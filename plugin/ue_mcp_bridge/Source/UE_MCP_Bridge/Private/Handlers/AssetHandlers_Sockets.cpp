@@ -168,7 +168,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::AddSocket(const TSharedPtr<FJsonObject>& 
 					if (bHasRot)   Existing->RelativeRotation = RelRot;
 					if (bHasScale) Existing->RelativeScale = RelScale;
 					SKM->MarkPackageDirty();
-					SKM->PostEditChange();
 
 					auto UpdatedResult = MCPSuccess();
 					MCPSetUpdated(UpdatedResult);
@@ -215,7 +214,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::AddSocket(const TSharedPtr<FJsonObject>& 
 		SKM->Modify();
 		SKM->GetMeshOnlySocketList().Add(NewSocket);
 		SKM->MarkPackageDirty();
-		SKM->PostEditChange();
 
 		auto Result = MCPSuccess();
 		MCPSetCreated(Result);
@@ -350,7 +348,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::RemoveSocket(const TSharedPtr<FJsonObject
 				Sockets[i]->Modify();
 				Sockets.RemoveAt(i);
 				SKM->MarkPackageDirty();
-				SKM->PostEditChange();
 
 				auto Result = MCPSuccess();
 				Result->SetStringField(TEXT("removed"), SocketName);
@@ -649,7 +646,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetSocketTransform(const TSharedPtr<FJson
 				if (bHasRot)   Existing->RelativeRotation = NewRot;
 				if (bHasScale) Existing->RelativeScale = NewScale;
 				SKM->MarkPackageDirty();
-				SKM->PostEditChange();
 
 				auto Result = MCPSuccess();
 				MCPSetUpdated(Result);

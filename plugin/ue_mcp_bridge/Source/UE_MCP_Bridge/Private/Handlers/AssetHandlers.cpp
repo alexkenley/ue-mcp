@@ -30,6 +30,14 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "UObject/TopLevelAssetPath.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "ImageUtils.h"
+#include "ThumbnailRendering/ThumbnailManager.h"
+#include "ThumbnailRendering/ThumbnailRenderer.h"
+#include "CanvasTypes.h"
+#include "RenderingThread.h"
+#include "TextureResource.h"
+#include "ScopedTransaction.h"
 
 // DataTable
 #include "Engine/DataTable.h"
@@ -163,6 +171,7 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("list_assets"), &ListAssets);
 	Registry.RegisterHandler(TEXT("search_assets"), &SearchAssets);
 	Registry.RegisterHandler(TEXT("read_asset"), &ReadAsset);
+	Registry.RegisterHandler(TEXT("render_asset_thumbnail"), &RenderThumbnail);
 	Registry.RegisterHandler(TEXT("read_asset_properties"), &ReadAssetProperties);
 	Registry.RegisterHandler(TEXT("duplicate_asset"), &DuplicateAsset);
 	Registry.RegisterHandler(TEXT("rename_asset"), &RenameAsset);
@@ -200,6 +209,7 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("add_socket"), &AddSocket);
 	Registry.RegisterHandler(TEXT("set_socket_transform"), &SetSocketTransform);
 	Registry.RegisterHandler(TEXT("set_asset_property"), &SetAssetProperty);
+	Registry.RegisterHandler(TEXT("append_asset_array_elements"), &AppendAssetArrayElements);
 	Registry.RegisterHandler(TEXT("set_texture_settings_by_type"), &SetTextureSettingsByType);
 	Registry.RegisterHandler(TEXT("create_interchange_pipeline"), &CreateInterchangePipeline);
 	Registry.RegisterHandler(TEXT("remove_socket"), &RemoveSocket);
@@ -288,6 +298,119 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("create_user_defined_struct"), &CreateUserDefinedStruct);
 	Registry.RegisterHandler(TEXT("list_struct_fields"), &ListStructFields);
 	Registry.RegisterHandler(TEXT("edit_user_defined_struct"), &EditUserDefinedStruct);
+}
+
+TSharedPtr<FJsonValue> FAssetHandlers::RenderThumbnail(const TSharedPtr<FJsonObject>& Params)
+{
+	FString AssetPath;
+	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("materialPath"), AssetPath)) return Err;
+	FString OutputPath;
+	if (auto Err = RequireString(Params, TEXT("outputPath"), OutputPath)) return Err;
+
+	const int32 Width = OptionalInt(Params, TEXT("width"), 256);
+	const int32 Height = OptionalInt(Params, TEXT("height"), 256);
+	if (Width < 1 || Width > 4096 || Height < 1 || Height > 4096)
+	{
+		return MCPError(TEXT("width and height must each be between 1 and 4096 pixels"));
+	}
+	if (FPaths::IsRelative(OutputPath))
+	{
+		return MCPError(TEXT("outputPath must be an absolute path"));
+	}
+	if (!FPaths::GetExtension(OutputPath).Equals(TEXT("png"), ESearchCase::IgnoreCase))
+	{
+		return MCPError(TEXT("outputPath must end in .png"));
+	}
+
+	UObject* Asset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	if (!Asset)
+	{
+		return MCPError(FString::Printf(TEXT("Asset not found: %s"), *AssetPath));
+	}
+
+	FThumbnailRenderingInfo* RenderInfo = UThumbnailManager::Get().GetRenderingInfo(Asset);
+	if (!RenderInfo || !RenderInfo->Renderer)
+	{
+		return MCPError(FString::Printf(
+			TEXT("No Unreal thumbnail renderer is registered for %s (%s)"),
+			*AssetPath,
+			*Asset->GetClass()->GetPathName()));
+	}
+
+	UObject* ObjectToRender = Asset;
+	if (RenderInfo->bUseClassDefaultObject)
+	{
+		if (UBlueprint* Blueprint = Cast<UBlueprint>(Asset))
+		{
+			if (Blueprint->GeneratedClass)
+			{
+				ObjectToRender = Blueprint->GeneratedClass->GetDefaultObject(false);
+			}
+		}
+	}
+	if (!RenderInfo->Renderer->CanVisualizeAsset(ObjectToRender))
+	{
+		return MCPError(FString::Printf(
+			TEXT("The thumbnail renderer cannot visualize %s yet; wait for asset compilation and retry"),
+			*AssetPath));
+	}
+
+	UTextureRenderTarget2D* RenderTarget = NewObject<UTextureRenderTarget2D>(GetTransientPackage());
+	RenderTarget->ClearColor = FLinearColor(0.018f, 0.018f, 0.018f, 0.0f);
+	RenderTarget->InitAutoFormat(Width, Height);
+	RenderTarget->UpdateResourceImmediate(true);
+
+	FTextureRenderTargetResource* RenderTargetResource = RenderTarget->GameThread_GetRenderTargetResource();
+	if (!RenderTargetResource)
+	{
+		return MCPError(TEXT("Failed to initialize thumbnail render target"));
+	}
+
+	FCanvas Canvas(RenderTargetResource, nullptr, FGameTime::GetTimeSinceAppStart(), GMaxRHIFeatureLevel);
+	Canvas.Clear(RenderTarget->ClearColor);
+	RenderInfo->Renderer->Draw(
+		ObjectToRender,
+		0,
+		0,
+		Width,
+		Height,
+		RenderTargetResource,
+		&Canvas,
+		false);
+	Canvas.Flush_GameThread();
+	FlushRenderingCommands();
+
+	TArray<FColor> Pixels;
+	FReadSurfaceDataFlags ReadFlags(RCM_UNorm, CubeFace_MAX);
+	if (!RenderTargetResource->ReadPixels(Pixels, ReadFlags) || Pixels.Num() != Width * Height)
+	{
+		return MCPError(TEXT("Failed to read rendered thumbnail pixels"));
+	}
+
+	const FString OutputDirectory = FPaths::GetPath(OutputPath);
+	if (!IFileManager::Get().DirectoryExists(*OutputDirectory)
+		&& !IFileManager::Get().MakeDirectory(*OutputDirectory, true))
+	{
+		return MCPError(FString::Printf(TEXT("Failed to create output directory: %s"), *OutputDirectory));
+	}
+
+	TArray<uint8> Compressed;
+	FImageUtils::ThumbnailCompressImageArray(Width, Height, Pixels, Compressed);
+	if (!FFileHelper::SaveArrayToFile(Compressed, *OutputPath))
+	{
+		return MCPError(FString::Printf(TEXT("Failed to write PNG: %s"), *OutputPath));
+	}
+
+	TSharedPtr<FJsonObject> Result = MCPSuccess();
+	Result->SetStringField(TEXT("assetPath"), AssetPath);
+	Result->SetStringField(TEXT("assetClass"), Asset->GetClass()->GetPathName());
+	Result->SetStringField(TEXT("rendererClass"), RenderInfo->Renderer->GetClass()->GetPathName());
+	Result->SetStringField(TEXT("outputPath"), OutputPath);
+	Result->SetNumberField(TEXT("width"), Width);
+	Result->SetNumberField(TEXT("height"), Height);
+	Result->SetBoolField(TEXT("litRendered"), true);
+	Result->SetStringField(TEXT("mode"), TEXT("engine_thumbnail"));
+	return MCPResult(Result);
 }
 
 // ---------------------------------------------------------------------------
@@ -2720,6 +2843,139 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetAssetProperty(const TSharedPtr<FJsonOb
 	Payload->SetStringField(TEXT("assetPath"), AssetPath);
 	Payload->SetStringField(TEXT("propertyName"), PropertyName);
 	Payload->SetStringField(TEXT("value"), PrevValue);
+	MCPSetRollback(Result, TEXT("set_asset_property"), Payload);
+	return MCPResult(Result);
+}
+
+// ---------------------------------------------------------------------------
+// append_asset_array_elements -- Append one or more values to a reflected
+// TArray without replacing its existing entries. Every element is converted
+// in temporary property storage first, so invalid input leaves the asset
+// completely untouched. The recursive property converter supports native and
+// user-defined structs as well as scalar and object-reference element types.
+// ---------------------------------------------------------------------------
+TSharedPtr<FJsonValue> FAssetHandlers::AppendAssetArrayElements(const TSharedPtr<FJsonObject>& Params)
+{
+	FString AssetPath;
+	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	FString PropertyName;
+	if (auto Err = RequireString(Params, TEXT("propertyName"), PropertyName)) return Err;
+
+	const TArray<TSharedPtr<FJsonValue>>* Elements = nullptr;
+	if (!Params->TryGetArrayField(TEXT("elements"), Elements) || !Elements)
+	{
+		return MCPError(TEXT("Missing 'elements' array parameter"));
+	}
+	if (Elements->IsEmpty())
+	{
+		return MCPError(TEXT("'elements' must contain at least one value"));
+	}
+
+	UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
+	if (!Asset)
+	{
+		return MCPError(FString::Printf(TEXT("Could not load asset '%s'"), *AssetPath));
+	}
+	Asset = MCPResolveAssetToCDO(Asset);
+
+	FProperty* FinalProp = nullptr;
+	void* ValuePtr = nullptr;
+	UObject* LeafOwner = nullptr;
+	FString ResolveErr;
+	if (!MCPJsonProperty::ResolveDottedPath(Asset, PropertyName, FinalProp, ValuePtr, LeafOwner, ResolveErr))
+	{
+		return MCPError(ResolveErr);
+	}
+
+	FArrayProperty* ArrayProp = CastField<FArrayProperty>(FinalProp);
+	if (!ArrayProp)
+	{
+		return MCPError(FString::Printf(
+			TEXT("Property '%s' is '%s', not a TArray"),
+			*PropertyName,
+			FinalProp ? *FinalProp->GetCPPType() : TEXT("unknown")));
+	}
+
+	// Stage and validate all elements before calling Modify or touching the
+	// destination array. This prevents a bad later element from leaving a
+	// partially appended array.
+	TArray<void*> StagedElements;
+	StagedElements.Reserve(Elements->Num());
+	auto DestroyStagedElements = [&]()
+	{
+		for (void* StagedValue : StagedElements)
+		{
+			ArrayProp->Inner->DestroyAndFreeValue(StagedValue);
+		}
+		StagedElements.Empty();
+	};
+
+	for (int32 Index = 0; Index < Elements->Num(); ++Index)
+	{
+		void* StagedValue = ArrayProp->Inner->AllocateAndInitializeValue();
+		StagedElements.Add(StagedValue);
+
+		FString ElementError;
+		if (!MCPJsonProperty::SetJsonOnProperty(ArrayProp->Inner, StagedValue, (*Elements)[Index], ElementError))
+		{
+			DestroyStagedElements();
+			return MCPError(FString::Printf(
+				TEXT("Failed to convert elements[%d] for '%s': %s"),
+				Index,
+				*PropertyName,
+				*ElementError));
+		}
+	}
+
+	const TSharedPtr<FJsonValue> PreviousValue = FMCPJsonSerializer::SerializeValue(ValuePtr, ArrayProp);
+	if (!PreviousValue.IsValid())
+	{
+		DestroyStagedElements();
+		return MCPError(FString::Printf(TEXT("Failed to serialize the previous value of '%s'"), *PropertyName));
+	}
+
+	FScriptArrayHelper ArrayHelper(ArrayProp, ValuePtr);
+	const int32 PreviousNum = ArrayHelper.Num();
+	const int32 AppendedCount = StagedElements.Num();
+
+	FScopedTransaction Transaction(NSLOCTEXT("UEMCPBridge", "AppendAssetArrayElements", "Append asset array elements"));
+	Asset->Modify();
+	if (LeafOwner && LeafOwner != Asset) LeafOwner->Modify();
+
+	ArrayHelper.AddValues(AppendedCount);
+	for (int32 Index = 0; Index < AppendedCount; ++Index)
+	{
+		ArrayProp->Inner->CopyCompleteValue(ArrayHelper.GetRawPtr(PreviousNum + Index), StagedElements[Index]);
+	}
+	DestroyStagedElements();
+
+	if (LeafOwner && LeafOwner != Asset) LeafOwner->PostEditChange();
+	Asset->PostEditChange();
+	Asset->MarkPackageDirty();
+
+	TArray<TSharedPtr<FJsonValue>> AppendedIndices;
+	AppendedIndices.Reserve(AppendedCount);
+	for (int32 Index = 0; Index < AppendedCount; ++Index)
+	{
+		AppendedIndices.Add(MakeShared<FJsonValueNumber>(PreviousNum + Index));
+	}
+
+	auto Result = MCPSuccess();
+	MCPSetUpdated(Result);
+	Result->SetStringField(TEXT("assetPath"), AssetPath);
+	Result->SetStringField(TEXT("propertyName"), PropertyName);
+	Result->SetStringField(TEXT("elementType"), ArrayProp->Inner->GetCPPType());
+	Result->SetNumberField(TEXT("previousNum"), PreviousNum);
+	Result->SetNumberField(TEXT("appendedCount"), AppendedCount);
+	Result->SetNumberField(TEXT("newNum"), PreviousNum + AppendedCount);
+	Result->SetArrayField(TEXT("appendedIndices"), AppendedIndices);
+	Result->SetField(TEXT("previousValue"), PreviousValue);
+	Result->SetBoolField(TEXT("saved"), false);
+
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("assetPath"), AssetPath);
+	Payload->SetStringField(TEXT("propertyName"), PropertyName);
+	Payload->SetField(TEXT("value"), PreviousValue);
 	MCPSetRollback(Result, TEXT("set_asset_property"), Payload);
 	return MCPResult(Result);
 }

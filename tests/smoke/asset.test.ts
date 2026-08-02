@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { getBridge, disconnectBridge, callBridge, resultArray, TEST_PREFIX } from "../setup.js";
 import type { EditorBridge } from "../../src/bridge.js";
 
@@ -21,6 +24,34 @@ describe("asset — read", () => {
   it("list_textures", async () => {
     const r = await callBridge(bridge, "list_textures", { recursive: true });
     expect(r.ok, r.error).toBe(true);
+  });
+});
+
+describe("asset - render thumbnail", () => {
+  const outputs: string[] = [];
+
+  afterAll(async () => {
+    await Promise.all(outputs.map((output) => rm(output, { force: true })));
+  });
+
+  it.each([
+    ["static mesh", "/Engine/BasicShapes/Cube.Cube"],
+    ["skeletal mesh", "/Engine/EngineMeshes/SkeletalCube.SkeletalCube"],
+    ["material", "/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"],
+    ["texture", "/Engine/EngineResources/DefaultTexture.DefaultTexture"],
+  ])("renders a %s without level staging", async (_kind, assetPath) => {
+    const outputPath = join(tmpdir(), `ue-mcp-thumbnail-${process.pid}-${outputs.length}.png`);
+    outputs.push(outputPath);
+
+    const r = await callBridge(bridge, "render_asset_thumbnail", {
+      assetPath,
+      outputPath,
+      width: 96,
+      height: 96,
+    });
+
+    expect(r.ok, r.error).toBe(true);
+    expect((await stat(outputPath)).size).toBeGreaterThan(100);
   });
 });
 
