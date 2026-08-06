@@ -50,7 +50,7 @@ struct FPreparedUpsertItem
 	TArray<FPreparedProperty> Properties;
 };
 
-bool IsProtectedAssetPath(const FString& Path)
+bool IsProtectedBulkUpsertAssetPath(const FString& Path)
 {
 	FString Normalized = Path;
 	Normalized.TrimStartAndEndInline();
@@ -144,7 +144,7 @@ bool ParseAssetIdentity(
 	}
 
 	const FString LongPackageName = OutItem.PackagePath + TEXT("/") + OutItem.Name;
-	if (IsProtectedAssetPath(LongPackageName))
+	if (IsProtectedBulkUpsertAssetPath(LongPackageName))
 	{
 		OutError = FString::Printf(TEXT("Refusing to mutate protected package '%s'"), *LongPackageName);
 		return false;
@@ -357,7 +357,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::BulkRestoreDataAssets(const TSharedPtr<FJ
 			FString AssetPath;
 			const TSharedPtr<FJsonObject>* Properties = nullptr;
 			if (!(*Item)->TryGetStringField(TEXT("assetPath"), AssetPath)
-				|| IsProtectedAssetPath(AssetPath)
+				|| IsProtectedBulkUpsertAssetPath(AssetPath)
 				|| !(*Item)->TryGetObjectField(TEXT("properties"), Properties)
 				|| !Properties
 				|| !Properties->IsValid())
@@ -414,7 +414,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::BulkRestoreDataAssets(const TSharedPtr<FJ
 			FString AssetPath;
 			if (!(*CreatedAssetPaths)[PathIndex].IsValid()
 				|| !(*CreatedAssetPaths)[PathIndex]->TryGetString(AssetPath)
-				|| IsProtectedAssetPath(AssetPath))
+				|| IsProtectedBulkUpsertAssetPath(AssetPath))
 			{
 				Errors.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("createdAssetPaths[%d] is invalid"), PathIndex)));
 				continue;
