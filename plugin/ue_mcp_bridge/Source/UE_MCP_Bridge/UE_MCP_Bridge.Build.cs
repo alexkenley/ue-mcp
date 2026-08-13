@@ -104,6 +104,7 @@ public class UE_MCP_Bridge : ModuleRules
 				"StateTreeModule",
 				"StateTreeEditorModule",
 				"StaticMeshDescription",
+				"StructUtils",
 				"ClothingSystemRuntimeCommon",
 				"ClothingSystemRuntimeInterface",
 				"SubobjectDataInterface",
