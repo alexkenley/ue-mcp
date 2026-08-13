@@ -30,7 +30,6 @@ public:
 			TestName,
 			*FGuid::NewGuid().ToString(EGuidFormats::Digits));
 		Package = CreatePackage(*PackageName);
-		Package->SetPackageFlags(PKG_Transient);
 		Package->SetDirtyFlag(false);
 	}
 
