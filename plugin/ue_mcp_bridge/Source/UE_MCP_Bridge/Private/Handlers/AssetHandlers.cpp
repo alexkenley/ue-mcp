@@ -144,6 +144,25 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("generate_lightmap_uvs"), &GenerateLightmapUvs);
 	Registry.RegisterHandler(TEXT("export_uv_layout"), &ExportUvLayout);
 	Registry.RegisterHandler(TEXT("check_uvs"), &CheckUvs);
+
+	// Procedural mesh operations (AssetHandlers_GeometryScript.cpp). Each one
+	// converts the LOD to a DynamicMesh, runs a solver over it and writes a
+	// StaticMesh back, which is minutes rather than milliseconds on a dense
+	// mesh. The default handler timeout would report a hang while the editor
+	// was still working.
+	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_simplify"), &SimplifyMesh, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_remesh"), &RemeshMesh, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_mirror"), &MirrorMesh, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_hole_fill"), &FillMeshHoles, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("generate_mesh_collision"), &GenerateMeshCollision, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_fracture"), &FractureMesh, 600.0f);
+
+	// Asset hygiene (AssetHandlers_Hygiene.cpp). Both walk the asset registry
+	// across a whole content directory, so both are bounded by their own
+	// maxAssets rather than by the default timeout.
+	Registry.RegisterHandlerWithTimeout(TEXT("audit_asset_hygiene"), &AuditAssetHygiene, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("fix_asset_hygiene"), &FixAssetHygiene, 300.0f);
+
 	Registry.RegisterHandler(TEXT("search_assets"), &SearchAssets);
 	Registry.RegisterHandler(TEXT("read_asset"), &ReadAsset);
 	Registry.RegisterHandler(TEXT("read_asset_properties"), &ReadAssetProperties);
