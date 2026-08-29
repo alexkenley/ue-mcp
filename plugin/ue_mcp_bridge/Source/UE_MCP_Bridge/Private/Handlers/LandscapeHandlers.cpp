@@ -412,6 +412,40 @@ void FLandscapeHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandlerWithTimeout(TEXT("refresh_landscape_physical_material_collision"), &RefreshPhysicalMaterialCollision, 600.0f);
 	Registry.RegisterHandlerWithTimeout(TEXT("sculpt_landscape"), &Sculpt, 120.0f);
 	Registry.RegisterHandlerWithTimeout(TEXT("paint_landscape_layer"), &PaintLayer, 120.0f);
+
+	// V1 region surface. Three of these names are load-bearing beyond dispatch:
+	// set_landscape_height_region, set_landscape_layer_weight_region and
+	// set_landscape_holes are the inverse methods the rollback records in
+	// LandscapeHandlers_Sculpt.cpp emit, so renaming one here breaks every
+	// undo those actions hand back without breaking anything that would show
+	// up at the call site.
+	Registry.RegisterHandlerWithTimeout(TEXT("get_landscape_height_region"), &GetHeightRegion, 120.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("set_landscape_height_region"), &SetHeightRegion, 300.0f);
+	Registry.RegisterHandler(TEXT("get_landscape_height_at_point"), &GetHeightAtPoint);
+	Registry.RegisterHandler(TEXT("get_landscape_normal_at_point"), &GetNormalAtPoint);
+	Registry.RegisterHandler(TEXT("get_landscape_slope_at_point"), &GetSlopeAtPoint);
+	Registry.RegisterHandlerWithTimeout(TEXT("get_landscape_slope_map"), &GetSlopeMap, 120.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("sculpt_landscape_region"), &SculptRegion, 300.0f);
+	// Erosion is O(vertices x iterations) on the game thread, and import and
+	// export move whole heightmaps through a codec and the filesystem, so these
+	// three get the long budgets. A client that gives up at the default while
+	// the editor is still writing leaves a half-applied terrain nobody asked
+	// about.
+	Registry.RegisterHandlerWithTimeout(TEXT("apply_landscape_erosion"), &ApplyErosion, 600.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("import_landscape_heightmap"), &ImportHeightmap, 600.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("export_landscape_heightmap"), &ExportHeightmap, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("analyze_landscape_terrain"), &AnalyzeTerrain, 120.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("get_landscape_layer_weight_region"), &GetLayerWeightRegion, 120.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("set_landscape_layer_weight_region"), &SetLayerWeightRegion, 300.0f);
+	Registry.RegisterHandler(TEXT("landscape_layer_exists"), &LayerExists);
+	Registry.RegisterHandler(TEXT("remove_landscape_layer"), &RemoveLayer);
+	Registry.RegisterHandlerWithTimeout(TEXT("get_landscape_holes"), &GetHoles, 120.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("set_landscape_holes"), &SetHoles, 300.0f);
+
+	// V17 core half: plan a landscape from a real-world heightmap, and convert
+	// geographic coordinates into that landscape's world space.
+	Registry.RegisterHandlerWithTimeout(TEXT("plan_real_world_landscape"), &PlanRealWorldLandscape, 120.0f);
+	Registry.RegisterHandler(TEXT("project_geo_coordinates"), &ProjectGeoCoordinates);
 }
 
 TSharedPtr<FJsonValue> FLandscapeHandlers::GetLandscapeInfo(const TSharedPtr<FJsonObject>& Params)
