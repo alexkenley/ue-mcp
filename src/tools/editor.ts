@@ -476,7 +476,11 @@ export const editorTool: ToolDef = categoryTool(
     includeValues: z.boolean().optional().describe("describe_object: include current property values (default false)"),
     value: z.unknown().optional(),
     save: z.boolean().optional().describe("set_property: save package to disk after the write (default true; false leaves it dirty) (#674)"),
-    pieAction: z.enum(["start", "stop", "status"]).optional(),
+    // Deliberately a string, not z.enum. The MCP SDK validates arguments BEFORE
+    // the tool callback runs, so a strict enum makes a typo fail at the transport
+    // with a schema error, and the handler's own message, which names every valid
+    // value, never reaches the caller. pie_control rejects an unknown one by name.
+    pieAction: z.string().optional().describe("play_in_editor: start | stop | status (default status)"),
     waitForAssetRegistry: z.boolean().optional().describe("play_in_editor start: block until AssetRegistry finishes the initial scan (default true)"),
     assetRegistryTimeoutSeconds: z.number().optional().describe("play_in_editor start: wait budget for the AssetRegistry scan (default 180s)"),
     actorLabel: z.string().optional(),
@@ -494,7 +498,8 @@ export const editorTool: ToolDef = categoryTool(
     sequencePath: z.string().optional().describe("Level Sequence asset path for sequencer authoring (#548)"),
     seconds: z.number().optional().describe("scrub_sequence: playhead position in seconds. Mutually exclusive with frame (#881)"),
     frame: z.number().optional().describe("scrub_sequence: playhead position as a frame number, read in timeUnit. Mutually exclusive with seconds (#881)"),
-    timeUnit: z.enum(["display", "tick"]).optional().describe("scrub_sequence: how to read frame. display (default) is the frame number Sequencer shows; tick is the unit get_sequence_info's playbackRange reports (#881)"),
+    // String rather than z.enum for the reason recorded on pieAction.
+    timeUnit: z.string().optional().describe("scrub_sequence: how to read frame: display | tick. display (default) is the frame number Sequencer shows; tick is the unit get_sequence_info's playbackRange reports (#881)"),
     startSeconds: z.number().optional().describe("Section/playback range start in seconds (#548)"),
     endSeconds: z.number().optional().describe("Section/playback range end in seconds (#548)"),
     cameraActorLabel: z.string().optional().describe("add_sequence_section CameraCut: camera actor to bind (#548)"),
@@ -502,7 +507,8 @@ export const editorTool: ToolDef = categoryTool(
     channel: z.string().optional().describe("set_sequence_keyframes: channel name (Location.X, Rotation.Z, yaw, fade...) (#548)"),
     keyframes: z.array(z.object({ seconds: z.number(), value: z.number() })).optional().describe("set_sequence_keyframes: [{seconds, value}] (#548)"),
     interpolation: z.string().optional().describe("set_sequence_keyframes: cubic (default) or linear (#548)"),
-    sequenceAction: z.enum(["play", "stop", "pause"]).optional(),
+    // String rather than z.enum for the reason recorded on pieAction.
+    sequenceAction: z.string().optional().describe("play_sequence: play (default) | pause | stop"),
     directory: z.string().optional(),
     platform: z.string().optional(),
     maxLines: z.number().optional(),
@@ -516,6 +522,11 @@ export const editorTool: ToolDef = categoryTool(
     crashFolder: z.string().optional(),
     pattern: z.string().optional().describe("Substring filter - dialog title/message, or library name for list_function_libraries (#455)"),
     includeFunctions: z.boolean().optional().describe("list_function_libraries: include each library's function listing (default true) (#455)"),
+    // Stays a strict enum on purpose. ParseResponseType falls back to "ok" for
+    // any string it does not recognise, so relaxing this would turn a typo into
+    // an unattended OK click on every dialog the pattern matches, reported as
+    // success. The schema rejection is the only thing standing between a
+    // misspelled "cancel" and a confirmed destructive prompt.
     response: z.enum(["yes", "no", "ok", "cancel", "retry", "continue", "yesall", "noall"]).optional().describe("Auto-response for matched dialogs"),
     buttonIndex: z.number().optional().describe("Index of button to click in active dialog"),
     buttonLabel: z.string().optional().describe("Label of button to click in active dialog"),

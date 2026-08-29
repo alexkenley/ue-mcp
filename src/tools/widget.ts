@@ -102,7 +102,12 @@ export const widgetTool: ToolDef = categoryTool(
     classFilter: z.string().optional().describe("Class name substring filter for runtime widget queries"),
     propertyNames: z.array(z.string()).optional().describe("inspect_runtime_instances: exact reflected property names to serialize"),
     childClassFilter: z.string().optional().describe("inspect_runtime_instances: class substring filter for subtree nodes (implies includeSubtree)"),
-    world: z.enum(["pie", "game", "auto"]).optional().describe("inspect_runtime_instances: runtime world scope (default pie). The editor world is never a valid target"),
+    // Deliberately a string, not z.enum. The MCP SDK validates arguments BEFORE
+    // the tool callback runs, so a strict enum makes a typo fail at the transport
+    // with a schema error, and the handler's own message never reaches the
+    // caller. An unrecognised scope resolves to the editor world, which this
+    // action refuses by name along with the scopes it accepts.
+    world: z.string().optional().describe("inspect_runtime_instances: runtime world scope: pie (default) | game | auto. The editor world is never a valid target"),
     pieInstance: z.number().int().optional().describe("inspect_runtime_instances: PIE instance id for multi-client sessions"),
     maxInstances: z.number().int().min(1).max(500).optional().describe("inspect_runtime_instances: maximum matching widget instances returned"),
     maxNodesPerInstance: z.number().int().min(1).max(2000).optional().describe("inspect_runtime_instances: maximum root/subtree nodes per instance"),

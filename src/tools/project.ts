@@ -1480,6 +1480,10 @@ export const projectTool: ToolDef = categoryTool(
     name: z.string().optional().describe("describe_action: the action to describe, as 'tool.action' or a bare action name"),
     category: z.string().optional().describe("describe_action / list_available_actions: narrow to one category instead of the whole surface"),
     includeNames: z.boolean().optional().describe("list_available_actions: list the action names, not just the counts (default false)"),
+    // Stays a strict enum on purpose: listAvailableActions treats anything that
+    // is neither "all" nor "available" as "blocked", so nothing rejects a typo.
+    // Relaxing it would answer a request for the available half with the
+    // blocked half and report success.
     state: z.enum(["available", "blocked", "all"]).optional().describe("list_available_actions: which side of the line to list when includeNames=true (default available)"),
     skipToolchain: z.boolean().optional().describe("check_install: skip the C++ toolchain probe, which shells out to vswhere or the compiler"),
     contentPath: z.string().optional().describe("list_content_assets: mount path to list, e.g. /Game or /Game/Characters (default /Game)"),
@@ -1499,6 +1503,9 @@ export const projectTool: ToolDef = categoryTool(
     buildCsPath: z.string().optional().describe("suggest_build_deps / lint_cpp_header: absolute path to a .Build.cs (defaults to the one owning the target)"),
     modulePath: z.string().optional().describe("suggest_build_deps: a file or directory whose owning Build.cs to read"),
     trees: z.union([z.string(), z.array(z.string())]).optional().describe("find_example_usage / find_references / find_callers / find_callees: engine trees to search - Runtime|Editor|Developer|Plugins|all (default Runtime)"),
+    // Stays a strict enum on purpose: classHierarchy tests the value against
+    // "ancestors" and "descendants" by inequality, so any other string walks
+    // both directions and the caller is never told its value was not understood.
     direction: z.enum(["ancestors", "descendants", "both"]).optional().describe("class_hierarchy: walk up, down, or both (default both)"),
     depth: z.number().optional().describe("class_hierarchy: generations of descendants to report (default 1; every transitive subclass of UObject is tens of thousands of names)"),
     includeProject: z.boolean().optional().describe("find_references / find_callers: also search this project's own Source and Plugins trees (default true)"),
@@ -1511,6 +1518,10 @@ export const projectTool: ToolDef = categoryTool(
     // v0.7.13 - native C++ authoring
     className: z.string().optional().describe("For create_cpp_class: new class name (no A/U prefix - handled by parent type)"),
     parentClass: z.string().optional().describe("For create_cpp_class: parent UClass. Short native names ('Actor') or /Script/<Module>.<Class> paths work. Default UObject."),
+    // Stays a strict enum on purpose: create_cpp_class maps "private" and
+    // "classes" to their folders and falls through to Public for everything
+    // else, so a typo would write the header into the wrong folder and report
+    // the class as created.
     classDomain: z.enum(["public", "private", "classes"]).optional().describe("For create_cpp_class: which folder under the module (Public/Private/Classes). Default 'public'."),
     subPath: z.string().optional().describe("For create_cpp_class: nested folder under the class domain (e.g. 'Gameplay/Abilities')."),
     wait: z.boolean().optional().describe("For live_coding_compile: block until compile finishes. Default false."),
@@ -1523,7 +1534,12 @@ export const projectTool: ToolDef = categoryTool(
     dependency: z.string().optional().describe("For add_module_dependency: module name to add (e.g. 'UMG')."),
     declaration: z.string().optional().describe("For add_cpp_member: full UPROPERTY(...) / UFUNCTION(...) block plus the member or function signature."),
     memberName: z.string().optional().describe("For add_cpp_member: the identifier the declaration introduces (used for idempotency)."),
-    access: z.enum(["public", "private"]).optional().describe("For add_module_dependency: 'public' (PublicDependencyModuleNames) or 'private' (default)."),
+    // Deliberately a string, not z.enum. The MCP SDK validates arguments BEFORE
+    // the tool callback runs, so a strict enum makes a typo fail at the transport
+    // with a schema error, and the handler's own message, which names both valid
+    // values, never reaches the caller. add_module_dependency rejects an unknown
+    // access by name.
+    access: z.string().optional().describe("For add_module_dependency: 'public' (PublicDependencyModuleNames) or 'private' (default)."),
     profileName: z.string().optional().describe("For resolve_collision_profile: the profile to resolve, e.g. 'Pawn', 'BlockAll', or one the project defined."),
     channel: z.string().optional().describe("For resolve_collision_profile: narrow the answer to one channel. Accepts the configured name ('Camera', 'Weapon'), the C++ enumerator ('ECC_Camera'), or the container index."),
     includeAllChannels: z.boolean().optional().describe("For resolve_collision_profile: include the unused GameTraceChannel slots as well as the engine channels and the project's own. Default false."),

@@ -466,18 +466,24 @@ export const assetTool: ToolDef = categoryTool(
     rows: z.record(z.unknown()).optional().describe("DataTable bulk rows { rowName: {field: value} } for fill_datatable_from_json (#535)"),
     jsonPath: z.string().optional(), jsonString: z.string().optional(),
     csvString: z.string().optional().describe("CurveTable CSV payload for import_curvetable"),
-    format: z.enum([
-      "json", "csv",
-      "R8", "RG8", "RGBA8", "RGBA8_SRGB",
-      "R16F", "RG16F", "RGBA16F", "R32F", "RG32F", "RGBA32F", "RGB10A2",
-    ]).optional().describe("CurveTable import format or create_render_target_2d pixel format"),
-    interpMode: z.enum(["linear", "constant", "cubic", "none"]).optional().describe("CurveTable interpolation mode"),
+    // Strings rather than z.enum. The MCP SDK validates arguments BEFORE the
+    // tool callback runs, so a strict enum makes a typo fail at the transport
+    // with a schema error, and the handler's own message, which names every
+    // valid value, never reaches the caller. Both handlers behind `format` and
+    // the CurveTable interpolation parser reject an unknown value by name.
+    format: z.string().optional().describe("CurveTable import format: json | csv. create_render_target_2d pixel format: R8 | RG8 | RGBA8 | RGBA8_SRGB | R16F | RG16F | RGBA16F | R32F | RG32F | RGBA32F | RGB10A2 (default RGBA8_SRGB)"),
+    interpMode: z.string().optional().describe("CurveTable interpolation mode: linear (default) | constant | cubic | none. cubic requires curveType='rich'"),
+    // Stays a strict enum on purpose: nothing downstream validates it. The
+    // CurveTable handlers compare against "rich" and "simple" and silently keep
+    // the inferred mode for anything else, so relaxing would turn a clean
+    // rejection into a write against the wrong curve type reporting success.
     curveType: z.enum(["simple", "rich"]).optional().describe("CurveTable row type"),
     mode: z.enum(["simple", "rich"]).optional().describe("Alias for curveType"),
     keys: z.array(z.object({
       time: z.number(),
       value: z.number(),
-      interpMode: z.enum(["linear", "constant", "cubic", "none"]).optional(),
+      // String for the reason recorded on the flat interpMode above.
+      interpMode: z.string().optional().describe("Per-key interpolation mode: linear (default) | constant | cubic | none"),
       arriveTangent: z.number().optional(),
       leaveTangent: z.number().optional(),
     })).optional().describe("CurveTable key array"),
@@ -497,6 +503,9 @@ export const assetTool: ToolDef = categoryTool(
     expandDepth: z.number().int().min(0).max(5).optional().describe("read_properties: inline owned subobjects to this depth (default 0) (#755)"),
     expandExternal: z.boolean().optional().describe("read_properties: also follow references to other assets (default false) (#755)"),
     maxExpandedObjects: z.number().int().positive().optional().describe("read_properties: cap on expanded objects (default 64) (#755)"),
+    // Stays a strict enum on purpose: the handler tests only for "json" and
+    // treats every other value as text, so nothing rejects a typo. Relaxing it
+    // would silently hand back ExportText for a caller who asked for JSON.
     valueFormat: z.enum(["text", "json"]).optional().describe("Property value format for read_properties/list_properties/get_properties. Default text preserves the existing Unreal ExportText output; json returns structured JSON where supported."),
     settings: z.record(z.unknown()).optional(),
     compressionSettings: z.string().optional().describe("Texture compression: Default, Normalmap, Grayscale, Displacementmap, VectorDisplacementmap, HDR, EditorIcon, Alpha, DistanceFieldFont, HDR_Compressed, BC7"),
@@ -666,7 +675,9 @@ export const assetTool: ToolDef = categoryTool(
     lodIndex: z.number().int().min(0).optional().describe("get_mesh_geometry / measure_mesh_geometry: which LOD to read (default 0). mesh_boolean: which LOD of each input mesh to read (default 0). read_skeletal_mesh_build_settings / set_skeletal_mesh_optimize_for_instancing: which LOD to target (default 0). UV actions: which LOD to act on (default 0)"),
     sectionIndex: z.number().int().min(0).optional().describe("get_mesh_geometry / measure_mesh_geometry: restrict to one render section; omit for every section"),
     uvChannel: z.number().int().min(0).optional().describe("get_mesh_geometry: which UV channel to return (default 0)"),
-    include: z.array(z.enum(["positions", "uvs", "normals", "triangles"])).optional().describe("get_mesh_geometry: which per-vertex arrays to return; omit for all four"),
+    // Strings for the reason recorded on `format` above: the handler names the
+    // four tokens back when it rejects one, and an empty array too.
+    include: z.array(z.string()).optional().describe("get_mesh_geometry: which per-vertex arrays to return: positions | uvs | normals | triangles. Omit for all four"),
     dumpToFile: z.boolean().optional().describe("get_mesh_geometry: write the full geometry JSON to a file instead of returning it inline, which is how a mesh over the inline vertex limit is read"),
     operation: z.string().optional().describe("mesh_boolean: union | subtract | intersect | trimInside | trimOutside | newPolyGroupInside | newPolyGroupOutside"),
     targetPath: z.string().optional().describe("mesh_boolean: the StaticMesh being cut. Its transform, materials, collision and Nanite setting are the ones the result inherits."),
@@ -674,7 +685,9 @@ export const assetTool: ToolDef = categoryTool(
     inPlace: z.boolean().optional().describe("mesh_boolean: overwrite targetPath instead of writing a separate output asset. apply_mesh_simplify / apply_mesh_remesh / apply_mesh_mirror / apply_mesh_hole_fill: overwrite assetPath instead. Default false, and the only destructive form; mutually exclusive with outputPath, and the only form with no rollback - pass backupPath to keep a copy of the original."),
     targetTransform: z.object({ location: Vec3.optional(), rotation: Rotator.optional(), scale: Vec3.optional() }).optional().describe("mesh_boolean: where the target mesh sits for the boolean. Default identity."),
     toolTransform: z.object({ location: Vec3.optional(), rotation: Rotator.optional(), scale: Vec3.optional() }).optional().describe("mesh_boolean: where the tool mesh sits for the boolean. Default identity."),
-    lodType: z.enum(["MaxAvailable", "HiResSourceModel", "SourceModel", "RenderData"]).optional().describe("mesh_boolean: which mesh data to read from each input. apply_mesh_simplify / apply_mesh_remesh / apply_mesh_mirror / apply_mesh_hole_fill / generate_mesh_collision / apply_mesh_fracture: which mesh data to read from the source. Default MaxAvailable, which ignores lodIndex."),
+    // String for the reason recorded on `format` above: every handler reading
+    // lodType rejects an unknown value by listing all four.
+    lodType: z.string().optional().describe("MaxAvailable | HiResSourceModel | SourceModel | RenderData. mesh_boolean: which mesh data to read from each input. apply_mesh_simplify / apply_mesh_remesh / apply_mesh_mirror / apply_mesh_hole_fill / generate_mesh_collision / apply_mesh_fracture: which mesh data to read from the source. Default MaxAvailable, which ignores lodIndex."),
     fillHoles: z.boolean().optional().describe("mesh_boolean: close the holes the cut opens (default true). apply_mesh_fracture: cap each piece where the plane cut it, so the pieces are solid rather than open shells (default true)"),
     simplifyOutput: z.boolean().optional().describe("mesh_boolean: collapse coplanar triangles the boolean introduced (default true)"),
     simplifyPlanarTolerance: z.number().optional().describe("mesh_boolean: how far from coplanar still counts as coplanar when simplifying (default 0.01)"),
@@ -684,11 +697,15 @@ export const assetTool: ToolDef = categoryTool(
     removeDegenerates: z.boolean().optional().describe("mesh_boolean / apply_mesh_simplify / apply_mesh_remesh / apply_mesh_mirror / apply_mesh_hole_fill: drop degenerate triangles when writing back into an existing mesh (default false)"),
     copyCollisionFromTarget: z.boolean().optional().describe("mesh_boolean: copy the target's simple collision shapes and collision complexity onto the result (default true)"),
     copyMaterialsFromTarget: z.boolean().optional().describe("mesh_boolean: copy the target's material slot list onto the result (default true)"),
-    nanite: z.enum(["inherit", "enable", "disable"]).optional().describe("mesh_boolean: Nanite on the written mesh, where inherit (default) matches the target. apply_mesh_simplify / apply_mesh_remesh / apply_mesh_mirror / apply_mesh_hole_fill / apply_mesh_fracture: Nanite on the written asset, where inherit matches the source."),
+    // String for the reason recorded on `format` above: every handler reading
+    // nanite rejects an unknown value by listing all three.
+    nanite: z.string().optional().describe("inherit | enable | disable. mesh_boolean: Nanite on the written mesh, where inherit (default) matches the target. apply_mesh_simplify / apply_mesh_remesh / apply_mesh_mirror / apply_mesh_hole_fill / apply_mesh_fracture: Nanite on the written asset, where inherit matches the source."),
     classFilter: z.string().optional().describe("Restrict search_fts to assets whose class name contains this substring"),
     className: z.string().optional().describe("Class for create_data_asset/create_asset_by_class: loaded class name with or without the C++ A/U/F/E prefix, or a /Script/Module.ClassName path"),
     properties: z.record(z.unknown()).optional().describe("Key/value property overrides for create_data_asset and create_subobject. Keys may be dotted paths into nested structs and subobjects."),
-    outer: z.enum(["asset", "package"]).optional().describe("create_subobject: whether the new subobject is owned by the asset (default, path \"<asset>.<name>\") or sits beside it in the package (path \"<package>.<name>\") (#975)."),
+    // String for the reason recorded on `format` above: the handler rejects an
+    // unknown value by naming both.
+    outer: z.string().optional().describe("create_subobject: asset (default) | package. Whether the new subobject is owned by the asset (default, path \"<asset>.<name>\") or sits beside it in the package (path \"<package>.<name>\") (#975)."),
     packages: z.array(z.string()).optional().describe("Package paths for get_referencers / get_dependencies"),
     hard: z.boolean().optional().describe("get_dependencies: include hard dependencies (default true)"),
     soft: z.boolean().optional().describe("get_dependencies: include soft dependencies (default true)"),

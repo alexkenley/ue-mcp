@@ -1167,7 +1167,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::ImportCurveTable(const TSharedPtr<FJsonOb
 	const FString InterpRaw = OptionalString(Params, TEXT("interpMode"), TEXT("linear"));
 	if (!ParseCurveInterpMode(InterpRaw, InterpMode))
 	{
-		return MCPError(FString::Printf(TEXT("Unknown interpMode '%s'. Use linear, constant, or cubic."), *InterpRaw));
+		return MCPError(FString::Printf(TEXT("Unknown interpMode '%s'. Use linear, constant, cubic or none."), *InterpRaw));
 	}
 
 	TArray<FString> Problems;
@@ -1232,7 +1232,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::AddCurveTableRow(const TSharedPtr<FJsonOb
 	const FString InterpRaw = OptionalString(Params, TEXT("interpMode"), TEXT("linear"));
 	if (!ParseCurveInterpMode(InterpRaw, InterpMode))
 	{
-		return MCPError(FString::Printf(TEXT("Unknown interpMode '%s'. Use linear, constant, or cubic."), *InterpRaw));
+		return MCPError(FString::Printf(TEXT("Unknown interpMode '%s'. Use linear, constant, cubic or none."), *InterpRaw));
 	}
 
 	FString CurveType = OptionalString(Params, TEXT("curveType"), OptionalString(Params, TEXT("mode")));
@@ -1414,7 +1414,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetCurveTableKeys(const TSharedPtr<FJsonO
 			if ((*KeyObj)->TryGetStringField(TEXT("interpMode"), InterpRaw))
 			{
 				ERichCurveInterpMode Parsed = RCIM_Linear;
-				if (!ParseCurveInterpMode(InterpRaw, Parsed)) return MCPError(FString::Printf(TEXT("Unknown interpMode '%s'."), *InterpRaw));
+				if (!ParseCurveInterpMode(InterpRaw, Parsed)) return MCPError(FString::Printf(TEXT("Unknown interpMode '%s'. Use linear, constant, cubic or none."), *InterpRaw));
 				if (Parsed == RCIM_Cubic) return MCPError(TEXT("Simple CurveTables cannot use cubic interpolation."));
 				if (bSawInterp && Parsed != SharedInterp) return MCPError(TEXT("Simple CurveTables require one shared interpMode for all keys."));
 				SharedInterp = Parsed;
@@ -1447,7 +1447,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetCurveTableKeys(const TSharedPtr<FJsonO
 			FString InterpRaw;
 			if ((*KeyObj)->TryGetStringField(TEXT("interpMode"), InterpRaw) && !ParseCurveInterpMode(InterpRaw, Interp))
 			{
-				return MCPError(FString::Printf(TEXT("Unknown interpMode '%s'."), *InterpRaw));
+				return MCPError(FString::Printf(TEXT("Unknown interpMode '%s'. Use linear, constant, cubic or none."), *InterpRaw));
 			}
 			FRichCurveKey Key((float)Time, (float)Value);
 			Key.InterpMode = Interp;
@@ -1500,7 +1500,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::AddCurveTableKey(const TSharedPtr<FJsonOb
 	const FString InterpRaw = OptionalString(Params, TEXT("interpMode"), TEXT("linear"));
 	if (!ParseCurveInterpMode(InterpRaw, InterpMode))
 	{
-		return MCPError(FString::Printf(TEXT("Unknown interpMode '%s'. Use linear, constant, or cubic."), *InterpRaw));
+		return MCPError(FString::Printf(TEXT("Unknown interpMode '%s'. Use linear, constant, cubic or none."), *InterpRaw));
 	}
 	const float Tolerance = (float)OptionalNumber(Params, TEXT("keyTimeTolerance"), UE_KINDA_SMALL_NUMBER);
 

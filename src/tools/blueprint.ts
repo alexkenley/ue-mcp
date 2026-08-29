@@ -178,7 +178,12 @@ export const blueprintTool: ToolDef = categoryTool(
     materialPaths: z.array(z.string()).optional().describe("Material asset paths for set_component_override_materials (#442)"),
     timelineName: z.string().optional().describe("Timeline name for add_timeline_track (#457)"),
     trackName: z.string().optional().describe("Track name within the timeline (#457)"),
-    trackType: z.enum(["float", "vector", "color", "event"]).optional().describe("add_timeline_track type (#457)"),
+    // Deliberately a string, not z.enum. The MCP SDK validates arguments BEFORE
+    // the tool callback runs, so a strict enum makes a typo fail at the transport
+    // with a schema error, and the handler's own message, which names every valid
+    // value, never reaches the caller. The handler rejects an unknown track type
+    // by listing all four.
+    trackType: z.string().optional().describe("add_timeline_track type: float (default) | vector | color | event (#457)"),
     keyframes: z.array(z.record(z.unknown())).optional().describe("add_timeline_track: [{time, value}] - value is number for float/event, {x,y,z} for vector, {r,g,b,a} for color (#457)"),
     halfHeight: z.number().optional().describe("set_capsule_size: capsule half height (unscaled)"),
     radius: z.number().optional().describe("set_capsule_size: capsule radius (unscaled)"),
@@ -192,7 +197,12 @@ export const blueprintTool: ToolDef = categoryTool(
     TickInterval: z.number().optional(),
     parameterName: z.string().optional(), parameterType: z.string().optional(),
     isOutput: z.boolean().optional(),
-    source: z.enum(["auto", "interface", "parent"]).optional().describe("override_function: advisory hint for where the overridable function comes from (#688)"),
+    // String rather than z.enum for the reason recorded on trackType, and with
+    // an extra one here: the value is purely advisory. GetOverrideFunctionClass
+    // resolves interface and parent overrides uniformly, so the handler echoes
+    // this back and never branches on it. A strict enum spent a transport-level
+    // schema error on a field that changes nothing.
+    source: z.string().optional().describe("override_function: advisory hint for where the overridable function comes from: auto (default) | interface | parent. Echoed back; the override is resolved the same way either way (#688)"),
     preferFunction: z.boolean().optional().describe("override_function: force the function-graph form even when the function could be placed as an override event (#688)"),
     query: z.string().optional(),
     includeFunctions: z.boolean().optional(),
@@ -244,7 +254,8 @@ export const blueprintTool: ToolDef = categoryTool(
     preserveFunctions: z.boolean().optional().describe("remove_interface: keep the interface's implementations as ordinary Blueprint functions instead of deleting them with the interface. Default false."),
     pure: z.boolean().optional().describe("set_function_properties: BlueprintPure - the function produces no side effects and its node loses the exec pins."),
     isConst: z.boolean().optional().describe("set_function_properties: const - the function only reads state."),
-    accessSpecifier: z.enum(["public", "protected", "private"]).optional().describe("set_function_properties: who may call the function."),
+    // String rather than z.enum for the reason recorded on trackType.
+    accessSpecifier: z.string().optional().describe("set_function_properties: who may call the function: public | protected | private."),
     keywords: z.string().optional().describe("set_function_properties: extra palette search keywords for the function's node."),
     compactNodeTitle: z.string().optional().describe("set_function_properties: render the node in compact form under this title."),
     callInEditor: z.boolean().optional().describe("set_function_properties / add_custom_event: expose a button in the details panel that runs it on a selected instance."),
@@ -255,7 +266,8 @@ export const blueprintTool: ToolDef = categoryTool(
     op: z.string().optional().describe("edit_graph_parameters op: add | remove | rename | set_type | set_default | reorder. edit_local_variable op: rename | remove | set_type | set_default"),
     defaultValue: z.string().optional().describe("Default value as Unreal export text; an empty string clears it. Used by edit_graph_parameters, edit_local_variable and set_struct_field_default."),
     metadata: z.record(z.unknown()).optional().describe("set_variable_metadata: {key: 'value'} pairs; a null value removes that key. Unreal stores every metadata value as text."),
-    netMode: z.enum(["none", "multicast", "server", "client"]).optional().describe("add_custom_event: replication mode for the event. Default none."),
+    // String rather than z.enum for the reason recorded on trackType.
+    netMode: z.string().optional().describe("add_custom_event: replication mode for the event: none (default) | multicast | server | client."),
     reliable: z.boolean().optional().describe("add_custom_event: send the replicated event reliably. Default true; ignored when netMode is none."),
     macroName: z.string().optional().describe("Macro graph name for create_macro / delete_macro"),
     inputs: z.array(z.object({ name: z.string(), type: z.string().optional() })).optional().describe("create_macro: input parameters [{name, type}]"),

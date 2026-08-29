@@ -97,7 +97,10 @@ export const gasTool: ToolDef = categoryTool(
     attributeSet: z.string().optional().describe("set_asc_defaults / init_asc: AttributeSet content path or class name"),
     initDataTable: z.string().optional().describe("set_asc_defaults: optional DataTable of starting attribute values"),
     actorPath: z.string().optional().describe("Full actor object path. The unambiguous selector for every runtime GAS action, and it wins over actorLabel when both are given. Editor labels are NOT unique, and a label matching several actors is refused with the candidates rather than resolved at random (#956/#983)"),
-    valueType: z.enum(["current", "base"]).optional().describe("set_live_attribute_value: \"current\" (default) writes the attribute data in place; \"base\" writes through the ASC aggregator (#956)"),
+    // String rather than z.enum for the same reason as inputEvent below: the
+    // handler rejects an unknown valueType and names both, and a strict enum
+    // replaced that with a transport-level schema error.
+    valueType: z.string().optional().describe("set_live_attribute_value: current | base. \"current\" (default) writes the attribute data in place; \"base\" writes through the ASC aggregator (#956)"),
     registerOwnerSets: z.boolean().optional().describe("get/set_live_attribute_value: register the actor's own attribute set subobjects on its ASC when it has none, the way BeginPlay would. Default true; false makes the call a strict read of what is already registered (#956)"),
 
     // -- Input binding (bind_ability_input / clear_ability_input / send_ability_input)

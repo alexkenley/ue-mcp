@@ -32,7 +32,12 @@ const ControlRigSetEdit = z.object({
   frame: z.number().int().optional(),
   frames: z.array(z.number().int()).min(1).optional(),
   transform: ControlRigKeyTransform,
-  space: z.enum(["local", "global"]).optional(),
+  // Deliberately a string, not z.enum. The MCP SDK validates arguments BEFORE
+  // the tool callback runs, so a strict enum makes a typo fail at the transport
+  // with a schema error, and the handler's own message, which names every valid
+  // value, never reaches the caller. The handler validates it and says what is
+  // valid, which is the answer a caller can act on.
+  space: z.string().optional().describe("Coordinate space for the written transform: local | component | global. global is an alias for component. Default local"),
 }).strict().refine(
   (edit) => (edit.frame === undefined) !== (edit.frames === undefined),
   { message: "set operations require exactly one of frame or frames" },
@@ -51,7 +56,8 @@ const ControlRigSetKeysEdit = z.object({
   op: z.literal("set_keys"),
   control: z.string().min(1),
   keys: z.array(ControlRigTransformKey).min(1),
-  space: z.enum(["local", "global"]).optional(),
+  // String rather than z.enum for the reason recorded on ControlRigSetEdit.space.
+  space: z.string().optional().describe("Coordinate space for the written transforms: local | component | global. global is an alias for component. Default local"),
 }).strict().refine(
   (edit) => edit.keys.every((key, index) => index === 0 || key.frame > edit.keys[index - 1].frame),
   { message: "set_keys frames must be strictly increasing" },
@@ -65,7 +71,8 @@ const ControlRigOffsetEdit = z.object({
   translationCm: ControlRigVec3.optional(),
   rotationDegrees: ControlRigRotator.optional(),
   scaleMultiplier: ControlRigVec3.optional(),
-  space: z.enum(["local", "global"]).optional(),
+  // String rather than z.enum for the reason recorded on ControlRigSetEdit.space.
+  space: z.string().optional().describe("Coordinate space for the offset: local | component | global. global is an alias for component. Default local"),
   blendInFrames: z.number().int().nonnegative().optional(),
   blendOutFrames: z.number().int().nonnegative().optional(),
 }).strict()
@@ -217,11 +224,14 @@ const IKRetargetChainMapping = z.object({
 }).strict();
 
 const IKRetargetPose = z.object({
-  side: z.enum(["source", "target"]),
+  // Strings rather than z.enum for the reason recorded on
+  // ControlRigSetEdit.space: the handler rejects an unknown value by name and
+  // a strict enum would replace that message with a transport schema error.
+  side: z.string().min(1).describe("Which retarget skeleton the pose belongs to: source | target"),
   name: z.string().min(1),
   create: z.boolean().optional(),
   reset: z.boolean().optional(),
-  autoAlign: z.enum(["chain_to_chain", "mesh_to_mesh", "local_axes", "global_axes"]).optional(),
+  autoAlign: z.string().optional().describe("Native auto-align method: chain_to_chain | mesh_to_mesh | local_axes | global_axes. Requires both preview meshes"),
   bones: z.array(z.string().min(1)).max(10_000).optional(),
   rotationOffsets: z.array(z.object({
     bone: z.string().min(1),
@@ -426,6 +436,10 @@ export const animationTool: ToolDef = categoryTool(
       name: z.string(),
       animSequencePath: z.string(),
       packagePath: z.string().optional(),
+      // Stays a strict enum on purpose. The montage creation path this forwards
+      // to compares against "error" and treats every other value as "skip", so
+      // nothing downstream rejects a typo. Relaxing it would turn a clean
+      // schema rejection into a silent skip that reports success.
       onConflict: z.enum(["skip", "error"]).optional(),
       slotName: z.string().optional(),
       trackIndex: z.number().int().nonnegative().optional(),
@@ -541,7 +555,8 @@ export const animationTool: ToolDef = categoryTool(
     virtualBoneName: z.string().optional(),
     retargetRoot: z.string().optional().describe("Retarget root bone name for IK Rig"),
     rootMotionBone: z.string().min(1).optional().describe("configure_ik_rig: root-motion bone name"),
-    autoSetup: z.enum(["retarget", "full_body"]).optional().describe("configure_ik_rig: optional native rig setup pass"),
+    // String rather than z.enum for the reason recorded on ControlRigSetEdit.space.
+    autoSetup: z.string().optional().describe("configure_ik_rig: optional native rig setup pass: retarget | full_body"),
     fullBodyIK: IKRigFullBodySettings.optional().describe("configure_ik_rig: Full Body IK solver and desired goal/effector settings"),
     exclusions: z.array(IKRigExclusion).max(2_048).optional().describe("configure_ik_rig: desired per-bone solver exclusions"),
     sourceRig: z.string().optional().describe("Source IKRig path for create_ik_retargeter"),
@@ -552,7 +567,8 @@ export const animationTool: ToolDef = categoryTool(
     sourcePreviewMesh: z.string().min(1).optional().describe("configure_ik_retargeter: source preview SkeletalMesh path"),
     targetPreviewMesh: z.string().min(1).optional().describe("configure_ik_retargeter: target preview SkeletalMesh path"),
     ensureDefaultOps: z.boolean().optional().describe("configure_ik_retargeter: ensure the complete UE 5.8 default operation stack; defaults true"),
-    autoMapMode: z.enum(["exact", "fuzzy", "clear"]).optional().describe("configure_ik_retargeter: native chain auto-map mode"),
+    // String rather than z.enum for the reason recorded on ControlRigSetEdit.space.
+    autoMapMode: z.string().optional().describe("configure_ik_retargeter: native chain auto-map mode: exact | fuzzy | clear"),
     forceRemap: z.boolean().optional().describe("configure_ik_retargeter: replace existing mappings during auto-map; defaults false"),
     chainMappings: z.array(IKRetargetChainMapping).max(10_000).optional().describe("configure_ik_retargeter: explicit target-to-source chain overrides; null or omitted source clears"),
     pose: IKRetargetPose.optional().describe("configure_ik_retargeter: named source or target pose authoring"),
@@ -571,7 +587,8 @@ export const animationTool: ToolDef = categoryTool(
     // UE 5.8 Control Rig + data-driven animation editing workflow.
     sourceAnimationPath: z.string().optional().describe("begin_control_rig_edit: source AnimSequence asset path (required)."),
     controlRigPath: z.string().optional().describe("begin_control_rig_edit: verified baseline ControlRigBlueprint asset path for this target character; required when rigMode='asset'. Create and validate the rig first when the project/character has none."),
-    rigMode: z.enum(["fk", "asset"]).optional().describe("begin_control_rig_edit: use 'asset' with the verified baseline controlRigPath; use 'fk' only when generated raw FK controls are the intended editing surface."),
+    // String rather than z.enum for the reason recorded on ControlRigSetEdit.space.
+    rigMode: z.string().optional().describe("begin_control_rig_edit: fk | asset. Use 'asset' with the verified baseline controlRigPath; use 'fk' only when generated raw FK controls are the intended editing surface. Default fk."),
     layered: z.boolean().optional().describe("begin_control_rig_edit: keep the source animation track active under the Control Rig layer; defaults false."),
     startFrame: z.number().int().optional().describe("begin_control_rig_edit: optional inclusive edit range start frame."),
     endFrame: z.number().int().optional().describe("begin_control_rig_edit: optional exclusive edit range end frame."),
@@ -647,7 +664,7 @@ export const animationTool: ToolDef = categoryTool(
     rootBone: z.string().optional().describe("Root bone name for bake_root_motion_from_bone (default 'root')"),
     axes: z.array(z.string()).optional().describe("Axes to bake ('x','y','z') for bake_root_motion_from_bone"),
     interpolation: z.string().optional().describe("bake_root_motion_from_bone: 'linear' (default) or 'per_frame'"),
-    space: z.string().optional().describe("Transform space. Control Rig edit actions: 'local'|'global'. get_bone_transforms: 'local'|'component'. get_bone_transform: 'world'|'component'|'local'."),
+    space: z.string().optional().describe("Transform space. Control Rig edit actions: 'local'|'component'|'global', where 'global' is an alias for 'component'. get_bone_transforms: 'local'|'component'. get_bone_transform: 'world'|'component'|'local'."),
     world: z.string().optional().describe("World scope for live actor skeletal queries: auto (default, prefer PIE), pie/game, or editor"),
     animation: z.string().optional().describe("AnimSequence path for add_blend_sample / set_blend_sample"),
     sampleIndex: z.number().optional().describe("BlendSpace sample index for set_blend_sample"),
