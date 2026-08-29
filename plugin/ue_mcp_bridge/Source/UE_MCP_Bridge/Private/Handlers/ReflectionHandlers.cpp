@@ -719,7 +719,8 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateGameplayTag(const TSharedPtr<F
 	FString ProjectDir = FPaths::ProjectDir();
 	FString TagFile = FPaths::Combine(ProjectDir, TEXT("Config"), TEXT("DefaultGameplayTags.ini"));
 
-	FString Section = TEXT("[/Script/GameplayTags.GameplayTagsSettings]");
+	const FString SectionName = TEXT("/Script/GameplayTags.GameplayTagsSettings");
+	const FString Section = FString::Printf(TEXT("[%s]"), *SectionName);
 	FString Entry = FString::Printf(TEXT("+GameplayTagList=(Tag=\"%s\",DevComment=\"%s\")"), *Tag, *Comment);
 
 	// The identity of a tag entry is the TAG, not the whole line. Keying the
@@ -736,8 +737,10 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateGameplayTag(const TSharedPtr<F
 	// tolerant of spacing, so `Tag = "Ability.Fire"` does not contain
 	// `Tag="Ability.Fire"` and the duplicate line comes straight back.
 	//
-	// So the scan is per line: comment lines are skipped the way the ini parser
-	// skips them, and the rest are compared with EVERY whitespace character
+	// So the scan is per line: lines the ini parser would not read as a
+	// declaration are skipped (see the marker note below in the loop, which
+	// says which markers those are and why), and the rest are compared with
+	// EVERY whitespace character
 	// removed, tabs included. FString::RemoveSpacesInline is not that: it is
 	// documented and implemented as removing the SPACE CHARACTER ONLY, so a
 	// tab-aligned `Tag<TAB>=<TAB>"Ability.Fire"` survived it and the duplicate
@@ -747,10 +750,14 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateGameplayTag(const TSharedPtr<F
 	// whitespace, so stripping it cannot merge two distinct tags; the stripped
 	// copy is used only for the comparison and never written back.
 	//
-	// FString::Contains and Equals default to case-INSENSITIVE, which is what is
-	// wanted here because FGameplayTag compares as an FName and FName is itself
-	// case-insensitive. That agreement is stated rather than left to be
-	// rediscovered, since it reads like an accident.
+	// Case is handled explicitly on every comparison below rather than left to
+	// the defaults, because the defaults disagree with each other:
+	// FString::Contains defaults to ESearchCase::IgnoreCase and FString::Equals
+	// defaults to ESearchCase::CaseSensitive (UnrealString.h.inl:1162, 1177,
+	// 1191 and 1271). IgnoreCase is what this handler wants throughout, since a
+	// gameplay tag compares as an FName and FName is case-insensitive, and an
+	// ini section name is looked up on an FString map key whose operator== is
+	// Stricmp.
 	auto StripWhitespace = [](const FString& In)
 	{
 		FString Out;
@@ -764,55 +771,105 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateGameplayTag(const TSharedPtr<F
 	const FString TagKey = FString::Printf(TEXT("Tag=\"%s\""), *Tag);
 	const FString CompactTagKey = StripWhitespace(TagKey);
 
+	// The section header is recognised the way FConfigFile's own parser
+	// recognises one, which is deliberately NOT the whitespace-stripped
+	// comparison the tag scan uses. ProcessInputFileContents strips TRAILING
+	// whitespace from the line and then requires the first character to be '['
+	// and the last to be ']' (ConfigCacheIni.cpp:1874-1902). So a line carrying
+	// anything after the closing bracket is not a section header to Unreal
+	// either, and a header written `[ Name ]` names a DIFFERENT section, one
+	// whose name has the spaces in it. Stripped full-line equality would have
+	// accepted that second form and spliced the entry into a section the engine
+	// never reads under the name this handler means. Leading whitespace is not
+	// tolerated for the same reason: the parser tests the raw first character.
+	auto IsSectionHeader = [&SectionName](const FString& RawLine)
+	{
+		FString Line = RawLine;
+		Line.TrimEndInline();
+		if (Line.Len() < 2 || Line[0] != TEXT('[') || Line[Line.Len() - 1] != TEXT(']')) return false;
+		return Line.Mid(1, Line.Len() - 2).Equals(SectionName, ESearchCase::IgnoreCase);
+	};
+
 	FString FileContent;
 	bool bTagAlreadyDeclared = false;
 	if (FFileHelper::LoadFileToString(FileContent, *TagFile))
 	{
-		TArray<FString> Lines;
-		FileContent.ParseIntoArrayLines(Lines, /*bCullEmpty=*/false);
-		int32 SectionLine = INDEX_NONE;
-		for (int32 i = 0; i < Lines.Num(); ++i)
+		// Walked by offset rather than split into an array of lines, because
+		// the write below has to be an INSERTION into the original text. The
+		// previous shape rejoined with FString::Join(Lines, LineEnd), and a
+		// join rewrites EVERY terminator in the file to the single separator
+		// that was detected: a hand-edited ini with mixed endings came back
+		// wholly converted, which is precisely the unrelated config diff this
+		// code goes out of its way not to produce. Only the inserted line is
+		// written now; every existing byte is left where it was.
+		int32 SectionInsertAt = INDEX_NONE;  // offset just past the header line
+		FString SectionLineEnd;              // that header line's own terminator
+		int32 Cursor = 0;
+		bool bAtEnd = false;
+		while (!bAtEnd && Cursor <= FileContent.Len())
 		{
-			FString Trimmed = Lines[i].TrimStartAndEnd();
-			// Both comment markers an Unreal ini honours.
-			if (Trimmed.IsEmpty() || Trimmed.StartsWith(TEXT(";")) || Trimmed.StartsWith(TEXT("#"))) continue;
-			const FString Compact = StripWhitespace(Trimmed);
-			if (Compact.Contains(CompactTagKey))
+			int32 LineEnd = Cursor;
+			while (LineEnd < FileContent.Len()
+				&& FileContent[LineEnd] != TEXT('\r')
+				&& FileContent[LineEnd] != TEXT('\n'))
 			{
-				bTagAlreadyDeclared = true;
-				break;
+				++LineEnd;
 			}
-			// The section header is read the same way and for the same reason:
-			// a raw whole-file scan for it would match a COMMENTED-OUT header
-			// and the new entry would be spliced in underneath a line the ini
-			// parser ignores, landing the tag in whatever section precedes it.
-			// IgnoreCase to keep the tolerance the previous whole-file
-			// Contains() had by default, so a differently cased header does not
-			// suddenly grow a second section.
-			if (SectionLine == INDEX_NONE && Compact.Equals(Section, ESearchCase::IgnoreCase)) SectionLine = i;
-		}
-		if (!bTagAlreadyDeclared)
-		{
-			// The separator the file already uses. Both branches below write
-			// with it: silently converting a CRLF ini to LF, or appending LF
-			// lines onto a CRLF file, would be an unrelated change landing in
-			// someone's config diff. The append branch used to hardcode "\n"
-			// and produce exactly the mixed line endings the join branch went
-			// out of its way to avoid.
-			const TCHAR* LineEnd = FileContent.Contains(TEXT("\r\n")) ? TEXT("\r\n") : TEXT("\n");
-			if (SectionLine == INDEX_NONE)
+			int32 TermLen = 0;
+			if (LineEnd < FileContent.Len())
 			{
-				FileContent += FString(LineEnd) + LineEnd + Section + LineEnd + Entry + LineEnd;
+				TermLen = (FileContent[LineEnd] == TEXT('\r')
+					&& LineEnd + 1 < FileContent.Len()
+					&& FileContent[LineEnd + 1] == TEXT('\n')) ? 2 : 1;
 			}
 			else
 			{
-				// Rejoin. ParseIntoArrayLines was called with bCullEmpty=false,
-				// and FString::ParseIntoArray appends the trailing remainder
-				// unconditionally in that mode, so a file ending in a newline
-				// yields a final empty element and the join puts that newline
-				// back. The rewrite does not eat the file's last line ending.
-				Lines.Insert(Entry, SectionLine + 1);
-				FileContent = FString::Join(Lines, LineEnd);
+				bAtEnd = true;
+			}
+
+			const FString Line = FileContent.Mid(Cursor, LineEnd - Cursor);
+			const FString Trimmed = Line.TrimStartAndEnd();
+			// ';' is the comment marker the ini parser honours: it skips a line
+			// whose first character is ';' (ConfigCacheIni.cpp:1946). '#' is not
+			// a comment marker there - `#Foo=Bar` parses as a key literally
+			// named "#Foo" - which is why a '#'-prefixed GameplayTagList line
+			// declares nothing and is skipped here too.
+			if (!Trimmed.IsEmpty() && !Trimmed.StartsWith(TEXT(";")) && !Trimmed.StartsWith(TEXT("#")))
+			{
+				if (StripWhitespace(Trimmed).Contains(CompactTagKey, ESearchCase::IgnoreCase))
+				{
+					bTagAlreadyDeclared = true;
+					break;
+				}
+				if (SectionInsertAt == INDEX_NONE && IsSectionHeader(Line))
+				{
+					SectionInsertAt = LineEnd + TermLen;
+					SectionLineEnd = FileContent.Mid(LineEnd, TermLen);
+				}
+			}
+			Cursor = LineEnd + TermLen;
+		}
+
+		if (!bTagAlreadyDeclared)
+		{
+			// The separator the file already uses, for the text this call adds.
+			// Silently converting a CRLF ini to LF, or appending LF lines onto a
+			// CRLF file, would be an unrelated change landing in someone's
+			// config diff.
+			const FString FileLineEnd = FileContent.Contains(TEXT("\r\n")) ? TEXT("\r\n") : TEXT("\n");
+			if (SectionInsertAt == INDEX_NONE)
+			{
+				FileContent += FileLineEnd + FileLineEnd + Section + FileLineEnd + Entry + FileLineEnd;
+			}
+			else
+			{
+				// Straight after the header line, reusing THAT line's own
+				// terminator so the new entry matches its neighbours. A header
+				// sitting on the file's last line has no terminator to copy, so
+				// the file default goes in front of the entry instead.
+				FileContent.InsertAt(SectionInsertAt, SectionLineEnd.IsEmpty()
+					? FileLineEnd + Entry
+					: Entry + SectionLineEnd);
 			}
 		}
 	}

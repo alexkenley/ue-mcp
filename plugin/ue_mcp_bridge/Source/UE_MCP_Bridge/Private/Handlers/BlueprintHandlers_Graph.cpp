@@ -27,6 +27,7 @@
 #include "K2Node_EditablePinBase.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_MacroInstance.h"
+#include "K2Node_Composite.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "K2Node_DynamicCast.h"
@@ -1285,33 +1286,40 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObje
 	// Nothing after the delete can read the node back, so the text the inverse
 	// would paste is captured while the node still exists.
 	//
-	// The EXPORT gate is the node CLASS, not CanDuplicateNode(). This says
-	// nothing about whether the delete is allowed - CanUserDeleteNode above is
-	// the only authority on that - it only decides whether rollback text is
-	// captured. Across the whole BlueprintGraph module UK2Node_Tunnel is the
-	// only class that overrides CanDuplicateNode, and UEdGraphNode's base
-	// returns true, so an entry, result or event node reports itself
-	// duplicatable and would be exported happily. (The AnimGraph nodes do
-	// override it and mostly answer false, which is what the other rollback
-	// note below covers.) Pasting that text back does not restore the graph: a
-	// second UK2Node_FunctionEntry, a second UK2Node_FunctionResult or a second
-	// Event node with the same signature is a Blueprint that no longer
-	// compiles, and a tunnel-derived node (composite, macro instance) keeps its
-	// body in a separate UEdGraph it only points at, so its text carries a
-	// reference rather than the contents. import_nodes_t3d drives
-	// FEdGraphUtilities::ImportNodesFromText directly and never consults
-	// UK2Node_Event::CanPasteHere, so nothing downstream catches it either. A
-	// rollback that corrupts the asset is worse than none.
+	// The EXPORT gate is CanDuplicateNode(), and only that. It says nothing
+	// about whether the delete is allowed - CanUserDeleteNode above is the sole
+	// authority on that - it decides whether there is any point capturing
+	// rollback text, and it is the same question the paste side asks:
+	// FGraphObjectTextFactory::CanCreateClass reads CanDuplicateNode off the
+	// class default object and skips the whole block when it answers false
+	// (EdGraphUtilities.cpp:125-150). Text no importer would accept is text
+	// worth not capturing.
+	//
+	// There is no additional exclusion by node class, because the round trip
+	// was traced rather than assumed. FEdGraphUtilities::ExportNodesToText
+	// builds an FExportObjectInnerContext and hands it to
+	// UExporter::ExportToOutputDevice (EdGraphUtilities.cpp:458-481); the
+	// context maps every object to its inners (UnrealExporter.cpp:515-522) and
+	// UObjectExporterT3D::ExportText calls ExportObjectInner
+	// (EditorExporters.cpp:331-338), which emits each inner as its own nested
+	// Begin Object block (UnrealExporter.cpp:571-623). Coming back,
+	// FCustomizableTextObjectFactory::ProcessBuffer captures those nested
+	// blocks as the node's property text and ImportObjectProperties recreates
+	// them as subobjects of the new node (EditorFactories.cpp:5347-5383,
+	// EditorObject.cpp:449 and 720-800). So a subgraph a node OWNS travels with
+	// it, and one it only references is left alone by the delete and still
+	// resolves on paste. What the paste does not restore is named in the
+	// rollback note instead of being used to withhold the rollback.
 	FString DeletedT3D;
 	int32 DeletedLinkCount = 0;
-	const bool bSingularNode = NodeToDelete->IsA<UK2Node_FunctionTerminator>()
-		|| NodeToDelete->IsA<UK2Node_Tunnel>()
-		|| NodeToDelete->IsA<UK2Node_Event>();
+	const bool bIsComposite = NodeToDelete->IsA<UK2Node_Composite>();
+	const bool bIsMacroInstance = NodeToDelete->IsA<UK2Node_MacroInstance>();
+	const bool bIsEventNode = NodeToDelete->IsA<UK2Node_Event>();
 	for (const UEdGraphPin* Pin : NodeToDelete->Pins)
 	{
 		if (Pin) DeletedLinkCount += Pin->LinkedTo.Num();
 	}
-	if (!bSingularNode && NodeToDelete->CanDuplicateNode())
+	if (NodeToDelete->CanDuplicateNode())
 	{
 		NodeToDelete->PrepareForCopying();
 		TSet<UObject*> NodeSet;
@@ -1319,8 +1327,19 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObje
 		FEdGraphUtilities::ExportNodesToText(NodeSet, DeletedT3D);
 	}
 
-	NodeToDelete->BreakAllNodeLinks();
-	TargetGraph->RemoveNode(NodeToDelete);
+	// FBlueprintEditorUtils::RemoveNode, not UEdGraph::RemoveNode. The graph
+	// method drops the node out of the Nodes array and breaks its links and
+	// stops there (EdGraph.cpp:260-279) - it never calls DestroyNode, which is
+	// where a node releases what it OWNS. For a collapsed graph that is the
+	// entire subgraph: UK2Node_Composite::DestroyNode hands BoundGraph to
+	// FBlueprintEditorUtils::RemoveGraph (K2Node_Composite.cpp:73-83), and
+	// without that call the bound graph outlived the node that owned it and
+	// stayed in the parent graph's SubGraphs with nothing pointing at it. The
+	// editor's own node deletion goes through this function
+	// (BlueprintEditorUtils.cpp:2751-2790), which breaks the links through the
+	// schema and clears breakpoints and pin watches on the way. bDontRecompile
+	// is true because the compile immediately below is this handler's own.
+	FBlueprintEditorUtils::RemoveNode(Blueprint, NodeToDelete, /*bDontRecompile*/ true);
 
 	FKismetEditorUtilities::CompileBlueprint(Blueprint);
 	SaveAssetPackage(Blueprint);
@@ -1332,9 +1351,9 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObje
 	Result->SetBoolField(TEXT("deleted"), true);
 
 	// The inverse is import_nodes_t3d fed the node's own exported text. It puts
-	// an equivalent node back in the same graph, but BreakAllNodeLinks already
-	// severed every wire and the paste mints a fresh GUID, so this is lossy in
-	// two named ways rather than a clean undo.
+	// an equivalent node back in the same graph, but the removal above broke
+	// every wire through the schema and the paste mints a fresh GUID, so this is
+	// lossy in two named ways rather than a clean undo.
 	if (!DeletedT3D.IsEmpty())
 	{
 		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
@@ -1343,33 +1362,50 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObje
 		Payload->SetStringField(TEXT("t3d"), DeletedT3D);
 		MCPSetRollback(Result, TEXT("import_nodes_t3d"), Payload);
 		Result->SetBoolField(TEXT("rollbackLossy"), true);
-		Result->SetStringField(TEXT("rollbackNote"), FString::Printf(TEXT(
+
+		// Everything appended here is a property of the class that was deleted,
+		// and each clause is a behaviour that was read out of the engine rather
+		// than inferred from the node's name.
+		FString Note = FString::Printf(TEXT(
 			"import_nodes_t3d pastes the node back with its properties intact, but the %d pin link(s) this delete "
 			"broke do NOT come back and have to be re-made with connect_pins. The pasted node also gets a new "
 			"nodeId, so '%s' will not address it afterwards."),
-			DeletedLinkCount, *NodeId));
+			DeletedLinkCount, *NodeId);
+		if (bIsComposite)
+		{
+			Note += TEXT(
+				" The collapsed graph comes back with the node. A composite's BoundGraph is created with the node "
+				"itself as its outer (UK2Node_Composite::PostPlacedNewNode), so the export carries the subgraph and "
+				"its contents inline rather than a reference to them, and UK2Node_Composite::PostPasteNode rewires "
+				"the entry and exit tunnels of the graph the paste rebuilt.");
+		}
+		if (bIsMacroInstance)
+		{
+			Note += TEXT(
+				" The macro definition itself was never touched: a macro instance holds only an "
+				"FGraphReference to a graph that lives in the macro library or in this Blueprint's own macro "
+				"graphs, so deleting the instance leaves the definition in place and the exported reference still "
+				"resolves when the node is pasted back.");
+		}
+		if (bIsEventNode)
+		{
+			Note += TEXT(
+				" One case is not a clean restore: if an event of the same name exists again by the time the paste "
+				"runs, UK2Node_Event::CanPasteHere refuses and the paste substitutes a Custom Event in its place "
+				"(UEdGraphSchema_K2::CreateSubstituteNode), which overrides nothing. Paste back into the state the "
+				"delete left, not after re-adding the event.");
+		}
+		Result->SetStringField(TEXT("rollbackNote"), Note);
 	}
 	else
 	{
 		Result->SetBoolField(TEXT("rollbackPossible"), false);
-		Result->SetStringField(TEXT("rollbackNote"), bSingularNode
-			? FString::Printf(TEXT(
-				"Node '%s' (%s) belongs to the class family delete_node never exports rollback text for: "
-				"K2Node_Event, K2Node_FunctionTerminator (function entry and function result) and K2Node_Tunnel "
-				"together with everything derived from it, which includes collapsed-graph (K2Node_Composite) and "
-				"macro instance nodes. The delete itself was allowed - the engine's own CanUserDeleteNode said so, "
-				"and it says so for an event, a function result whose signature is editable, a stray top-level "
-				"tunnel, a composite and a macro instance - so this is about the paste being wrong, not the delete "
-				"being refused. Pasting an event or a function terminator back adds a SECOND node with the same "
-				"signature and the Blueprint stops compiling. A composite or macro instance keeps its body in a "
-				"separate graph the node only points at, so its exported text carries a reference and not the "
-				"contents, and the paste would not rebuild what was deleted. No inverse is offered rather than one "
-				"that corrupts the asset: rebuild the node with add_node, or re-collapse the nodes."),
-				*NodeId, *NodeClassName)
-			: FString::Printf(TEXT(
-				"Node '%s' (%s) reported itself non-duplicatable through CanDuplicateNode, or exported to empty "
-				"text, so there is nothing for import_nodes_t3d to paste back and no inverse is offered."),
-				*NodeId, *NodeClassName));
+		Result->SetStringField(TEXT("rollbackNote"), FString::Printf(TEXT(
+			"Node '%s' (%s) reported itself non-duplicatable through CanDuplicateNode, or exported to empty "
+			"text, so there is nothing for import_nodes_t3d to paste back and no inverse is offered. The paste side "
+			"reads the same CanDuplicateNode and would refuse the block, so exporting it would have produced a "
+			"rollback that does nothing. Rebuild the node with add_node."),
+			*NodeId, *NodeClassName));
 	}
 	return MCPResult(Result);
 }
@@ -1855,11 +1891,21 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJson
 	// UK2Node_Tunnel overrides it; UK2Node_FunctionEntry and
 	// UK2Node_FunctionResult descend from UK2Node_FunctionTerminator and
 	// UK2Node_Event from UK2Node_EditablePinBase, so all three export happily.
-	// That is fine for an export, which is a read. It is not fine for the
-	// import: a graph holds one entry, one return and one event per signature,
-	// and pasting a second stops it compiling. The ones in this payload are
-	// therefore named in `singularNodes` so a caller round-tripping the text
-	// into a graph that already has them knows what to strip first.
+	// That is fine for an export, which is a read. It is the import that has to
+	// be careful, and the reason differs by class rather than being one rule:
+	// a second UK2Node_FunctionEntry in one function graph is a compile error
+	// the compiler raises by name ("Expected only one function entry node in
+	// graph", KismetCompiler.cpp:2224-2232), and a second event node for the
+	// same event produces a second function context with the same name, which
+	// is the DuplicateFunctionName error at KismetCompiler.cpp:2265-2275. A
+	// second UK2Node_FunctionResult is NOT an error - the engine supports
+	// several result nodes in one graph, which is why
+	// UK2Node_FunctionResult::CanUserDeleteNode lets a locked one go when
+	// another is present - but a pasted one re-syncs its pins to the entry node
+	// and to the primary result node (PostPasteNode, K2Node_FunctionResult.cpp:
+	// 269-279), so it does not necessarily arrive with the pins it left with.
+	// All three are named in `singularNodes` so a caller round-tripping the
+	// text into a graph that already has them can decide what to strip first.
 	TSet<UObject*> NodeSet;
 	int32 SkippedCount = 0;
 	TArray<TSharedPtr<FJsonValue>> SingularNodes;

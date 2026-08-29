@@ -15,6 +15,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UObject/Class.h"
+#include "UObject/Interface.h"
 
 class UBlueprint;
 class UActorComponent;
@@ -25,19 +26,23 @@ class UActorComponent;
 // nothing it inherited. Reading Blueprint->ParentClass->Interfaces therefore
 // answers a one-level question, and an interface declared on a GRANDPARENT
 // reads as absent. UClass::ImplementsInterface exists because the real answer
-// needs the super chain and the interface-extends-interface stack, so that is
-// the authority add_blueprint_interface and remove_blueprint_interface ask.
+// needs the class's super chain and, for each interface found there, that
+// interface's own super chain, so that is the authority add_blueprint_interface
+// and remove_blueprint_interface ask.
 //
 // ImplementsInterface returns a bool, and those handlers also have to NAME the
 // class the contract came from, while list_blueprint_interfaces has to
 // enumerate the whole set. The walk below is the single definition of that
-// reach, so the three handlers cannot drift into disagreeing about which
-// interfaces a Blueprint already has.
+// reach, and the three handlers read it rather than each rolling their own.
 
-/** Every interface StartClass implements, with the same reach
- *  UClass::ImplementsInterface has, each paired with the nearest ancestor class
- *  that brings it in. Nearest wins, so the pair names the class a caller should
- *  be pointed at. */
+/** Every interface StartClass implements, each paired with the nearest ancestor
+ *  class that brings it in. Nearest wins, so the pair names the class a caller
+ *  should be pointed at.
+ *
+ *  The reach is the one UClass::ImplementsInterface has (Class.cpp:6265-6284 in
+ *  the 5.7 source tree): outer loop over the super chain of the class, inner
+ *  test `InterfaceClass->IsChildOf(SomeInterface)` against each entry of that
+ *  class's own Interfaces array, and UInterface itself rejected up front. */
 inline void GatherImplementedInterfaces(UClass* StartClass, TArray<TPair<UClass*, UClass*>>& OutInterfaceAndProvider)
 {
 	TSet<UClass*> Seen;
@@ -45,21 +50,25 @@ inline void GatherImplementedInterfaces(UClass* StartClass, TArray<TPair<UClass*
 	{
 		for (const FImplementedInterface& Declared : Current->Interfaces)
 		{
-			// An interface may extend other interfaces, and a class that
-			// declares the derived one implements those too. Walking that stack
-			// is what keeps this in step with ImplementsInterface.
-			TArray<UClass*> Pending;
-			if (Declared.Class) Pending.Add(Declared.Class);
-			while (Pending.Num() > 0)
+			// An interface may extend another interface, and a class that
+			// declares the derived one implements the base too. That relation
+			// is the interface's SUPER CHAIN, not its Interfaces array: a
+			// derived interface is written `UUserObjectListEntry : public
+			// UUserListEntry` (IUserObjectListEntry.h:12-16), so the base
+			// arrives as SuperClass. ImplementsInterface reads it the same way,
+			// through IsChildOf, and stops before UInterface because it refuses
+			// UInterface as a query outright. Walking the chain here is what
+			// keeps the two in step; walking Interfaces would not, because on
+			// an interface class that array is empty.
+			for (UClass* Iface = Declared.Class;
+				Iface && Iface != UInterface::StaticClass();
+				Iface = Iface->GetSuperClass())
 			{
-				UClass* Iface = Pending.Pop();
-				if (!Iface || Seen.Contains(Iface)) continue;
+				// Already recorded means recorded by a nearer provider, and
+				// with it everything above it on this same chain, so stop.
+				if (Seen.Contains(Iface)) break;
 				Seen.Add(Iface);
 				OutInterfaceAndProvider.Emplace(Iface, Current);
-				for (const FImplementedInterface& Super : Iface->Interfaces)
-				{
-					if (Super.Class) Pending.Add(Super.Class);
-				}
 			}
 		}
 	}
@@ -67,7 +76,7 @@ inline void GatherImplementedInterfaces(UClass* StartClass, TArray<TPair<UClass*
 
 /** The nearest ancestor of StartClass (StartClass itself included) that brings
  *  InterfaceClass in, or nullptr. Built on the gather above so the name a
- *  handler reports and the set another handler lists can never disagree. */
+ *  handler reports and the set another handler lists are read off one walk. */
 inline UClass* FindInterfaceProvider(UClass* StartClass, const UClass* InterfaceClass)
 {
 	if (!StartClass || !InterfaceClass) return nullptr;
