@@ -80,10 +80,34 @@ namespace
 			TSharedPtr<FJsonObject> PolicyParams = MakeShared<FJsonObject>();
 			PolicyParams->SetStringField(TEXT("pattern"), Pattern);
 			PolicyParams->SetStringField(TEXT("response"), Response);
-			Registry.ExecuteHandler(TEXT("set_dialog_policy"), PolicyParams);
+			const TSharedPtr<FJsonValue> PolicyResult = Registry.ExecuteHandler(TEXT("set_dialog_policy"), PolicyParams);
 
-			UE_LOG(LogMCPBridge, Log,
-				TEXT("[UE-MCP] Startup dialog policy applied: '%s' answers '%s'"), *Pattern, *Response);
+			// The handler refuses a response keyword it does not recognise, and
+			// its error names the valid ones. Reporting "applied" regardless
+			// would leave a launch believing a prompt is answered when nothing
+			// is armed for it, which is the failure this whole path exists to
+			// prevent.
+			bool bApplied = false;
+			FString PolicyError;
+			if (PolicyResult.IsValid() && PolicyResult->Type == EJson::Object)
+			{
+				const TSharedPtr<FJsonObject>& PolicyObject = PolicyResult->AsObject();
+				bool bSuccess = false;
+				bApplied = PolicyObject->TryGetBoolField(TEXT("success"), bSuccess) && bSuccess;
+				PolicyObject->TryGetStringField(TEXT("error"), PolicyError);
+			}
+
+			if (bApplied)
+			{
+				UE_LOG(LogMCPBridge, Log,
+					TEXT("[UE-MCP] Startup dialog policy applied: '%s' answers '%s'"), *Pattern, *Response);
+			}
+			else
+			{
+				UE_LOG(LogMCPBridge, Warning,
+					TEXT("[UE-MCP] Startup dialog policy '%s' was NOT applied: %s"),
+					*Entry, PolicyError.IsEmpty() ? TEXT("the set_dialog_policy handler returned no success flag") : *PolicyError);
+			}
 		}
 	}
 }

@@ -1310,6 +1310,15 @@ TSharedPtr<FJsonValue> FAudioHandlers::ReadSoundRouting(const TSharedPtr<FJsonOb
 		Problems.Add(MakeShared<FJsonValueString>(Text));
 	};
 
+	// A fact the caller needs but which does not break routing. It is kept off
+	// `problems` deliberately, because `routable` is asserted on that array
+	// being empty and a correctly routed sound must not read as broken.
+	TArray<TSharedPtr<FJsonValue>> Notes;
+	auto Note = [&Notes](const FString& Text)
+	{
+		Notes.Add(MakeShared<FJsonValueString>(Text));
+	};
+
 	// ── Sound class chain, child to root ────────────────────────────────
 	TArray<TSharedPtr<FJsonValue>> ClassChain;
 	if (USoundClass* SC = Sound->SoundClassObject)
@@ -1464,18 +1473,59 @@ TSharedPtr<FJsonValue> FAudioHandlers::ReadSoundRouting(const TSharedPtr<FJsonOb
 		if (!Conc) continue;
 		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
 		O->SetStringField(TEXT("objectPath"), Conc->GetPathName());
-		O->SetNumberField(TEXT("maxCount"), Conc->Concurrency.MaxCount);
+
+		// MaxCount has TWO values and reading the public field alone reports the
+		// wrong one for exactly the assets where it matters. When
+		// bEnableMaxCountPlatformScaling is on, the field is EditCondition'd off
+		// in the details panel and the count in force comes from the private
+		// PlatformMaxCount (an FPerPlatformInt) resolved for this platform.
+		// GetMaxCount() is the accessor that answers with the resolved value,
+		// and IsMaxCountPlatformScalingEnabled() reports which of the two is
+		// live (Sound/SoundConcurrency.h: MaxCount public, the flag and
+		// PlatformMaxCount private, both accessors ENGINE_API).
+		//
+		// Both numbers are reported rather than one silently replacing the
+		// other: `maxCount` keeps meaning the authored field, and
+		// `effectiveMaxCount` is what the voice limiter actually applies.
+		const int32 AuthoredMaxCount = Conc->Concurrency.MaxCount;
+		const int32 EffectiveMaxCount = Conc->Concurrency.GetMaxCount();
+		const bool bPlatformScaled = Conc->Concurrency.IsMaxCountPlatformScalingEnabled();
+		O->SetNumberField(TEXT("maxCount"), AuthoredMaxCount);
+		O->SetNumberField(TEXT("effectiveMaxCount"), EffectiveMaxCount);
+		O->SetBoolField(TEXT("maxCountPlatformScaling"), bPlatformScaled);
+		O->SetStringField(TEXT("maxCountSource"),
+			bPlatformScaled ? TEXT("PlatformMaxCount") : TEXT("MaxCount"));
 		O->SetBoolField(TEXT("limitToOwner"), Conc->Concurrency.bLimitToOwner != 0);
 		// VolumeScale is private on FSoundConcurrencySettings; GetVolumeScale()
 		// is the public accessor (Sound/SoundConcurrency.h).
 		O->SetNumberField(TEXT("volumeScale"), Conc->Concurrency.GetVolumeScale());
 		Concurrencies.Add(MakeShared<FJsonValueObject>(O));
 
-		if (Conc->Concurrency.MaxCount <= 0)
+		// The property a caller has to write to change the count in force is
+		// not the same property in both modes, so the fix named here follows
+		// which one is live.
+		const FString CountProperty = bPlatformScaled
+			? TEXT("Concurrency.PlatformMaxCount")
+			: TEXT("Concurrency.MaxCount");
+
+		if (EffectiveMaxCount <= 0)
 		{
+			const FString ScalingClause = bPlatformScaled
+				? FString::Printf(
+					TEXT(" MaxCount platform scaling is ON, so the authored MaxCount of %d is ignored and the count comes from PlatformMaxCount for this platform."),
+					AuthoredMaxCount)
+				: FString();
 			Problem(FString::Printf(
-				TEXT("Concurrency '%s' has MaxCount %d, so no voice of this sound can ever start. Set it with asset(set_property, assetPath='%s', propertyName='Concurrency.MaxCount')."),
-				*Conc->GetName(), Conc->Concurrency.MaxCount, *Conc->GetPathName()));
+				TEXT("Concurrency '%s' has an effective MaxCount of %d, so no voice of this sound can ever start.%s Set it with asset(set_property, assetPath='%s', propertyName='%s')."),
+				*Conc->GetName(), EffectiveMaxCount, *ScalingClause, *Conc->GetPathName(), *CountProperty));
+		}
+		else if (bPlatformScaled && EffectiveMaxCount != AuthoredMaxCount)
+		{
+			// Not a failure, but the authored number is the one a caller reads
+			// off the details panel and it is not the one being enforced.
+			Note(FString::Printf(
+				TEXT("Concurrency '%s' authors MaxCount %d but enforces %d, because MaxCount platform scaling is on and PlatformMaxCount answers for this platform. Change the enforced count with asset(set_property, assetPath='%s', propertyName='Concurrency.PlatformMaxCount'), or turn scaling off with propertyName='Concurrency.bEnableMaxCountPlatformScaling' to make MaxCount authoritative again."),
+				*Conc->GetName(), AuthoredMaxCount, EffectiveMaxCount, *Conc->GetPathName()));
 		}
 	}
 	Result->SetArrayField(TEXT("concurrencies"), Concurrencies);
@@ -1489,6 +1539,8 @@ TSharedPtr<FJsonValue> FAudioHandlers::ReadSoundRouting(const TSharedPtr<FJsonOb
 
 	Result->SetArrayField(TEXT("problems"), Problems);
 	Result->SetNumberField(TEXT("problemCount"), Problems.Num());
+	Result->SetArrayField(TEXT("notes"), Notes);
+	Result->SetNumberField(TEXT("noteCount"), Notes.Num());
 	Result->SetBoolField(TEXT("routable"), Problems.Num() == 0);
 	return MCPResult(Result);
 }

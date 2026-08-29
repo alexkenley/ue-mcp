@@ -670,6 +670,63 @@ async function requestEditorSelfQuit(port: number, host: string): Promise<boolea
 }
 
 /**
+ * The save prompts a shutdown raises, and the answer this stop wants.
+ *
+ * Every one of these is armed EXPLICITLY before the quit goes out, and that is
+ * load-bearing. The plugin ships the same patterns as built-in safety nets, but
+ * a safety net only answers a Slate modal while a bridge request is in flight,
+ * so that closing the editor by hand still prompts the human who did it. A stop
+ * asked for over the bridge is not that case, and the shutdown prompt arrives
+ * on a later tick with no request in flight, so the stop says out loud that it
+ * owns the answer.
+ *
+ * `response: "no"` rather than a literal button label: the plugin maps the
+ * keyword onto the labels a dialog actually offers, so "no" reaches the
+ * shutdown prompt's "Don't Save" button, and a dialog that spells it
+ * differently still resolves. A literal label that misses presses nothing.
+ */
+const STOP_SAVE_PROMPT_PATTERNS = ["Save Content", "Save Changes", "Unsaved", "Untitled"] as const;
+
+async function armStopDialogPolicies(port: number, host: string): Promise<string[]> {
+  const armed: string[] = [];
+  for (const pattern of STOP_SAVE_PROMPT_PATTERNS) {
+    if (await sendOneBridgeCall(port, "set_dialog_policy", { pattern, response: "no" }, host)) {
+      armed.push(pattern);
+    }
+  }
+  return armed;
+}
+
+/**
+ * What is holding the editor open, in the words of the thing holding it.
+ *
+ * A stop that times out used to say only "close it manually", which left the
+ * caller to make two more calls (get_engine_state, then list_dialogs) to learn
+ * something the bridge already knew. If a modal is up, name it and its buttons
+ * and the exact call that answers it.
+ */
+function blockedStopDetail(state: EngineState): string {
+  const modal = state.snapshot?.modal;
+  if (modal) {
+    const buttons = (modal.buttons ?? []).filter((b) => b !== "");
+    // Which button to press is the caller's decision, so the buttons are listed
+    // and none is picked for them. Guessing here would be guessing about
+    // discarding somebody's unsaved work.
+    const suggestion =
+      buttons.length > 0
+        ? ` Press one with editor(action='respond_to_dialog', buttonLabel='<one of: ${buttons.join(" | ")}>'), ` +
+          `or arm it for next time with editor(action='set_dialog_policy', pattern='${modal.title}', buttonLabel='<the same>').`
+        : " It exposes no button this walk can read; editor(action='respond_to_dialog', action='close') destroys the window.";
+    return (
+      ` It is blocked on the modal "${modal.title}" [${buttons.length > 0 ? buttons.join(", ") : "no readable buttons"}]` +
+      (modal.message ? `: ${modal.message.replace(/\s+/g, " ").trim().slice(0, 300)}` : "") +
+      `.${suggestion}`
+    );
+  }
+  return ` ${state.summary}`;
+}
+
+/**
  * Which editor belongs to the loaded project, decided once so that every
  * lifecycle action agrees about it.
  *
@@ -826,6 +883,12 @@ export async function stopEditor(force = false, projectDir?: string): Promise<{ 
     };
   }
 
+  // Arm the save prompts BEFORE asking it to quit. The shutdown prompt is a
+  // Slate modal window, not an FMessageDialog, so nothing answers it unless a
+  // policy is armed for it, and once it is up the game thread is parked and
+  // this is no longer a call that can be made in time.
+  const armedPolicies = await armStopDialogPolicies(port, host);
+
   const quitSent = await requestEditorSelfQuit(port, host);
   if (!quitSent) {
     return {
@@ -846,9 +909,19 @@ export async function stopEditor(force = false, projectDir?: string): Promise<{ 
       };
     }
   }
+  const blockedState = await readEngineState(projectPath, { probeWindows: false });
+  const armedNote =
+    armedPolicies.length > 0
+      ? ` Dialog policies were armed for ${armedPolicies.join(", ")} before the quit went out.`
+      : " No dialog policy could be armed before the quit went out, so any save prompt is unanswered.";
   return {
     success: false,
-    message: "Asked the editor to quit but its bridge is still up after 20s. Close it manually - ue-mcp never force-kills processes.",
+    message:
+      "Asked the editor to quit but its bridge is still up after 20s." +
+      blockedStopDetail(blockedState) +
+      armedNote +
+      " ue-mcp never force-kills processes.",
+    state: blockedState,
   };
 }
 

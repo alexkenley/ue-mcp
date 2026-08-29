@@ -42,6 +42,12 @@ void FMCPEngineStatusHooks::Install()
 	GPreTickHandle = FSlateApplication::Get().OnPreTick().AddLambda([](float)
 	{
 		FMCPEngineStatus::Get().CaptureNow();
+		// Also here, not only on the modal-loop tick. A modal that has just
+		// gone up is answered a frame sooner, and this is the tick that runs
+		// with no modal at all, which is what clears the "already answered
+		// this window" bookkeeping. The call is a null check when nothing is
+		// modal.
+		FDialogHandlers::ApplyPolicyToActiveModal();
 	});
 
 	GModalLoopHandle = FSlateApplication::Get().GetOnModalLoopTickEvent().AddLambda([](float)
@@ -51,6 +57,16 @@ void FMCPEngineStatusHooks::Install()
 		// is queued behind the same blocked game thread. Modal-safe handlers
 		// run here so a dialog can be cleared from the outside.
 		FMCPGameThreadExecutor::DrainModalSafeQueue();
+
+		// Drain first, then apply: a set_dialog_policy that arrived on this
+		// same tick is registered by the drain above and gets its chance here.
+		//
+		// This is the only place an armed policy can answer a Slate modal
+		// WINDOW. FCoreDelegates::ModalMessageDialog carries FMessageDialog
+		// prompts and nothing else, so the editor's own modals - the shutdown
+		// "Save Content" prompt above all - were never offered to the policy
+		// list at all, and an automated stop hung on one every time.
+		FDialogHandlers::ApplyPolicyToActiveModal();
 	});
 }
 
