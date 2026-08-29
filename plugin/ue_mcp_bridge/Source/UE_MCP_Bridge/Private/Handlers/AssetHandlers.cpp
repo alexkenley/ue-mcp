@@ -465,6 +465,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReindexAssetsFTS(const TSharedPtr<FJsonOb
 	TSharedPtr<FJsonObject> Result = MCPSuccess();
 	Result->SetStringField(TEXT("directory"), Directory);
 	Result->SetNumberField(TEXT("indexedCount"), Found.Num());
+	Result->SetBoolField(TEXT("unchanged"), true);
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("A rescan makes the in-memory asset registry agree with what is on disk. No asset, package or file changed, ")
+		TEXT("so there is nothing to undo, and un-scanning a path is not an operation the registry offers."));
 	return MCPResult(Result);
 }
 
@@ -1989,7 +1994,23 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAsset(const TSharedPtr<FJsonObject>
 		ApplyDiagnosticsToJson(Result, DiagnoseDeleteFailure(AssetPath));
 	}
 
-	// Delete is non-reversible by default.
+	// Scoped to what actually happened, the way the batch delete scopes its
+	// note to the entries with status deleted. A delete the editor refused or
+	// could not finish left the asset where it was, and saying the package is
+	// gone would be describing a different call.
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	if (bSuccess)
+	{
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("The package is gone from disk and the bridge holds no copy of it, so no call recreates the asset that was ")
+			TEXT("deleted. There is no inverse action. Take the snapshot before the delete if the step has to be recoverable."));
+	}
+	else
+	{
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("Nothing was deleted: the asset is still at this path, so there is nothing to undo. The diagnostics on this ")
+			TEXT("result say why the delete did not finish."));
+	}
 	return MCPResult(Result);
 }
 
@@ -2076,6 +2097,10 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAssetBatch(const TSharedPtr<FJsonOb
 	if (Protected > 0) Result->SetNumberField(TEXT("protected"), Protected);
 	Result->SetNumberField(TEXT("total"), PerPath.Num());
 	if (ClosedEditors > 0) Result->SetNumberField(TEXT("closedEditors"), ClosedEditors);
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("Every package with status deleted is gone from disk and the bridge holds no copy of it, so no call recreates ")
+		TEXT("them. There is no inverse action. Take the snapshot before the delete if the step has to be recoverable."));
 	return MCPResult(Result);
 }
 
@@ -2214,9 +2239,17 @@ TSharedPtr<FJsonValue> FAssetHandlers::BulkRename(const TSharedPtr<FJsonObject>&
 	bool bOk = AssetTools.RenameAssets(BatchRenames);
 
 	// Mark each batched rename with its post-op status.
+	// Every entry that landed also produces the entry that puts it back, so the
+	// inverse covers exactly the renames that happened rather than the ones
+	// that were asked for.
 	int32 Succeeded = 0;
 	int32 Failed = 0;
 	int32 Idx = 0;
+	TArray<TSharedPtr<FJsonValue>> ReverseRenames;
+	// Two entries naming the same source collapse onto one asset, so a reverse
+	// list built without this would carry a second entry whose source no
+	// longer exists and which comes back not_found.
+	TSet<FString> ReverseSeen;
 	for (int32 i = 0; i < PerItem.Num(); ++i)
 	{
 		TSharedPtr<FJsonObject> Rec = PerItem[i]->AsObject();
@@ -2232,6 +2265,19 @@ TSharedPtr<FJsonValue> FAssetHandlers::BulkRename(const TSharedPtr<FJsonObject>&
 		{
 			Rec->SetStringField(TEXT("status"), TEXT("renamed"));
 			Succeeded++;
+
+			if (!ReverseSeen.Contains(DestFullPath))
+			{
+				ReverseSeen.Add(DestFullPath);
+				FString SourcePath;
+				Rec->TryGetStringField(TEXT("sourcePath"), SourcePath);
+				const FMCPAssetPathForms SourceForms = MCPAssetPathForms(SourcePath);
+				TSharedPtr<FJsonObject> Reverse = MakeShared<FJsonObject>();
+				Reverse->SetStringField(TEXT("sourcePath"), DestFullPath);
+				Reverse->SetStringField(TEXT("newPackagePath"), FPaths::GetPath(SourceForms.PackagePath));
+				Reverse->SetStringField(TEXT("newName"), SourceForms.AssetName);
+				ReverseRenames.Add(MakeShared<FJsonValueObject>(Reverse));
+			}
 		}
 		else
 		{
@@ -2299,6 +2345,28 @@ TSharedPtr<FJsonValue> FAssetHandlers::BulkRename(const TSharedPtr<FJsonObject>&
 			TEXT("%d of %d renamed assets left an ObjectRedirector at the old path, still pointed at by packages this rename did not load. ")
 			TEXT("Pass redirectorPackages to asset(fixup_redirectors) to load exactly those referencers, rewrite them, and delete the stubs that come out unreferenced."),
 			RedirectorsLeft, Succeeded));
+	}
+
+	if (ReverseRenames.Num() > 0)
+	{
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetArrayField(TEXT("renames"), ReverseRenames);
+		MCPSetRollback(Result, TEXT("bulk_rename_assets"), Payload);
+		Result->SetBoolField(TEXT("rollbackLossy"), true);
+		Result->SetBoolField(TEXT("rollbackVerified"), false);
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("UNVERIFIED. The inverse renames every asset that landed back to the package path and name it came from, and ")
+			TEXT("redirectorsLeft on this result says how many of those old paths this call left an ObjectRedirector standing at. ")
+			TEXT("Whether IAssetTools::RenameAssets will rename over a destination package occupied by such a redirector is not ")
+			TEXT("stated in the shipped IAssetTools.h and FAssetRenameManager is not distributed, so it has not been established ")
+			TEXT("here. If it refuses, this rollback fails for the entries whose old path still carries a stub. Redirectors are ")
+			TEXT("not undone in any case: the stubs at the old paths stay, and the reverse rename leaves its own at the new paths. ")
+			TEXT("Run asset(fixup_redirectors) before a rollback to clear the old stubs, and again after it."));
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), TEXT("No rename landed, so there is nothing to undo."));
 	}
 	return MCPResult(Result);
 }
@@ -2530,6 +2598,10 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAsset(const TSharedPtr<FJsonObject>& 
 			}
 		}
 		Result->SetBoolField(TEXT("success"), bSuccess);
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("A save overwrites the file on disk with what is in memory. The previous file contents are gone and the ")
+			TEXT("bridge holds no copy, so there is no un-save. There is no inverse action."));
 		return MCPResult(Result);
 	}
 	else
@@ -2545,6 +2617,10 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAsset(const TSharedPtr<FJsonObject>& 
 		auto Result = MCPSuccess();
 		Result->SetBoolField(TEXT("success"), true);
 		Result->SetStringField(TEXT("message"), TEXT("All modified assets under /Game saved (dirty only). Use save_all_dirty for a per-package report."));
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("A save overwrites the files on disk with what is in memory. The previous file contents are gone and the ")
+			TEXT("bridge holds no copy, so there is no un-save. There is no inverse action."));
 		return MCPResult(Result);
 	}
 }
@@ -2590,10 +2666,17 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAllDirty(const TSharedPtr<FJsonObject
 	Result->SetNumberField(TEXT("attempted"), TargetNames.Num());
 	Result->SetArrayField(TEXT("saved"), Written);
 	Result->SetArrayField(TEXT("stillDirty"), StillDirty);
+	// Keyed off what reached disk, not off what was dirty going in: a run where
+	// every package failed to write attempted work and changed nothing.
+	Result->SetBoolField(TEXT("unchanged"), Written.Num() == 0);
 	if (StillDirty.Num() > 0)
 	{
 		Result->SetStringField(TEXT("note"), TEXT("Some packages are still dirty after the save. Retry those with asset(save, path=..., force=true)."));
 	}
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("A save overwrites the files on disk with what is in memory. The previous file contents are gone and the ")
+		TEXT("bridge holds no copy, so there is no un-save. There is no inverse action."));
 	return MCPResult(Result);
 }
 
@@ -2664,8 +2747,14 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReloadPackage(const TSharedPtr<FJsonObjec
 	FString PackageName = Package->GetName();
 	FString PackageFileName;
 	bool bSuccess = false;
+	// Whether the reload machinery ran at all. Everything below sits inside
+	// this branch, so when the package is not on disk nothing is reset,
+	// collected or re-read and the call genuinely changed nothing.
+	bool bReloadRan = false;
 	if (FPackageName::DoesPackageExist(PackageName, &PackageFileName))
 	{
+		bReloadRan = true;
+
 		// Reset loaders so we can reload
 		ResetLoaders(Package);
 
@@ -2685,6 +2774,28 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReloadPackage(const TSharedPtr<FJsonObjec
 	{
 		Result->SetStringField(TEXT("error"), TEXT("Package reload failed"));
 	}
+	// Keyed off whether the reload block executed, not off whether it worked.
+	// Where it ran, ResetLoaders and a collection have already changed editor
+	// state, and a failed re-read left the package WORSE than it found it
+	// rather than unchanged. Where the package is not on disk that block is
+	// skipped whole and nothing happened, so an unconditional false would have
+	// been an inaccurate marker on exactly that path.
+	Result->SetBoolField(TEXT("unchanged"), !bReloadRan);
+	if (bReloadRan)
+	{
+		Result->SetStringField(TEXT("idempotencyNote"),
+			TEXT("A reload that runs is never a no-op: ResetLoaders and a garbage collection precede the re-read, so replaying ")
+			TEXT("this call discards and rebuilds the in-memory package again rather than recognising it has nothing to do."));
+	}
+	else
+	{
+		Result->SetStringField(TEXT("idempotencyNote"),
+			TEXT("The package is not on disk, so nothing was reset, collected or re-read and this call changed nothing."));
+	}
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("A reload throws the in-memory package away and re-reads the file. Whatever was in memory and not on disk is ")
+		TEXT("gone, and reloading again re-reads the same file rather than restoring it. There is no inverse action."));
 
 	return MCPResult(Result);
 }
@@ -2943,8 +3054,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::MoveFolder(const TSharedPtr<FJsonObject>&
 
 	bool bOk = AssetTools.RenameAssets(BatchRenames);
 
-	// Count how many actually landed at the destination
+	// Count how many actually landed at the destination, and record the entry
+	// that puts each one back, so the inverse covers exactly the moves that
+	// happened rather than the ones that were asked for.
 	int32 Succeeded = 0;
+	TArray<TSharedPtr<FJsonValue>> ReverseRenames;
 	for (const FAssetRenameData& Data : BatchRenames)
 	{
 		const FString DestFullPath = FString::Printf(TEXT("%s/%s.%s"),
@@ -2952,6 +3066,17 @@ TSharedPtr<FJsonValue> FAssetHandlers::MoveFolder(const TSharedPtr<FJsonObject>&
 		if (UEditorAssetLibrary::DoesAssetExist(DestFullPath))
 		{
 			Succeeded++;
+
+			FString OriginalPackagePath = Data.NewPackagePath;
+			if (OriginalPackagePath.StartsWith(DestinationPath))
+			{
+				OriginalPackagePath = SourcePath + OriginalPackagePath.Mid(DestinationPath.Len());
+			}
+			TSharedPtr<FJsonObject> Reverse = MakeShared<FJsonObject>();
+			Reverse->SetStringField(TEXT("sourcePath"), DestFullPath);
+			Reverse->SetStringField(TEXT("newPackagePath"), OriginalPackagePath);
+			Reverse->SetStringField(TEXT("newName"), Data.NewName);
+			ReverseRenames.Add(MakeShared<FJsonValueObject>(Reverse));
 		}
 	}
 
@@ -2961,6 +3086,32 @@ TSharedPtr<FJsonValue> FAssetHandlers::MoveFolder(const TSharedPtr<FJsonObject>&
 	Result->SetNumberField(TEXT("totalAssets"), FoundAssets.Num());
 	Result->SetNumberField(TEXT("renamedCount"), Succeeded);
 	Result->SetBoolField(TEXT("allSucceeded"), bOk && Succeeded == BatchRenames.Num());
+	Result->SetBoolField(TEXT("unchanged"), Succeeded == 0);
+
+	// The inverse is per asset, not the mirrored move_folder call: reversing
+	// the folders would also drag anything that was already sitting under
+	// destinationPath before this ran, which this call never touched.
+	if (ReverseRenames.Num() > 0)
+	{
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetArrayField(TEXT("renames"), ReverseRenames);
+		MCPSetRollback(Result, TEXT("bulk_rename_assets"), Payload);
+		Result->SetBoolField(TEXT("rollbackLossy"), true);
+		Result->SetBoolField(TEXT("rollbackVerified"), false);
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("UNVERIFIED. The inverse moves each asset that landed back to the package path it came from, and this move left ")
+			TEXT("an ObjectRedirector at each of those old paths. Whether IAssetTools::RenameAssets will rename over a destination ")
+			TEXT("package occupied by such a redirector is not stated in the shipped IAssetTools.h and FAssetRenameManager is not ")
+			TEXT("distributed, so it has not been established here. If it refuses, this rollback fails. Two things do not come back ")
+			TEXT("in any case: bulk_rename_assets refuses World assets, so a level this move carried has to be returned with ")
+			TEXT("asset(rename); and the redirector stubs stay, as do the ones the reverse move leaves at the new paths. ")
+			TEXT("Run asset(fixup_redirectors) before a rollback to clear the old stubs, and again after it."));
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), TEXT("No asset landed at the destination, so there is nothing to undo."));
+	}
 	return MCPResult(Result);
 }
 
@@ -2990,6 +3141,10 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateFolder(const TSharedPtr<FJsonObject
 	}
 
 	TArray<TSharedPtr<FJsonValue>> Created, Existed, Failed;
+	// Every directory this call brought into being, leaves and intermediates
+	// alike. `Created` stays the leaf-only list the response has always
+	// reported; this is what the rollback has to remove.
+	TArray<FString> MadeDirectories;
 	for (const FString& P : Paths)
 	{
 		FString Norm = P;
@@ -3004,10 +3159,38 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateFolder(const TSharedPtr<FJsonObject
 			Existed.Add(MakeShared<FJsonValueString>(Norm));
 			continue;
 		}
+		// MakeDirectory builds the whole tree, so /Game/A/B/C can create A and B
+		// as well as C. Recording only the leaf left the intermediates behind
+		// on rollback. Walk up first and collect every segment that is missing.
+		TArray<FString> MissingChain;
+		{
+			// The mount root is the floor. Contains("/") is true of "/Game"
+			// because of the leading slash, so it never stopped the walk on its
+			// own: it only held because DoesDirectoryExist happens to answer
+			// true for a mount root. Ask the package system where the floor is
+			// instead of relying on that.
+			const FName MountPoint = FPackageName::GetPackageMountPoint(Norm);
+			const FString MountRoot = MountPoint.IsNone()
+				? FString()
+				: FString(TEXT("/")) + MountPoint.ToString();
+
+			FString Walk = Norm;
+			while (!Walk.IsEmpty() && Walk != TEXT("/"))
+			{
+				if (!MountRoot.IsEmpty() && Walk == MountRoot) break;
+				if (UEditorAssetLibrary::DoesDirectoryExist(Walk)) break;
+				MissingChain.Add(Walk);
+				const FString Parent = FPaths::GetPath(Walk);
+				if (Parent.IsEmpty() || Parent == Walk) break;
+				Walk = Parent;
+			}
+		}
+
 		const bool bOk = UEditorAssetLibrary::MakeDirectory(Norm);
 		if (bOk)
 		{
 			Created.Add(MakeShared<FJsonValueString>(Norm));
+			for (const FString& Made : MissingChain) MadeDirectories.AddUnique(Made);
 		}
 		else
 		{
@@ -3023,6 +3206,32 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateFolder(const TSharedPtr<FJsonObject
 	Result->SetNumberField(TEXT("existedCount"), Existed.Num());
 	Result->SetNumberField(TEXT("failedCount"), Failed.Num());
 	Result->SetBoolField(TEXT("allSucceeded"), Failed.Num() == 0);
+	Result->SetBoolField(TEXT("unchanged"), Created.Num() == 0);
+
+	// Only the directories this call made. A path that already existed is not
+	// this call's to delete. Deepest first, so delete_folder takes a child out
+	// before its parent: a parent still holding a child is not empty, and the
+	// default force=false leaves a non-empty directory alone.
+	if (MadeDirectories.Num() > 0)
+	{
+		MadeDirectories.Sort([](const FString& A, const FString& B) { return A.Len() > B.Len(); });
+		TArray<TSharedPtr<FJsonValue>> RollbackPaths;
+		for (const FString& Made : MadeDirectories) RollbackPaths.Add(MakeShared<FJsonValueString>(Made));
+
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetArrayField(TEXT("paths"), RollbackPaths);
+		MCPSetRollback(Result, TEXT("delete_folder"), Payload);
+		Result->SetBoolField(TEXT("rollbackLossy"), false);
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("The inverse removes every directory this call brought into being, intermediates included, deepest first. It runs ")
+			TEXT("with the default force=false, so a directory that has since had assets put into it is reported not_empty and left ")
+			TEXT("standing rather than deleted out from under them."));
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), TEXT("No directory was created, so there is nothing to undo."));
+	}
 	return MCPResult(Result);
 }
 
@@ -3058,6 +3267,15 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteFolder(const TSharedPtr<FJsonObject
 
 	TArray<TSharedPtr<FJsonValue>> Entries;
 	int32 Deleted = 0, Absent = 0, Failed = 0;
+	// The directories this call actually removed, and whether any of them took
+	// assets with them. Both feed the rollback record below.
+	TArray<TSharedPtr<FJsonValue>> DeletedPaths;
+	int32 AssetsDeleted = 0;
+	// DeleteDirectory takes the whole subtree, so a folder with subdirectories
+	// loses more than the path that was named. create_folder can only put back
+	// the paths it is handed, and the empty subdirectories are not enumerable
+	// from the asset list, so this is counted and disclosed rather than claimed.
+	int32 SubdirectoriesDeleted = 0;
 
 	for (const FString& P : Paths)
 	{
@@ -3115,6 +3333,19 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteFolder(const TSharedPtr<FJsonObject
 		{
 			Entry->SetStringField(TEXT("status"), TEXT("deleted"));
 			if (Contained.Num() > 0) Entry->SetNumberField(TEXT("assetsDeleted"), Contained.Num());
+			DeletedPaths.Add(MakeShared<FJsonValueString>(Norm));
+			AssetsDeleted += Contained.Num();
+			// Any contained asset sitting below Norm rather than directly in it
+			// proves there was a subdirectory that went with the delete.
+			{
+				TSet<FString> NestedDirs;
+				for (const FString& Held : Contained)
+				{
+					const FString HeldDir = FPaths::GetPath(Held);
+					if (HeldDir.Len() > Norm.Len() && HeldDir.StartsWith(Norm)) NestedDirs.Add(HeldDir);
+				}
+				SubdirectoriesDeleted += NestedDirs.Num();
+			}
 			Deleted++;
 		}
 		else
@@ -3132,6 +3363,30 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteFolder(const TSharedPtr<FJsonObject
 	Result->SetNumberField(TEXT("absentCount"), Absent);
 	Result->SetNumberField(TEXT("failedCount"), Failed);
 	Result->SetBoolField(TEXT("allSucceeded"), Failed == 0);
+	Result->SetBoolField(TEXT("unchanged"), Deleted == 0);
+
+	if (DeletedPaths.Num() > 0)
+	{
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetArrayField(TEXT("paths"), DeletedPaths);
+		MCPSetRollback(Result, TEXT("create_folder"), Payload);
+		Result->SetNumberField(TEXT("subdirectoriesDeleted"), SubdirectoriesDeleted);
+		const bool bLossy = AssetsDeleted > 0 || SubdirectoriesDeleted > 0;
+		Result->SetBoolField(TEXT("rollbackLossy"), bLossy);
+		if (bLossy)
+		{
+			Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+				TEXT("The inverse recreates only the %d directory path(s) that were named, empty. It does not restore the tree ")
+				TEXT("beneath them: this delete also took %d subdirectory(ies), and force=true took %d asset(s) inside them, which ")
+				TEXT("no call brings back. Only a delete of empty, leaf directories is fully undone by this rollback."),
+				DeletedPaths.Num(), SubdirectoriesDeleted, AssetsDeleted));
+		}
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), TEXT("No directory was deleted, so there is nothing to undo."));
+	}
 	return MCPResult(Result);
 }
 
@@ -3288,6 +3543,27 @@ TSharedPtr<FJsonValue> FAssetHandlers::ForceReload(const TSharedPtr<FJsonObject>
 	Result->SetStringField(TEXT("method"), ReloadMethod);
 	Result->SetBoolField(TEXT("wasLoaded"), PreviousObject != nullptr);
 	Result->SetBoolField(TEXT("objectReplaced"), bReplaced);
+	// Never true, and answered the same way asset(reload_package) answers it.
+	// Every path that reaches here has already run ReloadPackages, or its
+	// fallback of ResetLoaders plus ClearFlags plus a collection, or at minimum
+	// a bare CollectGarbage, so editor state moved before this line.
+	//
+	// !bReplaced does NOT mean nothing happened. It means the editor refused to
+	// release the package, which is the same state the branch below reports as
+	// success:false with an error saying the object still holds its pre-reload
+	// contents. Keeping it in this term produced success:false, reloaded:false
+	// and unchanged:true on one result, and a dirty package whose unsaved edits
+	// had just been discarded could read unchanged:true as well.
+	Result->SetBoolField(TEXT("unchanged"), false);
+	Result->SetStringField(TEXT("idempotencyNote"),
+		TEXT("A forced reload is never a no-op: it releases and re-reads the package every time it is called rather than ")
+		TEXT("recognising it has nothing to do. wasLoaded, objectReplaced, closedOpenEditor and discardedUnsavedChanges on this ")
+		TEXT("result say what it actually moved."));
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("A forced reload throws the in-memory package away and re-reads the file. With discardUnsaved=true anything that ")
+		TEXT("was in memory and not on disk is gone, and reloading again re-reads the same file rather than restoring it. ")
+		TEXT("There is no inverse action."));
 	if (bWasDirty) Result->SetBoolField(TEXT("discardedUnsavedChanges"), true);
 	if (bClosedEditor) Result->SetBoolField(TEXT("closedOpenEditor"), true);
 	if (Reloaded) Result->SetStringField(TEXT("class"), Reloaded->GetClass()->GetName());
@@ -3576,6 +3852,12 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetTextureSettingsByType(const TSharedPtr
 
 	TArray<TSharedPtr<FJsonValue>> Updated;
 	TArray<TSharedPtr<FJsonValue>> Failed;
+	// One rollback item per texture, carrying the three properties this action
+	// writes, as they stood before the first write to that texture. Keyed by
+	// path because a caller may list the same texture under two groups, and
+	// bulk_set_asset_properties rejects a duplicate assetPath.
+	TArray<TSharedPtr<FJsonValue>> RollbackItems;
+	TSet<FString> RollbackSeen;
 
 	for (const auto& Pair : (*GroupsObj)->Values)
 	{
@@ -3605,6 +3887,24 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetTextureSettingsByType(const TSharedPtr
 				Failed.Add(MakeShared<FJsonValueObject>(F));
 				continue;
 			}
+			const FString TexObjectPath = Tex->GetPathName();
+			if (!RollbackSeen.Contains(TexObjectPath))
+			{
+				RollbackSeen.Add(TexObjectPath);
+				TSharedPtr<FJsonObject> Prev = MakeShared<FJsonObject>();
+				// UPROPERTY names, and the enumerator spellings the bulk
+				// property writer resolves by name.
+				Prev->SetStringField(TEXT("CompressionSettings"),
+					StaticEnum<TextureCompressionSettings>()->GetNameStringByValue((int64)Tex->CompressionSettings.GetValue()));
+				Prev->SetStringField(TEXT("LODGroup"),
+					StaticEnum<TextureGroup>()->GetNameStringByValue((int64)Tex->LODGroup.GetValue()));
+				Prev->SetBoolField(TEXT("SRGB"), Tex->SRGB != 0);
+				TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+				Item->SetStringField(TEXT("assetPath"), TexObjectPath);
+				Item->SetObjectField(TEXT("properties"), Prev);
+				RollbackItems.Add(MakeShared<FJsonValueObject>(Item));
+			}
+
 			Tex->Modify();
 			Tex->PreEditChange(nullptr);
 			Tex->CompressionSettings = Profile->Compression;
@@ -3620,12 +3920,48 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetTextureSettingsByType(const TSharedPtr
 	}
 
 	auto Result = MCPSuccess();
+	// Not MCPSetUpdated: it writes a bool named "updated", which is the name
+	// this result already uses for the per-texture array.
+	Result->SetBoolField(TEXT("unchanged"), Updated.Num() == 0);
 	Result->SetArrayField(TEXT("updated"), Updated);
 	Result->SetNumberField(TEXT("updatedCount"), Updated.Num());
 	if (Failed.Num() > 0)
 	{
 		Result->SetArrayField(TEXT("failed"), Failed);
 		Result->SetNumberField(TEXT("failedCount"), Failed.Num());
+	}
+
+	// bulk_set_asset_properties rejects a batch over this size outright, so past
+	// it the inverse is a call that cannot execute. Kept in step with
+	// MaxBulkPropertyAssets in AssetHandlers_BulkProperties.cpp; that constant
+	// is file-local to its own translation unit and cannot be shared without
+	// moving it to a header, so the number is asserted here rather than copied
+	// silently.
+	const int32 MaxBulkRollbackItems = 500;
+	if (RollbackItems.Num() > 0 && RollbackItems.Num() <= MaxBulkRollbackItems)
+	{
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetArrayField(TEXT("items"), RollbackItems);
+		// Without this, bulk_set_asset_properties stops at the first item it
+		// cannot apply and restores nothing. A rollback should put back
+		// everything it still can and report the rest.
+		Payload->SetBoolField(TEXT("continueOnError"), true);
+		MCPSetRollback(Result, TEXT("bulk_set_asset_properties"), Payload);
+		Result->SetBoolField(TEXT("rollbackLossy"), false);
+	}
+	else if (RollbackItems.Num() > MaxBulkRollbackItems)
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+			TEXT("This call wrote %d textures. The inverse is one bulk_set_asset_properties call and that action refuses a batch ")
+			TEXT("larger than %d, so emitting one here would hand the flow engine a rollback that cannot run. Split the call into ")
+			TEXT("batches of %d or fewer to get a working inverse for each."),
+			RollbackItems.Num(), MaxBulkRollbackItems, MaxBulkRollbackItems));
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), TEXT("No texture was written, so there is nothing to undo."));
 	}
 	return MCPResult(Result);
 }
