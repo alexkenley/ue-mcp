@@ -98,6 +98,11 @@ void FProjectHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// live_coding_compile(wait=true) can also exceed 30s on a full rebuild.
 	Registry.RegisterHandlerWithTimeout(TEXT("live_coding_compile"), &LiveCodingCompile, 300.0f);
 	Registry.RegisterHandler(TEXT("live_coding_status"), &LiveCodingStatus);
+
+	// Plugin enablement. Bodies live in ProjectHandlers_Plugins.cpp.
+	Registry.RegisterHandler(TEXT("list_available_plugins"), &ListAvailablePlugins);
+	Registry.RegisterHandler(TEXT("enable_plugin"), &EnablePlugin);
+	Registry.RegisterHandler(TEXT("disable_plugin"), &DisablePlugin);
 }
 
 // ─── create_cpp_class ────────────────────────────────────────────────
