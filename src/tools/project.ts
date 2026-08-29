@@ -33,6 +33,7 @@ import { listContent } from "../content-index.js";
 import { getWorkarounds } from "../workaround-tracker.js";
 import { readLogState, readEngineSnapshot } from "../engine-observer.js";
 import { switchProject, isTargetDiverged } from "../project-switch.js";
+import { ueMcpConfigRejections, describeConfigRejections } from "../project.js";
 import { CURSOR_PARAM, paged } from "../pagination.js";
 
 /**
@@ -191,6 +192,15 @@ export const projectTool: ToolDef = categoryTool(
           // projects. Unreachable through set_project, reported so it can
           // never be silent again.
           editorTargetMismatch: isTargetDiverged(ctx.project, target) || undefined,
+          // D3: a `ue-mcp:` key that failed validation is dropped and the rest
+          // of the block still applies. Reported here because the alternative
+          // signal is a warn() on stderr, which MCP clients write to a log
+          // nobody opens - and the setting most often lost this way was
+          // bridge.port, which put the client and the editor on different ports.
+          configWarnings: (() => {
+            const rejected = ueMcpConfigRejections(ctx.project.projectDir);
+            return rejected.length > 0 ? describeConfigRejections(rejected) : undefined;
+          })(),
           project: ctx.project.isLoaded ? { name: ctx.project.projectName, path: ctx.project.projectPath, contentDir: ctx.project.contentDir, engineAssociation: ctx.project.engineAssociation, config: Object.keys(ctx.project.config).length > 0 ? ctx.project.config : undefined } : null,
           // Bridge ABI version of the deployed plugin in this project.
           // Plugins declaring nativeModule.minBridgeApi compare against
@@ -283,6 +293,10 @@ export const projectTool: ToolDef = categoryTool(
           };
         }
         const active = ctx.sessions.active;
+        // S2: the shared-port record is computed at registration, before any
+        // lockfile has been read, and connect() moves the port afterwards.
+        // Recompute from the ports actually in use before reporting them.
+        ctx.sessions.refreshSharedPorts();
         const editors = await Promise.all(
           ctx.sessions.list().map(async (s) => {
             const info = s.info(s === active);
@@ -339,6 +353,22 @@ export const projectTool: ToolDef = categoryTool(
           name: typeof p.editorName === "string" && p.editorName ? p.editorName : undefined,
         });
         const alreadyRegistered = ctx.sessions.size === before;
+
+        // D1: build this editor's own tool graph, plugins, task registry and
+        // guards BEFORE it is addressable. Without it every per-session lookup
+        // missed and fell back to the first project's load, so a call or a
+        // flow targeted at this editor ran the FIRST project's steps inside it.
+        // A failure here is reported rather than swallowed: an editor that
+        // cannot be given its own surface must not borrow another's.
+        try {
+          await ctx.sessions.prepare(session);
+        } catch (e) {
+          throw new Error(
+            `Registered '${session.name}' but could not build its tool surface, so it is not safe to dispatch to: ` +
+              `${e instanceof Error ? e.message : String(e)}. ` +
+              `Drop it with project(action='drop_editor', editorTarget='${session.name}') and check that project's ue-mcp.yml.`,
+          );
+        }
 
         const attachResult = attach(session.project);
         let started: unknown;
