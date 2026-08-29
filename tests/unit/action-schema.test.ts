@@ -26,6 +26,7 @@ import {
   allActionSchemas,
   forwardedParams,
   nearestActions,
+  parseParams,
   parseParamsClause,
   resolveActionRef,
   similarity,
@@ -133,6 +134,83 @@ describe("parseParamsClause", () => {
     expect(parseParamsClause("Reads the thing. Params: none (#204)")).toEqual([]);
   });
 
+  it("keeps reading past `none` when the clause carries on", () => {
+    // `paged()` appends `cursor?, limit?` to whatever clause is already there,
+    // including `none`. Treating `none` as a terminator hid the paging
+    // parameters of every paged action that documents no others, which left
+    // page two of pcg(list_graphs) unreachable from the advertised schema.
+    expect(parseParamsClause("Lists them. Params: none, cursor?, limit?").map((p) => p.name))
+      .toEqual(["cursor", "limit"]);
+  });
+
+  it("reads a parameter whose name is also an English word", () => {
+    // `value`, `all`, `from`, `to` and `name` are real parameters on this
+    // surface. A prose filter that refuses them by vocabulary deletes a
+    // required field from the schema an agent is handed, and the agent then
+    // makes a call the handler rejects - or, where the handler reads the field
+    // unguarded, one that writes an empty string and reports success.
+    expect(parseParamsClause("Params: assetPath, parameterName, value, association?").map((p) => p.name))
+      .toEqual(["assetPath", "parameterName", "value", "association"]);
+    expect(parseParamsClause("Params: foliageTypePath, center?, radius?, all?").map((p) => p.name))
+      .toContain("all");
+  });
+
+  it("reads every separator the descriptions actually use", () => {
+    expect(parseParamsClause("Params: widgetName? | className?, childName?").map((p) => p.name))
+      .toEqual(["widgetName", "className", "childName"]);
+    expect(parseParamsClause("Params: actorLabels[] and/or actorPaths[]").map((p) => p.name))
+      .toEqual(["actorLabels", "actorPaths"]);
+    expect(parseParamsClause("Params: assetPaths (string[]) or assetPath").map((p) => p.name))
+      .toEqual(["assetPaths", "assetPath"]);
+    expect(parseParamsClause("Params: systemPath, scaleX?/scaleY?/scaleZ? (separate keys)").map((p) => p.name))
+      .toEqual(["systemPath", "scaleX", "scaleY", "scaleZ"]);
+  });
+
+  it("stops where the prose resumes inside an item", () => {
+    // `where each entry is ...` describes the shape of `renames`, and the
+    // names behind it are fields of that shape, not parameters.
+    expect(parseParamsClause("Params: renames[] where each entry is {sourcePath, destinationPath}").map((p) => p.name))
+      .toEqual(["renames"]);
+    expect(parseParamsClause("Params: dryRun? to preview").map((p) => p.name)).toEqual(["dryRun"]);
+  });
+
+  it("reports alternatives as one choice rather than as several required names", () => {
+    const { params, alternatives } = parseParams("Params: actorLabel OR actorPath, seed?");
+    expect(params.filter((p) => p.group !== undefined).map((p) => p.name)).toEqual(["actorLabel", "actorPath"]);
+    expect(alternatives).toEqual([{ branches: [["actorLabel"], ["actorPath"]], required: true }]);
+  });
+
+  it("keeps the names that go together inside one branch of a choice", () => {
+    const { alternatives } = parseParams("Params: name + packagePath? (create) OR materialPath (build)");
+    expect(alternatives[0].branches).toEqual([["name", "packagePath"], ["materialPath"]]);
+  });
+
+  it("says a choice is optional when the clause marks every side optional", () => {
+    expect(parseParams("Params: widgetName? | className?").alternatives[0].required).toBe(false);
+  });
+
+  it("carries an `at least one of` quantifier across the names behind it", () => {
+    const { params, alternatives } = parseParams(
+      "Params: at least one of labelPrefix, labelContains, className; dryRun? to preview",
+    );
+    expect(alternatives).toEqual([
+      { branches: [["labelPrefix"], ["labelContains"], ["className"]], required: true },
+    ]);
+    expect(params.find((p) => p.name === "dryRun")).toEqual({ name: "dryRun", optional: true });
+  });
+
+  it("uses the declared keys to settle a bracket that could be prose", () => {
+    // `(or ...)` carries real alias names (`sourceString (or value)`) and also
+    // plain English (`boneName (or socket name)`). The category's own shape is
+    // what tells the two apart, so a name is only read out of one when the
+    // wire would accept every name in it.
+    const known = new Set(["sourceString", "value"]);
+    expect(parseParamsClause("Params: sourceString (or value)", known).map((p) => p.name))
+      .toEqual(["sourceString", "value"]);
+    expect(parseParamsClause("Params: boneName (or socket name)", new Set(["boneName", "name"])).map((p) => p.name))
+      .toEqual(["boneName"]);
+  });
+
   it("returns nothing when there is no clause at all", () => {
     expect(parseParamsClause("Just a description.")).toEqual([]);
   });
@@ -183,6 +261,35 @@ describe("actionSchema", () => {
     expect(byName.get("propertyName")?.required).toBe(true);
     expect(byName.get("save")?.required).toBe(false);
     expect(byName.get("save")?.type).toBe("boolean");
+  });
+
+  it("reports a parameter the description names with an ordinary English word", () => {
+    // material(set_parameter) hard-requires `value` and the description says
+    // so. Reporting the schema without it had an agent call the action with
+    // no value at all.
+    const material = ALL_TOOLS.find((t) => t.name === "material")!;
+    const byName = new Map(actionSchema(material, "set_parameter").params.map((p) => [p.name, p]));
+    expect(byName.get("value")?.required).toBe(true);
+  });
+
+  it("reports the paging parameters of an action that documents no others", () => {
+    const pcg = ALL_TOOLS.find((t) => t.name === "pcg")!;
+    const names = actionSchema(pcg, "list_graphs").params.map((p) => p.name);
+    expect(names).toContain("cursor");
+    expect(names).toContain("limit");
+  });
+
+  it("publishes a choice instead of marking both sides required", () => {
+    const pcg = ALL_TOOLS.find((t) => t.name === "pcg")!;
+    const schema = actionSchema(pcg, "execute");
+    const byName = new Map(schema.params.map((p) => [p.name, p]));
+    expect(byName.get("actorLabel")?.required).toBe(false);
+    expect(byName.get("actorPath")?.required).toBe(false);
+    expect(schema.alternatives).toEqual([
+      { branches: [["actorLabel"], ["actorPath"]], required: true },
+    ]);
+    expect(byName.get("actorLabel")?.alternativeGroup).toBe(0);
+    expect(byName.get("actorPath")?.alternativeGroup).toBe(0);
   });
 
   it("marks a server-side action as local", () => {

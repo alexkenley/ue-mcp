@@ -94,6 +94,16 @@ describe("paged()", () => {
     expect(parseParamsClause(out).map((p) => p.name)).toEqual(["cursor", "limit"]);
   });
 
+  it("stays readable when the action it wraps documented `Params: none`", () => {
+    // The two names land BEHIND the word `none`, which reads oddly and is the
+    // shape a good few paged actions carry (`pcg.list_graphs` among them). It
+    // is only a wording problem: the clause continues, so the reader has to
+    // continue with it, and the paging parameters are advertised either way.
+    const out = paged("List every graph. Params: none");
+    expect(out).toContain("Params: none, cursor?, limit?");
+    expect(parseParamsClause(out).map((p) => p.name)).toEqual(["cursor", "limit"]);
+  });
+
   it("is idempotent, so re-wrapping a description cannot document a name twice", () => {
     const once = paged("List gameplay tags. Params: filter?");
     expect(paged(once)).toBe(once);

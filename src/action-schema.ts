@@ -39,6 +39,12 @@ export interface ParamSchema {
    * before the handler sees it, whatever the description promises.
    */
   sources: Array<"documented" | "forwards" | "declared">;
+  /**
+   * Index into the action's `alternatives` when this parameter is one of a
+   * choice. `required` is false for every member of a choice, because the
+   * handler takes either one; what has to be satisfied is the group.
+   */
+  alternativeGroup?: number;
 }
 
 export interface ActionSchema {
@@ -66,6 +72,17 @@ export interface ActionSchema {
    */
   class: ActionClass;
   params: ParamSchema[];
+  /**
+   * Choices the action offers, when it offers any.
+   *
+   * `level.delete_actor` takes `actorLabel OR actorPath`, and reporting both
+   * as required would have a caller send two ways of naming one actor, while
+   * reporting both as optional would have it send neither. Neither is
+   * individually required and the group is, so the group is what is published:
+   * each branch is a set of names that go together, and `required` says
+   * whether one of the branches has to be supplied.
+   */
+  alternatives?: AlternativeGroup[];
   /**
    * Names promised by the description or read by `mapParams` that the category
    * does not declare. Passing one of these has no effect.
@@ -172,9 +189,86 @@ function enumValues(schema: z.ZodTypeAny): string[] | undefined {
 
 /* ── description parsing ───────────────────────────────────────────── */
 
-/** Words that open a commentary segment rather than name a parameter. */
-const PROSE_LEADERS =
-  /^(default|max|min|e|i|g|or|and|either|one|two|the|a|an|at|no|not|see|note|use|used|uses|takes|accepts|same|plus|only|required|optional|omit|omitted|pass|passing|when|where|with|without|for|from|to|into|per|so|then|this|that|these|those|it|its|each|every|any|all|both|call|calls|after|before|since|because|exactly|shaped|otherwise|instead|also|first|last|next|returns?|values?)$/i;
+/**
+ * A parameter named by an action's `Params:` clause.
+ *
+ * `group` is set when the clause offered the name as one of a choice
+ * (`actorLabel OR actorPath`). A member of a choice is never individually
+ * required, however the clause marks it, because the handler takes either.
+ */
+export interface DocumentedParam {
+  name: string;
+  optional: boolean;
+  /** Index into the parse's `alternatives`, when this name is one of a choice. */
+  group?: number;
+}
+
+/**
+ * A choice the clause offered.
+ *
+ * Each branch is the set of names that go together, so `name + packagePath? OR
+ * materialPath` has branches `[["name", "packagePath"], ["materialPath"]]`:
+ * what the caller supplies is one branch, not one name.
+ */
+export interface AlternativeGroup {
+  branches: string[][];
+  /** True when the action needs one of the branches. */
+  required: boolean;
+}
+
+export interface DocumentedParams {
+  params: DocumentedParam[];
+  alternatives: AlternativeGroup[];
+}
+
+/**
+ * The grammar of a `Params:` clause, as the descriptions in this repo actually
+ * write it rather than as one might wish they did.
+ *
+ * The clause is a list of ITEMS separated by `,` or `;` at bracket depth zero.
+ * Each item names one parameter and then, optionally, commentary. Inside an
+ * item the names are joined by separators:
+ *
+ *   OR or | either   a choice: supply one side, not both
+ *   and/or           a choice where more than one side is also allowed
+ *   + with plus      a conjunction: the names go together in one branch
+ *   /                two spellings, or two keys, of the same idea
+ *
+ * An item may open with a quantifier (`at least one of`, `exactly one of`),
+ * which makes the names behind it a choice, or with a connective (`plus`,
+ * `then`, `EITHER`) continuing the previous item.
+ *
+ * Everything else at depth zero ends the item, because the prose has resumed:
+ * a bare word that is not a separator (`renames[] where each entry is ...`),
+ * or a character that cannot start a name (`all=true`, `- uses its agent`).
+ *
+ * The rule that matters most is what is NOT here. There is no list of English
+ * words that are refused in parameter position. `value`, `all`, `from`, `to`,
+ * `min`, `max` and `name` are real parameters on this surface, and a filter
+ * that reads them as prose deletes a required field from the schema an agent
+ * is handed. Position decides, not vocabulary: the head of an item, and
+ * whatever follows a separator, is a parameter.
+ */
+
+/** Joins two names into a choice. */
+const CHOICE_WORD = /^(?:or|either)$/i;
+/** Joins two names into one branch of a choice. */
+const JOIN_WORD = /^(?:and|plus|with)$/i;
+/** Opens an item that continues the previous one rather than naming a parameter. */
+const LEAD_WORD = /^(?:or|either|and|plus|with|then|also)$/i;
+/** `at least one of a/b/c`, `exactly one of x/y`, `any one of ...`. */
+const QUANTIFIER = /^\s*(?:at\s+least\s+|exactly\s+|any\s+)?(?:one|two)\s+of\s+/i;
+/**
+ * `Params: none` says the action takes nothing of its own. It is a sentinel,
+ * not a terminator: `paged()` appends `cursor?, limit?` behind it, and those
+ * are real parameters.
+ */
+const NONE_WORD = /^none$/i;
+/**
+ * Commentary that shares a bracket with real parameters, for the case where
+ * the category's declared keys are not to hand to settle it.
+ */
+const BRACKET_PROSE = /^(?:default|defaults|e|g|i|see|note|optional|required|omit|when|flat|legacy|socket)$/i;
 
 /** Cut a clause at the first match of `stop` that is not inside brackets. */
 function cutAtDepthZero(text: string, stop: RegExp): string {
@@ -192,20 +286,238 @@ function cutAtDepthZero(text: string, stop: RegExp): string {
   return text;
 }
 
+/** The bracket group opening at `i`, and the index just past its close. */
+function bracketAt(text: string, i: number): { inner: string; end: number } {
+  let depth = 0;
+  for (let j = i; j < text.length; j++) {
+    const c = text[j];
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") {
+      depth--;
+      if (depth === 0) return { inner: text.slice(i + 1, j), end: j + 1 };
+    }
+  }
+  return { inner: text.slice(i + 1), end: text.length };
+}
+
+/** Split on the given separators, ignoring any that sits inside brackets. */
+function splitDepthZero(text: string, separators: string): Array<{ text: string; separator: string }> {
+  const out: Array<{ text: string; separator: string }> = [];
+  let depth = 0;
+  let start = 0;
+  let separator = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth = Math.max(0, depth - 1);
+    else if (depth === 0 && separators.includes(c)) {
+      out.push({ text: text.slice(start, i), separator });
+      separator = c;
+      start = i + 1;
+    }
+  }
+  out.push({ text: text.slice(start), separator });
+  return out;
+}
+
+interface Atom {
+  name: string;
+  optional: boolean;
+}
+
+interface ScannedItem {
+  /** Names offered as a choice, one set per branch. Empty when there is none. */
+  branches: Atom[][];
+  /** Names the item adds outright, from a `(+ ...)` group. */
+  extra: Atom[];
+  /** True when the item's names are alternatives rather than a plain list. */
+  choice: boolean;
+  /** True when a quantifier said one of them is needed. */
+  quantified: boolean;
+}
+
+interface ScanOptions {
+  /** The category's declared keys, when the caller has them. */
+  known?: ReadonlySet<string>;
+  /** Every name must be declared, or the whole group is read as commentary. */
+  strict?: boolean;
+}
+
+/** The atoms of a `(+ x?, y?)` group: further parameters, plus commentary. */
+function scanPlusGroup(inner: string, known?: ReadonlySet<string>): Atom[] {
+  const out: Atom[] = [];
+  for (const part of splitDepthZero(inner.replace(/^\s*\+/, ""), ",")) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)(\[\])?\s*(\?)?/.exec(part.text);
+    if (!m) continue;
+    const accepted = known ? known.has(m[1]) : !BRACKET_PROSE.test(m[1]);
+    if (accepted) out.push({ name: m[1], optional: m[3] === "?" });
+  }
+  return out;
+}
+
 /**
- * Pull parameter names out of the `Params:` clause every action description
- * in this repo carries.
+ * Read one item of the clause.
  *
- * The clause is prose, not a grammar: it carries types in parentheses,
- * defaults, issue numbers, alternatives joined by `OR`, and nested optional
- * groups spelled `(+ recursive?, default true)`. Only the leading identifier
- * of each comma-separated segment is a parameter name; everything inside
- * parentheses is commentary, except a `(+ ...)` group, which is a real list of
- * further parameters.
+ * Scans left to right at depth zero, alternating between "a name may appear
+ * here" and "a separator may appear here". The first thing that is neither
+ * ends the item: the rest of it is prose about the parameter, not more
+ * parameters.
  */
-export function parseParamsClause(description: string): Array<{ name: string; optional: boolean }> {
+function scanItem(text: string, options: ScanOptions): ScannedItem {
+  const { known, strict } = options;
+  const branches: Atom[][] = [[]];
+  const extra: Atom[] = [];
+  let choice = false;
+  let quantified = false;
+  let expectName = true;
+  let atHead = true;
+  // A head connective (`plus shortcuts:`) is as often the prose resuming as it
+  // is a continuation, so the name behind one has to be a declared key.
+  let headGuarded = false;
+  let rejected = false;
+
+  // Set once a `+` (or `and`/`plus`/`with`) has joined something into the
+  // current branch. After that a `/` is reading inside the branch rather than
+  // starting a new one: `systemPath + emitterName?/emitterIndex?` is one way
+  // of addressing the emitter, not two ways of addressing the system.
+  let conjoined = false;
+
+  const branch = (): Atom[] => branches[branches.length - 1];
+  const openBranch = (markChoice: boolean): void => {
+    if (markChoice) choice = true;
+    if (branch().length > 0) branches.push([]);
+    conjoined = false;
+  };
+  const addAtom = (atom: Atom): boolean => {
+    if (known && (strict || headGuarded) && !known.has(atom.name)) return false;
+    branch().push(atom);
+    headGuarded = false;
+    return true;
+  };
+
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (/\s/.test(c)) { i++; continue; }
+
+    if (atHead) {
+      const q = QUANTIFIER.exec(text.slice(i));
+      if (q) {
+        quantified = true;
+        choice = true;
+        i += q[0].length;
+        continue;
+      }
+    }
+
+    if (c === "(" || c === "[" || c === "{") {
+      const { inner, end } = bracketAt(text, i);
+      i = end;
+      if (expectName) {
+        // `EITHER (nodeId + inputName) OR graphInput`: a bracket where a name
+        // was due groups names, it does not comment on one.
+        const sub = scanItem(inner, { known, strict: true });
+        const atoms = [...sub.branches.flat(), ...sub.extra];
+        if (atoms.length > 0) {
+          for (const atom of atoms) branch().push(atom);
+          conjoined = atoms.length > 1;
+          headGuarded = false;
+          expectName = false;
+        }
+        continue;
+      }
+      const trimmed = inner.trim();
+      if (trimmed.startsWith("+")) {
+        extra.push(...scanPlusGroup(trimmed, known));
+      } else if (/^or\b/i.test(trimmed)) {
+        // `(or point, or worldX + worldY)` names further ways to say the same
+        // thing. It is only ever read as parameters when every name in it is
+        // declared, because the same shape carries prose (`(or socket name)`).
+        const alt: Atom[][] = [];
+        let ok = true;
+        for (const part of splitDepthZero(trimmed, ",")) {
+          const sub = scanItem(part.text, { known, strict: true });
+          if (sub.branches.length === 0 && sub.extra.length === 0) { ok = false; break; }
+          for (const b of sub.branches) alt.push(b);
+          if (sub.extra.length > 0) alt.push(sub.extra);
+        }
+        if (ok && alt.length > 0) {
+          choice = true;
+          for (const b of alt) branches.push(b);
+        }
+      }
+      continue;
+    }
+
+    if (c === "|") { openBranch(true); expectName = true; atHead = false; i++; continue; }
+    if (c === "+") { conjoined = true; expectName = true; atHead = false; i++; continue; }
+    if (c === "/") {
+      // A slash separates: `target/targetLabel` are two spellings of one
+      // parameter and `frames?/times?` are two ways of asking. Whether that
+      // separation is a CHOICE is decided by the rest of the item - an item
+      // with no `OR` in it is a plain list, and its branches never surface.
+      if (!conjoined) openBranch(false);
+      expectName = true;
+      atHead = false;
+      i++;
+      continue;
+    }
+    if (c === ":") { i++; continue; }
+
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)(\[\])?\s*(\?)?/.exec(text.slice(i));
+    if (!m) break;
+    const word = m[1];
+
+    if (atHead && NONE_WORD.test(word) && !known?.has(word)) return { branches: [], extra: [], choice: false, quantified: false };
+
+    if (CHOICE_WORD.test(word) || JOIN_WORD.test(word) || (atHead && LEAD_WORD.test(word))) {
+      if (CHOICE_WORD.test(word)) openBranch(true);
+      else conjoined = true;
+      if (atHead) headGuarded = true;
+      expectName = true;
+      atHead = false;
+      i += m[1].length;
+      continue;
+    }
+
+    if (!expectName) break;
+    if (!addAtom({ name: word, optional: m[3] === "?" })) { rejected = true; break; }
+    expectName = false;
+    atHead = false;
+    i += m[0].length;
+  }
+
+  if (rejected && branch().length === 0 && branches.length === 1) {
+    return { branches: [], extra: [], choice: false, quantified: false };
+  }
+  const filled = branches.filter((b) => b.length > 0);
+  // A branch is reached, or not, through its first name. Everything conjoined
+  // behind an optional one is therefore optional too, however the clause spelt
+  // it: `axisHorizontal?/axisVertical? + horizontalMin/horizontalMax/...` is a
+  // back-compat spelling of an optional axis, not six required numbers.
+  for (const b of filled) {
+    if (b[0].optional) for (const atom of b) atom.optional = true;
+  }
+  // A quantifier is a choice even before a second branch turns up: `at least
+  // one of a, b, c` spells its list with commas, so the rest of it arrives as
+  // the items that follow.
+  const isChoice = (choice && filled.length > 1) || (quantified && filled.length > 0);
+  return { branches: filled, extra, choice: isChoice, quantified };
+}
+
+/**
+ * Pull the parameters out of the `Params:` clause every action carries.
+ *
+ * `known`, when given, is the category's declared keys. It settles the two
+ * places where the clause alone is ambiguous - a name behind a head connective
+ * and a name inside a bracket - by asking whether the wire would accept it.
+ * It only ever admits a name, never refuses one that stands in plain parameter
+ * position, so a name the description invents is still reported and still
+ * shows up as drift.
+ */
+export function parseParams(description: string, known?: ReadonlySet<string>): DocumentedParams {
   const at = description.search(/\bParams:/);
-  if (at < 0) return [];
+  if (at < 0) return { params: [], alternatives: [] };
   let clause = description.slice(at + "Params:".length);
 
   // The clause runs until the prose resumes. Two things end it: a `Returns`
@@ -216,56 +528,62 @@ export function parseParamsClause(description: string): Array<{ name: string; op
   clause = cutAtDepthZero(clause, /\.\s+|\bReturns\b|\bReturn:/g);
   // A trailing issue reference is not part of the list.
   clause = clause.replace(/\(#[\d/#\s,]+\)\s*$/, "").trim();
-  if (/^none\b/i.test(clause)) return [];
 
-  const found: Array<{ name: string; optional: boolean }> = [];
-  const seen = new Set<string>();
-  const add = (name: string, optional: boolean): void => {
-    if (PROSE_LEADERS.test(name)) return;
-    if (seen.has(name)) return;
-    seen.add(name);
-    found.push({ name, optional });
-  };
-  const push = (raw: string): void => {
-    // `at least one of a/b/c` and `exactly one of x/y` introduce a choice
-    // between real parameters, so the quantifier is dropped and the list
-    // behind it is read.
-    const segment = raw.replace(/^\s*(?:at least|exactly|either|any)\s+(?:one|two)?\s*(?:of)?\s*/i, "");
-    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*(?:\/[A-Za-z_][A-Za-z0-9_]*)*)(\[\])?(\?)?/.exec(segment);
-    if (!m) return;
-    const optional = m[3] === "?";
-    // `target/targetLabel` documents two spellings of one parameter, and both
-    // are real: the handler accepts either.
-    for (const alias of m[1].split("/")) add(alias, optional);
+  const params: DocumentedParam[] = [];
+  const byName = new Map<string, DocumentedParam>();
+  const alternatives: AlternativeGroup[] = [];
+  const add = (atom: Atom, group?: number): DocumentedParam => {
+    const existing = byName.get(atom.name);
+    if (existing) {
+      if (group !== undefined && existing.group === undefined) existing.group = group;
+      return existing;
+    }
+    const param: DocumentedParam = { name: atom.name, optional: atom.optional };
+    if (group !== undefined) param.group = group;
+    byName.set(atom.name, param);
+    params.push(param);
+    return param;
   };
 
-  // Split on commas that are not inside parentheses or brackets, so
-  // `(string[], default 3)` stays with its parameter.
-  const segments: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let i = 0; i < clause.length; i++) {
-    const c = clause[i];
-    if (c === "(" || c === "[" || c === "{") depth++;
-    else if (c === ")" || c === "]" || c === "}") depth = Math.max(0, depth - 1);
-    else if (c === "," && depth === 0) {
-      segments.push(clause.slice(start, i));
-      start = i + 1;
-    }
-  }
-  segments.push(clause.slice(start));
+  const items = splitDepthZero(clause, ",;");
+  // A quantifier that ran out of item (`at least one of a, b, c`) keeps
+  // collecting the bare names behind it until something else appears.
+  let openGroup: { index: number; scanned: ScannedItem } | undefined;
 
-  for (const segment of segments) {
-    // `a? (...) OR b? (...)` documents two independent parameters.
-    for (const alt of segment.split(/\bOR\b/)) {
-      push(alt);
-      // A `(+ x?, y?)` group lists further parameters rather than commentary.
-      for (const group of alt.matchAll(/\(\+([^)]*)\)/g)) {
-        for (const sub of group[1].split(",")) push(sub);
-      }
+  for (const item of items) {
+    const bare = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(item.text);
+    if (openGroup && item.separator === "," && bare) {
+      alternatives[openGroup.index].branches.push([bare[1]]);
+      add({ name: bare[1], optional: false }, openGroup.index);
+      continue;
     }
+    openGroup = undefined;
+
+    const scanned = scanItem(item.text, { known });
+    if (scanned.branches.length === 0 && scanned.extra.length === 0) continue;
+
+    if (scanned.choice) {
+      const index = alternatives.length;
+      const required = scanned.quantified
+        || scanned.branches.every((b) => b.some((a) => !a.optional));
+      alternatives.push({ branches: scanned.branches.map((b) => b.map((a) => a.name)), required });
+      for (const b of scanned.branches) for (const atom of b) add(atom, index);
+      if (scanned.quantified) openGroup = { index, scanned };
+    } else {
+      for (const b of scanned.branches) for (const atom of b) add(atom);
+    }
+    for (const atom of scanned.extra) add(atom);
   }
-  return found;
+
+  return { params, alternatives };
+}
+
+/** The parameters the `Params:` clause names, without the choice structure. */
+export function parseParamsClause(
+  description: string,
+  known?: ReadonlySet<string>,
+): DocumentedParam[] {
+  return parseParams(description, known).params;
 }
 
 /**
@@ -343,9 +661,28 @@ export function actionSchema(tool: ToolDef, action: string): ActionSchema {
     );
   }
   const description = spec.description ?? "";
-  const documented = parseParamsClause(description);
+  // The category's declared keys settle the two spots where the clause alone
+  // is ambiguous, so the parse is done against them rather than in the dark.
+  const declaredNames = new Set(Object.keys(tool.schema));
+  const parsed = parseParams(description, declaredNames);
+  const documented = parsed.params;
   const forwards = new Set(forwardedParams(spec));
   const documentedByName = new Map(documented.map((d) => [d.name, d]));
+
+  // A choice only survives while more than one of its branches is reachable.
+  // `asset.migrate` documents `toEditor OR destinationContentDir`, and with
+  // one editor registered `toEditor` is not in the shape at all, which leaves
+  // an ordinary required parameter rather than a choice.
+  const alternatives: AlternativeGroup[] = [];
+  const groupIndex = new Map<number, number>();
+  parsed.alternatives.forEach((group, i) => {
+    const branches = group.branches
+      .map((b) => b.filter((n) => declaredNames.has(n)))
+      .filter((b) => b.length > 0);
+    if (branches.length < 2) return;
+    groupIndex.set(i, alternatives.length);
+    alternatives.push({ branches, required: group.required });
+  });
 
   const params: ParamSchema[] = [];
   const covered = new Set<string>();
@@ -354,6 +691,7 @@ export function actionSchema(tool: ToolDef, action: string): ActionSchema {
     if (name === "action") continue;
     const { inner, optional, description: paramDoc, default: dflt } = unwrap(schema);
     const doc = documentedByName.get(name);
+    const group = doc?.group === undefined ? undefined : groupIndex.get(doc.group);
     const sources: ParamSchema["sources"] = ["declared"];
     if (doc) sources.unshift("documented");
     if (forwards.has(name)) sources.splice(sources.length - 1, 0, "forwards");
@@ -369,11 +707,12 @@ export function actionSchema(tool: ToolDef, action: string): ActionSchema {
       // The description's `?` marker wins: it is per-action, whereas the
       // category shape has to declare nearly everything optional to let its
       // other actions through.
-      required: doc ? !doc.optional : !optional,
+      required: doc ? group === undefined && !doc.optional : !optional,
       description: paramDoc,
       enumValues: enumValues(inner),
       default: dflt,
       sources,
+      alternativeGroup: group,
     });
   }
 
@@ -403,6 +742,7 @@ export function actionSchema(tool: ToolDef, action: string): ActionSchema {
     timeoutMs: spec.timeoutMs,
     class: classifyActionClass(tool.name, action).class,
     params,
+    alternatives: alternatives.length > 0 ? alternatives : undefined,
     drift,
   };
 }
