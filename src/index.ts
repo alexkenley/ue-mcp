@@ -438,7 +438,10 @@ async function main() {
 
   const server = new McpServer({
     name: "ue-mcp",
-    version: "0.6.4",
+    // Read from package.json, never written here. A literal was frozen at
+    // 0.6.4 in April and every release since told its clients that, while
+    // doctor and the update check read the real one and disagreed with it.
+    version: pkg.version,
   }, {
     instructions: serverInstructions,
   });

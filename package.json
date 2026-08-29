@@ -44,7 +44,7 @@
   },
   "homepage": "https://ue-mcp.com/docs/",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "up": "node scripts/run.js",
