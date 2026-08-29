@@ -38,6 +38,7 @@ import {
   type JournalStep,
 } from "../journal.js";
 import { journalActions } from "./journal-actions.js";
+import { unappliedRollbackCall } from "./handler-outcome.js";
 import { skillActions } from "./skill-actions.js";
 
 /**
@@ -77,7 +78,13 @@ export function createFlowTool(
         + 'flow(action="journal_get", runId=...) reconstructs it afterwards. Params: flowName, '
         + "skip? (step names or numbers), params? (runtime options merged into every step's options, "
         + "highest priority), rollback_on_failure? (invoke inverse tasks in reverse order when a "
-        + "later step fails). Returns a summary, every step's data, and the runId.",
+        + "later step fails). A step whose handler reports success:false FAILS the step and stops the "
+        + "run, and the inverses collected from the steps BEFORE it are what rollback_on_failure "
+        + "unwinds. The failing step's OWN inverse, which a few handlers attach after a partial write, "
+        + "is reported rather than replayed: it arrives verbatim on steps[i].unappliedRollback and in "
+        + "that step's error text, ready to run as its own step, and in a nested flow it arrives in the "
+        + "nested step's error text. Returns a summary, every step's data, "
+        + "and the runId.",
       handler: async (ctx, params) => runFlow(registryFor(ctx), configFor(ctx), ctx, params),
     },
     plan: {
@@ -420,6 +427,15 @@ function formatFlowResult(result: FlowRunResult): Record<string, unknown> {
       lines.push(`      ${s.result.error.message}`);
     }
 
+    // A step that failed AFTER writing part of its change attaches its own
+    // inverse. The runner harvests an inverse only from a step that SUCCEEDED,
+    // so this one is never replayed by anything - printing it is what keeps it
+    // from being discarded in silence. See flow/handler-outcome.ts.
+    if (s.result && s.result.success === false && s.result.rollback) {
+      lines.push(`      Undo for the part that applied (NOT run automatically):`);
+      lines.push(`      ${unappliedRollbackCall(s.result.rollback)}`);
+    }
+
     if (s.result?.data?.output && typeof s.result.data.output === "string") {
       const output = s.result.data.output;
       if (output.length > 0) {
@@ -489,6 +505,20 @@ function formatFlowResult(result: FlowRunResult): Record<string, unknown> {
         ? { message: s.result.error.message, name: s.result.error.name }
         : undefined,
       data: s.result?.data,
+      // The failing step's own inverse, verbatim and replayable. Reported
+      // rather than replayed: `rollback` above lists the inverses the runner
+      // DID invoke, which are the ones from steps that succeeded.
+      unappliedRollback: s.result && s.result.success === false && s.result.rollback
+        ? {
+            record: s.result.rollback,
+            step: unappliedRollbackCall(s.result.rollback),
+            replayed: false,
+            note:
+              "This step applied part of its change before failing. The flow runner replays inverses only from " +
+              "steps that succeeded, so this one was reported and not run. Run it as the step shown, or call the " +
+              "bridge method in `record.payload.method` with the rest of the payload.",
+          }
+        : undefined,
     })),
     rollback: result.rollback,
     hookErrors: result.hookErrors,

@@ -4,6 +4,7 @@ import { stripEditorTarget } from "../types.js";
 import { prepareCall, finishCall } from "../call-pipeline.js";
 import type { FlowContext } from "./context.js";
 import { liftRollback } from "./rollback.js";
+import { applyHandlerOutcome } from "./handler-outcome.js";
 
 /**
  * Create a TaskConstructor for a bridge-delegation action.
@@ -30,7 +31,7 @@ export function bridgeTaskClass(
       const answered = await this.bridge.call(method, params, timeoutMs);
       const raw = finishCall(answered, pipeline);
       if (typeof raw !== "object" || raw === null) {
-        return { success: true, data: { result: raw } };
+        return applyHandlerOutcome(this.ctx, answered, { success: true, data: { result: raw } });
       }
       // Handlers attach `rollback` to their response. This class never lifted
       // it, so every rollback emitted by a registered action was silently
@@ -44,9 +45,23 @@ export function bridgeTaskClass(
       // handler-backed ones, which pass data through untouched.
       const raw2 = raw as Record<string, unknown>;
       const result: TaskResult = { success: true, data: raw2 };
-      const record = liftRollback(raw2.rollback);
+      // Lifted off the answer the editor gave, not off the projected copy: a
+      // caller's `select`/`omit` shapes the response it reads, and must not be
+      // able to filter the runner's undo record out of existence.
+      // Falling back to the projected copy keeps this a strict superset of what
+      // was lifted before: the projection only ever removes keys, so this can
+      // add a record, never drop one.
+      const answeredRollback = answered !== null && typeof answered === "object"
+        ? (answered as Record<string, unknown>).rollback
+        : undefined;
+      const record = liftRollback(answeredRollback ?? raw2.rollback);
       if (record) result.rollback = record;
-      return result;
+      // The step's verdict comes from the same unprojected answer, for the
+      // same reason: `select: ["path"]` leaves no `success` key to read. The
+      // bridge resolves a `success: false` body normally, so without this a
+      // handler-reported failure was a passing step, and `rollback_on_failure`
+      // only ever fired on a transport fault.
+      return applyHandlerOutcome(this.ctx, answered, result);
     }
   }
   Object.defineProperty(FactoryBridgeTask, "name", { value: `BridgeTask_${name}` });
@@ -65,13 +80,20 @@ export function handlerTaskClass(
     get taskName() { return name; }
     async execute(): Promise<TaskResult> {
       const pipeline = prepareCall(this.options as Record<string, unknown>);
-      const data = finishCall(await fn(this.ctx, pipeline.params), pipeline);
-      return {
+      const answered = await fn(this.ctx, pipeline.params);
+      const data = finishCall(answered, pipeline);
+      // Same defect as the bridge class had, from the same hardcoded `true`:
+      // a direct handler reports a refusal by RETURNING `{ success: false,
+      // message }` rather than throwing (stop_editor when a dialog blocks the
+      // editor, a PIE launch the user declined), and only a throw was ever
+      // reaching the runner. Read off `answered` so a `select` cannot hide the
+      // verdict, and the data still passes through untouched.
+      return applyHandlerOutcome(this.ctx, answered, {
         success: true,
         data: typeof data === "object" && data !== null
           ? (data as Record<string, unknown>)
           : { result: data },
-      };
+      });
     }
   }
   Object.defineProperty(FactoryHandlerTask, "name", { value: `HandlerTask_${name}` });
