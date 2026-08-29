@@ -881,7 +881,17 @@ TSharedPtr<FJsonValue> FEditorHandlers::RedrawViewport(const TSharedPtr<FJsonObj
 	Result->SetNumberField(TEXT("viewportsInvalidated"), Redrawn);
 	Result->SetStringField(TEXT("note"),
 		TEXT("The viewport is marked for redraw; the renderer paints it on the next editor tick. A non-realtime viewport draws exactly one frame from this. Use editor(set_realtime) when a ticking simulation has to advance as well."));
+	// Classified a mutation, and defensibly so: it drives the renderer and
+	// invalidates hit proxies, which is engine work rather than a query. What
+	// it does not do is write state, so the did-anything-change answer is "no":
+	// the viewport shows the same scene before and after, only sooner. Unlike
+	// hit_test_viewport_pixel this is not reported as misclassified.
+	Result->SetBoolField(TEXT("changed"), false);
+	Result->SetBoolField(TEXT("unchanged"), true);
 	// No rollback: a redraw changes no state, and repeating it is a no-op.
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("Nothing to undo. This asks the renderer to paint sooner than it otherwise would and writes no viewport, world or asset state."));
 	return MCPResult(Result);
 }
 
@@ -908,6 +918,10 @@ TSharedPtr<FJsonValue> FEditorHandlers::BeginEditorTransaction(const TSharedPtr<
 	// BeginTransaction returns the pre-existing nesting depth, so a non-zero
 	// index means this call nested inside a transaction someone else opened.
 	Result->SetBoolField(TEXT("nested"), bWasActive);
+	// Opening always changes state, nested or not: there is one more open
+	// transaction than there was, and nothing here can find that already done
+	// and skip it. `nested` answers a different question and is not a stand-in.
+	Result->SetBoolField(TEXT("changed"), true);
 	if (bWasActive)
 	{
 		Result->SetStringField(TEXT("note"),
@@ -1002,6 +1016,13 @@ TSharedPtr<FJsonValue> FEditorHandlers::CancelEditorTransaction(const TSharedPtr
 		NoOp->SetBoolField(TEXT("unchanged"), true);
 		NoOp->SetStringField(TEXT("note"),
 			TEXT("No transaction was open, so nothing was cancelled and no state changed. This is the expected answer when a flow rolls back past a transaction it had already ended."));
+		NoOp->SetBoolField(TEXT("changed"), false);
+		// Same answer as the active branch below, stated on this path too: a
+		// cancel has no inverse, and this one did not even have anything to
+		// cancel.
+		NoOp->SetBoolField(TEXT("rollbackPossible"), false);
+		NoOp->SetStringField(TEXT("rollbackNote"),
+			TEXT("Nothing was cancelled, so there is nothing to restore."));
 		MCPViewportCtlWriteUndoState(Trans, NoOp);
 		return MCPResult(NoOp);
 	}
@@ -1030,6 +1051,9 @@ TSharedPtr<FJsonValue> FEditorHandlers::CancelEditorTransaction(const TSharedPtr
 		TEXT("Every object the transaction recorded was restored and no undo step was added. A cancel is itself the rollback, so there is nothing to reverse afterwards."));
 	// No rollback: this IS the inverse operation. A discarded transaction leaves
 	// no record to reapply.
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("A cancel is itself an inverse, and it consumes what it undid: CancelTransaction restores the recorded objects and discards the buffer, so the edits it reverted no longer exist anywhere to be reapplied. Reopening a transaction with begin_editor_transaction starts an empty one."));
 	return MCPResult(Result);
 }
 
