@@ -1915,7 +1915,21 @@ bool FMCPBridgeServer::ReadHttpRequest(FMCPSocketHandle SocketFD, FString& OutRe
 		const int32 BytesReceived = recv(SocketFD, (char*)Chunk, (int32)sizeof(Chunk), 0);
 		if (BytesReceived <= 0)
 		{
-			UE_LOG(LogMCPBridge, Warning, TEXT("[UE-MCP] Connection closed before the upgrade request completed (%d bytes read)"), Raw.Num());
+			// A close with NOTHING read is a liveness probe, not a fault. The
+			// server's own readiness check opens a TCP socket, sees it accept
+			// and destroys it without speaking HTTP, once a second while an
+			// editor is starting. Logging that at Warning wrote fifty warnings
+			// into the editor log per launch and taught the reader to ignore
+			// the category. A PARTIAL read is different: somebody began an
+			// upgrade and vanished, which is worth seeing.
+			if (Raw.Num() == 0)
+			{
+				UE_LOG(LogMCPBridge, Verbose, TEXT("[UE-MCP] Port probe connected and closed without an upgrade request"));
+			}
+			else
+			{
+				UE_LOG(LogMCPBridge, Warning, TEXT("[UE-MCP] Connection closed part way through the upgrade request (%d bytes read)"), Raw.Num());
+			}
 			return false;
 		}
 
