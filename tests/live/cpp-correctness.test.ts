@@ -29,6 +29,9 @@ const TEST_PROJECT = path.join(REPO_ROOT, "tests", "ue_mcp", "ue_mcp.uproject");
 /** Long enough for a cold build on a machine that has never scanned the tree. */
 const COLD = 1_800_000;
 
+/** The symbol the usage cases search for, warmed once in `beforeAll`. */
+const USAGE_SYMBOL = "GetPlayerPawn";
+
 let server: LiveServer;
 let scratch: string;
 
@@ -41,6 +44,18 @@ beforeAll(async () => {
   });
   // Pay the build once for the file, so each case measures a query.
   await server.call("project", { action: "build_engine_index", timeoutMs: COLD });
+  // And pay the usage search's own one-time cost here for the same reason.
+  // On a launcher install there are no engine .cpp files, so the fallback has
+  // to consider every header in the Runtime tree, and a header this machine
+  // has never opened costs milliseconds of first-touch I/O whatever the code
+  // does with it: about 3 ms each, measured, against 11,000 headers. That is
+  // tens of seconds the first time and under a second every time after, since
+  // the OS keeps the pages. It belongs in the hook, which is already where
+  // this file pays one-time costs, rather than inside a per-case timeout,
+  // where it is what used to make these two cases fail on a cold disk.
+  await server.call("project", {
+    action: "find_example_usage", symbol: USAGE_SYMBOL, limit: 5, timeoutMs: COLD,
+  });
 }, COLD);
 
 afterAll(async () => {
@@ -282,6 +297,8 @@ describe("find_example_usage", () => {
   interface Usage {
     siteCount: number;
     engineSourcesAvailable: boolean;
+    filesScanned: number;
+    truncated?: boolean;
     note?: string;
     sites: Array<{ file: string; line: number; text: string; kind: string }>;
   }
@@ -295,7 +312,7 @@ describe("find_example_usage", () => {
     // An engine installed from the Epic launcher ships headers and no .cpp at
     // all, which is the common case. Both outcomes are correct; what must not
     // happen is an empty list that reads as "nothing uses this symbol".
-    const body = await usage("GetPlayerPawn");
+    const body = await usage(USAGE_SYMBOL);
     expect(typeof body.engineSourcesAvailable).toBe("boolean");
 
     if (body.engineSourcesAvailable) {
@@ -310,11 +327,33 @@ describe("find_example_usage", () => {
   });
 
   it("never returns a comment or a declaration as an example of use", async () => {
-    const body = await usage("GetPlayerPawn");
+    const body = await usage(USAGE_SYMBOL);
     for (const site of body.sites) {
-      expect(site.text).toContain("GetPlayerPawn");
+      expect(site.text).toContain(USAGE_SYMBOL);
       expect(site.text.startsWith("//")).toBe(false);
-      expect(site.text).not.toMatch(/^\s*(?:class|struct|virtual|static|template)/);
+      expect(site.text).not.toMatch(/^\s*(?:class|struct|virtual|static|template)\b/);
     }
+  });
+
+  it("reads the Runtime tree once, and finishes inside its budget", async () => {
+    // The number of files read IS the cost of this action, so it is asserted
+    // rather than inferred from a stopwatch. On a launcher install that is the
+    // whole Runtime tree, because "used nowhere in a header" cannot be
+    // established without looking at every header. What must not happen is
+    // that the number grows: walking a tree twice, or reading headers on an
+    // install that does have sources, both show up here as a jump in it.
+    const body = await usage(USAGE_SYMBOL);
+    if (body.engineSourcesAvailable) {
+      // A source build has real call sites, so the scan stops at the limit
+      // long before it runs out of tree.
+      expect(body.filesScanned).toBeGreaterThan(0);
+    } else {
+      // A launcher install has to read the headers out to prove the absence.
+      expect(body.filesScanned).toBeGreaterThan(1_000);
+    }
+    expect(body.filesScanned).toBeLessThan(40_000);
+    // The budget is generous enough that one tree never reaches it. If this
+    // fires, the search got slower rather than larger.
+    expect(body.truncated).toBeUndefined();
   });
 });

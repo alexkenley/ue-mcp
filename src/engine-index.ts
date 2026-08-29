@@ -437,16 +437,62 @@ export interface LoadedIndex {
   buildMs?: number;
 }
 
-/** The index for one engine, from cache when possible. */
+/**
+ * The last index loaded, held in memory.
+ *
+ * The disk cache turns a minutes-long scan into a file read, and that was
+ * treated as cheap enough to repeat. It is not: the cache file for a full
+ * engine is around 80 MB, so every action that wanted the table re-read and
+ * re-parsed all of it, which cost about three quarters of a second and around
+ * 200 MB of fresh heap per call. A sequence of a dozen index-backed calls
+ * therefore churned a couple of gigabytes and evicted the filesystem cache
+ * that the file-reading actions beside it depend on, which is how a search
+ * that ran in two seconds on its own came to take thirty in company.
+ *
+ * One entry, not a map: two engines in one process is possible but rare, and
+ * one resident copy of an 80 MB table is a cost worth paying while two is not.
+ * It is validated against the cache file's size and mtime, so an index
+ * rebuilt by another process is picked up, and against the engine's own
+ * version, so an upgrade is too.
+ */
+let residentIndex: { cacheFile: string; stamp: string; index: EngineIndex } | null = null;
+
+/** Size and mtime of the cache file, or null when there is no file. */
+function cacheStamp(file: string): string | null {
+  try {
+    const s = fs.statSync(file);
+    return `${s.mtimeMs}:${s.size}`;
+  } catch {
+    return null;
+  }
+}
+
+/** The index for one engine, from memory or cache when possible. */
 export function loadEngineIndex(engineRoot: string, options: LoadOptions = {}): LoadedIndex {
   const trees = options.trees ?? DEFAULT_TREES;
+  const file = indexCacheFile(engineRoot, trees);
   if (!options.refresh) {
+    const stamp = cacheStamp(file);
+    if (
+      residentIndex
+      && residentIndex.cacheFile === file
+      && stamp !== null
+      && residentIndex.stamp === stamp
+      && residentIndex.index.engineVersion === engineVersionOf(engineRoot)
+    ) {
+      return { index: residentIndex.index, source: "cache", cacheFile: file };
+    }
     const cached = readCachedIndex(engineRoot, trees);
-    if (cached) return { index: cached, source: "cache", cacheFile: indexCacheFile(engineRoot, trees) };
+    if (cached) {
+      if (stamp !== null) residentIndex = { cacheFile: file, stamp, index: cached };
+      return { index: cached, source: "cache", cacheFile: file };
+    }
   }
   const started = Date.now();
   const index = buildEngineIndex(engineRoot, trees, options.onProgress);
   const cacheFile = writeCachedIndex(index);
+  const stamp = cacheFile ? cacheStamp(cacheFile) : null;
+  residentIndex = cacheFile && stamp !== null ? { cacheFile, stamp, index } : null;
   return { index, source: "built", cacheFile, buildMs: Date.now() - started };
 }
 

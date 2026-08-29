@@ -13,7 +13,9 @@
  * and what a header the agent just wrote actually references.
  */
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import { treeRoots } from "./engine-analysis.js";
 import {
   lookupMember,
   lookupSymbol,
@@ -271,7 +273,134 @@ export interface UsageResult {
    * that", and those call for opposite next steps.
    */
   engineSourcesAvailable: boolean;
+  /** How many files were read and searched, which is what this cost. */
+  filesScanned: number;
+  /** Set when the search stopped on its time budget rather than on the tree,
+   *  so a short list is never mistaken for a complete one. */
+  truncated?: boolean;
   note?: string;
+}
+
+/** Directories that hold nothing a usage example could come from. */
+const SCAN_SKIP_DIRS = new Set(["Intermediate", "ThirdParty", "Binaries", "Saved", "node_modules"]);
+
+/**
+ * How many reads are asked for at once.
+ *
+ * The cost of this search is not CPU, it is per-file first-touch latency: on
+ * Windows every file opened for the first time goes through the virus
+ * scanner, and reading one file at a time leaves the disk idle in between. On
+ * a cold cache that is 13.7 ms per file, so a tree the size of Runtime costs
+ * over two minutes read serially.
+ *
+ * What actually decides the parallelism is libuv's thread pool, which node
+ * sizes at four unless `UV_THREADPOOL_SIZE` is set before the process starts.
+ * Measured on 4,498 cold headers, in interleaved halves so neither half got
+ * the warmer disk: 30.8 s serial against 7.4 s here, which is the factor of
+ * four the default pool allows. The same batch with the pool raised to 64
+ * runs about three times faster again, so this asks for more than four in
+ * flight: the number costs nothing when the pool cannot supply it, and the
+ * gain is there for any process that does raise it.
+ */
+const SCAN_CONCURRENCY = 24;
+
+/**
+ * Files read per batch.
+ *
+ * Reads are issued in parallel but results are consumed in list order, so the
+ * sites returned are the same ones a single-threaded scan would have found in
+ * the same order. A batch is what buys the parallelism without making the
+ * answer depend on which read happened to finish first.
+ */
+const SCAN_BATCH = 96;
+
+/**
+ * The default wall-clock budget for one search.
+ *
+ * Sized to bound the pathological request without ever cutting an honest one
+ * short. One tree the size of Runtime, read cold, is around 35 seconds and
+ * under a second once the OS has the pages, so a single tree never comes near
+ * this. `trees: "all"` over a launcher install is four times that plus the
+ * whole plugin tree, and that is the request this exists to stop rather than
+ * let run to the action's ten-minute call timeout.
+ */
+const SCAN_BUDGET_MS = 120_000;
+
+interface SourceListing {
+  cpp: string[];
+  headers: string[];
+}
+
+/**
+ * Every .cpp and .h under a directory, depth first.
+ *
+ * One walk, not one per pass. "Does this install ship sources" and "which
+ * files should I read" are the same question asked of the same listing, and
+ * they were being answered by two separate walks of the same tree.
+ */
+function listSources(dir: string): SourceListing {
+  const cpp: string[] = [];
+  const headers: string[] = [];
+  const walk = (at: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(at, { withFileTypes: true });
+    } catch {
+      return; // an unreadable directory is not a reason to fail the search
+    }
+    for (const entry of entries) {
+      const full = path.join(at, entry.name);
+      if (entry.isDirectory()) {
+        if (!SCAN_SKIP_DIRS.has(entry.name)) walk(full);
+        continue;
+      }
+      if (entry.name.endsWith(".cpp")) cpp.push(full);
+      else if (entry.name.endsWith(".h")) headers.push(full);
+    }
+  };
+  walk(dir);
+  return { cpp, headers };
+}
+
+/**
+ * Listings for the engine's own trees, kept for the life of the process.
+ *
+ * An installed engine is read-only, so walking it a second time can only
+ * produce the list we already have. A project tree is deliberately NOT cached:
+ * writing a file and then asking how the symbol in it is used is the normal
+ * order of events here.
+ */
+const engineListings = new Map<string, SourceListing>();
+
+function listEngineTree(dir: string): SourceListing {
+  let listing = engineListings.get(dir);
+  if (!listing) {
+    listing = listSources(dir);
+    engineListings.set(dir, listing);
+  }
+  return listing;
+}
+
+/** Read a batch of files at bounded concurrency, keeping list order. An
+ *  unreadable file comes back as null rather than failing the batch. */
+async function readBatch(files: readonly string[]): Promise<Array<Buffer | null>> {
+  const out: Array<Buffer | null> = new Array(files.length).fill(null);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const at = next++;
+      if (at >= files.length) return;
+      try {
+        out[at] = await fsp.readFile(files[at]);
+      } catch {
+        /* keep the null */
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(SCAN_CONCURRENCY, files.length) }, () => worker()),
+  );
+  return out;
 }
 
 /**
@@ -284,13 +413,42 @@ export interface UsageResult {
  * those this falls back to headers, where Unreal keeps a great deal of inline
  * code, and to the project's own sources, which are often the better example
  * anyway. The result says which happened.
+ *
+ * ## Why it is shaped the way it is
+ *
+ * On a launcher install the fallback has to consider every header in the
+ * tree, because a symbol used inline could be in any of them, and the search
+ * cannot stop early when the answer is "used nowhere in a header", which for
+ * most symbols it is. That is roughly 11,000 files and 80 MB per call, and
+ * three things kept it from being affordable:
+ *
+ *   - the tree was walked twice, once to discover there were no .cpp files
+ *     and again to read the headers;
+ *   - every file was decoded from UTF-8 into a UTF-16 string before being
+ *     tested for the name, though fewer than one file in a thousand holds it,
+ *     so nearly all of that decoding was thrown away;
+ *   - the reads were issued one at a time, which on a cold filesystem cache
+ *     serialises 11,000 virus-scanner round trips.
+ *
+ * So: one walk, remembered; the name matched against the raw bytes and only a
+ * matching file decoded; and reads issued in parallel batches while results
+ * are still consumed in order. The remaining cost is bounded by `budgetMs`,
+ * and a search cut short by it says so rather than returning a short list that
+ * reads as a complete one.
  */
-export function findExampleUsage(
+export async function findExampleUsage(
   engineRoot: string,
   symbol: string,
-  options: { limit?: number; trees?: string[]; projectDir?: string | null } = {},
-): UsageResult {
+  options: {
+    limit?: number;
+    trees?: string[];
+    projectDir?: string | null;
+    /** Wall-clock ceiling. Reached only by a tree far larger than Runtime. */
+    budgetMs?: number;
+  } = {},
+): Promise<UsageResult> {
   const limit = options.limit ?? 10;
+  const deadline = Date.now() + (options.budgetMs ?? SCAN_BUDGET_MS);
   const trees = options.trees ?? ["Runtime"];
   const needle = symbol.includes("::") ? symbol.split("::").pop()! : symbol;
   const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -299,79 +457,92 @@ export function findExampleUsage(
   const use = new RegExp(`\\b${escaped}\\s*[(<:.]`);
   // The line that declares the thing is not an example of using it.
   const declaration = new RegExp(`^\\s*(?:class|struct|enum|virtual|static|template|UFUNCTION|UPROPERTY)\\b`);
+  // Matched against the file's bytes, so a file that cannot contain the name
+  // is ruled out without being decoded.
+  const needleBytes = Buffer.from(needle, "utf-8");
 
   const sites: UsageSite[] = [];
-  let sawCpp = false;
+  let filesScanned = 0;
+  let truncated = false;
 
-  const scan = (dir: string, kind: UsageSite["kind"], root: string): void => {
-    if (sites.length >= limit) return;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
+  const collect = (buffer: Buffer, full: string, root: string, kind: UsageSite["kind"]): void => {
+    if (!buffer.includes(needleBytes)) return;
+    const lines = buffer.toString("utf-8").split(/\r?\n/);
+    for (let i = 0; i < lines.length && sites.length < limit; i++) {
+      const text = lines[i].trim();
+      if (!use.test(text)) continue;
+      if (text.startsWith("//") || text.startsWith("*") || text.startsWith("#")) continue;
+      if (declaration.test(text)) continue;
+      sites.push({
+        file: path.relative(root, full).replace(/\\/g, "/"),
+        line: i + 1,
+        text: text.slice(0, 240),
+        kind,
+      });
     }
-    for (const entry of entries) {
-      if (sites.length >= limit) return;
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name === "Intermediate" || entry.name === "ThirdParty" || entry.name === "Binaries") continue;
-        scan(full, kind, root);
-        continue;
-      }
-      const isCpp = entry.name.endsWith(".cpp");
-      const isHeader = entry.name.endsWith(".h");
-      if (!isCpp && !isHeader) continue;
-      if (isCpp) sawCpp = true;
-      // Headers are the fallback, so they are only read once it is clear the
-      // tree has no sources to prefer.
-      if (isHeader && kind === "source") continue;
+  };
 
-      let source: string;
-      try {
-        source = fs.readFileSync(full, "utf-8");
-      } catch {
-        continue;
+  const scanList = async (
+    files: readonly string[],
+    root: string,
+    kind: UsageSite["kind"],
+  ): Promise<void> => {
+    for (let at = 0; at < files.length; at += SCAN_BATCH) {
+      if (sites.length >= limit) return;
+      if (Date.now() >= deadline) {
+        truncated = true;
+        return;
       }
-      if (!source.includes(needle)) continue;
-      const lines = source.split(/\r?\n/);
-      for (let i = 0; i < lines.length && sites.length < limit; i++) {
-        const text = lines[i].trim();
-        if (!use.test(text)) continue;
-        if (text.startsWith("//") || text.startsWith("*") || text.startsWith("#")) continue;
-        if (declaration.test(text)) continue;
-        sites.push({
-          file: path.relative(root, full).replace(/\\/g, "/"),
-          line: i + 1,
-          text: text.slice(0, 240),
-          kind: isCpp ? kind : "header",
-        });
+      const batch = files.slice(at, at + SCAN_BATCH);
+      const buffers = await readBatch(batch);
+      for (let i = 0; i < batch.length && sites.length < limit; i++) {
+        const buffer = buffers[i];
+        if (!buffer) continue;
+        filesScanned++;
+        collect(buffer, batch[i], root, kind);
       }
     }
   };
 
-  // Pass one: sources only, which is what an example should be.
-  for (const tree of trees) scan(path.join(engineRoot, "Engine", "Source", tree), "source", engineRoot);
-
-  const engineSourcesAvailable = sawCpp;
+  const listings = treeRoots(engineRoot, trees).map(listEngineTree);
+  const engineSourcesAvailable = listings.some((l) => l.cpp.length > 0);
   let note: string | undefined;
 
-  if (!engineSourcesAvailable) {
+  if (engineSourcesAvailable) {
+    // Sources only, which is what an example should be.
+    for (const listing of listings) await scanList(listing.cpp, engineRoot, "source");
+  } else {
     note =
       "This engine install ships headers without .cpp sources, which is normal for a launcher "
       + "install, so no engine call sites exist to find. Results below come from inline code in "
       + "headers and from this project's own sources. A source build of the engine would answer "
       + "this fully.";
-    // Pass two: headers, where Unreal keeps a lot of inline implementation.
-    for (const tree of trees) scan(path.join(engineRoot, "Engine", "Source", tree), "header", engineRoot);
+    // Headers, where Unreal keeps a lot of inline implementation.
+    for (const listing of listings) await scanList(listing.headers, engineRoot, "header");
   }
 
   // The project's own code is often the better example regardless.
   if (options.projectDir && sites.length < limit) {
-    scan(path.join(options.projectDir, "Source"), "project", options.projectDir);
+    const own = listSources(path.join(options.projectDir, "Source"));
+    await scanList(own.cpp, options.projectDir, "project");
+    if (sites.length < limit) await scanList(own.headers, options.projectDir, "header");
   }
 
-  return { symbol, siteCount: sites.length, sites, engineSourcesAvailable, note };
+  if (truncated) {
+    note = (note ? `${note} ` : "")
+      + `The search stopped after ${filesScanned} files on its time budget, so this list is a `
+      + "sample rather than everything there is. Narrow it with a smaller 'trees' list.";
+  }
+
+  return {
+    symbol,
+    siteCount: sites.length,
+    sites,
+    engineSourcesAvailable,
+    filesScanned,
+    truncated: truncated || undefined,
+    note,
+  };
 }
 
 /* ── header lint ───────────────────────────────────────────────────── */

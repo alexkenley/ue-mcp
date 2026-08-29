@@ -9,13 +9,19 @@
  *
  * The end-to-end behaviour against a real engine is asserted in the live tier.
  */
-import { describe, it, expect } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { afterAll, beforeAll, describe, it, expect } from "vitest";
 import {
   includePathFor,
+  indexCacheFile,
   isDefinitionTail,
   isPrivateHeader,
+  loadEngineIndex,
   lookupSymbol,
   moduleFor,
+  readCachedIndex,
   scanHeader,
   splitQualified,
   unprefixed,
@@ -252,5 +258,89 @@ describe("splitQualified", () => {
 
   it("leaves a bare name alone", () => {
     expect(splitQualified("AActor")).toEqual({ member: "AActor" });
+  });
+});
+
+/* ── the cache, and the copy kept in memory ────────────────────────── */
+
+/**
+ * The disk cache turns a minutes-long scan into a file read, and that was
+ * treated as cheap enough to repeat on every call. For a full engine that
+ * file is around 80 MB, so repeating it cost about three quarters of a second
+ * and a couple of hundred megabytes of fresh heap each time, and it evicted
+ * the filesystem cache that the file-reading actions beside it depend on.
+ * What is pinned here is that a second load re-uses the table rather than
+ * rebuilding it from the bytes, and that it still notices a rebuilt file, a
+ * deleted one, and an explicit refresh.
+ */
+describe("loadEngineIndex", () => {
+  const HEADER = "Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h";
+  let temp: string;
+  let engine: string;
+  let previousState: string | undefined;
+
+  beforeAll(() => {
+    previousState = process.env.UE_MCP_USER_STATE;
+    temp = fs.mkdtempSync(path.join(os.tmpdir(), "ue-mcp-engine-index-cache-"));
+    // Redirected, so a run cannot read or write the developer's own index.
+    process.env.UE_MCP_USER_STATE = path.join(temp, "state.json");
+
+    engine = path.join(temp, "Engine_5.8");
+    const header = path.join(engine, HEADER);
+    fs.mkdirSync(path.dirname(header), { recursive: true });
+    fs.writeFileSync(header, `#pragma once\nclass ENGINE_API AActor\n{\n};\n`, "utf-8");
+    const version = path.join(engine, "Engine", "Build", "Build.version");
+    fs.mkdirSync(path.dirname(version), { recursive: true });
+    fs.writeFileSync(version, JSON.stringify({ MajorVersion: 5, MinorVersion: 8, PatchVersion: 0, Changelist: 1 }));
+  });
+
+  afterAll(() => {
+    if (previousState === undefined) delete process.env.UE_MCP_USER_STATE;
+    else process.env.UE_MCP_USER_STATE = previousState;
+    fs.rmSync(temp, { recursive: true, force: true });
+  });
+
+  it("builds once, then serves the same table without re-reading the file", () => {
+    const built = loadEngineIndex(engine, { trees: ["Runtime"] });
+    expect(built.source).toBe("built");
+    expect(built.cacheFile).toBe(indexCacheFile(engine, ["Runtime"]));
+    expect(fs.existsSync(built.cacheFile!)).toBe(true);
+
+    const again = loadEngineIndex(engine, { trees: ["Runtime"] });
+    expect(again.source).toBe("cache");
+    // Identity, not equality: a re-read would parse an equal table out of the
+    // bytes, and parsing the bytes is the cost this exists to avoid.
+    expect(again.index).toBe(built.index);
+    // The bytes on disk still say the same thing, which is what makes the
+    // shortcut safe rather than merely fast.
+    expect(readCachedIndex(engine, ["Runtime"])?.symbolCount).toBe(built.index.symbolCount);
+  });
+
+  it("rebuilds on refresh, and keeps the rebuilt table", () => {
+    const first = loadEngineIndex(engine, { trees: ["Runtime"] });
+    const refreshed = loadEngineIndex(engine, { trees: ["Runtime"], refresh: true });
+    expect(refreshed.source).toBe("built");
+    expect(refreshed.index).not.toBe(first.index);
+    expect(loadEngineIndex(engine, { trees: ["Runtime"] }).index).toBe(refreshed.index);
+  });
+
+  it("notices a cache file written by something else", () => {
+    const held = loadEngineIndex(engine, { trees: ["Runtime"] }).index;
+    const file = indexCacheFile(engine, ["Runtime"]);
+    const edited = { ...held, symbolCount: held.symbolCount + 1 };
+    fs.writeFileSync(file, JSON.stringify(edited));
+
+    const reloaded = loadEngineIndex(engine, { trees: ["Runtime"] });
+    expect(reloaded.source).toBe("cache");
+    expect(reloaded.index).not.toBe(held);
+    expect(reloaded.index.symbolCount).toBe(held.symbolCount + 1);
+  });
+
+  it("rebuilds when the cache file is gone", () => {
+    const held = loadEngineIndex(engine, { trees: ["Runtime"] }).index;
+    fs.rmSync(indexCacheFile(engine, ["Runtime"]), { force: true });
+    const rebuilt = loadEngineIndex(engine, { trees: ["Runtime"] });
+    expect(rebuilt.source).toBe("built");
+    expect(rebuilt.index).not.toBe(held);
   });
 });
