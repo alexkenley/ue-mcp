@@ -75,6 +75,7 @@ const PER_SESSION: Record<string, string> = {
   "context-cli.ts": "Writes one project's context strategy, chosen with --editor.",
   "plugin-cli.ts": "Installs and inspects plugins for one project, chosen with --editor.",
   "feedback-cli.ts": "Scopes the deferred queue and the feedback mode with --editor.",
+  "dialog-cli.ts": "Scopes the dialog handling mode with --editor, one editor at a time.",
   "skills.ts": "Installs and removes agent skills inside one project directory.",
 
   "flow/context.ts": "Carries the session a flow step runs in.",
@@ -140,6 +141,7 @@ const SESSION_INDEPENDENT: Record<string, string> = {
   "flow/events.ts": "One process-wide event bus. Which editor a run belongs to rides on the event, not here.",
   "flow/schema.ts": "Shared flow schema declarations.",
   "flow/rollback.ts": "Pure shaping of a rollback record.",
+  "flow/handler-outcome.ts": "Pure reading of a handler's own verdict off the body it answered with.",
   "flow/write-methods.ts": "Pure classification of a bridge method name.",
   "flow/index.ts": "Re-export barrel with no behaviour.",
 

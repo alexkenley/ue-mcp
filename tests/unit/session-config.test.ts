@@ -160,8 +160,9 @@ describe("collapsing env warnings", () => {
       UE_MCP_ENV: "ci",
       UE_MCP_CONTEXT_STRATEGY: "lean",
       UE_MCP_FEEDBACK_MODE: "defer",
+      UE_MCP_DIALOG_MODE: "auto",
     });
-    expect(lines).toHaveLength(7);
+    expect(lines).toHaveLength(8);
   });
 
   it("say nothing about variables nobody set", () => {

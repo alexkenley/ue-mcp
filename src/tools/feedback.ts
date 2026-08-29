@@ -13,6 +13,7 @@ import {
   type FallbackReport,
 } from "../feedback-fallback.js";
 import { getFeedbackMode, type FeedbackMode } from "../user-state.js";
+import { clientAdvertisesElicitation } from "../editor-control.js";
 import { warn } from "../log.js";
 import { routeFeedback, type RoutingDecision } from "../feedback-routing.js";
 import { CORE_REPO, newIssueUrl, parseRepoSlug, repoSlug, sameRepo, type GitHubRepo } from "../registry-catalog.js";
@@ -694,7 +695,14 @@ export const feedbackTool: ToolDef = categoryTool(
         // The client never advertised elicitation, so there is no form to
         // show. Previously a dead end; now it degrades to the fallback, which
         // needs nothing from the client at all.
-        if (mode === "interactive" && !ctx.elicit) {
+        //
+        // Asked as a capability, not as "is there a function". The server
+        // builds the gate at startup, before any client has connected, so
+        // ctx.elicit is defined for every client and testing it for undefined
+        // made this branch unreachable: a client that advertised nothing got
+        // the elicitation path and its error, rather than the fallback that
+        // needs nothing from it.
+        if (mode === "interactive" && !clientAdvertisesElicitation(ctx.elicit)) {
           const report = saveFallback("client did not advertise the elicitation capability");
           return elicitationFallbackDirective(
             `[FEEDBACK NOT SUBMITTED - NO APPROVAL CHANNEL]`,
@@ -867,8 +875,10 @@ export const feedbackTool: ToolDef = categoryTool(
         }
 
         // ── Interactive mode (default): elicitation gate ───────────
-        // NOTE: ctx.elicit is guaranteed defined here because the
-        // mode === "interactive" + !ctx.elicit case returned above.
+        // NOTE: ctx.elicit is guaranteed defined here. The capability check
+        // above returns for interactive mode when the client advertised no
+        // elicitation, and a missing gate is one of the states that check
+        // reports as "cannot be asked", so nothing reaches here without one.
         let elicitResult;
         // #772: a client that never renders the form still answers, and it
         // answers instantly. Time the round trip so an auto-decline can be
