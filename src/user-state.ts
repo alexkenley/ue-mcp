@@ -29,9 +29,29 @@ interface ProjectState {
    *  per-session equivalent of UE_MCP_FEEDBACK_MODE without moving it into
    *  tracked project yaml, where it does not belong. */
   feedback?: { mode?: FeedbackMode };
+  /** Per-project dialog handling mode. Same preference as the user-wide one
+   *  below, scoped to one project root, for the same reason the feedback mode
+   *  is: one editor can be a long unattended run while the user sits in front
+   *  of another. */
+  dialog?: { mode?: DialogMode };
 }
 
 export type FeedbackMode = "interactive" | "auto-approve" | "defer";
+
+/**
+ * How a modal dialog blocking the editor is handled.
+ *
+ *   interactive - put the dialog to the user in an MCP elicitation form, with
+ *                 its own buttons as the choices, and press only what they pick.
+ *   auto        - hand the dialog back in full and let the agent choose and
+ *                 answer it. The server presses nothing.
+ *   defer       - suspend: press nothing, elicit nothing, and tell the user a
+ *                 dialog is blocking the editor and needs answering by hand.
+ *
+ * Same three-value shape as FeedbackMode, read the same way, defaulted in one
+ * place (resolveDialogMode in editor-control.ts).
+ */
+export type DialogMode = "interactive" | "auto" | "defer";
 
 interface Preferences {
   /** Per-user, per-device feedback approval mode. Set via
@@ -39,6 +59,10 @@ interface Preferences {
    *  preference varies per developer / per machine (am I at the keyboard,
    *  is this a long unattended run, etc.). */
   feedback?: { mode?: FeedbackMode };
+  /** Per-user, per-device dialog handling mode. NOT in project yaml for the
+   *  same reason: whether a person is at the keyboard to answer a modal is a
+   *  property of the machine and the session, not of the project. */
+  dialog?: { mode?: DialogMode };
 }
 
 interface UserState {
@@ -57,7 +81,16 @@ function readState(): UserState {
   const file = statePath();
   if (!fs.existsSync(file)) return {};
   try {
-    return JSON.parse(fs.readFileSync(file, "utf-8")) as UserState;
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf-8"));
+    // A catch on JSON.parse only covers a file that is not JSON at all. `null`,
+    // `[]`, `3` and `true` are all valid JSON documents and none of them is a
+    // state object, so returning what parsed handed every reader something to
+    // dereference: `state.projects` on null throws a TypeError with no
+    // explanation, out of a call that had nothing to do with preferences. Every
+    // reader below assumes an object, so this is the one place to insist on it.
+    // A file that is not one is treated exactly like a file that is not there.
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as UserState;
   } catch {
     return {};
   }
@@ -76,6 +109,7 @@ function writeState(state: UserState): void {
         delete proj.installedHooks;
       }
       if (proj.feedback && proj.feedback.mode === undefined) delete proj.feedback;
+      if (proj.dialog && proj.dialog.mode === undefined) delete proj.dialog;
       if (Object.keys(proj).length === 0) {
         delete state.projects[key];
       }
@@ -87,6 +121,8 @@ function writeState(state: UserState): void {
   if (state.preferences) {
     const fb = state.preferences.feedback;
     if (fb && fb.mode === undefined) delete state.preferences.feedback;
+    const dlg = state.preferences.dialog;
+    if (dlg && dlg.mode === undefined) delete state.preferences.dialog;
     if (Object.keys(state.preferences).length === 0) {
       delete state.preferences;
     }
@@ -125,8 +161,26 @@ export function setInstalledHooks(projectRoot: string, hooks: string[]): void {
   writeState(state);
 }
 
+/**
+ * Read a stored mode the way the env var is read: trimmed and case-folded.
+ *
+ * The same rule as asDialogMode below, deliberately. These are two adjacent
+ * keys in one file, and a user who learns that " AUTO " works for one of them
+ * has learned something false about the other.
+ *
+ * This is kept knowing what it costs: a hand-edited state.json holding
+ * "AUTO-APPROVE" used to fall back to interactive, and now resolves to
+ * auto-approve, so upgrading removes that user's approval prompt. It is still
+ * the right reading. Nothing writes this key but setFeedbackMode, which stores
+ * the canonical spelling, so the only way to hold "AUTO-APPROVE" is to have
+ * typed it, and somebody who typed the name of a mode named that mode. The old
+ * behaviour was not a safety gate: it was a value silently ignored, with the
+ * effective mode reported nowhere the person who wrote it would look. Honouring
+ * what they wrote is the reading that can be checked against the file.
+ */
 function asFeedbackMode(mode: unknown): FeedbackMode | undefined {
-  return mode === "interactive" || mode === "auto-approve" || mode === "defer" ? mode : undefined;
+  const named = typeof mode === "string" ? mode.trim().toLowerCase() : mode;
+  return named === "interactive" || named === "auto-approve" || named === "defer" ? named : undefined;
 }
 
 /**
@@ -169,6 +223,90 @@ export function setFeedbackMode(mode: FeedbackMode | undefined, projectRoot?: st
     delete state.preferences.feedback.mode;
   } else {
     state.preferences.feedback.mode = mode;
+  }
+  writeState(state);
+}
+
+/**
+ * Read a stored mode the way the env var is read: trimmed and case-folded.
+ *
+ * The env override lowercases, so "AUTO" there is auto. A stored value that
+ * demanded an exact match made the same word in state.json fall through to the
+ * default without a word said, which is the kind of difference nobody finds by
+ * reading their own config.
+ */
+function asDialogMode(mode: unknown): DialogMode | undefined {
+  const named = typeof mode === "string" ? mode.trim().toLowerCase() : mode;
+  return named === "interactive" || named === "auto" || named === "defer" ? named : undefined;
+}
+
+/**
+ * The dialog handling mode, for one project or for this user.
+ *
+ * Read exactly like the feedback mode above, and stored in the same file under
+ * `dialog.mode`: a project's own preference wins over the user-wide one when it
+ * has been set, and nothing here reads project yaml, because whether somebody
+ * is at the keyboard to answer a modal is a property of the machine and the
+ * session rather than of the project.
+ *
+ * Returns undefined when nothing is stored. The default is NOT decided here:
+ * it depends on whether the connected client advertised elicitation, which this
+ * module cannot see. resolveDialogMode in editor-control.ts owns it.
+ */
+export function getDialogMode(projectRoot?: string | null): DialogMode | undefined {
+  const state = readState();
+  if (projectRoot) {
+    const scoped = asDialogMode(state.projects?.[projectKey(projectRoot)]?.dialog?.mode);
+    if (scoped) return scoped;
+  }
+  return asDialogMode(state.preferences?.dialog?.mode);
+}
+
+/**
+ * The dialog mode each scope holds, without the fallback.
+ *
+ * getDialogMode answers "what applies", which is the right question for the
+ * server and the wrong one for a display: it falls back to the user preference,
+ * so a caller printing its result as the project's own value reports a value
+ * the project never set. This answers "what is set where".
+ */
+export function getDialogModeScopes(projectRoot?: string | null): {
+  project?: DialogMode;
+  user?: DialogMode;
+} {
+  const state = readState();
+  return {
+    project: projectRoot
+      ? asDialogMode(state.projects?.[projectKey(projectRoot)]?.dialog?.mode)
+      : undefined,
+    user: asDialogMode(state.preferences?.dialog?.mode),
+  };
+}
+
+/** Set or clear the dialog mode preference. Pass undefined to clear. */
+export function setDialogMode(mode: DialogMode | undefined, projectRoot?: string | null): void {
+  const state = readState();
+  // Normalised on the way in as well as on the way out, so the file never holds
+  // a spelling that only one of the two readers accepts.
+  if (mode !== undefined) mode = asDialogMode(mode) ?? mode;
+  if (projectRoot) {
+    const key = projectKey(projectRoot);
+    if (!state.projects) state.projects = {};
+    if (!state.projects[key]) state.projects[key] = {};
+    if (mode === undefined) {
+      delete state.projects[key].dialog;
+    } else {
+      state.projects[key].dialog = { mode };
+    }
+    writeState(state);
+    return;
+  }
+  if (!state.preferences) state.preferences = {};
+  if (!state.preferences.dialog) state.preferences.dialog = {};
+  if (mode === undefined) {
+    delete state.preferences.dialog.mode;
+  } else {
+    state.preferences.dialog.mode = mode;
   }
   writeState(state);
 }

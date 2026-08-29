@@ -17,6 +17,7 @@ import {
 } from "./engine-observer.js";
 import { findLiveInstanceRecord, isPidAlive, lockfileIsFromThisLaunch, resolveBridgeTarget } from "./editor-target.js";
 import { startProgress } from "./ui/progress.js";
+import { getDialogMode, getUserStatePath, type DialogMode } from "./user-state.js";
 import type { ElicitFn, ProgressFn } from "./types.js";
 
 // Process control is cross-platform: the editor binary path and the running-
@@ -227,7 +228,19 @@ async function waitForEditorReady(
   projectPath: string | null | undefined,
   projectDir: string | undefined,
   maxWaitSeconds: number,
-  opts: { showProgress?: boolean; onProgress?: ProgressFn; launchedAtMs?: number } = {},
+  opts: {
+    showProgress?: boolean;
+    onProgress?: ProgressFn;
+    launchedAtMs?: number;
+    /**
+     * Whether a dialog seen during startup is reported with the call that
+     * presses each button. False under defer, whose whole promise is that the
+     * report is for recognition and carries nothing that actuates. Defaults to
+     * true: a direct start_editor has no mode to consult, and the report is the
+     * same under every mode there.
+     */
+    pressCalls?: boolean;
+  } = {},
 ): Promise<ReadyResult> {
   const startTime = Date.now();
   const maxWaitMs = maxWaitSeconds * 1000;
@@ -332,17 +345,29 @@ async function waitForEditorReady(
       // The whole question, not a summary of it. A startup that stops on a
       // dialog stops because somebody has to read it and decide, and nothing
       // here answers it for them.
+      //
+      // The dialog handling mode does not reach this branch, and saying why
+      // matters: this is a launch that has not finished, the bridge is not
+      // answering yet, so there is no socket to deliver respond_to_dialog on
+      // and no mode could press anything even if one asked. Every mode behaves
+      // the same here - report it, press nothing - which is defer's behaviour
+      // and the safe one. Answering a prompt raised this early is what
+      // start_editor's dialogPolicy parameter is for, and it is armed by a
+      // caller, in advance, on purpose.
       const buttons = (snapshot.modal.buttons ?? []).filter((b) => b !== "");
       return finish({
         ready: false,
         elapsedSeconds: elapsed(),
         timeline,
-        reason: describeBlockingDialog({
-          title: snapshot.modal.title,
-          message: snapshot.modal.message ?? "",
-          buttons,
-          choices: buttons.map((label) => ({ buttonLabel: label, respondWith: respondCallFor(label) })),
-        }),
+        reason: describeBlockingDialog(
+          {
+            title: snapshot.modal.title,
+            message: snapshot.modal.message ?? "",
+            buttons,
+            choices: buttons.map((label) => ({ buttonLabel: label, respondWith: respondCallFor(label) })),
+          },
+          { pressCalls: opts.pressCalls !== false },
+        ),
         state: await readEngineState(projectPath ?? null),
       });
     }
@@ -505,6 +530,14 @@ export async function startEditor(
      * leaves the sharpest part of the tier unexercised by default.
      */
     paramEcho?: boolean;
+
+    /**
+     * Passed through to the startup wait: false withholds the per-button
+     * respond_to_dialog calls from a dialog raised during startup. Set by
+     * restartEditor when the dialog handling mode is defer, so the restart
+     * keeps defer's no-actuation promise across both halves. Defaults to true.
+     */
+    pressCalls?: boolean;
   } = {},
 ): Promise<{ success: boolean; message: string; state?: EngineState; timeline?: ReadyPhase[]; elapsedSeconds?: number }> {
   // Every check below is about ONE editor: the one holding this project. Know
@@ -567,7 +600,11 @@ export async function startEditor(
     // Hold here until the editor is actually usable, drawing the startup as a
     // progress bar. Returning as soon as the socket answered is what left
     // callers polling get_engine_state in a loop while shaders compiled.
-    const result = await waitForEditorReady(project.projectPath, projectDir, timeoutSeconds, { onProgress, launchedAtMs });
+    const result = await waitForEditorReady(project.projectPath, projectDir, timeoutSeconds, {
+      onProgress,
+      launchedAtMs,
+      pressCalls: opts.pressCalls,
+    });
 
     if (!result.ready) {
       return {
@@ -776,8 +813,30 @@ export interface BlockingDialog {
   message: string;
   /** Every button label, in the order the dialog lays them out. */
   buttons: string[];
-  /** Each button paired with the exact call that presses it. */
-  choices: { buttonLabel: string; respondWith: string }[];
+  /**
+   * Each button paired with the exact call that presses it.
+   *
+   * `respondWith` is the ACTUATION half and it is omitted in defer mode, where
+   * the report exists so a person can recognise the window in front of them
+   * and answer it there. Handing the call back in defer left the mode differing
+   * from auto in prose alone, and an agent optimising for completion uses what
+   * it is given.
+   */
+  choices: { buttonLabel: string; respondWith?: string }[];
+}
+
+/**
+ * The same dialog, reported for recognition rather than actuation.
+ *
+ * Title, whole message and every button label in the order the dialog lays them
+ * out all survive: that is what a person reads to find the window and decide.
+ * What goes is the call that presses each button.
+ */
+export function forRecognitionOnly(dialog: BlockingDialog): BlockingDialog {
+  return {
+    ...dialog,
+    choices: dialog.choices.map((choice) => ({ buttonLabel: choice.buttonLabel })),
+  };
 }
 
 /**
@@ -827,9 +886,20 @@ async function readBlockingDialog(port: number, host: string): Promise<BlockingD
  * the reader's decision and the report exists so they can make it from what the
  * editor actually asked, rather than from a summary of it.
  */
-export function describeBlockingDialog(dialog: BlockingDialog): string {
+export function describeBlockingDialog(
+  dialog: BlockingDialog,
+  opts: { pressCalls?: boolean; answeredByUser?: string } = {},
+): string {
+  const pressCalls = opts.pressCalls !== false;
+  // "Nothing was answered for you" is false once the user has answered one
+  // through the elicitation prompt and a second dialog has come up behind it.
+  // The line has to describe the call it is part of, not the common case.
+  const lead = opts.answeredByUser
+    ? `A modal dialog is blocking the editor. You answered "${opts.answeredByUser}" and this one came up ` +
+      "behind it; nothing else was sent to it and no button was pressed here that you did not choose."
+    : "A modal dialog is blocking the editor, so nothing was sent to it and nothing was answered for you.";
   const lines = [
-    `A modal dialog is blocking the editor, so nothing was sent to it and nothing was answered for you.`,
+    lead,
     "",
     `Title: ${dialog.title}`,
     "Message:",
@@ -837,17 +907,153 @@ export function describeBlockingDialog(dialog: BlockingDialog): string {
     "",
   ];
   if (dialog.choices.length > 0) {
-    lines.push("Buttons, in the order the dialog lays them out. Press one:");
+    lines.push(
+      pressCalls
+        ? "Buttons, in the order the dialog lays them out. Press one:"
+        : "Buttons, in the order the dialog lays them out, so you can find this window:",
+    );
     for (const [index, choice] of dialog.choices.entries()) {
-      lines.push(`  ${index + 1}. ${choice.buttonLabel}   ${choice.respondWith}`);
+      const call = pressCalls && choice.respondWith ? `   ${choice.respondWith}` : "";
+      lines.push(`  ${index + 1}. ${choice.buttonLabel}${call}`);
     }
-  } else {
+  } else if (pressCalls) {
     lines.push(
       "The dialog exposes no button label that can be read, so there is nothing to name. " +
         "editor(action='respond_to_dialog', action='close') destroys the window, which is not the same as answering it.",
     );
+  } else {
+    lines.push("The dialog exposes no button label that can be read, so there is nothing to name here either.");
   }
   return lines.join("\n");
+}
+
+/**
+ * The dialog handling mode that applied, and why it applied.
+ *
+ * The "why" is reported because the mode is resolved from three places and a
+ * caller who sees a dialog handled differently than they expected needs to know
+ * which one decided it, without reading the server's source.
+ */
+export interface ResolvedDialogMode {
+  mode: DialogMode;
+  /** Where the mode came from, in the reader's terms. */
+  source: string;
+}
+
+/**
+ * Whether the user behind this call can actually be shown a form.
+ *
+ * NOT "was an elicit function handed over". The shipped server builds that
+ * function at startup, before a client has connected, so it is always present
+ * and testing it for undefined answers a different question: it says the server
+ * has a gate, not that the client has a UI. Reading it that way put every
+ * client that advertised nothing into the interactive path and reported the
+ * reason as "the client advertised elicitation", which was false.
+ *
+ * A gate built outside the server (tests, embedders) carries no probe and is
+ * taken at face value: it was handed over deliberately.
+ */
+export function clientAdvertisesElicitation(elicit?: ElicitFn): boolean {
+  if (!elicit) return false;
+  if (typeof elicit.clientAdvertisesElicitation === "function") {
+    return elicit.clientAdvertisesElicitation();
+  }
+  return true;
+}
+
+/**
+ * Resolve the dialog handling mode. Precedence (highest wins), the same shape
+ * the feedback approval mode uses:
+ *
+ *   1. UE_MCP_DIALOG_MODE env var         - per-process override
+ *   2. ~/.ue-mcp/state.json, this project - per-project, `dialog.mode`
+ *   3. ~/.ue-mcp/state.json preference    - per-user-per-device, `dialog.mode`
+ *   4. default: "interactive" when the connected client advertised MCP
+ *      elicitation, otherwise "defer"
+ *
+ * THE DEFAULT NEVER RESOLVES TO "auto". A dialog is a question for a person,
+ * and with no channel to that person the safe answer is to suspend and say so,
+ * never to let something decide it because asking was inconvenient. "auto" is
+ * reachable only by being named, in the env var or in the stored preference.
+ *
+ * An unrecognised env value is ignored rather than guessed at, and the fact
+ * that it was ignored travels in `source` so a typo does not silently change
+ * how dialogs are handled.
+ *
+ * Mode is NOT read from ue-mcp.yml, for the reason the feedback mode is not:
+ * whether a person is at the keyboard to answer a modal is a property of the
+ * machine and the session, not project policy a collaborator should inherit.
+ */
+export function resolveDialogMode(opts: {
+  projectDir?: string | null;
+  /** Whether the connected MCP client advertised the elicitation capability. */
+  canElicit: boolean;
+  env?: NodeJS.ProcessEnv;
+}): ResolvedDialogMode {
+  const raw = ((opts.env ?? process.env).UE_MCP_DIALOG_MODE ?? "").trim().toLowerCase();
+  if (raw === "interactive" || raw === "auto" || raw === "defer") {
+    return { mode: raw, source: `UE_MCP_DIALOG_MODE=${raw}` };
+  }
+  const ignored = raw === "" ? "" : ` (UE_MCP_DIALOG_MODE="${raw}" names no mode and was ignored)`;
+
+  const stored = getDialogMode(opts.projectDir ?? null);
+  if (stored) {
+    return { mode: stored, source: `dialog.mode in ${getUserStatePath()}${ignored}` };
+  }
+
+  return opts.canElicit
+    ? { mode: "interactive", source: `default, because this MCP client advertised elicitation${ignored}` }
+    : {
+        mode: "defer",
+        source:
+          "default, because this MCP client did not advertise elicitation, and the fallback is defer" +
+          ` rather than auto${ignored}`,
+      };
+}
+
+/**
+ * What the caller is told to do about a dialog nothing pressed, per mode.
+ *
+ * Every branch here ends with the dialog still up and no button pressed. The
+ * modes differ in who is being asked to deal with it, which is the whole point
+ * of having them, so each says that plainly rather than leaving the reader to
+ * infer it from a mode name.
+ */
+function dialogModeGuidance(
+  resolved: ResolvedDialogMode,
+  canElicit: boolean,
+  opts: { quitSent?: boolean } = {},
+): string {
+  const applied = `Dialog handling mode: ${resolved.mode} (${resolved.source}).`;
+  // Whether a quit went out is a fact about the call, and this text is reused
+  // on both sides of it: before the quit, where nothing was asked to close, and
+  // after it, where the dialog came up behind a quit already in flight.
+  const quitState = opts.quitSent
+    ? "The quit went out before this dialog appeared and the editor has not closed."
+    : "The editor was not asked to quit.";
+  if (resolved.mode === "auto") {
+    return (
+      `${applied} Nothing was pressed for you: in auto mode the whole dialog is handed back and the ` +
+      "choice is yours. Press the button you choose with the call listed beside it, then call " +
+      "editor(action='stop_editor') again."
+    );
+  }
+  if (resolved.mode === "interactive" && !canElicit) {
+    return (
+      `${applied} Interactive mode shows this dialog to the user in an MCP elicitation form, and this ` +
+      "client did not advertise that capability, so no form could be shown and nothing was pressed. " +
+      "Answer the dialog in the Unreal Editor window, or set UE_MCP_DIALOG_MODE=auto to answer it from " +
+      "here with editor(action='respond_to_dialog'), then call editor(action='stop_editor') again."
+    );
+  }
+  if (resolved.mode === "interactive") {
+    return `${applied} ${quitState} Answer the dialog, then call editor(action='stop_editor') again.`;
+  }
+  return (
+    `${applied} Nothing was pressed and nothing was asked of you: in defer mode a blocking dialog is ` +
+    "left alone. Go to the Unreal Editor window and answer the dialog quoted above yourself, then call " +
+    "editor(action='stop_editor') again."
+  );
 }
 
 /**
@@ -918,19 +1124,29 @@ async function askUserToAnswerDialog(
  * in the report: title, the message in full, and the exact call for every
  * button. Nothing is truncated and no button is recommended.
  */
-function blockedStopDetail(state: EngineState): string {
+function blockedStopDetail(
+  state: EngineState,
+  opts: { pressCalls?: boolean; answeredByUser?: string } = {},
+): string {
   const modal = state.snapshot?.modal;
   if (!modal) return ` ${state.summary}`;
 
   const buttons = (modal.buttons ?? []).filter((b) => b !== "");
   return (
     " " +
-    describeBlockingDialog({
-      title: modal.title,
-      message: modal.message ?? "",
-      buttons,
-      choices: buttons.map((label) => ({ buttonLabel: label, respondWith: respondCallFor(label) })),
-    })
+    describeBlockingDialog(
+      {
+        title: modal.title,
+        message: modal.message ?? "",
+        buttons,
+        choices: buttons.map((label) => ({ buttonLabel: label, respondWith: respondCallFor(label) })),
+      },
+      // answeredByUser travels the whole way down. This renderer is reached
+      // AFTER the interactive path may have pressed a button, and the lead line
+      // describeBlockingDialog writes without it says nothing was answered for
+      // you, which is a denial of the press that just happened.
+      { pressCalls: opts.pressCalls, answeredByUser: opts.answeredByUser },
+    )
   );
 }
 
@@ -1065,6 +1281,28 @@ export interface StopEditorResult {
   blockingDialog?: BlockingDialog;
   /** Set when the user answered the dialog through an elicitation prompt. */
   dialogAnsweredByUser?: string;
+  /** Which dialog handling mode applied, set whenever a dialog was in the way. */
+  dialogMode?: DialogMode;
+  /** Why that mode applied: the env var, the stored preference, or the default. */
+  dialogModeSource?: string;
+}
+
+/**
+ * What a restart returns. It is the start's result plus the stop half's account
+ * of any dialog met on the way, because the restart's stop is a full
+ * editor(stop_editor) and a caller cannot see which dialog handling mode
+ * applied if the fields are dropped on the way out.
+ */
+export interface RestartEditorResult {
+  success: boolean;
+  message: string;
+  state?: EngineState;
+  timeline?: ReadyPhase[];
+  elapsedSeconds?: number;
+  blockingDialog?: BlockingDialog;
+  dialogAnsweredByUser?: string;
+  dialogMode?: DialogMode;
+  dialogModeSource?: string;
 }
 
 /**
@@ -1072,11 +1310,20 @@ export interface StopEditorResult {
  * and it offers no flag that would discard them, because there is not one:
  * losing unsaved work is not something this tool can be asked to do.
  */
-function unsavedWorkRefusal(dirty: string[]): string {
+function unsavedWorkRefusal(dirty: string[], answeredByUser?: string): string {
+  // "The editor is exactly as it was" is only true when nothing was sent, and
+  // this refusal is also reached AFTER a dialog the user answered through the
+  // elicitation prompt. On a save prompt that button may have written packages
+  // to disk, so claiming the editor is untouched described the wrong call. The
+  // sentence is now the one that matches what happened.
+  const untouched = answeredByUser
+    ? `You answered its dialog with "${answeredByUser}", so that button was pressed and whatever it did has ` +
+      "already happened. Nothing has been sent to the editor since, no quit went out, and no dialog is open now. "
+    : "Nothing was sent to the editor, so no save prompt is open and the editor is exactly as it was. ";
   return (
     `Refusing to stop the editor: ${dirty.length} unsaved package${dirty.length === 1 ? " is" : "s are"} ` +
     `still dirty and stopping would lose ${dirty.length === 1 ? "it" : "them"}. Unsaved: ${dirty.join(", ")}. ` +
-    "Nothing was sent to the editor, so no save prompt is open and the editor is exactly as it was. " +
+    untouched +
     "Save them with editor(action='save_dirty') and re-call this, save the ones you want with level(save) or " +
     "asset(save) first, or close the editor yourself and answer its save prompt by hand."
   );
@@ -1097,10 +1344,21 @@ function unsavedWorkRefusal(dirty: string[]): string {
  * not sent in that case, so no save prompt is raised, nothing hangs, and
  * nothing is lost.
  *
- * There is deliberately no flag that discards. Where the client supports MCP
- * elicitation, a blocking dialog is put to the person instead, with the
- * dialog's own buttons as the choices, and only the button THEY pick is
- * pressed.
+ * There is deliberately no flag that discards.
+ *
+ * What happens to a blocking dialog is the caller's choice, through the dialog
+ * handling mode (resolveDialogMode above):
+ *
+ *   interactive - the dialog is put to the person over MCP elicitation, with
+ *                 its own buttons as the choices, and only the button THEY pick
+ *                 is pressed. The default when the client advertised
+ *                 elicitation.
+ *   auto        - the dialog is handed back whole, every button paired with the
+ *                 exact call that presses it, and the agent decides. The server
+ *                 presses nothing.
+ *   defer       - nothing is pressed and nothing is elicited. The dialog is
+ *                 quoted and the user is told to answer it in the editor. The
+ *                 default when the client did not advertise elicitation.
  *
  * The port comes from what this project published and nowhere else, and the
  * process behind it is checked before the quit goes out (#819).
@@ -1110,9 +1368,37 @@ export async function stopEditor(
   opts: {
     /** Ask the connected client's user, when it advertised elicitation. */
     elicit?: ElicitFn;
+    /**
+     * How long each poll of the confirm wait sleeps, in milliseconds.
+     *
+     * Internal, defaulted to a second, and not reachable from the tool schema:
+     * it exists so the waiting paths (the 20 polls for the port to close, and
+     * the 10 after a dialog was answered) can be exercised by a test in
+     * milliseconds instead of half a minute. Production passes nothing.
+     */
+    confirmPollMs?: number;
   } = {},
 ): Promise<StopEditorResult> {
   const projectPath = uprojectInDir(projectDir);
+  // Resolved once, up front, so every dialog this stop can run into is handled
+  // by the same mode and reports the same reason for it.
+  // Whether the user can be shown a form is a property of the CONNECTED
+  // client, not of whether a gate function was handed over. See
+  // clientAdvertisesElicitation.
+  const canElicit = clientAdvertisesElicitation(opts.elicit);
+  const confirmPollMs = opts.confirmPollMs ?? 1000;
+  /**
+   * Whether this call hands back the call that presses each button.
+   *
+   * defer says the server suspends and a person deals with the dialog in the
+   * editor. A payload carrying the exact respond_to_dialog call per button
+   * makes defer and auto differ in prose alone, and an agent optimising for
+   * completion presses one, which is auto behaviour wearing a defer label. So
+   * defer reports the dialog for RECOGNITION - exact title, whole message,
+   * every button label in order - and nothing that actuates it.
+   */
+  const dialogMode = resolveDialogMode({ projectDir, canElicit });
+  const pressCalls = dialogMode.mode !== "defer";
   const ownership = await resolveOwnedEditor(projectDir, projectPath);
   if (!ownership.owned) {
     return { success: false, message: ownership.message, ...(ownership.state ? { state: ownership.state } : {}) };
@@ -1128,10 +1414,14 @@ export async function stopEditor(
     // "Unreachable" is where the user is left guessing, so say what the engine
     // is actually doing: a modal dialog waiting on an answer, a slow task at
     // 60%, or a game thread that stopped ticking are all visible from outside.
+    //
+    // The mode does not decide anything here: respond_to_dialog travels over
+    // the bridge, and the bridge is what is unreachable, so a dialog seen from
+    // outside is reported and pressed by nobody under every mode.
     const state = await readEngineState(projectPath, { probeWindows: true });
     return {
       success: false,
-      message: `Editor is running but its bridge is unreachable, so it cannot be asked to quit cleanly.${blockedStopDetail(state)} Close it manually - ue-mcp never force-kills processes.`,
+      message: `Editor is running but its bridge is unreachable, so it cannot be asked to quit cleanly.${blockedStopDetail(state, { pressCalls })} Close it manually - ue-mcp never force-kills processes.`,
       state,
     };
   }
@@ -1142,8 +1432,32 @@ export async function stopEditor(
   // before sending, and report the whole question rather than acting on it.
   let dialog = await readBlockingDialog(port, host);
   let answeredByUser: string | undefined;
+  /** Whether any dialog was in the way, which is when the mode decided anything. */
+  let dialogSeen = dialog !== null;
+
+  /**
+   * What every return below says about the dialog, gated on WHAT HAPPENED
+   * rather than on what is still on screen.
+   *
+   * A dialog the user answered is gone by the time the later returns run, so
+   * keying these off the live dialog dropped the mode, its reason and the
+   * button the user pressed from exactly the results that came after a press.
+   * dialogSeen and answeredByUser are facts about the call and never go back to
+   * false.
+   */
+  const dialogFields = (): Partial<StopEditorResult> =>
+    dialogSeen
+      ? {
+          dialogMode: dialogMode.mode,
+          dialogModeSource: dialogMode.source,
+          ...(answeredByUser ? { dialogAnsweredByUser: answeredByUser } : {}),
+        }
+      : {};
   if (dialog) {
-    if (opts.elicit) {
+    // Interactive is the ONLY mode that reaches a button, and only through the
+    // user's own pick in the elicitation form. auto and defer both leave the
+    // dialog exactly where it is.
+    if (dialogMode.mode === "interactive" && canElicit && opts.elicit) {
       const pressed = await askUserToAnswerDialog(port, host, dialog, opts.elicit);
       if (pressed !== null) {
         answeredByUser = pressed;
@@ -1156,14 +1470,12 @@ export async function stopEditor(
       return {
         success: false,
         refusedReason: "blocking-dialog",
-        blockingDialog: dialog,
-        ...(answeredByUser ? { dialogAnsweredByUser: answeredByUser } : {}),
+        blockingDialog: pressCalls ? dialog : forRecognitionOnly(dialog),
+        ...dialogFields(),
         message:
-          describeBlockingDialog(dialog) +
-          (answeredByUser
-            ? `\n\nYou pressed "${answeredByUser}" on the previous dialog and this one came up behind it. `
-            : "\n\n") +
-          "The editor was not asked to quit. Answer the dialog, then call editor(action='stop_editor') again.",
+          describeBlockingDialog(dialog, { pressCalls, answeredByUser }) +
+          "\n\n" +
+          dialogModeGuidance(dialogMode, canElicit),
       };
     }
   }
@@ -1181,12 +1493,14 @@ export async function stopEditor(
         success: false,
         refusedReason: "unsaved-work",
         dirtyPackages: dirty,
-        message: unsavedWorkRefusal(dirty),
+        ...dialogFields(),
+        message: unsavedWorkRefusal(dirty, answeredByUser),
       };
     }
     const why = typeof shutdown.result?.error === "string" ? shutdown.result.error : "it gave no reason";
     return {
       success: false,
+      ...dialogFields(),
       message:
         `The editor refused to schedule its own shutdown: ${why}. Nothing was asked to quit. ` +
         "ue-mcp never force-kills processes.",
@@ -1206,6 +1520,7 @@ export async function stopEditor(
       return {
         success: false,
         refusedReason: "unknown-dirty-state",
+        ...dialogFields(),
         message:
           `${cause}, so whether anything is unsaved cannot be established and stopping would risk losing it. ` +
           "Nothing was asked to quit. Save with editor(action='save_dirty'), or close the editor yourself and " +
@@ -1217,13 +1532,15 @@ export async function stopEditor(
         success: false,
         refusedReason: "unsaved-work",
         dirtyPackages: fallbackDirty,
-        message: unsavedWorkRefusal(fallbackDirty),
+        ...dialogFields(),
+        message: unsavedWorkRefusal(fallbackDirty, answeredByUser),
       };
     }
 
     if (!(await requestPythonSelfQuit(port, host))) {
       return {
         success: false,
+        ...dialogFields(),
         message: "Could not deliver a quit request to the editor bridge. Close the editor manually - ue-mcp never force-kills processes.",
       };
     }
@@ -1231,7 +1548,7 @@ export async function stopEditor(
 
   // Confirm via the project's own bridge port closing - specific to this editor.
   for (let i = 0; i < 20; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, confirmPollMs));
     if (!(await isBridgeAvailable(host, port))) {
       return {
         success: true,
@@ -1239,23 +1556,85 @@ export async function stopEditor(
           "Editor quit itself via the bridge." +
           (answeredByUser ? ` You answered its dialog with "${answeredByUser}".` : "") +
           (ownership.healed ? ` ${ownership.healed}` : ""),
-        ...(answeredByUser ? { dialogAnsweredByUser: answeredByUser } : {}),
+        // Reported whenever a dialog was in the way, including when answering
+        // it is what let the stop through, so the caller can always see which
+        // mode applied and why.
+        ...dialogFields(),
       };
     }
   }
 
   // It was clean and unblocked when the quit went out, so whatever is holding
   // it started afterwards. Say what that is, in full.
-  const blockedState = await readEngineState(projectPath, { probeWindows: false });
-  const late = await readBlockingDialog(port, host);
+  let blockedState = await readEngineState(projectPath, { probeWindows: false });
+  let late = await readBlockingDialog(port, host);
+  if (late) dialogSeen = true;
+
+  // The same mode governs a dialog that came up behind the quit. Interactive
+  // puts it to the user exactly as it would have before the quit; auto and
+  // defer leave it alone, so the loop below never runs for them.
+  if (late && dialogMode.mode === "interactive" && canElicit && opts.elicit) {
+    const pressed = await askUserToAnswerDialog(port, host, late, opts.elicit);
+    if (pressed !== null) {
+      answeredByUser = pressed;
+      // Answering it may have released the quit that was already in flight.
+      for (let i = 0; i < 10; i++) {
+        await new Promise((resolve) => setTimeout(resolve, confirmPollMs));
+        if (!(await isBridgeAvailable(host, port))) {
+          return {
+            success: true,
+            message: `Editor quit itself via the bridge after you answered its dialog with "${pressed}".`,
+            ...dialogFields(),
+          };
+        }
+      }
+      late = await readBlockingDialog(port, host);
+      // The snapshot above was taken BEFORE the elicitation, so it still holds
+      // the modal the user has since answered. Rendering it after the press is
+      // how one message came to quote a dialog that no longer exists, hand back
+      // a respond_to_dialog call for each of its buttons, and say in the same
+      // breath that no dialog is up. Read the state again so what is described
+      // is what is there.
+      blockedState = await readEngineState(projectPath, { probeWindows: false });
+    }
+  }
+
+  // What this says has to match what this call did. A dialog that was answered
+  // seconds ago is off the screen by now, so the earlier version took the
+  // no-dialog branch and told the caller that no dialog was up and that nothing
+  // here presses a button, after pressing one. Each clause is now conditional
+  // on the thing it asserts.
+  //
+  // The snapshot can still show a modal the bridge's list_dialogs does not (a
+  // native window, or one raised in the moment between the two reads). When it
+  // does, blockedStopDetail has already quoted that dialog and said who
+  // answered what, so none of the "no dialog is up now" sentences may follow
+  // it: they would contradict the block directly above them.
+  const snapshotModalUp = blockedState.snapshot?.modal != null;
+  const holdingItOpen = late
+    ? " " + describeBlockingDialog(late, { pressCalls, answeredByUser }) + "\n\n" + dialogModeGuidance(dialogMode, canElicit, { quitSent: true })
+    : blockedStopDetail(blockedState, { pressCalls, answeredByUser }) +
+      (snapshotModalUp
+        ? ""
+        : answeredByUser
+          ? ` You answered its dialog with "${answeredByUser}" and no dialog is up now, but the editor still has not closed.`
+          : dialogSeen
+            ? " No dialog is up now, and nothing here pressed a button for you."
+            : " Nothing was dirty and no dialog was up when the quit went out, and nothing here presses a button for you.");
+
   return {
     success: false,
     message:
       "Asked the editor to quit but its bridge is still up after 20s." +
-      (late ? " " + describeBlockingDialog(late) : blockedStopDetail(blockedState)) +
-      " Nothing was dirty and no dialog was up when the quit went out, and nothing here presses a button for you." +
+      holdingItOpen +
       " ue-mcp never force-kills processes.",
-    ...(late ? { blockingDialog: late, refusedReason: "blocking-dialog" as const } : {}),
+    ...dialogFields(),
+    ...(late
+      ? {
+          blockingDialog: pressCalls ? late : forRecognitionOnly(late),
+          refusedReason: "blocking-dialog" as const,
+        }
+      : {}),
     state: blockedState,
   };
 }
@@ -1264,7 +1643,7 @@ export async function restartEditor(
   project: ProjectContext,
   bridge?: { connect: (timeoutMs?: number) => Promise<void> },
   opts: { elicit?: ElicitFn } = {},
-): Promise<{ success: boolean; message: string }> {
+): Promise<RestartEditorResult> {
   // Same rule as start and stop: without a loaded project there is no editor
   // this is about, and the machine-wide answer is somebody else's editor (#819).
   if (!project.projectPath) {
@@ -1274,20 +1653,40 @@ export async function restartEditor(
   // A restart inherits the stop's rules whole: it refuses on unsaved work and
   // on a blocking dialog rather than acting on either. Restarting is not a
   // reason to lose a package or to answer a question for somebody.
+  // The restart resolves the mode itself rather than reading it off the stop's
+  // result: the stop only reports one when it MET a dialog, and the start half
+  // has to keep defer's no-actuation promise whether or not the stop ran into
+  // anything.
+  const dialogMode = resolveDialogMode({
+    projectDir: project.projectDir ?? null,
+    canElicit: clientAdvertisesElicitation(opts.elicit),
+  });
   const stopResult = await stopEditor(project.projectDir ?? undefined, { elicit: opts.elicit });
   // Whether the stop mattered is a question about THIS project's editor: a
   // failed stop with nothing of ours left running just means it was already
   // down, and another project's editor being up says nothing either way.
+  // The stop half is where a dialog is met, so the restart carries the stop's
+  // account of it rather than flattening it into a message string. The doc
+  // promises dialogMode on every result that met a dialog, and a return type
+  // that cannot hold it would make that promise unkeepable here.
+  const dialogAccount: Partial<RestartEditorResult> = {
+    ...(stopResult.dialogMode ? { dialogMode: stopResult.dialogMode } : {}),
+    ...(stopResult.dialogModeSource ? { dialogModeSource: stopResult.dialogModeSource } : {}),
+    ...(stopResult.blockingDialog ? { blockingDialog: stopResult.blockingDialog } : {}),
+    ...(stopResult.dialogAnsweredByUser ? { dialogAnsweredByUser: stopResult.dialogAnsweredByUser } : {}),
+  };
   if (!stopResult.success && (await findInteractiveEditors(project.projectPath)).length > 0) {
-    return { success: false, message: `Failed to stop editor: ${stopResult.message}` };
+    return { success: false, message: `Failed to stop editor: ${stopResult.message}`, ...dialogAccount };
   }
 
   // Wait for process to fully terminate and release locks
   await new Promise((resolve) => setTimeout(resolve, 3000));
 
-  const startResult = await startEditor(project);
+  const startResult = await startEditor(project, undefined, undefined, {
+    pressCalls: dialogMode.mode !== "defer",
+  });
   if (!startResult.success) {
-    return startResult;
+    return { ...startResult, ...dialogAccount };
   }
 
   // Reconnect the bridge if provided
@@ -1299,7 +1698,7 @@ export async function restartEditor(
     }
   }
 
-  return startResult;
+  return { ...startResult, ...dialogAccount };
 }
 
 export interface BuildResult {

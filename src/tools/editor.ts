@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { categoryTool, bp, directive, type ToolDef, type ToolContext } from "../types.js";
-import { startEditor, stopEditor, restartEditor, buildProject, resolveOwnedEditor } from "../editor-control.js";
+import { startEditor, stopEditor, restartEditor, buildProject, resolveOwnedEditor, clientAdvertisesElicitation } from "../editor-control.js";
 import { readEngineState, withBridgeSnapshot, type EngineSnapshot } from "../engine-observer.js";
 import { progressRenderingNote } from "../client-quirks.js";
 import { pushWorkaround, workaroundCount } from "../workaround-tracker.js";
@@ -76,7 +76,7 @@ export const editorTool: ToolDef = categoryTool(
       },
     },
     stop_editor: {
-      description: "Close Unreal Editor gracefully (asks the editor to quit itself via the bridge; never an OS kill). Acts only on the editor for the loaded project, resolved from the port lockfile that editor published at <project>/Saved/UE_MCP_Bridge/port.json. With no lockfile there is no port to aim at and the call refuses, naming the file it checked, rather than probing a default port that another project's editor could answer on (#819). It never presses a dialog button and never discards unsaved work. Two questions are asked before anything is sent: is a modal dialog blocking the editor, and is any package unsaved. Either one refuses in under a second and sends no quit, so nothing hangs and nothing is lost. A blocking dialog is reported whole - exact title, the complete message text untruncated, every button in order, and the exact respond_to_dialog call for each - and where the client supports MCP elicitation the question is put to the user instead, with those same buttons as the choices, so only the button THEY pick is pressed. Unsaved packages are named individually; save them with editor(save_dirty), or close the editor yourself and answer its prompt by hand. There is deliberately no flag that discards. Params: none",
+      description: "Close Unreal Editor gracefully (asks the editor to quit itself via the bridge; never an OS kill). Acts only on the editor for the loaded project, resolved from the port lockfile that editor published at <project>/Saved/UE_MCP_Bridge/port.json. With no lockfile there is no port to aim at and the call refuses, naming the file it checked, rather than probing a default port that another project's editor could answer on (#819). It never discards unsaved work and it never presses a button nobody named. Two questions are asked before anything is sent: is a modal dialog blocking the editor, and is any package unsaved. Unsaved work refuses in under a second, names every dirty package, and sends no quit, so nothing hangs and nothing is lost; save them with editor(save_dirty), or close the editor yourself and answer its prompt by hand. There is deliberately no flag that discards. What happens to a blocking dialog is the dialog handling mode's decision, resolved from UE_MCP_DIALOG_MODE, then ~/.ue-mcp/state.json, then the default (interactive when the client advertised MCP elicitation, otherwise defer, never auto). interactive puts the dialog to the person over elicitation with its own buttons as the choices and presses only the button THEY pick. auto hands the dialog back whole, every button paired with the exact respond_to_dialog call, and the agent decides; the server presses nothing. defer presses nothing and asks nothing, quoting the dialog for recognition only (title, whole message, buttons in order, no press calls) so a person answers it in the editor. The same mode governs a dialog raised behind the quit. Every result that met a dialog reports dialogMode, dialogModeSource, and dialogAnsweredByUser when the user answered one. Params: none",
       handler: async (ctx: ToolContext) => {
         return stopEditor(ctx.project.projectDir ?? undefined, { elicit: ctx.elicit });
       },
@@ -220,7 +220,14 @@ export const editorTool: ToolDef = categoryTool(
 
         if (!preauthorized) {
           authorizationSource = "user_approval";
-          if (!ctx.elicit) {
+          // Asked as a capability, not as "is there a function". The server
+          // builds the gate at startup, before any client has connected, so
+          // ctx.elicit is defined for every client and testing it for undefined
+          // made this branch unreachable: a client that advertised nothing fell
+          // through to the call below, which throws, and the refusal it got was
+          // approval_prompt_failed with the raw error rather than the
+          // approval_required one that names the config key to set instead.
+          if (!ctx.elicit || !clientAdvertisesElicitation(ctx.elicit)) {
             return {
               success: false,
               blocked: true,
