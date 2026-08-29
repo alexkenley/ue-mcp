@@ -20,6 +20,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { ALL_TOOLS } from "../../src/tools.js";
+import { requiresExplicitEditor } from "../../src/action-class.js";
 import {
   actionSchema,
   allActionSchemas,
@@ -254,5 +255,36 @@ describe("suggestions", () => {
   it("returns nothing rather than noise for an empty reference", () => {
     expect(nearestActions("", ["sculpt"])).toEqual([]);
     expect(suggestActions("", ALL_TOOLS)).toEqual([]);
+  });
+});
+
+describe("action class", () => {
+  it("labels a read as read and a mutation as mutate", () => {
+    const asset = ALL_TOOLS.find((t) => t.name === "asset")!;
+    expect(actionSchema(asset, "read_properties").class).toBe("read");
+    expect(actionSchema(asset, "set_property").class).toBe("mutate");
+    expect(actionSchema(asset, "delete").class).toBe("mutate");
+  });
+
+  it("labels every action on the surface", () => {
+    // `unknown` is a real answer for an action whose effect a parameter
+    // decides, but it must be a deliberate one, not a gap.
+    for (const schema of allActionSchemas(ALL_TOOLS)) {
+      expect(["read", "mutate", "unknown"], `${schema.tool}.${schema.action}`).toContain(schema.class);
+    }
+  });
+
+  it("says unknown for an action whose effect a parameter decides", () => {
+    // What editor(invoke_function) does is chosen by the UFUNCTION named in
+    // its parameters, so the honest label is unknown. It is gated exactly
+    // like a mutation, which is why the honest label costs nothing.
+    const editor = ALL_TOOLS.find((t) => t.name === "editor")!;
+    expect(actionSchema(editor, "invoke_function").class).toBe("unknown");
+    expect(requiresExplicitEditor(actionSchema(editor, "invoke_function").class)).toBe(true);
+  });
+
+  it("gates arbitrary python as a mutation rather than leaving it unlabelled", () => {
+    const editor = ALL_TOOLS.find((t) => t.name === "editor")!;
+    expect(actionSchema(editor, "execute_python").class).toBe("mutate");
   });
 });

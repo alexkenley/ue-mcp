@@ -607,7 +607,11 @@ export const projectTool: ToolDef = categoryTool(
         + "right one. name takes 'tool.action' (asset.set_property) or a bare action name, "
         + "which reports every category providing it. A name that does not resolve comes back "
         + "with the closest spellings rather than a bare failure. Reads the graph THIS editor "
-        + "advertises, so injected Epic and plugin actions are included. "
+        + "advertises, so injected Epic and plugin actions are included. Each action also "
+        + "reports class: read (observes), mutate (changes the editor, its project on disk, or "
+        + "its process) or unknown (decided by a parameter, so gated like mutate) - MCP's own "
+        + "readOnlyHint is per tool, and every tool here is a category holding both, so a "
+        + "harness that gates writes reads it from here. "
         + "Params: name (required), category? (return every action of one category instead of one action)",
       handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
         const { getLiveToolGraph } = await import("../tools.js");

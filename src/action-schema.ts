@@ -22,6 +22,7 @@
  */
 import { z } from "zod";
 import type { ActionSpec, ToolDef } from "./types.js";
+import { classifyActionClass, type ActionClass } from "./action-class.js";
 
 export interface ParamSchema {
   name: string;
@@ -50,6 +51,20 @@ export interface ActionSchema {
   local: boolean;
   /** Longer wait this action declares for itself, in milliseconds. */
   timeoutMs?: number;
+  /**
+   * Whether this observes the editor or changes it (#817's taxonomy).
+   *
+   * MCP's own readOnlyHint is per TOOL, and every tool here is a category
+   * holding both reads and mutations, so the manifest cannot carry this. A
+   * harness that wants to auto-approve reads and prompt on writes reads it
+   * from here instead of maintaining its own list.
+   *
+   *   read    observes; landing it in the wrong editor changes nothing
+   *   mutate  may change the editor, its project on disk, or its process
+   *   unknown decided by a parameter (an arbitrary python string, a wrapped
+   *           tool name), and therefore gated exactly like mutate
+   */
+  class: ActionClass;
   params: ParamSchema[];
   /**
    * Names promised by the description or read by `mapParams` that the category
@@ -386,6 +401,7 @@ export function actionSchema(tool: ToolDef, action: string): ActionSchema {
     bridge: spec.bridge,
     local: !spec.bridge,
     timeoutMs: spec.timeoutMs,
+    class: classifyActionClass(tool.name, action).class,
     params,
     drift,
   };
