@@ -240,8 +240,8 @@ export const assetTool: ToolDef = categoryTool(
     create_datatable:     bp("Create DataTable. Params: name, packagePath?, rowStruct", "create_datatable"),
     reimport_datatable:   bp("Reimport DataTable from JSON. Params: assetPath, jsonPath?, jsonString?", "reimport_datatable", (p) => ({ path: p.assetPath, jsonPath: p.jsonPath, jsonString: p.jsonString })),
     set_datatable_row:    bp("Append or overwrite a single DataTable row. Params: assetPath, rowName, row (object with row-struct fields - partial updates merge with the existing row). Idempotent; rollback restores the prior row (#437)", "set_datatable_row", (p) => ({ assetPath: p.assetPath, rowName: p.rowName, row: p.row ?? p.fields ?? p.data })),
-    add_datatable_row:    bp("Alias for set_datatable_row (#437)", "add_datatable_row", (p) => ({ assetPath: p.assetPath, rowName: p.rowName, row: p.row ?? p.fields ?? p.data })),
-    update_datatable_row: bp("Alias for set_datatable_row; partial update merges with existing row (#437)", "update_datatable_row", (p) => ({ assetPath: p.assetPath, rowName: p.rowName, row: p.row ?? p.fields ?? p.data })),
+    add_datatable_row:    bp("Alias for set_datatable_row. Params: assetPath, rowName, row (or fields / data) (#437)", "add_datatable_row", (p) => ({ assetPath: p.assetPath, rowName: p.rowName, row: p.row ?? p.fields ?? p.data })),
+    update_datatable_row: bp("Alias for set_datatable_row; partial update merges with existing row. Params: assetPath, rowName, row (or fields / data) (#437)", "update_datatable_row", (p) => ({ assetPath: p.assetPath, rowName: p.rowName, row: p.row ?? p.fields ?? p.data })),
     remove_datatable_row: bp("Remove a single DataTable row. Idempotent (alreadyDeleted=true if missing). Params: assetPath, rowName (#437)", "remove_datatable_row", (p) => ({ assetPath: p.assetPath, rowName: p.rowName })),
     get_datatable_row:    bp("Read one DataTable row's fields without dumping the whole table. Params: assetPath, rowName (#535)", "get_datatable_row", (p) => ({ assetPath: p.assetPath, rowName: p.rowName })),
     set_datatable_cell:   bp("Write a single field on a single existing row (merges, leaves other cells untouched). Errors if the row doesn't exist. Params: assetPath, rowName, fieldName, value (#535)", "set_datatable_cell", (p) => ({ assetPath: p.assetPath, rowName: p.rowName, fieldName: p.fieldName, value: p.value })),
@@ -364,7 +364,7 @@ export const assetTool: ToolDef = categoryTool(
         force: p.force,
       }),
     },
-    list_locks:           bp("List all currently-held asset locks with holder session id, acquiredAt, and ttlSecondsRemaining.", "list_locks"),
+    list_locks:           bp("List all currently-held asset locks with holder session id, acquiredAt, and ttlSecondsRemaining. Params: none", "list_locks"),
     unlock_all: {
       description: "Release every lock held by one session in a single call, returning the number released. Defaults to the addressed editor's own session; pass sessionId to clear a different one (for example after a crashed session left assets wedged). Params: sessionId?",
       handler: async (ctx, p) => ctx.bridge.call("release_session_locks", {

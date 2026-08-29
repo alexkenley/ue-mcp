@@ -9,7 +9,7 @@ export const pcgTool: ToolDef = categoryTool(
     list_graphs:          bp("List PCG graphs. Params: directory?, recursive?", "list_pcg_graphs"),
     read_graph:           bp("Read graph structure. Params: assetPath", "read_pcg_graph"),
     read_node_settings:   bp("Read node settings. Params: assetPath, nodeName", "read_pcg_node_settings"),
-    get_components:       bp("List PCG components in level", "get_pcg_components"),
+    get_components:       bp("List PCG components in level. Params: none", "get_pcg_components"),
     get_component_details: bp("Inspect PCG component. Params: actorLabel OR actorPath (#983)", "get_pcg_component_details"),
     create_graph:         bp("Create graph. Params: name, packagePath?", "create_pcg_graph"),
     add_node:             bp("Add node. Params: assetPath, nodeType, nodeName?", "add_pcg_node"),

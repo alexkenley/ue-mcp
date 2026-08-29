@@ -37,7 +37,7 @@ export const materialTool: ToolDef = categoryTool(
     connect_to_property: bp("Wire expression to material output. Params: materialPath, expressionName, outputName?, property", "connect_to_material_property"),
     list_expressions:  bp("List expression nodes. Params: materialPath", "list_material_expressions"),
     delete_expression: bp("Remove expression. Params: materialPath, expressionName", "delete_material_expression"),
-    list_expression_types: bp("List available expression types", "list_expression_types"),
+    list_expression_types: bp("List available expression types. Params: none", "list_expression_types"),
     recompile:         bp("Recompile material. Pass recompileChildren=true to cascade to every MaterialInstanceConstant whose parent chain reaches this material (#421). Params: materialPath, recompileChildren?", "recompile_material", (p) => ({ materialPath: p.materialPath, recompileChildren: p.recompileChildren })),
     duplicate:         bp("Duplicate material asset. Params: sourcePath, destinationPath", "duplicate_material"),
     validate:          bp("Validate material graph - find orphans, broken refs. Params: assetPath", "validate_material", (p) => ({ assetPath: p.assetPath ?? p.materialPath })),
@@ -47,7 +47,7 @@ export const materialTool: ToolDef = categoryTool(
     build_graph:       bp("Build graph from spec. Params: assetPath, nodes, propertyConnections?", "build_material_graph"),
     render_preview:    bp("Render preview PNG. Params: assetPath, outputPath, width?, height?", "render_material_preview", (p) => ({ assetPath: p.assetPath ?? p.materialPath, outputPath: p.outputPath, width: p.width, height: p.height })),
     begin_transaction: bp("Begin undo transaction. Params: label?", "begin_material_transaction"),
-    end_transaction:   bp("End undo transaction", "end_material_transaction"),
+    end_transaction:   bp("End undo transaction. Params: none", "end_material_transaction"),
   },
   undefined,
   {

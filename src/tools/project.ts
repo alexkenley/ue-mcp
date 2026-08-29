@@ -75,7 +75,7 @@ export const projectTool: ToolDef = categoryTool(
   "Project status and editor connection: get_status (is the editor connected?), set_project (switch/redirect the bridge to another .uproject), get_info. Also config INI files, module load state, and C++ source inspection. Call project(get_status) first in any session.",
   {
     get_status: {
-      description: "Check server mode and editor connection. Also reports pluginBuildStale when the compiled bridge is older than its source, which is the real cause of 'Unknown method' on handlers that do exist (#785)",
+      description: "Check server mode and editor connection. Also reports pluginBuildStale when the compiled bridge is older than its source, which is the real cause of 'Unknown method' on handlers that do exist. Params: none (#785)",
       handler: async (ctx) => {
         const flows = ctx.getFlows?.() ?? [];
         const bridgeApiVersion = ctx.project.projectDir
@@ -216,7 +216,7 @@ export const projectTool: ToolDef = categoryTool(
       },
     },
     list_editors: {
-      description: "List every editor session this server drives: name, project, bridge port, whether the socket is connected, whether anything is answering on that port, and which session untargeted calls fall through to (#817)",
+      description: "List every editor session this server drives: name, project, bridge port, whether the socket is connected, whether anything is answering on that port, and which session untargeted calls fall through to. Params: none (#817)",
       handler: async (ctx) => {
         if (!ctx.sessions) {
           return {
@@ -325,7 +325,7 @@ export const projectTool: ToolDef = categoryTool(
       },
     },
     get_info: {
-      description: "Read .uproject file details",
+      description: "Read .uproject file details. Params: none",
       handler: async (ctx) => {
         ctx.project.ensureLoaded();
         return { projectName: ctx.project.projectName, engineAssociation: ctx.project.engineAssociation, contentDir: ctx.project.contentDir, uprojectContents: JSON.parse(fs.readFileSync(ctx.project.projectPath!, "utf-8")) };
@@ -361,7 +361,7 @@ export const projectTool: ToolDef = categoryTool(
       },
     },
     list_config_tags: {
-      description: "Extract gameplay tags from config",
+      description: "Extract gameplay tags from config. Params: none",
       handler: async (ctx) => {
         ctx.project.ensureLoaded();
         const configDir = ctx.project.configDir!;
@@ -412,7 +412,7 @@ export const projectTool: ToolDef = categoryTool(
       },
     },
     list_modules: {
-      description: "List C++ modules",
+      description: "List C++ modules. Params: none",
       handler: async (ctx) => {
         ctx.project.ensureLoaded();
         const roots = findSourceRoots(ctx.project.projectDir!, ctx.project.projectName);
@@ -519,7 +519,7 @@ export const projectTool: ToolDef = categoryTool(
       },
     },
     list_engine_modules: {
-      description: "List modules in Engine/Source/Runtime",
+      description: "List modules in Engine/Source/Runtime. Params: none",
       handler: async (ctx) => {
         const engineRoot = requireEngineRoot(ctx);
         const runtimeDir = path.join(engineRoot, "Engine", "Source", "Runtime");
@@ -672,7 +672,7 @@ export const projectTool: ToolDef = categoryTool(
         return { ...result, output: lines.join("") };
       },
     },
-    generate_project_files: bp("Generate IDE project files (Visual Studio, Xcode, etc.)", "generate_project_files"),
+    generate_project_files: bp("Generate IDE project files (Visual Studio, Xcode, etc.). Params: none", "generate_project_files"),
 
     // v0.7.13 - native C++ authoring. Bridge handlers wrap
     // GameProjectUtils / ILiveCodingModule (same APIs used by the editor's
@@ -692,7 +692,7 @@ export const projectTool: ToolDef = categoryTool(
       }),
     },
     list_project_modules: bp(
-      "List native modules in the current project (name, host type, source path). Feed moduleName from here into create_cpp_class.",
+      "List native modules in the current project (name, host type, source path). Feed moduleName from here into create_cpp_class. Params: none",
       "list_project_modules",
       () => ({}),
     ),
@@ -713,7 +713,7 @@ export const projectTool: ToolDef = categoryTool(
       mapParams: (p) => ({ wait: p.wait }),
     },
     live_coding_status: bp(
-      "Report Live Coding availability/state (available, started, enabledForSession, compiling). Helps choose between live_coding_compile and build_project.",
+      "Report Live Coding availability/state (available, started, enabledForSession, compiling). Helps choose between live_coding_compile and build_project. Params: none",
       "live_coding_status",
       () => ({}),
     ),
