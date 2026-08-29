@@ -1,6 +1,7 @@
 import type { TaskResult, TaskConstructor } from "@db-lyon/flowkit";
 import { UeMcpTask } from "../task.js";
 import { stripEditorTarget } from "../types.js";
+import { prepareCall, finishCall } from "../call-pipeline.js";
 import type { FlowContext } from "./context.js";
 import { liftRollback } from "./rollback.js";
 
@@ -21,8 +22,13 @@ export function bridgeTaskClass(
       // before the mapper too, since a mapper that forwards its input verbatim
       // would carry it into the call.
       const options = stripEditorTarget(this.options as Record<string, unknown>);
-      const params = mapParams ? mapParams(options) : options;
-      const raw = await this.bridge.call(method, params, timeoutMs);
+      // Repairs the call's paths and takes the caller's field selection off it.
+      // This is the route a live MCP call and a flow step both take, so it is
+      // the route those two have to be applied on.
+      const pipeline = prepareCall(options);
+      const params = mapParams ? mapParams(pipeline.params) : pipeline.params;
+      const answered = await this.bridge.call(method, params, timeoutMs);
+      const raw = finishCall(answered, pipeline);
       if (typeof raw !== "object" || raw === null) {
         return { success: true, data: { result: raw } };
       }
@@ -58,7 +64,8 @@ export function handlerTaskClass(
   class FactoryHandlerTask extends UeMcpTask {
     get taskName() { return name; }
     async execute(): Promise<TaskResult> {
-      const data = await fn(this.ctx, this.options as Record<string, unknown>);
+      const pipeline = prepareCall(this.options as Record<string, unknown>);
+      const data = finishCall(await fn(this.ctx, pipeline.params), pipeline);
       return {
         success: true,
         data: typeof data === "object" && data !== null

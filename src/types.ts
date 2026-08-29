@@ -5,8 +5,7 @@ import type { EditorSession, SessionRegistry } from "./session.js";
 import { McpError, ErrorCode } from "./errors.js";
 import { MAX_BRIDGE_TIMEOUT_MS } from "./bridge-timeouts.js";
 import { nearestActions } from "./action-schema.js";
-import { normalizePathParams, attachPathRepairs } from "./path-params.js";
-import { takeFieldSelection, projectResult, attachFieldReport } from "./field-select.js";
+import { prepareCall, finishCall } from "./call-pipeline.js";
 
 /**
  * Elicit a deterministic, user-mediated form response via the MCP client.
@@ -326,6 +325,22 @@ export interface CategoryOptions {
  * it and strips it, so it cannot reach a bridge method as an argument.
  */
 /**
+ * The `action` parameter of a category tool.
+ *
+ * Advertised as an enum, parsed as a string, and the difference matters.
+ *
+ * The MCP layer validates arguments BEFORE the tool callback runs, so a strict
+ * `z.enum` meant a misspelled action never reached dispatch: it came back as a
+ * zod issue whose message is the serialized issue list, which carries the full
+ * `options` array. On level, with 140 actions, a single typo returned about
+ * 8KB naming every action twice and burying the one the caller wanted.
+ *
+ * Accepting any string moves the refusal into `categoryTool`, which answers
+ * with the closest spellings in a couple of lines. The enum stays in the
+ * published schema, so a client still gets the list and the agent still gets
+ * the guidance; only the failure path changed.
+ */
+/**
  * The action names an `action` schema advertises.
  *
  * `actionEnum` wraps the enum in a union with a bare string, so reading
@@ -346,22 +361,6 @@ export function actionEnumValues(schema: z.ZodType): string[] {
   return [];
 }
 
-/**
- * The `action` parameter of a category tool.
- *
- * Advertised as an enum, parsed as a string, and the difference matters.
- *
- * The MCP layer validates arguments BEFORE the tool callback runs, so a strict
- * `z.enum` meant a misspelled action never reached dispatch: it came back as a
- * zod issue whose message is the serialized issue list, which carries the full
- * `options` array. On level, with 140 actions, a single typo returned about
- * 8KB naming every action twice and burying the one the caller wanted.
- *
- * Accepting any string moves the refusal into dispatch, which answers with the
- * closest spellings in a couple of lines. The enum stays in the published
- * schema, so a client still gets the list and the agent still gets the
- * guidance; only the failure path changed.
- */
 export function actionEnum(names: [string, ...string[]]): z.ZodType {
   return z
     .union([z.enum(names), z.string()])
@@ -461,21 +460,15 @@ export function categoryTool(
       // Routing, not an argument. Pulled out before normalizeParams so no
       // mapParams can forward it into a bridge call as a parameter (#989).
       const { timeoutMs: requestedTimeout, rest: withoutTimeout } = takeTimeout(params);
-      // Also routing, and also stripped here so no mapParams can forward it
-      // into a bridge call as a parameter.
-      const { selection, rest: withoutSelection } = takeFieldSelection(withoutTimeout);
-      // Backslash repair runs before the category's own folding, so a category
-      // that reads a path in `normalizeParams` sees the repaired one. The
-      // repairs are reported on the result rather than applied silently.
-      const { params: repaired, repairs } = normalizePathParams(withoutSelection);
-      const normalized = options?.normalizeParams ? options.normalizeParams(repaired) : repaired;
-
-      // The warnings are attached AFTER the projection, so a select that did
-      // not name them cannot filter out the account of what was repaired.
-      const finish = (raw: unknown): unknown => {
-        const projection = projectResult(raw, selection);
-        return attachPathRepairs(attachFieldReport(projection.result, projection), repairs);
-      };
+      // Strips select/omit and repairs the call's paths, before the category's
+      // own folding, so a category that reads a path in `normalizeParams` sees
+      // the repaired one. The same two functions run on the live route in
+      // flow/task-factory.ts; this must not grow a second implementation.
+      const pipeline = prepareCall(withoutTimeout);
+      const normalized = options?.normalizeParams
+        ? options.normalizeParams(pipeline.params)
+        : pipeline.params;
+      const finish = (raw: unknown): unknown => finishCall(raw, pipeline);
 
       if (spec.handler) {
         // The budget travels on the context, not in the parameters: a custom
@@ -561,7 +554,7 @@ export function bp(...args: unknown[]): ActionSpec {
   return { bridge: args[0] as string, mapParams: args[1] as ((p: Record<string, unknown>) => Record<string, unknown>) | undefined };
 }
 
-/* â”€â”€ Directive response â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* ── Directive response ─────────────────────────────────────────────
  * Handlers can return this to emit a mandatory instruction as a
  * separate MCP content block *before* the tool result.  Because the
  * directive occupies its own block it is structurally impossible for
@@ -571,7 +564,7 @@ export function bp(...args: unknown[]): ActionSpec {
  * and for agents that respect prose), `machine` carries a structured
  * record so downstream tooling (flow runners, feedback dashboards) can
  * detect the directive even if prose is stripped or summarised.
- * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+ * ─────────────────────────────────────────────────────────────────── */
 export interface DirectiveMachine {
   /** Stable identifier for the directive kind (e.g. "workaround.feedback"). */
   kind: string;
