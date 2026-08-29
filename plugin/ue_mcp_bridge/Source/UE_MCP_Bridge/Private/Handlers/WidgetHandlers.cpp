@@ -658,6 +658,10 @@ TSharedPtr<FJsonValue> FWidgetHandlers::RunEditorUtilityWidget(const TSharedPtr<
 	MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("assetPath"), AssetPath);
 	Result->SetStringField(TEXT("name"), EUWidget->GetName());
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("This spawns and registers an editor tab, and the widget's own construction script runs inside it. No action closes that tab, ")
+		TEXT("and nothing here knows what the widget did once it was open, so there is nothing to undo and no action that would undo it."));
 
 	return MCPResult(Result);
 }
@@ -687,6 +691,10 @@ TSharedPtr<FJsonValue> FWidgetHandlers::RunEditorUtilityBlueprint(const TSharedP
 	MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("assetPath"), AssetPath);
 	Result->SetStringField(TEXT("name"), EUBlueprint->GetName());
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("This runs a user-authored editor script. What it changed is decided by the blueprint, not by this action, so nothing here ")
+		TEXT("can name an inverse. Undo it the way the script's own author would."));
 
 	return MCPResult(Result);
 }
@@ -1089,6 +1097,20 @@ TSharedPtr<FJsonValue> FWidgetHandlers::RemoveWidget(const TSharedPtr<FJsonObjec
 	}
 
 	FString RemovedClass = FoundWidget->GetClass()->GetName();
+	// Captured for the rollback, before the removal takes the links apart. The
+	// class travels as its full path rather than its short name, because
+	// add_widget resolves a path exactly while a short name has to be unique
+	// among every loaded UWidget subclass - and a widget's own generated class
+	// (WBP_Foo_C) is exactly the case a short name can miss.
+	const FString RemovedClassPath = FoundWidget->GetClass()->GetPathName();
+	const UPanelWidget* RemovedParent = FoundWidget->GetParent();
+	const FString RemovedParentName = RemovedParent ? RemovedParent->GetName() : FString();
+	const bool bRemovedWasRoot = (WidgetBP->WidgetTree->RootWidget == FoundWidget);
+	int32 RemovedChildCount = 0;
+	if (const UPanelWidget* RemovedPanel = Cast<UPanelWidget>(FoundWidget))
+	{
+		RemovedChildCount = RemovedPanel->GetChildrenCount();
+	}
 
 	// Hand the removal to the engine FIRST, while the parent link is still
 	// intact: UWidgetTree::RemoveWidget detaches the widget from its parent
@@ -1139,10 +1161,52 @@ TSharedPtr<FJsonValue> FWidgetHandlers::RemoveWidget(const TSharedPtr<FJsonObjec
 	Result->SetStringField(TEXT("widgetName"), WidgetName);
 	Result->SetStringField(TEXT("widgetClass"), RemovedClass);
 	Result->SetStringField(TEXT("assetPath"), AssetPath);
+	Result->SetStringField(TEXT("widgetClassPath"), RemovedClassPath);
+	Result->SetStringField(TEXT("previousParentWidgetName"), RemovedParentName);
+	Result->SetBoolField(TEXT("wasRoot"), bRemovedWasRoot);
+	Result->SetNumberField(TEXT("removedChildCount"), RemovedChildCount);
 	MCPSetWidgetGuidOutcome(Result, GuidSync, AssetPath);
 	MCPSetWidgetCompileOutcome(Result, WidgetBP, AssetPath,
 		FString::Printf(TEXT("Widget '%s' was removed"), *WidgetName));
-	// No rollback: remove_widget is destructive (would need to snapshot widget tree to reverse).
+
+	// add_widget puts a widget of the same class back under the same parent and
+	// under the same name: the removal evicted the old object into the transient
+	// package, so the name is free again. What it cannot put back is the state
+	// that lived on the removed widget - its property values, its slot layout,
+	// its bindings and its whole subtree, all of which went with it. An empty
+	// parentWidgetName means "no parent", which is what add_widget needs to see
+	// to make the replacement the root again.
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("assetPath"), AssetPath);
+	Payload->SetStringField(TEXT("widgetClass"), RemovedClassPath);
+	Payload->SetStringField(TEXT("widgetName"), WidgetName);
+	if (!RemovedParentName.IsEmpty())
+	{
+		Payload->SetStringField(TEXT("parentWidgetName"), RemovedParentName);
+	}
+	MCPSetRollback(Result, TEXT("add_widget"), Payload);
+	Result->SetBoolField(TEXT("rollbackLossy"), true);
+
+	FString Placement;
+	if (!RemovedParentName.IsEmpty())
+	{
+		Placement = FString::Printf(TEXT("under '%s'"), *RemovedParentName);
+	}
+	else if (bRemovedWasRoot)
+	{
+		Placement = TEXT("as the tree root, which is where add_widget puts a widget when the tree has no root");
+	}
+	else
+	{
+		Placement = TEXT("under the tree root - it had no parent panel when it was removed, and add_widget with no parentWidgetName ")
+			TEXT("parents to the root rather than leaving it detached");
+	}
+
+	Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+		TEXT("widget(add_widget) restores a DEFAULT %s named '%s' %s. Its property values, its slot layout, its designer bindings and its ")
+		TEXT("%d direct child widget(s) are NOT restored - the removal moved that whole subtree out of the Widget Blueprint. ")
+		TEXT("Read the subtree with widget(read_tree) or widget(get_properties) before removing if any of it matters."),
+		*RemovedClass, *WidgetName, *Placement, RemovedChildCount));
 
 	return MCPResult(Result);
 }
@@ -1358,7 +1422,22 @@ TSharedPtr<FJsonValue> FWidgetHandlers::SetRoot(const TSharedPtr<FJsonObject>& P
 	MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("rootWidget"), WidgetName);
 	Result->SetStringField(TEXT("previousRoot"), PreviousRootName);
+	Result->SetNumberField(TEXT("evictedWidgets"), Evicted);
 	MCPSetWidgetGuidOutcome(Result, GuidSync, AssetPath);
+
+	// No inverse, and naming one would be a lie. Swapping the root moves the old
+	// root and everything under it OUT of the WidgetTree and into the transient
+	// package under fresh unique names, so nothing in the asset answers to
+	// '<previousRoot>' any more and set_root_widget replayed with that name
+	// would fail on "Widget not found". Rebuilding the old subtree would take
+	// one add_widget per widget plus every property it carried, which is not one
+	// call and not something this action captured.
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+		TEXT("Swapping the root evicted the previous root '%s' and %d widget(s) with it out of the Widget Blueprint, so no call can name ")
+		TEXT("them again. Read the tree with widget(read_tree) BEFORE a root swap if it has to be recoverable, or use widget(wrap_root) ")
+		TEXT("instead, which keeps the old root as a child and does emit an inverse."),
+		*PreviousRootName, Evicted));
 	return MCPResult(Result);
 }
 
@@ -1407,10 +1486,51 @@ TSharedPtr<FJsonValue> FWidgetHandlers::WrapRoot(const TSharedPtr<FJsonObject>& 
 		return MCPError(TEXT("Failed to construct wrapper widget"));
 	}
 
+	// Widgets the tree OWNS but no longer reaches from the root. They matter
+	// because the rollback below runs set_root_widget, and that action calls
+	// EvictUnreachableWidgets, which sweeps every unreachable widget rather
+	// than only the wrapper this call is about to create. A blueprint already
+	// carrying an orphan would lose it permanently on rollback, so it is
+	// counted here and reported rather than glossed over. Counted BEFORE the
+	// wrap, since the wrap changes what the root reaches.
+	int32 PreExistingOrphans = 0;
+	{
+		TSet<const UObject*> Reachable;
+		WidgetBP->WidgetTree->ForEachWidget([&Reachable](UWidget* Widget)
+		{
+			if (Widget) { Reachable.Add(Widget); }
+		});
+		for (const auto& Binding : WidgetBP->WidgetTree->NamedSlotBindings)
+		{
+			if (!Binding.Value) continue;
+			Reachable.Add(Binding.Value);
+			UWidgetTree::ForWidgetAndChildren(Binding.Value, [&Reachable](UWidget* Widget)
+			{
+				if (Widget) { Reachable.Add(Widget); }
+			});
+		}
+		TArray<UObject*> Owned;
+		MCPGetDirectSubobjects(WidgetBP->WidgetTree, Owned);
+		for (UObject* Object : Owned)
+		{
+			UWidget* Widget = Cast<UWidget>(Object);
+			// The wrapper is excluded by name rather than by ordering: ConstructWidget
+			// above already outered it to the tree, and it is not root yet, so the walk
+			// cannot reach it and would otherwise count this call's own new widget as a
+			// pre-existing orphan.
+			if (Widget && Widget != Wrapper && !Reachable.Contains(Widget)) { ++PreExistingOrphans; }
+		}
+	}
+
 	WidgetBP->WidgetTree->RootWidget = Wrapper;
 	Wrapper->AddChild(OldRoot);
 
 	TWeakObjectPtr<UPanelWidget> AddedWrapper(Wrapper);
+	// Held the same way, and for the same reason: the compile below can
+	// replace the widget objects, so the name is read back off a weak pointer
+	// rather than off a raw one that may no longer be the live widget.
+	TWeakObjectPtr<UWidget> WrappedChild(OldRoot);
+	FString WrappedChildName = OldRoot->GetName();
 
 	WidgetBP->MarkPackageDirty();
 	// #728: the wrapper is a new widget variable and needs a GUID before the
@@ -1423,13 +1543,41 @@ TSharedPtr<FJsonValue> FWidgetHandlers::WrapRoot(const TSharedPtr<FJsonObject>& 
 	}
 	UEditorAssetLibrary::SaveAsset(AssetPath);
 
+	if (WrappedChild.IsValid())
+	{
+		WrappedChildName = WrappedChild->GetName();
+	}
+
 	auto Result = MCPSuccess();
 	MCPSetCreated(Result);
 	Result->SetStringField(TEXT("wrapperName"),
 		AddedWrapper.IsValid() ? AddedWrapper->GetName() : Wrapper->GetName());
 	Result->SetStringField(TEXT("wrapperClass"), WrapperCls->GetName());
-	Result->SetStringField(TEXT("wrappedChild"), OldRoot->GetName());
+	Result->SetStringField(TEXT("wrappedChild"), WrappedChildName);
 	MCPSetWidgetGuidOutcome(Result, GuidSync, AssetPath);
+
+	// Rooting the wrapped child again is the inverse: set_root_widget detaches
+	// the new root from its parent (the wrapper) first, then evicts whatever
+	// the tree no longer reaches, and the wrapper is what that is.
+	//
+	// It is only EXACT when the tree held no orphan already, because the
+	// eviction sweeps every unreachable widget rather than the wrapper alone.
+	// An orphan that was there before this call is reachable from nothing
+	// after the rollback either, so it goes with the wrapper.
+	Result->SetNumberField(TEXT("preExistingOrphans"), PreExistingOrphans);
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("assetPath"), AssetPath);
+	Payload->SetStringField(TEXT("widgetName"), WrappedChildName);
+	MCPSetRollback(Result, TEXT("set_root_widget"), Payload);
+	Result->SetBoolField(TEXT("rollbackLossy"), PreExistingOrphans > 0);
+	if (PreExistingOrphans > 0)
+	{
+		Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+			TEXT("This Widget Blueprint already owns %d widget(s) the tree does not reach from its root. The rollback runs ")
+			TEXT("widget(set_root), which moves EVERY unreachable widget out of the blueprint, so those %d would be lost along with ")
+			TEXT("the wrapper this call created. Clear them first with widget(remove_widget), or accept the loss."),
+			PreExistingOrphans, PreExistingOrphans));
+	}
 	return MCPResult(Result);
 }
 
@@ -2549,6 +2697,13 @@ TSharedPtr<FJsonValue> FWidgetHandlers::AddWidgetToViewport(const TSharedPtr<FJs
 	Result->SetStringField(TEXT("class"), WidgetClass->GetName());
 	Result->SetBoolField(TEXT("inViewport"), Widget->IsInViewport());
 	Result->SetNumberField(TEXT("zOrder"), ZOrder);
+	// The bridge registers no action that takes a widget back off the viewport,
+	// so there is no inverse call to name. What this created is a transient PIE
+	// object that dies with the PIE session; nothing on disk changed.
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("No action removes a widget from the viewport, so there is no inverse to run. The instance is transient PIE state: it goes ")
+		TEXT("away when Play-In-Editor stops, and nothing on disk was changed by this call."));
 	return MCPResult(Result);
 }
 
@@ -2620,6 +2775,13 @@ TSharedPtr<FJsonValue> FWidgetHandlers::InvokeRuntimeWidgetFunction(const TShare
 		{
 			return Err;
 		}
+		// A simulated click, commit or value change fires the child's delegates,
+		// and what those handlers then do is decided by the running blueprint.
+		// Nothing here knows what changed, so nothing here can name an inverse.
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("This fires the child widget's delegates in the live PIE session, and what the bound handlers do is the running game's ")
+			TEXT("business. The effects are not captured and no action reverses them."));
 		return MCPResult(Result);
 	}
 
@@ -2642,6 +2804,10 @@ TSharedPtr<FJsonValue> FWidgetHandlers::InvokeRuntimeWidgetFunction(const TShare
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("widget"), Found->GetName());
 	Result->SetStringField(TEXT("invoked"), FunctionName);
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("This calls a UFUNCTION the widget's author wrote. What it changed is the function's business, not this action's, so there is ")
+		TEXT("nothing captured to restore and no inverse to name."));
 	return MCPResult(Result);
 }
 

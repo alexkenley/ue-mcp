@@ -64,6 +64,13 @@ namespace
 		FMetaSoundBuilderNodeOutputHandle OnPlay;
 		FMetaSoundBuilderNodeInputHandle OnFinished;
 		TArray<FMetaSoundBuilderNodeInputHandle> AudioOuts;
+		/** The graph-output vertex name of each entry in AudioOuts, at the same
+		 *  index. An audio output IS a graph output ("Out Mono", "Out Left",
+		 *  "Out Right", ...), and audio(metasound_disconnect) addresses it by
+		 *  that name, so the name is what a rollback for
+		 *  metasound_connect_audio_out has to carry. Filled in the same loop as
+		 *  AudioOuts so the two can never drift apart. */
+		TArray<FName> AudioOutNames;
 		bool bOneShot = true;
 	};
 
@@ -143,6 +150,7 @@ namespace
 		B.FindGraphOutputNode(SourceOneShotInterface::Outputs::OnFinished, DataType, Session.OnFinished, R);
 
 		Session.AudioOuts.Reset();
+		Session.AudioOutNames.Reset();
 		if (const Metasound::Engine::FOutputAudioFormatInfoPair* FormatInfo = B.FindOutputAudioFormatInfo())
 		{
 			for (const Metasound::FVertexName& VertexName : FormatInfo->Value.OutputVertexChannelOrder)
@@ -152,6 +160,7 @@ namespace
 				if (Ok(R))
 				{
 					Session.AudioOuts.Add(Handle);
+					Session.AudioOutNames.Add(VertexName);
 				}
 			}
 		}
@@ -316,6 +325,58 @@ namespace
 	}
 
 	bool Ok(EMetaSoundBuilderResult R) { return R == EMetaSoundBuilderResult::Succeeded; }
+
+	/**
+	 * A frontend literal back out as the (value, dataType) pair MakeLiteral
+	 * above turns into exactly that literal again. This is what lets
+	 * metasound_set_input_default emit a rollback that restores the previous
+	 * default rather than guessing at one.
+	 *
+	 * Only the four scalar kinds round-trip, because they are the only ones
+	 * MakeLiteral can build. Everything else (None, UObject, every array kind)
+	 * returns false, and the caller says so instead of emitting a rollback that
+	 * would write a different value than the one that was there.
+	 */
+	bool MSAuthorLiteralToJson(const FMetasoundFrontendLiteral& Lit, TSharedPtr<FJsonValue>& OutValue, FString& OutTypeHint)
+	{
+		switch (Lit.GetType())
+		{
+		case EMetasoundFrontendLiteralType::Boolean:
+		{
+			bool B = false;
+			if (!Lit.TryGet(B)) return false;
+			OutValue = MakeShared<FJsonValueBoolean>(B);
+			OutTypeHint = TEXT("bool");
+			return true;
+		}
+		case EMetasoundFrontendLiteralType::Integer:
+		{
+			int32 I = 0;
+			if (!Lit.TryGet(I)) return false;
+			OutValue = MakeShared<FJsonValueNumber>((double)I);
+			OutTypeHint = TEXT("int32");
+			return true;
+		}
+		case EMetasoundFrontendLiteralType::Float:
+		{
+			float F = 0.0f;
+			if (!Lit.TryGet(F)) return false;
+			OutValue = MakeShared<FJsonValueNumber>((double)F);
+			OutTypeHint = TEXT("float");
+			return true;
+		}
+		case EMetasoundFrontendLiteralType::String:
+		{
+			FString S;
+			if (!Lit.TryGet(S)) return false;
+			OutValue = MakeShared<FJsonValueString>(S);
+			OutTypeHint = TEXT("string");
+			return true;
+		}
+		default:
+			return false;
+		}
+	}
 
 	/**
 	 * Create (idempotently) the MetaSoundSource asset and attach a builder to its
@@ -636,6 +697,16 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundAddNode(const TSharedPtr<FJsonOb
 	Res->SetStringField(TEXT("nodeId"), Node.NodeID.ToString());
 	Res->SetNumberField(TEXT("inputCount"), NumInputs);
 	Res->SetNumberField(TEXT("outputCount"), NumOutputs);
+
+	// The node was created by this call and nothing is wired to it yet, so
+	// removing it is an exact inverse. metasound_remove_node's default
+	// removeUnusedDependencies also drops the class dependency this add
+	// introduced, which is the other half of what was written.
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("assetPath"), AssetPath);
+	Payload->SetStringField(TEXT("nodeId"), Node.NodeID.ToString());
+	MCPSetRollback(Res, TEXT("metasound_remove_node"), Payload);
+	Res->SetBoolField(TEXT("rollbackLossy"), false);
 	return MCPResult(Res);
 }
 
@@ -658,6 +729,16 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundAddGraphInput(const TSharedPtr<F
 	MCPSetCreated(Res);
 	Res->SetStringField(TEXT("input"), Name);
 	Res->SetStringField(TEXT("dataType"), DataType);
+
+	// metasound_remove_member with memberKind 'input' is the declared inverse of
+	// adding a graph input. Nothing is connected to a member this call just
+	// created, so the removal takes no edges with it.
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("assetPath"), AssetPath);
+	Payload->SetStringField(TEXT("memberKind"), TEXT("input"));
+	Payload->SetStringField(TEXT("name"), Name);
+	MCPSetRollback(Res, TEXT("metasound_remove_member"), Payload);
+	Res->SetBoolField(TEXT("rollbackLossy"), false);
 	return MCPResult(Res);
 }
 
@@ -680,6 +761,15 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundAddGraphOutput(const TSharedPtr<
 	MCPSetCreated(Res);
 	Res->SetStringField(TEXT("output"), Name);
 	Res->SetStringField(TEXT("dataType"), DataType);
+
+	// Same shape as the graph-input add: memberKind 'output' is the declared
+	// inverse, and a member this call just created drives no edges yet.
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("assetPath"), AssetPath);
+	Payload->SetStringField(TEXT("memberKind"), TEXT("output"));
+	Payload->SetStringField(TEXT("name"), Name);
+	MCPSetRollback(Res, TEXT("metasound_remove_member"), Payload);
+	Res->SetBoolField(TEXT("rollbackLossy"), false);
 	return MCPResult(Res);
 }
 
@@ -709,6 +799,18 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundConnect(const TSharedPtr<FJsonOb
 
 	auto Res = MCPSuccess();
 	MCPSetUpdated(Res);
+
+	// All four of fromNodeId/fromOutput/toNodeId/toInput is metasound_disconnect's
+	// single-edge form, which is the only one of its four forms with an exact
+	// inverse: it drops this edge and no other.
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("assetPath"), AssetPath);
+	Payload->SetStringField(TEXT("fromNodeId"), FromNodeId);
+	Payload->SetStringField(TEXT("fromOutput"), FromOutput);
+	Payload->SetStringField(TEXT("toNodeId"), ToNodeId);
+	Payload->SetStringField(TEXT("toInput"), ToInput);
+	MCPSetRollback(Res, TEXT("metasound_disconnect"), Payload);
+	Res->SetBoolField(TEXT("rollbackLossy"), false);
 	return MCPResult(Res);
 }
 
@@ -729,6 +831,17 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundConnectGraphInput(const TSharedP
 
 	auto Res = MCPSuccess();
 	MCPSetUpdated(Res);
+
+	// toNodeId + toInput alone is metasound_disconnect's 'input' form: it clears
+	// whatever drives that input vertex. A node input vertex holds at most one
+	// incoming edge (ConnectNodes refuses a second), so the one edge it clears
+	// is the one this call just made.
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("assetPath"), AssetPath);
+	Payload->SetStringField(TEXT("toNodeId"), ToNodeId);
+	Payload->SetStringField(TEXT("toInput"), ToInput);
+	MCPSetRollback(Res, TEXT("metasound_disconnect"), Payload);
+	Res->SetBoolField(TEXT("rollbackLossy"), false);
 	return MCPResult(Res);
 }
 
@@ -749,6 +862,17 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundConnectGraphOutput(const TShared
 
 	auto Res = MCPSuccess();
 	MCPSetUpdated(Res);
+
+	// fromNodeId + fromOutput + graphOutput is metasound_disconnect's single-edge
+	// form with the destination named as a graph output, so it cuts this edge
+	// and leaves every other edge on both vertices alone.
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("assetPath"), AssetPath);
+	Payload->SetStringField(TEXT("fromNodeId"), FromNodeId);
+	Payload->SetStringField(TEXT("fromOutput"), FromOutput);
+	Payload->SetStringField(TEXT("graphOutput"), GraphOutput);
+	MCPSetRollback(Res, TEXT("metasound_disconnect"), Payload);
+	Res->SetBoolField(TEXT("rollbackLossy"), false);
 	return MCPResult(Res);
 }
 
@@ -778,6 +902,32 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundConnectAudioOut(const TSharedPtr
 	auto Res = MCPSuccess();
 	MCPSetUpdated(Res);
 	Res->SetNumberField(TEXT("channel"), Channel);
+
+	// An audio output is a graph output, so metasound_disconnect addresses it by
+	// vertex name rather than by channel index. The name comes from the same
+	// engine channel-order table that produced the handle, at the same index, so
+	// it names the vertex this call actually wrote to.
+	if (S->AudioOutNames.IsValidIndex(Channel))
+	{
+		const FString GraphOutput = S->AudioOutNames[Channel].ToString();
+		Res->SetStringField(TEXT("graphOutput"), GraphOutput);
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("assetPath"), AssetPath);
+		Payload->SetStringField(TEXT("fromNodeId"), FromNodeId);
+		Payload->SetStringField(TEXT("fromOutput"), FromOutput);
+		Payload->SetStringField(TEXT("graphOutput"), GraphOutput);
+		MCPSetRollback(Res, TEXT("metasound_disconnect"), Payload);
+		Res->SetBoolField(TEXT("rollbackLossy"), false);
+	}
+	else
+	{
+		Res->SetBoolField(TEXT("rollbackPossible"), false);
+		Res->SetStringField(TEXT("rollbackNote"),
+			TEXT("The vertex name of audio channel ") + FString::FromInt(Channel) +
+			TEXT(" could not be read back off the builder's output-format table, and audio(metasound_disconnect) ")
+			TEXT("addresses an audio output by graph-output name rather than by channel index, so no rollback is offered. ")
+			TEXT("audio(metasound_list_connections) reports the graph output this edge landed on."));
+	}
 	return MCPResult(Res);
 }
 
@@ -794,9 +944,29 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundSetInputDefault(const TSharedPtr
 	FMetasoundFrontendLiteral Lit = MakeLiteral(Value, TypeHint);
 	EMetaSoundBuilderResult R = EMetaSoundBuilderResult::Failed;
 
+	// The previous default, read BEFORE the write, is the rollback payload. Only
+	// the scalar literal kinds can be expressed as this action's own (value,
+	// dataType) pair, so anything else is reported as having no rollback rather
+	// than given one that would write a different value.
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	bool bCapturedPrevious = false;
+
 	FString GraphInput;
 	if (Params->TryGetStringField(TEXT("graphInput"), GraphInput) && !GraphInput.IsEmpty())
 	{
+		EMetaSoundBuilderResult PrevResult = EMetaSoundBuilderResult::Failed;
+		const FMetasoundFrontendLiteral Previous = S->Builder->GetGraphInputDefault(FName(*GraphInput), PrevResult);
+		TSharedPtr<FJsonValue> PrevValue;
+		FString PrevHint;
+		if (Ok(PrevResult) && MSAuthorLiteralToJson(Previous, PrevValue, PrevHint))
+		{
+			Payload->SetStringField(TEXT("assetPath"), AssetPath);
+			Payload->SetStringField(TEXT("graphInput"), GraphInput);
+			Payload->SetField(TEXT("value"), PrevValue);
+			Payload->SetStringField(TEXT("dataType"), PrevHint);
+			bCapturedPrevious = true;
+		}
+
 		S->Builder->SetGraphInputDefault(FName(*GraphInput), Lit, R);
 		if (!Ok(R)) return MCPError(FString::Printf(TEXT("Failed to set default on graph input '%s'."), *GraphInput));
 	}
@@ -807,12 +977,41 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundSetInputDefault(const TSharedPtr
 		if (auto Err = RequireString(Params, TEXT("inputName"), InputName)) return Err;
 		FMetaSoundBuilderNodeInputHandle In = S->Builder->FindNodeInputByName(NodeFromId(NodeId), FName(*InputName), R);
 		if (!Ok(R)) return MCPError(FString::Printf(TEXT("Input vertex '%s' not found on node."), *InputName));
+
+		EMetaSoundBuilderResult PrevResult = EMetaSoundBuilderResult::Failed;
+		const FMetasoundFrontendLiteral Previous = S->Builder->GetNodeInputDefault(In, PrevResult);
+		TSharedPtr<FJsonValue> PrevValue;
+		FString PrevHint;
+		if (Ok(PrevResult) && MSAuthorLiteralToJson(Previous, PrevValue, PrevHint))
+		{
+			Payload->SetStringField(TEXT("assetPath"), AssetPath);
+			Payload->SetStringField(TEXT("nodeId"), NodeId);
+			Payload->SetStringField(TEXT("inputName"), InputName);
+			Payload->SetField(TEXT("value"), PrevValue);
+			Payload->SetStringField(TEXT("dataType"), PrevHint);
+			bCapturedPrevious = true;
+		}
+
 		S->Builder->SetNodeInputDefault(In, Lit, R);
 		if (!Ok(R)) return MCPError(TEXT("Failed to set node input default (type mismatch?)."));
 	}
 
 	auto Res = MCPSuccess();
 	MCPSetUpdated(Res);
+	if (bCapturedPrevious)
+	{
+		MCPSetRollback(Res, TEXT("metasound_set_input_default"), Payload);
+		Res->SetBoolField(TEXT("rollbackLossy"), false);
+	}
+	else
+	{
+		Res->SetBoolField(TEXT("rollbackPossible"), false);
+		Res->SetStringField(TEXT("rollbackNote"),
+			TEXT("The previous default could not be expressed as this action's (value, dataType) pair: it was unset, or an object ")
+			TEXT("or array literal, and metasound_set_input_default builds bool, int32, float and string literals only. Writing any of ")
+			TEXT("those back would set a different value than the one that was there, so no rollback is offered. ")
+			TEXT("audio(metasound_read_document) reports the defaults that are on the graph."));
+	}
 	return MCPResult(Res);
 }
 
@@ -837,6 +1036,14 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundBuild(const TSharedPtr<FJsonObje
 	Res->SetStringField(TEXT("path"), Source->GetPathName());
 	Res->SetStringField(TEXT("note"),
 		TEXT("Document saved to the asset. Authoring writes into the asset's own document as it goes, so this persists it to disk rather than flushing a separate builder."));
+	// A save has no inverse. The bytes that were on disk before it are gone, and
+	// the document it wrote is the same one every earlier authoring call had
+	// already edited in memory, so there is nothing this action alone put there
+	// to take back out. The authoring calls carry their own rollbacks.
+	Res->SetBoolField(TEXT("rollbackPossible"), false);
+	Res->SetStringField(TEXT("rollbackNote"),
+		TEXT("metasound_build persists the asset's document to disk. A write to disk cannot be withdrawn, and the graph edits it ")
+		TEXT("saved were made by the metasound_* authoring calls, each of which emits its own inverse. Roll those back and save again."));
 	return MCPResult(Res);
 }
 
