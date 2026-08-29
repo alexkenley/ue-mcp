@@ -15,6 +15,8 @@
 #include "AttributeSet.h"
 #include "GameplayEffect.h"
 #include "GameplayEffectTypes.h"
+#include "Abilities/GameplayAbility.h"
+#include "GameplayAbilitySpec.h"
 #include "GameplayTagContainer.h"
 #include "UObject/UObjectHash.h"
 #include "UObject/UnrealType.h"
@@ -758,5 +760,417 @@ TSharedPtr<FJsonValue> FGasHandlers::InitAsc(const TSharedPtr<FJsonObject>& Para
 		Result->SetArrayField(TEXT("registeredOwnerSets"), Adopted);
 	}
 	Result->SetNumberField(TEXT("attributeCount"), AttrCount);
+	return MCPResult(Result);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Granting, diagnosis and the reason an activation failed.
+//
+// Everything above operates on attributes and effects. What was missing is the
+// half that decides whether an authored ability does anything at all: an
+// ability the ASC has never been given cannot activate, and when activation
+// does fail GAS reports it only to the log, as a line that names neither the
+// ability nor the reason in a form anything can read back.
+//
+// These are deliberately NOT property writes. An ability's configuration is
+// reachable through asset(set_property) on its Blueprint CDO, because that
+// action resolves a Blueprint path to the generated class default object and
+// walks nested properties. What no property write can do is call GiveAbility,
+// read the active effect container, or ask the ability whether it would
+// activate right now and why not.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace
+{
+	/**
+	 * Resolve a UGameplayAbility subclass from a content path or a class name.
+	 *
+	 * Accepts a Blueprint path ("/Game/Abilities/GA_Fireball"), the generated
+	 * class path ("/Game/Abilities/GA_Fireball.GA_Fireball_C") and a native
+	 * class name ("UGameplayAbility"), because a caller who just created the
+	 * asset has the first spelling and a caller reading get_asc_state has the
+	 * second.
+	 */
+	UClass* ResolveAbilityClass(const FString& Spec, TSharedPtr<FJsonValue>& OutError)
+	{
+		if (Spec.IsEmpty())
+		{
+			OutError = MCPError(TEXT("Missing ability class"));
+			return nullptr;
+		}
+
+		// A generated-class path loads directly.
+		if (UClass* Direct = LoadObject<UClass>(nullptr, *Spec))
+		{
+			if (Direct->IsChildOf(UGameplayAbility::StaticClass())) return Direct;
+			OutError = MCPError(FString::Printf(
+				TEXT("'%s' is a %s, not a GameplayAbility"), *Spec, *Direct->GetName()));
+			return nullptr;
+		}
+
+		// A Blueprint path: take its generated class.
+		TSharedPtr<FJsonValue> Ignored;
+		if (UGameplayAbility* CDO = LoadBlueprintCDO<UGameplayAbility>(Spec, Ignored))
+		{
+			return CDO->GetClass();
+		}
+
+		// A bare "_C"-less content path, then a native class name.
+		if (UClass* Generated = LoadObject<UClass>(nullptr, *(Spec + TEXT("_C"))))
+		{
+			if (Generated->IsChildOf(UGameplayAbility::StaticClass())) return Generated;
+		}
+		if (UClass* Native = FindObject<UClass>(nullptr, *Spec))
+		{
+			if (Native->IsChildOf(UGameplayAbility::StaticClass())) return Native;
+		}
+
+		OutError = MCPError(FString::Printf(
+			TEXT("Could not resolve '%s' to a GameplayAbility class. Pass the Blueprint path "
+				 "(/Game/Abilities/GA_Fireball), its generated class path (…_C), or a native class name."),
+			*Spec));
+		return nullptr;
+	}
+
+	/** One ability spec, as JSON. Shared by grant, revoke and the tracer. */
+	TSharedPtr<FJsonObject> DescribeSpec(const FGameplayAbilitySpec& Spec)
+	{
+		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+		// The int is private; ToString is the public identity.
+		Out->SetStringField(TEXT("handle"), Spec.Handle.ToString());
+		Out->SetStringField(TEXT("abilityClass"), Spec.Ability ? Spec.Ability->GetClass()->GetPathName() : TEXT("None"));
+		Out->SetNumberField(TEXT("level"), Spec.Level);
+		Out->SetNumberField(TEXT("inputID"), Spec.InputID);
+		Out->SetBoolField(TEXT("active"), Spec.IsActive());
+		return Out;
+	}
+}
+
+TSharedPtr<FJsonValue> FGasHandlers::GrantAbility(const TSharedPtr<FJsonObject>& Params)
+{
+	FString AbilitySpec;
+	if (auto Err = RequireString(Params, TEXT("abilityClass"), AbilitySpec)) return Err;
+
+	AActor* Actor = nullptr;
+	TSharedPtr<FJsonValue> Error;
+	UAbilitySystemComponent* ASC = ResolveASC(Params, Actor, Error);
+	if (!ASC) return Error;
+
+	UClass* AbilityClass = ResolveAbilityClass(AbilitySpec, Error);
+	if (!AbilityClass) return Error;
+
+	const int32 Level = static_cast<int32>(OptionalNumber(Params, TEXT("level"), 1.0));
+	const int32 InputID = static_cast<int32>(OptionalNumber(Params, TEXT("inputId"), -1.0));
+
+	// Granting is server-authoritative in GAS. On a client ASC GiveAbility is a
+	// no-op that logs and returns an invalid handle, which would otherwise read
+	// as success here.
+	if (!ASC->IsOwnerActorAuthoritative())
+	{
+		return MCPError(FString::Printf(
+			TEXT("'%s' ASC is not authoritative, and GiveAbility only runs on the authority. "
+				 "Target the server/primary PIE world (world=\"pie\", pieInstance=0)."),
+			*Actor->GetActorLabel()));
+	}
+
+	// Idempotent: granting the same class twice would leave two specs and two
+	// handles for what the caller thinks of as one ability.
+	for (const FGameplayAbilitySpec& Existing : ASC->GetActivatableAbilities())
+	{
+		if (Existing.Ability && Existing.Ability->GetClass() == AbilityClass)
+		{
+			auto Already = MCPSuccess();
+			MCPSetExisted(Already);
+			Already->SetStringField(TEXT("actorLabel"), Actor->GetActorLabel());
+			Already->SetObjectField(TEXT("spec"), DescribeSpec(Existing));
+			Already->SetStringField(TEXT("note"), TEXT("This ability class was already granted; the existing spec is returned."));
+			return MCPResult(Already);
+		}
+	}
+
+	FGameplayAbilitySpec Spec(AbilityClass, Level, InputID, Actor);
+	const FGameplayAbilitySpecHandle Handle = ASC->GiveAbility(Spec);
+	if (!Handle.IsValid())
+	{
+		return MCPError(FString::Printf(
+			TEXT("GiveAbility refused '%s' on '%s'."), *AbilityClass->GetName(), *Actor->GetActorLabel()));
+	}
+
+	const FGameplayAbilitySpec* Granted = ASC->FindAbilitySpecFromHandle(Handle);
+	auto Result = MCPSuccess();
+	MCPSetCreated(Result);
+	Result->SetStringField(TEXT("actorLabel"), Actor->GetActorLabel());
+	Result->SetStringField(TEXT("actorPath"), Actor->GetPathName());
+	if (Granted) Result->SetObjectField(TEXT("spec"), DescribeSpec(*Granted));
+	Result->SetNumberField(TEXT("activatableCount"), ASC->GetActivatableAbilities().Num());
+
+	// Undoing a grant is a revoke of the same class on the same actor.
+	TSharedPtr<FJsonObject> RollbackPayload = MakeShared<FJsonObject>();
+	RollbackPayload->SetStringField(TEXT("actorPath"), Actor->GetPathName());
+	RollbackPayload->SetStringField(TEXT("abilityClass"), AbilityClass->GetPathName());
+	MCPSetRollback(Result, TEXT("revoke_ability"), RollbackPayload);
+
+	return MCPResult(Result);
+}
+
+TSharedPtr<FJsonValue> FGasHandlers::RevokeAbility(const TSharedPtr<FJsonObject>& Params)
+{
+	FString AbilitySpec;
+	if (auto Err = RequireString(Params, TEXT("abilityClass"), AbilitySpec)) return Err;
+
+	AActor* Actor = nullptr;
+	TSharedPtr<FJsonValue> Error;
+	UAbilitySystemComponent* ASC = ResolveASC(Params, Actor, Error);
+	if (!ASC) return Error;
+
+	UClass* AbilityClass = ResolveAbilityClass(AbilitySpec, Error);
+	if (!AbilityClass) return Error;
+
+	if (!ASC->IsOwnerActorAuthoritative())
+	{
+		return MCPError(TEXT("ClearAbility only runs on the authority. Target the server/primary PIE world."));
+	}
+
+	TArray<FGameplayAbilitySpecHandle> ToClear;
+	for (const FGameplayAbilitySpec& Existing : ASC->GetActivatableAbilities())
+	{
+		if (Existing.Ability && Existing.Ability->GetClass() == AbilityClass)
+		{
+			ToClear.Add(Existing.Handle);
+		}
+	}
+
+	auto Result = MCPSuccess();
+	Result->SetStringField(TEXT("actorLabel"), Actor->GetActorLabel());
+	Result->SetStringField(TEXT("abilityClass"), AbilityClass->GetPathName());
+	Result->SetNumberField(TEXT("revoked"), ToClear.Num());
+
+	// Idempotent, and it says which happened: a caller replaying a rollback
+	// should not get an error for work already undone.
+	if (ToClear.Num() == 0)
+	{
+		Result->SetBoolField(TEXT("alreadyRevoked"), true);
+		return MCPResult(Result);
+	}
+
+	for (const FGameplayAbilitySpecHandle& Handle : ToClear) ASC->ClearAbility(Handle);
+	Result->SetNumberField(TEXT("activatableCount"), ASC->GetActivatableAbilities().Num());
+	return MCPResult(Result);
+}
+
+TSharedPtr<FJsonValue> FGasHandlers::GetActiveEffects(const TSharedPtr<FJsonObject>& Params)
+{
+	AActor* Actor = nullptr;
+	TSharedPtr<FJsonValue> Error;
+	UAbilitySystemComponent* ASC = ResolveASC(Params, Actor, Error);
+	if (!ASC) return Error;
+
+	// Everything, rather than a query: the caller is diagnosing, and a filter
+	// that hid the effect they were looking for would be the whole problem.
+	const FGameplayEffectQuery Query;
+	TArray<FActiveGameplayEffectHandle> Handles = ASC->GetActiveEffects(Query);
+
+	TArray<TSharedPtr<FJsonValue>> Effects;
+	for (const FActiveGameplayEffectHandle& Handle : Handles)
+	{
+		const FActiveGameplayEffect* Active = ASC->GetActiveGameplayEffect(Handle);
+		if (!Active) continue;
+
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		const UGameplayEffect* Def = Active->Spec.Def;
+		Entry->SetStringField(TEXT("effectClass"), Def ? Def->GetClass()->GetPathName() : TEXT("None"));
+		// The int is private; ToString is the public identity.
+		Entry->SetStringField(TEXT("handle"), Handle.ToString());
+		Entry->SetNumberField(TEXT("level"), Active->Spec.GetLevel());
+		Entry->SetNumberField(TEXT("stackCount"), Active->Spec.GetStackCount());
+		Entry->SetNumberField(TEXT("duration"), Active->GetDuration());
+		Entry->SetNumberField(TEXT("timeRemaining"), Active->GetTimeRemaining(ASC->GetWorld()->GetTimeSeconds()));
+		Entry->SetBoolField(TEXT("inhibited"), Active->bIsInhibited);
+
+		// Which actor caused this, which is the question asked when an effect
+		// is present and nobody knows where it came from.
+		if (const AActor* Instigator = Active->Spec.GetEffectContext().GetInstigator())
+		{
+			Entry->SetStringField(TEXT("instigator"), Instigator->GetActorLabel());
+		}
+
+		FGameplayTagContainer GrantedTags;
+		Active->Spec.GetAllGrantedTags(GrantedTags);
+		TArray<TSharedPtr<FJsonValue>> TagList;
+		for (const FGameplayTag& Tag : GrantedTags) TagList.Add(MakeShared<FJsonValueString>(Tag.ToString()));
+		Entry->SetArrayField(TEXT("grantedTags"), TagList);
+
+		Effects.Add(MakeShared<FJsonValueObject>(Entry));
+	}
+
+	FGameplayTagContainer Owned;
+	ASC->GetOwnedGameplayTags(Owned);
+	TArray<TSharedPtr<FJsonValue>> OwnedList;
+	for (const FGameplayTag& Tag : Owned) OwnedList.Add(MakeShared<FJsonValueString>(Tag.ToString()));
+
+	auto Result = MCPSuccess();
+	Result->SetStringField(TEXT("actorLabel"), Actor->GetActorLabel());
+	Result->SetNumberField(TEXT("effectCount"), Effects.Num());
+	Result->SetArrayField(TEXT("activeEffects"), Effects);
+	Result->SetArrayField(TEXT("ownedTags"), OwnedList);
+	return MCPResult(Result);
+}
+
+TSharedPtr<FJsonValue> FGasHandlers::TraceAbilityActivation(const TSharedPtr<FJsonObject>& Params)
+{
+	FString AbilitySpec;
+	if (auto Err = RequireString(Params, TEXT("abilityClass"), AbilitySpec)) return Err;
+
+	AActor* Actor = nullptr;
+	TSharedPtr<FJsonValue> Error;
+	UAbilitySystemComponent* ASC = ResolveASC(Params, Actor, Error);
+	if (!ASC) return Error;
+
+	UClass* AbilityClass = ResolveAbilityClass(AbilitySpec, Error);
+	if (!AbilityClass) return Error;
+
+	auto Result = MCPSuccess();
+	Result->SetStringField(TEXT("actorLabel"), Actor->GetActorLabel());
+	Result->SetStringField(TEXT("abilityClass"), AbilityClass->GetPathName());
+
+	TArray<TSharedPtr<FJsonValue>> Blockers;
+	const auto Block = [&Blockers](const FString& Reason)
+	{
+		Blockers.Add(MakeShared<FJsonValueString>(Reason));
+	};
+
+	// 1. Granted at all. This is the single most common reason an authored
+	//    ability does nothing, and it produces no log line worth reading.
+	const FGameplayAbilitySpec* Spec = nullptr;
+	for (const FGameplayAbilitySpec& Candidate : ASC->GetActivatableAbilities())
+	{
+		if (Candidate.Ability && Candidate.Ability->GetClass() == AbilityClass)
+		{
+			Spec = &Candidate;
+			break;
+		}
+	}
+	if (!Spec)
+	{
+		Block(TEXT("not granted: this ability class is not in the ASC's activatable abilities. Call gas(grant_ability) first."));
+		Result->SetBoolField(TEXT("granted"), false);
+		Result->SetBoolField(TEXT("wouldActivate"), false);
+		Result->SetArrayField(TEXT("blockedBy"), Blockers);
+		return MCPResult(Result);
+	}
+
+	Result->SetBoolField(TEXT("granted"), true);
+	Result->SetObjectField(TEXT("spec"), DescribeSpec(*Spec));
+
+	// Spec->Ability is a TObjectPtr, so the two branches have no common type
+	// without naming it. The primary instance is preferred because an
+	// instanced ability's live state is what decides whether it can activate;
+	// a non-instanced one only ever has the CDO.
+	UGameplayAbility* Ability = Spec->GetPrimaryInstance();
+	if (!Ability) Ability = Spec->Ability;
+	if (!Ability)
+	{
+		Block(TEXT("the spec has no ability instance or CDO to interrogate."));
+		Result->SetBoolField(TEXT("wouldActivate"), false);
+		Result->SetArrayField(TEXT("blockedBy"), Blockers);
+		return MCPResult(Result);
+	}
+
+	// 2. Already running, and not allowed to retrigger. Read through
+	//    reflection because the flag is protected on UGameplayAbility; it is a
+	//    UPROPERTY, so this is the supported way in rather than a workaround.
+	bool bRetrigger = false;
+	if (const FBoolProperty* RetriggerProp = CastField<FBoolProperty>(
+			Ability->GetClass()->FindPropertyByName(TEXT("bRetriggerInstancedAbility"))))
+	{
+		bRetrigger = RetriggerProp->GetPropertyValue_InContainer(Ability);
+	}
+	if (Spec->IsActive() && !bRetrigger)
+	{
+		Block(TEXT("already active, and bRetriggerInstancedAbility is false."));
+	}
+
+	// 3. Tags: the ability's own blockers, and what the ASC currently owns.
+	FGameplayTagContainer OwnedTags;
+	ASC->GetOwnedGameplayTags(OwnedTags);
+
+	const auto ReportTags = [&](const TCHAR* Field, const FGameplayTagContainer& Tags)
+	{
+		if (Tags.IsEmpty()) return;
+		TArray<TSharedPtr<FJsonValue>> List;
+		for (const FGameplayTag& Tag : Tags) List.Add(MakeShared<FJsonValueString>(Tag.ToString()));
+		Result->SetArrayField(Field, List);
+	};
+
+	// CanActivateAbility reports the tags it refused over through a single
+	// OptionalRelevantTags container. The engine does not separate "the owner
+	// has a tag that blocks this" from "the ability requires a tag the owner
+	// lacks", so neither does this: the tags are reported as what they are,
+	// the ones relevant to the refusal, rather than sorted into two buckets on
+	// a guess.
+	FGameplayTagContainer RelevantTags;
+	const FGameplayAbilityActorInfo* ActorInfo = ASC->AbilityActorInfo.Get();
+	const bool bCanActivate = Ability->CanActivateAbility(
+		Spec->Handle,
+		ActorInfo,
+		/*SourceTags*/ nullptr,
+		/*TargetTags*/ nullptr,
+		&RelevantTags);
+
+	ReportTags(TEXT("ownedTags"), OwnedTags);
+	ReportTags(TEXT("relevantTags"), RelevantTags);
+
+	if (!bCanActivate && !RelevantTags.IsEmpty())
+	{
+		Block(FString::Printf(
+			TEXT("refused over tags: %s. Compare against ownedTags, and against the ability's "
+				 "ActivationRequiredTags / ActivationBlockedTags."),
+			*RelevantTags.ToStringSimple()));
+	}
+
+	// 4. Cooldown, reported with the time left rather than as a bare "no".
+	//    CheckCooldown returns TRUE when the ability is free to use, so a
+	//    false here is the cooldown being active.
+	FGameplayTagContainer CooldownTags;
+	if (!Ability->CheckCooldown(Spec->Handle, ActorInfo, &CooldownTags))
+	{
+		float Remaining = 0.f;
+		float Duration = 0.f;
+		Ability->GetCooldownTimeRemainingAndDuration(Spec->Handle, ActorInfo, Remaining, Duration);
+		Result->SetNumberField(TEXT("cooldownRemaining"), Remaining);
+		Result->SetNumberField(TEXT("cooldownDuration"), Duration);
+		Block(FString::Printf(TEXT("on cooldown: %.2fs of %.2fs remaining."), Remaining, Duration));
+	}
+
+	// 5. Cost, which is the other half of "it just does not fire".
+	FGameplayTagContainer CostTags;
+	if (!Ability->CheckCost(Spec->Handle, ActorInfo, &CostTags))
+	{
+		const UGameplayEffect* CostEffect = Ability->GetCostGameplayEffect();
+		Block(FString::Printf(
+			TEXT("cost not met%s."),
+			CostEffect ? *FString::Printf(TEXT(" (%s)"), *CostEffect->GetClass()->GetName()) : TEXT("")));
+	}
+
+	Result->SetBoolField(TEXT("wouldActivate"), bCanActivate && Blockers.Num() == 0);
+	Result->SetArrayField(TEXT("blockedBy"), Blockers);
+	if (bCanActivate && Blockers.Num() == 0)
+	{
+		Result->SetStringField(TEXT("note"), TEXT("Nothing is blocking activation right now."));
+	}
+
+	// Optionally prove it, rather than only predicting it.
+	if (OptionalBool(Params, TEXT("activate"), false))
+	{
+		const bool bActivated = ASC->TryActivateAbility(Spec->Handle);
+		Result->SetBoolField(TEXT("activated"), bActivated);
+		if (!bActivated && Blockers.Num() == 0)
+		{
+			Result->SetStringField(TEXT("activationNote"), TEXT(
+				"TryActivateAbility refused even though no blocker was found. That usually means the "
+				"ability's own CanActivateAbility override, or a Blueprint-side check, refused it."));
+		}
+	}
+
 	return MCPResult(Result);
 }

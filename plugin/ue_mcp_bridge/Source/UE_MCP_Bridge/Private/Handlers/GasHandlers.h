@@ -108,4 +108,16 @@ private:
 	// GasHandlers_Runtime.cpp.
 	static TSharedPtr<FJsonValue> GetLiveAttributeValue(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetLiveAttributeValue(const TSharedPtr<FJsonObject>& Params);
+
+	// Granting and diagnosis. An ability the ASC has never been given cannot
+	// activate, and when activation fails GAS reports it only to the log, in a
+	// form nothing can read back. These are deliberately not property writes:
+	// an ability's CONFIGURATION is reachable through asset(set_property) on
+	// its Blueprint CDO, but nothing there can call GiveAbility, read the
+	// active effect container, or ask an ability whether it would activate and
+	// why not. Implemented in GasHandlers_Runtime.cpp.
+	static TSharedPtr<FJsonValue> GrantAbility(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RevokeAbility(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> GetActiveEffects(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> TraceAbilityActivation(const TSharedPtr<FJsonObject>& Params);
 };

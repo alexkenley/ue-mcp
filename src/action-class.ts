@@ -137,6 +137,17 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   "project.verify_symbols": "read",
   "project.lint_cpp_header": "read",
 
+  // ── GAS granting and diagnosis ──────────────────────────────────────
+  // grant/revoke change a live actor's AbilitySystemComponent, so they are
+  // mutations even though neither verb is in the lexicon.
+  "gas.grant_ability": "mutate",
+  "gas.revoke_ability": "mutate",
+  // Reads by default. `activate: true` really does activate the ability, and
+  // an action whose effect a parameter decides is exactly what `unknown` is
+  // for: it is gated like a mutation, which is the safe answer, and the label
+  // stays honest.
+  "gas.trace_ability_activation": "unknown",
+
   // ── Arbitrary payload decides the effect ────────────────────────────
   "epic.call_tool": "unknown",
   "editor.execute_python": "mutate",

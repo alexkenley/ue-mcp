@@ -75,6 +75,10 @@ void FGasHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("get_asc_state"), &GetAscState);
 	Registry.RegisterHandler(TEXT("get_live_attribute_value"), &GetLiveAttributeValue);
 	Registry.RegisterHandler(TEXT("set_live_attribute_value"), &SetLiveAttributeValue);
+	Registry.RegisterHandler(TEXT("grant_ability"), &GrantAbility);
+	Registry.RegisterHandler(TEXT("revoke_ability"), &RevokeAbility);
+	Registry.RegisterHandler(TEXT("get_active_effects"), &GetActiveEffects);
+	Registry.RegisterHandler(TEXT("trace_ability_activation"), &TraceAbilityActivation);
 }
 
 TSharedPtr<FJsonValue> FGasHandlers::CreateGasBlueprint(
