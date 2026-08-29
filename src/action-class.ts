@@ -136,6 +136,13 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   // uses them.
   "project.verify_symbols": "read",
   "project.lint_cpp_header": "read",
+  // The relational half of the same reading: what a class derives from, what
+  // derives from it, and the lines around a declaration. `class` and `symbol`
+  // are nouns rather than verbs, so the lexicon has nothing to go on. The
+  // `find_*` analysis actions resolve through the lexicon already and are not
+  // listed here.
+  "project.class_hierarchy": "read",
+  "project.symbol_context": "read",
 
   // ── Viewport, transactions and AI runtime ───────────────────────────
   // Repaints the viewport. Nothing about the editor, the project on disk or

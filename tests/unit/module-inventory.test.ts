@@ -104,6 +104,7 @@ const SESSION_INDEPENDENT: Record<string, string> = {
   "call-pipeline.ts": "Composes those two over one call's parameters and result; holds nothing per editor.",
   "engine-index.ts": "Indexes an ENGINE tree, which projects share; keyed by engine root, not by editor.",
   "cpp-correctness.ts": "Views over that index plus a Build.cs read; takes its paths as arguments.",
+  "engine-analysis.ts": "Hierarchy, reference and call queries over the same engine tree and index; every path it reads is an argument.",
   "auth.ts": "GitHub identity for feedback authorship: per user, not per project.",
   "auth-cli.ts": "Runs that per-user device flow.",
   "login-cli.ts": "Registry login, per user.",

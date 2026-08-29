@@ -16,6 +16,13 @@ import {
   lintHeader,
   findBuildCs,
 } from "../cpp-correctness.js";
+import {
+  classHierarchy,
+  findCallees,
+  findCallers,
+  findReferences,
+  symbolContext,
+} from "../engine-analysis.js";
 import { readDeployedBridgeApiVersion } from "../plugin/bridge-api.js";
 import { CLIENT_PROTOCOL_VERSION, describeProtocolMismatch } from "../bridge.js";
 import { searchTools, type ToolSearchHit } from "../tool-search.js";
@@ -1029,6 +1036,149 @@ export const projectTool: ToolDef = categoryTool(
         });
       },
     },
+    class_hierarchy: {
+      description:
+        "Report what a class derives from and what derives from it, which is the question behind "
+        + "'what should I subclass' and 'what already does this'. Ancestors are the full chain up "
+        + "to the root, nearest parent first; descendants default to the direct subclasses only, "
+        + "because every transitive subclass of UObject is tens of thousands of names. Every node "
+        + "carries its module, its include and whether it crosses a module boundary from the "
+        + "queried class, since crossing one is what forces a Build.cs dependency; "
+        + "crossModuleDependencies is that list on its own. Reads the engine symbol index and no "
+        + "files, so it is fast once the index exists, and builds it on first use, which can take "
+        + "several minutes on a cold filesystem. A base the index cannot resolve (a template, a "
+        + "macro-generated type) stops the walk and is reported as unresolvedAncestor rather than "
+        + "silently ending the chain. "
+        + "Params: symbol (class or struct name, prefix optional), direction? "
+        + "(ancestors|descendants|both, default both), depth? (generations of descendants, default "
+        + "1), limit? (max descendants, default 100)",
+      timeoutMs: 1_800_000,
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        const symbol = (p.symbol as string | undefined)?.trim();
+        if (!symbol) throw new Error("Missing 'symbol'");
+        const direction = p.direction as "ancestors" | "descendants" | "both" | undefined;
+        const { index, source } = requireEngineIndex(ctx);
+        return {
+          indexSource: source,
+          engineVersion: index.engineVersion,
+          ...classHierarchy(index, symbol, {
+            depth: p.depth as number | undefined,
+            limit: p.limit as number | undefined,
+            direction,
+          }),
+        };
+      },
+    },
+    find_references: {
+      description:
+        "Find every line in the engine tree that names a symbol, which answers 'how is this woven "
+        + "into the engine' and 'what would break if this changed'. Broader than find_callers on "
+        + "purpose: a reference is a member declaration, a UPROPERTY type, a cast, a template "
+        + "argument or a call, and both headers and .cpp files are searched. Comment lines and "
+        + "preprocessor lines are skipped, since neither is a use. Each site reports its file, "
+        + "line, text and owning module. An engine installed from the Epic launcher ships headers "
+        + "WITHOUT .cpp sources, so engineSourcesAvailable says whether implementation files could "
+        + "be searched at all and the note says what was searched instead. Scans files rather than "
+        + "the index, so a rare name on a cold filesystem is slow. "
+        + "Params: symbol (bare or Class::Member), limit? (max sites, default 40), trees? "
+        + "(Runtime|Editor|Developer|Plugins|all, default Runtime), includeProject? (also search "
+        + "this project's Source and Plugins, default true)",
+      timeoutMs: 600_000,
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        const symbol = (p.symbol as string | undefined)?.trim();
+        if (!symbol) throw new Error("Missing 'symbol'");
+        const engineRoot = requireEngineRoot(ctx);
+        return findReferences(engineRoot, symbol, {
+          limit: p.limit as number | undefined,
+          trees: typeof p.trees === "string" ? [p.trees] : (p.trees as string[] | undefined),
+          projectDir: ctx.project.projectDir,
+          includeProject: p.includeProject !== false,
+        });
+      },
+    },
+    find_callers: {
+      description:
+        "Find who calls a function, and from which enclosing function, which is how to see the "
+        + "conventions around a call before writing one: what is checked first, what is passed, "
+        + "what is done with the result. Searches .cpp bodies first, since a mention in a header is "
+        + "usually a declaration rather than a call, and excludes the function's own definition. "
+        + "Each site reports file, line, text, module and, for a site in a .cpp, the Class::Method "
+        + "it sits inside. An engine installed from the Epic launcher ships headers WITHOUT .cpp "
+        + "sources, so on those there are no engine call sites to find: engineSourcesAvailable "
+        + "reports that and the search falls back to inline code in headers and to this project's "
+        + "own Source tree, rather than returning an empty list that reads as 'nothing calls this'. "
+        + "Params: symbol (bare or Class::Method), limit? (max sites, default 25), trees? "
+        + "(Runtime|Editor|Developer|Plugins|all, default Runtime), includeProject? (also search "
+        + "this project's Source and Plugins, default true)",
+      timeoutMs: 600_000,
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        const symbol = (p.symbol as string | undefined)?.trim();
+        if (!symbol) throw new Error("Missing 'symbol'");
+        const engineRoot = requireEngineRoot(ctx);
+        return findCallers(engineRoot, symbol, {
+          limit: p.limit as number | undefined,
+          trees: typeof p.trees === "string" ? [p.trees] : (p.trees as string[] | undefined),
+          projectDir: ctx.project.projectDir,
+          includeProject: p.includeProject !== false,
+        });
+      },
+    },
+    find_callees: {
+      description:
+        "Report what a function calls, by reading its body and looking every called name back up "
+        + "in the engine index. Answers 'what does doing this properly actually involve': the "
+        + "result carries each callee's module and include, and modules[] is the Build.cs cost of "
+        + "writing code that does the same thing. The body is found via the index, which keeps the "
+        + "search to the owning class's module rather than the whole tree, and the definition it "
+        + "read is reported with its file and line range. An engine installed from the Epic "
+        + "launcher ships headers WITHOUT .cpp sources, so only functions whose body is inline in a "
+        + "header can be read there; engineSourcesAvailable and the note say so instead of "
+        + "returning an empty list. Builds the index on first use. "
+        + "Params: symbol (Class::Method, or a bare exported free function), limit? (max callees, "
+        + "default 100), trees? (which trees to test for sources, default Runtime)",
+      timeoutMs: 1_800_000,
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        const symbol = (p.symbol as string | undefined)?.trim();
+        if (!symbol) throw new Error("Missing 'symbol'");
+        const { index, source } = requireEngineIndex(ctx);
+        return {
+          indexSource: source,
+          ...findCallees(index, symbol, {
+            projectDir: ctx.project.projectDir,
+            limit: p.limit as number | undefined,
+            trees: typeof p.trees === "string" ? [p.trees] : (p.trees as string[] | undefined),
+          }),
+        };
+      },
+    },
+    symbol_context: {
+      description:
+        "Return the lines of engine source around a declaration, so the API surrounding a symbol "
+        + "can be read without opening the file: the sibling overloads, the UPROPERTY above it, the "
+        + "comment saying which of three similar methods to call. verify_symbols returns the "
+        + "declaration line alone, which is the signature and nothing else; this is that line in "
+        + "its neighbourhood. Accepts Class::Member as well as a bare type and resolves both "
+        + "exactly as verify_symbols does. When the declaration opens a body that closes inside the "
+        + "window the result ends at the closing brace instead of mid-type, and reports "
+        + "bodyEndLine. Builds the index on first use, which can take several minutes on a cold "
+        + "filesystem. "
+        + "Params: symbol (bare or Class::Member), contextBefore? (lines before the declaration, "
+        + "default 8), contextAfter? (lines after, default 40)",
+      timeoutMs: 1_800_000,
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        const symbol = (p.symbol as string | undefined)?.trim();
+        if (!symbol) throw new Error("Missing 'symbol'");
+        const { index, source } = requireEngineIndex(ctx);
+        return {
+          indexSource: source,
+          engineRoot: index.engineRoot,
+          ...symbolContext(index, symbol, {
+            before: p.contextBefore as number | undefined,
+            after: p.contextAfter as number | undefined,
+          }),
+        };
+      },
+    },
     lint_cpp_header: {
       description:
         "Check a header you just wrote against the engine it has to build against, and report what "
@@ -1219,7 +1369,7 @@ export const projectTool: ToolDef = categoryTool(
     moduleName: z.string().optional().describe("For read_module / is_module_loaded: module name"),
     filter: z.string().optional().describe("For list_loaded_modules: case-insensitive name substring (#689)"),
     loadedOnly: z.boolean().optional().describe("For list_loaded_modules: only loaded modules (#689)"),
-    limit: z.number().optional().describe("For search_tools: max results (default 20) (#704)"),
+    limit: z.number().optional().describe("Max results: search_tools (default 20), find_example_usage (10), find_references (40), find_callers (25), find_callees (100), class_hierarchy descendants (100) (#704)"),
     name: z.string().optional().describe("describe_action: the action to describe, as 'tool.action' or a bare action name"),
     category: z.string().optional().describe("describe_action: return every action of this category instead of one action"),
     extensions: z.union([z.string(), z.array(z.string())]).optional().describe("For list_files: extension filter (#608)"),
@@ -1231,12 +1381,17 @@ export const projectTool: ToolDef = categoryTool(
     configuration: z.string().optional().describe("Build configuration: Development, Debug, Shipping"),
     platform: z.string().optional().describe("Target platform: Win64, Linux, Mac"),
     clean: z.boolean().optional().describe("Clean build"),
-    symbol: z.string().optional().describe("Symbol name for find_engine_symbol / find_example_usage"),
+    symbol: z.string().optional().describe("Symbol name for find_engine_symbol / find_example_usage / class_hierarchy / find_references / find_callers / find_callees / symbol_context"),
     names: z.union([z.string(), z.array(z.string())]).optional().describe("verify_symbols / suggest_build_deps: engine symbol names, as an array or a comma-separated string (max 200)"),
     refresh: z.boolean().optional().describe("build_engine_index: rebuild even when a valid cache exists"),
     buildCsPath: z.string().optional().describe("suggest_build_deps / lint_cpp_header: absolute path to a .Build.cs (defaults to the one owning the target)"),
     modulePath: z.string().optional().describe("suggest_build_deps: a file or directory whose owning Build.cs to read"),
-    trees: z.union([z.string(), z.array(z.string())]).optional().describe("find_example_usage: engine trees to search (default Runtime)"),
+    trees: z.union([z.string(), z.array(z.string())]).optional().describe("find_example_usage / find_references / find_callers / find_callees: engine trees to search - Runtime|Editor|Developer|Plugins|all (default Runtime)"),
+    direction: z.enum(["ancestors", "descendants", "both"]).optional().describe("class_hierarchy: walk up, down, or both (default both)"),
+    depth: z.number().optional().describe("class_hierarchy: generations of descendants to report (default 1; every transitive subclass of UObject is tens of thousands of names)"),
+    includeProject: z.boolean().optional().describe("find_references / find_callers: also search this project's own Source and Plugins trees (default true)"),
+    contextBefore: z.number().optional().describe("symbol_context: lines of source before the declaration (default 8)"),
+    contextAfter: z.number().optional().describe("symbol_context: lines of source after the declaration (default 40)"),
     maxResults: z.number().optional().describe("Cap on find_engine_symbol / search_engine_cpp hits (default 100 / 500)"),
     tree: z.string().optional().describe("For search_engine_cpp: Runtime|Editor|Developer|Plugins|all (default Runtime)"),
     subdirectory: z.string().optional().describe("For search_engine_cpp: subdirectory within the chosen tree"),
