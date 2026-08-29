@@ -45,7 +45,7 @@ const IDEMPOTENCY_MARKERS = [
   "alreadyDeleted", "alreadyRevoked", "alreadyRemoved", "alreadyDetached",
   "alreadyExists", "alreadyRunning", "alreadyStopped", "alreadyPaused",
   "alreadySet", "alreadyOpen", "unchanged", "noChange", "wasAlready",
-  "skipped", "nested", "wasActive",
+  "skipped", "nested", "wasActive", "alreadyClosed", "alreadyApplied",
   "SetBoolField(TEXT(\"changed\")",
 ];
 

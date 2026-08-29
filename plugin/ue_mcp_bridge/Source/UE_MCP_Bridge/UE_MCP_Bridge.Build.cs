@@ -3,7 +3,9 @@ using UnrealBuildTool;
 // New source files (UBT caches the module file list and will not pick one up
 // until this file changes): GameplayHandlers_EQS.cpp,
 // GameplayHandlers_BTRuntime.cpp, GameplayHandlers_Perception.cpp,
-// EditorHandlers_ViewportControl.cpp.
+// EditorHandlers_ViewportControl.cpp, NiagaraHandlers_Advanced.cpp,
+// AudioHandlers_MetaSoundRead.cpp, AssetHandlers_UV.cpp,
+// AnimationHandlers_Skeleton.cpp.
 
 public class UE_MCP_Bridge : ModuleRules
 {

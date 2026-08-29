@@ -36,6 +36,18 @@ private:
 	static TSharedPtr<FJsonValue> MetaSoundSetInputDefault(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> MetaSoundBuild(const TSharedPtr<FJsonObject>& Params);
 
+	// MetaSound graph introspection, in AudioHandlers_MetaSoundRead.cpp. The
+	// bridge could BUILD a graph and not read it back, so it could write but
+	// not verify or iterate, which is worse than not writing at all. Node ids
+	// match what the authoring actions already accept.
+	static TSharedPtr<FJsonValue> MetaSoundReadDocument(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> MetaSoundListConnections(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> MetaSoundListVariables(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> MetaSoundSearchNodes(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> MetaSoundInspectNode(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> MetaSoundListNodePins(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> MetaSoundValidate(const TSharedPtr<FJsonObject>& Params);
+
 	// ── SoundCue graph authoring (AudioHandlers_SoundCue.cpp) ───────────
 	// One-shot: stamp a whole cue tree (nodes + connections + root) in one call.
 	static TSharedPtr<FJsonValue> SoundCueAuthor(const TSharedPtr<FJsonObject>& Params);

@@ -128,6 +128,12 @@ const NO_INVERSE: Record<string, string> = {
   cancel_editor_transaction:
     "Discarding a transaction IS the undo. There is nothing to un-cancel: the "
     + "objects were already restored and the transaction no longer exists.",
+  export_uv_layout:
+    "Writes a preview PNG to Saved/. An export produces an output artifact "
+    + "rather than project state, and deleting a file that regenerates on "
+    + "demand is not a meaningful undo. The same reasoning covers the six "
+    + "export_* actions that predate this one, all of which likewise emit no "
+    + "rollback; they belong to the deferred convention pass.",
   report_noise_event:
     "Injects a one-shot stimulus into the running world. An AI either heard it "
     + "or did not; there is no call that un-hears it. For the same reason it "

@@ -137,6 +137,13 @@ namespace
 void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	Registry.RegisterHandler(TEXT("list_assets"), &ListAssets);
+	Registry.RegisterHandler(TEXT("read_uv_channels"), &ReadUvChannels);
+	Registry.RegisterHandler(TEXT("set_uv_channel_count"), &SetUvChannelCount);
+	Registry.RegisterHandler(TEXT("unwrap_uvs"), &UnwrapUvs);
+	Registry.RegisterHandler(TEXT("transform_uvs"), &TransformUvs);
+	Registry.RegisterHandler(TEXT("generate_lightmap_uvs"), &GenerateLightmapUvs);
+	Registry.RegisterHandler(TEXT("export_uv_layout"), &ExportUvLayout);
+	Registry.RegisterHandler(TEXT("check_uvs"), &CheckUvs);
 	Registry.RegisterHandler(TEXT("search_assets"), &SearchAssets);
 	Registry.RegisterHandler(TEXT("read_asset"), &ReadAsset);
 	Registry.RegisterHandler(TEXT("read_asset_properties"), &ReadAssetProperties);

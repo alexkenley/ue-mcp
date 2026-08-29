@@ -12,6 +12,20 @@ public:
 private:
 	// Existing read-only queries
 	static TSharedPtr<FJsonValue> ListAnimAssets(const TSharedPtr<FJsonObject>& Params);
+
+	// Real-bone skeleton editing, in AnimationHandlers_Skeleton.cpp. Before
+	// this the bridge could list bones and add virtual ones, and could not
+	// touch a real bone at all. USkeletonModifier batches every hierarchy
+	// change and writes only on commit, so the lifecycle is explicit the way
+	// begin/apply/bake_control_rig_edit already is.
+	static TSharedPtr<FJsonValue> BeginSkeletonEdit(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> EditSkeletonBones(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> CommitSkeletonEdit(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> CancelSkeletonEdit(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SetBoneRetargeting(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> AuthorBlendProfile(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> EditCurveMetadata(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RegisterCompatibleSkeleton(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ListSkeletalMeshes(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> GetSkeletonInfo(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ListSockets(const TSharedPtr<FJsonObject>& Params);

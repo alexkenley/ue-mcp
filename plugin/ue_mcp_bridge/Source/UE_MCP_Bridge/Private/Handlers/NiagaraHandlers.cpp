@@ -89,6 +89,17 @@ void FNiagaraHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("list_niagara_module_inputs"), &ListModuleInputs);
 	Registry.RegisterHandler(TEXT("set_niagara_module_input"), &SetModuleInput);
 	Registry.RegisterHandler(TEXT("add_niagara_module"), &AddModule);
+	Registry.RegisterHandler(TEXT("list_niagara_dynamic_inputs"), &ListDynamicInputs);
+	Registry.RegisterHandler(TEXT("set_niagara_dynamic_input"), &SetDynamicInput);
+	Registry.RegisterHandler(TEXT("remove_niagara_dynamic_input"), &RemoveDynamicInput);
+	Registry.RegisterHandler(TEXT("add_niagara_simulation_stage"), &AddSimulationStage);
+	Registry.RegisterHandler(TEXT("remove_niagara_simulation_stage"), &RemoveSimulationStage);
+	Registry.RegisterHandler(TEXT("add_niagara_event_handler"), &AddEventHandler);
+	Registry.RegisterHandler(TEXT("remove_niagara_event_handler"), &RemoveEventHandler);
+	Registry.RegisterHandler(TEXT("get_niagara_custom_hlsl"), &GetCustomHlsl);
+	Registry.RegisterHandler(TEXT("set_niagara_custom_hlsl"), &SetCustomHlsl);
+	Registry.RegisterHandler(TEXT("remove_niagara_module"), &RemoveModule);
+	Registry.RegisterHandler(TEXT("set_niagara_module_enabled"), &SetModuleEnabled);
 	Registry.RegisterHandler(TEXT("remove_emitter_from_system"), &RemoveEmitterFromSystem);
 	Registry.RegisterHandler(TEXT("validate_niagara_system"), &ValidateSystem);
 	Registry.RegisterHandler(TEXT("list_niagara_static_switches"), &ListStaticSwitches);

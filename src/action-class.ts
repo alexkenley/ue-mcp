@@ -144,6 +144,12 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   // Pure reads whose verb is not in the lexicon.
   "editor.get_undo_state": "read",
   "asset.read_skeletal_mesh_build_settings": "read",
+  // Rewrites a mesh's UV layout in place, so it changes the asset on disk.
+  "asset.unwrap_uvs": "mutate",
+  // Reports UV faults and writes nothing.
+  "asset.check_uvs": "read",
+  // Records another skeleton as compatible on this one, so it writes the asset.
+  "animation.register_compatible_skeleton": "mutate",
   // Discards an open transaction, restoring what it touched. That is a change
   // to editor state, so it is gated like one even though its purpose is undo.
   "editor.cancel_transaction": "mutate",

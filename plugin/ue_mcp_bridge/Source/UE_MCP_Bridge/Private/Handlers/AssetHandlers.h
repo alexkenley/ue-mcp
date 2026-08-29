@@ -13,6 +13,18 @@ public:
 private:
 	// Handler implementations
 	static TSharedPtr<FJsonValue> ListAssets(const TSharedPtr<FJsonObject>& Params);
+
+	// UV authoring and inspection, in AssetHandlers_UV.cpp. There was no UV
+	// surface at all: one read-only peek at a single channel off render data.
+	// Lightmap settings themselves stay with asset(set_property); what earns a
+	// handler here is that writing them does nothing until the mesh rebuilds.
+	static TSharedPtr<FJsonValue> ReadUvChannels(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SetUvChannelCount(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> UnwrapUvs(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> TransformUvs(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> GenerateLightmapUvs(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ExportUvLayout(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> CheckUvs(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SearchAssets(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ReadAsset(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ReadAssetProperties(const TSharedPtr<FJsonObject>& Params);

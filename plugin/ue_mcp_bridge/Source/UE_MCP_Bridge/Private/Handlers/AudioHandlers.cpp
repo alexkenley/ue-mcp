@@ -47,6 +47,13 @@ void FAudioHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("metasound_connect_audio_out"), &MetaSoundConnectAudioOut);
 	Registry.RegisterHandler(TEXT("metasound_set_input_default"), &MetaSoundSetInputDefault);
 	Registry.RegisterHandler(TEXT("metasound_build"), &MetaSoundBuild);
+	Registry.RegisterHandler(TEXT("metasound_read_document"), &MetaSoundReadDocument);
+	Registry.RegisterHandler(TEXT("metasound_list_connections"), &MetaSoundListConnections);
+	Registry.RegisterHandler(TEXT("metasound_list_variables"), &MetaSoundListVariables);
+	Registry.RegisterHandler(TEXT("metasound_search_nodes"), &MetaSoundSearchNodes);
+	Registry.RegisterHandler(TEXT("metasound_inspect_node"), &MetaSoundInspectNode);
+	Registry.RegisterHandler(TEXT("metasound_list_node_pins"), &MetaSoundListNodePins);
+	Registry.RegisterHandler(TEXT("metasound_validate"), &MetaSoundValidate);
 
 	// SoundCue graph authoring (AudioHandlers_SoundCue.cpp)
 	Registry.RegisterHandler(TEXT("soundcue_author"), &SoundCueAuthor);

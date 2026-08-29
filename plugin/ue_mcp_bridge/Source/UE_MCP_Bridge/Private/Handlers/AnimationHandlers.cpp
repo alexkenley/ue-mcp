@@ -72,6 +72,14 @@
 void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	Registry.RegisterHandler(TEXT("list_anim_assets"), &ListAnimAssets);
+	Registry.RegisterHandler(TEXT("begin_skeleton_edit"), &BeginSkeletonEdit);
+	Registry.RegisterHandler(TEXT("edit_skeleton_bones"), &EditSkeletonBones);
+	Registry.RegisterHandler(TEXT("commit_skeleton_edit"), &CommitSkeletonEdit);
+	Registry.RegisterHandler(TEXT("cancel_skeleton_edit"), &CancelSkeletonEdit);
+	Registry.RegisterHandler(TEXT("set_bone_retargeting"), &SetBoneRetargeting);
+	Registry.RegisterHandler(TEXT("author_blend_profile"), &AuthorBlendProfile);
+	Registry.RegisterHandler(TEXT("edit_curve_metadata"), &EditCurveMetadata);
+	Registry.RegisterHandler(TEXT("register_compatible_skeleton"), &RegisterCompatibleSkeleton);
 	Registry.RegisterHandler(TEXT("list_skeletal_meshes"), &ListSkeletalMeshes);
 	Registry.RegisterHandler(TEXT("get_skeleton_info"), &GetSkeletonInfo);
 	Registry.RegisterHandler(TEXT("list_animation_sockets"), &ListSockets);
