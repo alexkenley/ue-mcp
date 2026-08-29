@@ -165,6 +165,37 @@ void FBlueprintHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 
 	// #945: project-wide call-site audit (BlueprintHandlers_Search.cpp).
 	Registry.RegisterHandlerWithTimeout(TEXT("search_blueprint_call_sites"), &SearchCallSites, SearchCallSitesTimeoutSeconds);
+
+	// V9 Blueprint depth (BlueprintHandlers_Depth.cpp). Interface removal and
+	// listing, function flags and metadata, parameter CRUD across functions,
+	// macros, dispatcher signatures and custom events, member and local
+	// variable rename plus metadata, dispatcher removal, custom events with a
+	// typed signature, and macro authoring.
+	Registry.RegisterHandler(TEXT("list_blueprint_interfaces"), &ListBlueprintInterfaces);
+	Registry.RegisterHandler(TEXT("remove_blueprint_interface"), &RemoveBlueprintInterface);
+	Registry.RegisterHandler(TEXT("set_function_properties"), &SetFunctionProperties);
+	Registry.RegisterHandler(TEXT("list_graph_parameters"), &ListGraphParameters);
+	Registry.RegisterHandler(TEXT("edit_graph_parameters"), &EditGraphParameters);
+	Registry.RegisterHandler(TEXT("rename_blueprint_variable"), &RenameBlueprintVariable);
+	Registry.RegisterHandler(TEXT("get_blueprint_variable_metadata"), &GetBlueprintVariableMetadata);
+	Registry.RegisterHandler(TEXT("set_blueprint_variable_metadata"), &SetBlueprintVariableMetadata);
+	Registry.RegisterHandler(TEXT("edit_local_variable"), &EditLocalVariable);
+	Registry.RegisterHandler(TEXT("list_event_dispatchers"), &ListEventDispatchers);
+	Registry.RegisterHandler(TEXT("remove_event_dispatcher"), &RemoveEventDispatcher);
+	Registry.RegisterHandler(TEXT("add_custom_event"), &AddCustomEvent);
+	Registry.RegisterHandler(TEXT("create_macro"), &CreateMacro);
+	Registry.RegisterHandler(TEXT("delete_macro"), &DeleteMacro);
+
+	// V14 user-type authoring (BlueprintHandlers_UserTypes.cpp). Creation and
+	// the coarse entry CRUD stay on the asset category; these cover ordering,
+	// entry and field metadata, field defaults, and the whole-definition read.
+	Registry.RegisterHandler(TEXT("read_user_defined_enum"), &ReadUserDefinedEnum);
+	Registry.RegisterHandler(TEXT("reorder_enum_values"), &ReorderEnumValues);
+	Registry.RegisterHandler(TEXT("set_enum_metadata"), &SetEnumMetadata);
+	Registry.RegisterHandler(TEXT("read_user_defined_struct"), &ReadUserDefinedStruct);
+	Registry.RegisterHandler(TEXT("set_struct_field_default"), &SetStructFieldDefault);
+	Registry.RegisterHandler(TEXT("reorder_struct_fields"), &ReorderStructFields);
+	Registry.RegisterHandler(TEXT("edit_struct_metadata"), &EditStructMetadata);
 }
 
 // ---------------------------------------------------------------------------
