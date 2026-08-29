@@ -45,21 +45,32 @@ import { classifyActionClass } from "../../src/action-class.js";
  * what this file exists to stop.
  */
 const BASELINE = {
-  // +2 over the original 359, and +3 over the original 146, for a reason worth
-  // stating: wiring an ORPHAN surfaces its pre-existing debt. Three handlers
-  // that already violated these conventions were unreachable from TS, so they
-  // were not counted as mutations at all. Surfacing a capability is the right
-  // move and it should not be discouraged by a number going up, but the debt
-  // was always there:
+  // Re-pinned from a real measurement after the backlog wave landed, which
+  // added roughly 206 actions across 18 new handler files and took the surface
+  // from 943 registered handlers to 1096.
   //
-  //   set_runtime_visibility                     no idempotency marker
-  //   restore_runtime_visibility                 neither
-  //   set_skeletal_mesh_optimize_for_instancing  neither
+  // Both counters went DOWN, which is the outcome worth protecting: 361 to 356
+  // and 149 to 129. None of that is the new work being exempted. It comes from
+  // two places.
   //
-  // These belong to the deferred convention pass over all 359, not to the
-  // ticket that surfaced them.
-  mutationsWithoutRollback: 361,
-  mutationsWithoutIdempotency: 149,
+  // Every one of the wave's own mutations carries both markers, so 206 actions
+  // arrived adding nothing to either count.
+  //
+  // And the auditor itself got more accurate. It used to brace-match a handler
+  // body and look for markers inside it, so a handler funnelling its write
+  // through a shared file-local helper read as having neither, which is what
+  // the seven landscape writers going through MCPLscWriteHeights and
+  // MCPLscWriteWeights did. It now follows one level of file-local call and
+  // records which helper earned the credit. It also used to key on a bare
+  // method name, so two classes sharing one collided and it audited the wrong
+  // body; keying on the class-qualified name made the numbers slightly WORSE
+  // in two places, correctly, and resolved six bodies it could never find.
+  //
+  // The rule stands: if a number goes UP, a new handler skipped a convention.
+  // If it goes DOWN, lower it here and commit that. Never edit these to
+  // whatever makes the test pass.
+  mutationsWithoutRollback: 356,
+  mutationsWithoutIdempotency: 129,
   orphanedHandlers: 22,
 };
 
