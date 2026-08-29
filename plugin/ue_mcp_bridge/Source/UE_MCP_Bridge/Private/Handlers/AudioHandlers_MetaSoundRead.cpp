@@ -315,6 +315,46 @@ namespace
 			|| Type == EMetasoundFrontendClassType::VariableMutator;
 	}
 
+	/** A literal type's own name, for saying what a value is when it cannot be rendered. */
+	FString MSReadLiteralTypeName(EMetasoundFrontendLiteralType Type)
+	{
+		switch (Type)
+		{
+		case EMetasoundFrontendLiteralType::None:         return TEXT("None");
+		case EMetasoundFrontendLiteralType::Boolean:      return TEXT("Boolean");
+		case EMetasoundFrontendLiteralType::Integer:      return TEXT("Integer");
+		case EMetasoundFrontendLiteralType::Float:        return TEXT("Float");
+		case EMetasoundFrontendLiteralType::String:       return TEXT("String");
+		case EMetasoundFrontendLiteralType::UObject:      return TEXT("UObject");
+		case EMetasoundFrontendLiteralType::NoneArray:    return TEXT("NoneArray");
+		case EMetasoundFrontendLiteralType::BooleanArray: return TEXT("BooleanArray");
+		case EMetasoundFrontendLiteralType::IntegerArray: return TEXT("IntegerArray");
+		case EMetasoundFrontendLiteralType::FloatArray:   return TEXT("FloatArray");
+		case EMetasoundFrontendLiteralType::StringArray:  return TEXT("StringArray");
+		case EMetasoundFrontendLiteralType::UObjectArray: return TEXT("UObjectArray");
+		default:                                          return TEXT("Invalid");
+		}
+	}
+
+	/**
+	 * A literal the typed accessors declined, named rather than guessed at.
+	 *
+	 * The frontend's ToString() is a debug rendering, not a value: handing it
+	 * back as a bare JSON string would look like something metasound_author or
+	 * metasound_set_input_default would take, and it is not. So the field says
+	 * what the value is and marks the text as read-only.
+	 */
+	TSharedPtr<FJsonValue> MSReadUnrenderableLiteral(const FMetasoundFrontendLiteral& Lit)
+	{
+		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+		O->SetStringField(TEXT("literalType"), MSReadLiteralTypeName(Lit.GetType()));
+		O->SetStringField(TEXT("text"), Lit.ToString());
+		O->SetStringField(TEXT("note"),
+			TEXT("This literal has no JSON form the metasound write actions accept, so it is reported by type "
+				 "rather than by value. 'text' is the frontend's own rendering and is for reading only."));
+		return MakeShared<FJsonValueObject>(O);
+	}
+
 	/** A literal as JSON of its own kind, so a reader can compare it to what it set. */
 	TSharedPtr<FJsonValue> MSReadLiteralToJson(const FMetasoundFrontendLiteral& Lit)
 	{
@@ -355,11 +395,113 @@ namespace
 		}
 		case EMetasoundFrontendLiteralType::None:
 			return MakeShared<FJsonValueNull>();
+
+		// Arrays come back as JSON arrays of the same element form, which is the
+		// shape the write actions take them in, rather than as one packed string.
+		case EMetasoundFrontendLiteralType::NoneArray:
+		{
+			TArray<TSharedPtr<FJsonValue>> Out;
+			for (int32 I = 0; I < Lit.GetArrayNum(); ++I) Out.Add(MakeShared<FJsonValueNull>());
+			return MakeShared<FJsonValueArray>(Out);
+		}
+		case EMetasoundFrontendLiteralType::BooleanArray:
+		{
+			TArray<bool> V;
+			if (Lit.TryGet(V))
+			{
+				TArray<TSharedPtr<FJsonValue>> Out;
+				for (bool B : V) Out.Add(MakeShared<FJsonValueBoolean>(B));
+				return MakeShared<FJsonValueArray>(Out);
+			}
+			break;
+		}
+		case EMetasoundFrontendLiteralType::IntegerArray:
+		{
+			TArray<int32> V;
+			if (Lit.TryGet(V))
+			{
+				TArray<TSharedPtr<FJsonValue>> Out;
+				for (int32 I : V) Out.Add(MakeShared<FJsonValueNumber>(I));
+				return MakeShared<FJsonValueArray>(Out);
+			}
+			break;
+		}
+		case EMetasoundFrontendLiteralType::FloatArray:
+		{
+			TArray<float> V;
+			if (Lit.TryGet(V))
+			{
+				TArray<TSharedPtr<FJsonValue>> Out;
+				for (float F : V) Out.Add(MakeShared<FJsonValueNumber>(F));
+				return MakeShared<FJsonValueArray>(Out);
+			}
+			break;
+		}
+		case EMetasoundFrontendLiteralType::StringArray:
+		{
+			TArray<FString> V;
+			if (Lit.TryGet(V))
+			{
+				TArray<TSharedPtr<FJsonValue>> Out;
+				for (const FString& S : V) Out.Add(MakeShared<FJsonValueString>(S));
+				return MakeShared<FJsonValueArray>(Out);
+			}
+			break;
+		}
+		case EMetasoundFrontendLiteralType::UObjectArray:
+		{
+			TArray<UObject*> V;
+			if (Lit.TryGet(V))
+			{
+				TArray<TSharedPtr<FJsonValue>> Out;
+				for (UObject* Obj : V) Out.Add(MakeShared<FJsonValueString>(Obj ? Obj->GetPathName() : FString()));
+				return MakeShared<FJsonValueArray>(Out);
+			}
+			break;
+		}
 		default:
 			break;
 		}
-		// Arrays and anything the typed accessors decline: the frontend's own text form.
-		return MakeShared<FJsonValueString>(Lit.ToString());
+		// Invalid, and anything a typed accessor declined: named, not guessed at.
+		return MSReadUnrenderableLiteral(Lit);
+	}
+
+	/**
+	 * The literal a GRAPH INPUT carries as its default value.
+	 *
+	 * It is not on the input node. A graph input node's InputLiterals array is
+	 * empty, which is why reading only that array reported no default for an
+	 * input that metasound_author had just written one for. The value lives on
+	 * the document's root graph CLASS interface, as one entry per page on the
+	 * class input of the same name (FMetasoundFrontendClassInput::Defaults), and
+	 * UMetaSoundSourceBuilder::AddGraphInputNode / SetGraphInputDefault write it
+	 * there.
+	 *
+	 * Returns null when the input carries no default at all, so a caller can
+	 * tell "no default set" from "the default is zero".
+	 */
+	const FMetasoundFrontendLiteral* MSReadGraphInputDefault(
+		const FMetasoundFrontendDocument& Doc,
+		const FName InputName,
+		const FGuid& PageID)
+	{
+		for (const FMetasoundFrontendClassInput& In : Doc.RootGraph.GetDefaultInterface().Inputs)
+		{
+			if (In.Name != InputName) continue;
+			if (const FMetasoundFrontendLiteral* Lit = In.FindConstDefault(PageID))
+			{
+				if (Lit->IsValid()) return Lit;
+			}
+			// The page being read carries no default of its own. A default held
+			// on another page is still what this input was authored with, so
+			// report that rather than nothing.
+			for (const FMetasoundFrontendClassInputDefault& D : In.GetDefaults())
+			{
+				if (D.Literal.IsValid()) return &D.Literal;
+			}
+			return nullptr;
+		}
+		return nullptr;
 	}
 
 	/** The literal set on a node input in this graph, if one is set. */
@@ -450,10 +592,22 @@ namespace
 		return O;
 	}
 
-	/** One input vertex, carrying its connection state and whatever default is set. */
+	/**
+	 * One input vertex, carrying its connection state and whatever default is set.
+	 *
+	 * Two places hold a default and they are not interchangeable. An ordinary
+	 * node's per-instance override sits in the node's own InputLiterals; a GRAPH
+	 * INPUT node has none, and its value is the graph input's default on the root
+	 * graph class interface. Both are reported as "default", because both are
+	 * what the caller set and what it gets to set again, and "defaultSource" says
+	 * which one it came from so a caller knows whether to write it back with
+	 * metasound_set_input_default's nodeId form or its graphInput form.
+	 */
 	TSharedPtr<FJsonObject> MSReadInputVertexJson(
+		const FMetasoundFrontendDocument& Doc,
 		const FMetasoundFrontendNode& Node,
 		const FMetasoundFrontendVertex& Vertex,
+		const FGuid& PageID,
 		const FMSReadDegree& Degrees)
 	{
 		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
@@ -468,11 +622,22 @@ namespace
 		{
 			O->SetField(TEXT("default"), MSReadLiteralToJson(*Lit));
 			O->SetBoolField(TEXT("defaultIsSet"), true);
+			O->SetStringField(TEXT("defaultSource"), TEXT("node"));
+			return O;
 		}
-		else
+
+		if (MSReadClassType(Doc, Node) == EMetasoundFrontendClassType::Input)
 		{
-			O->SetBoolField(TEXT("defaultIsSet"), false);
+			if (const FMetasoundFrontendLiteral* Lit = MSReadGraphInputDefault(Doc, Node.Name, PageID))
+			{
+				O->SetField(TEXT("default"), MSReadLiteralToJson(*Lit));
+				O->SetBoolField(TEXT("defaultIsSet"), true);
+				O->SetStringField(TEXT("defaultSource"), TEXT("graphInput"));
+				return O;
+			}
 		}
+
+		O->SetBoolField(TEXT("defaultIsSet"), false);
 		return O;
 	}
 
@@ -676,13 +841,20 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundReadDocument(const TSharedPtr<FJ
 			{
 				Brief->SetStringField(TEXT("dataType"), Node.Interface.Outputs[0].TypeName.ToString());
 			}
-			for (const FMetasoundFrontendVertex& V : Node.Interface.Inputs)
+			// The default the caller authored, in the same JSON form
+			// metasound_author's inputs[].default took it, so a read of a graph
+			// input is the argument list that would declare it again. It is read
+			// off the root graph class interface: an input node's own
+			// InputLiterals array is empty, and reading only that reported no
+			// default for a value the write had stored correctly.
+			if (const FMetasoundFrontendLiteral* Lit = MSReadGraphInputDefault(*T.Doc, Node.Name, T.Graph->PageID))
 			{
-				if (const FMetasoundFrontendLiteral* Lit = MSReadNodeInputLiteral(Node, V.VertexID))
-				{
-					Brief->SetField(TEXT("default"), MSReadLiteralToJson(*Lit));
-					break;
-				}
+				Brief->SetField(TEXT("default"), MSReadLiteralToJson(*Lit));
+				Brief->SetBoolField(TEXT("defaultIsSet"), true);
+			}
+			else
+			{
+				Brief->SetBoolField(TEXT("defaultIsSet"), false);
 			}
 			GraphInputs.Add(MakeShared<FJsonValueObject>(Brief));
 		}
@@ -967,7 +1139,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundInspectNode(const TSharedPtr<FJs
 	TArray<TSharedPtr<FJsonValue>> Inputs, Outputs, Environment;
 	for (const FMetasoundFrontendVertex& V : Node->Interface.Inputs)
 	{
-		Inputs.Add(MakeShared<FJsonValueObject>(MSReadInputVertexJson(*Node, V, Degrees)));
+		Inputs.Add(MakeShared<FJsonValueObject>(MSReadInputVertexJson(*T.Doc, *Node, V, T.Graph->PageID, Degrees)));
 	}
 	for (const FMetasoundFrontendVertex& V : Node->Interface.Outputs)
 	{
@@ -1033,7 +1205,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundListNodePins(const TSharedPtr<FJ
 		for (const FMetasoundFrontendVertex& V : Node->Interface.Inputs)
 		{
 			if (!Matches(V)) continue;
-			TSharedPtr<FJsonObject> O = MSReadInputVertexJson(*Node, V, Degrees);
+			TSharedPtr<FJsonObject> O = MSReadInputVertexJson(*T.Doc, *Node, V, T.Graph->PageID, Degrees);
 			bool bConnected = false;
 			O->TryGetBoolField(TEXT("connected"), bConnected);
 			if (!bConnected) UnconnectedInputs++;

@@ -857,7 +857,14 @@ describe("MetaSound introspection", () => {
       error?: string;
       nodeId?: string;
       name?: string;
-      inputs?: Array<{ name?: string; dataType?: string; connected?: boolean; defaultIsSet?: boolean }>;
+      inputs?: Array<{
+        name?: string;
+        dataType?: string;
+        connected?: boolean;
+        defaultIsSet?: boolean;
+        default?: unknown;
+        defaultSource?: string;
+      }>;
       outputs?: Array<{ name?: string; dataType?: string; connected?: boolean }>;
       incoming?: unknown[];
       outgoing?: unknown[];
@@ -878,6 +885,28 @@ describe("MetaSound introspection", () => {
 
     expect((body.incoming ?? []).length).toBeGreaterThan(0);
     expect((body.outgoing ?? []).length).toBeGreaterThan(0);
+  }, 300_000);
+
+  it("reports a graph input's authored default when the input node is inspected", async () => {
+    // Same round-trip contract as metasound_read_document's graphInputs, one
+    // level down. A graph input node carries no per-node input literal, so the
+    // value has to be read off the root graph class interface; reading only the
+    // node reported no default for a value the write had stored.
+    const doc = await readDoc();
+    const pitchId = (doc.graphInputs ?? []).find((i) => i.name === GRAPH_INPUT)?.nodeId;
+    expect(pitchId, `no ${GRAPH_INPUT} graph input node id`).toBeTruthy();
+
+    const body = resultJson<{
+      success?: boolean;
+      error?: string;
+      inputs?: Array<{ name?: string; default?: unknown; defaultIsSet?: boolean; defaultSource?: string }>;
+    }>(await call("audio", { action: "metasound_inspect_node", assetPath: METASOUND_OBJECT, nodeId: pitchId }));
+
+    expect(body.success, body.error).not.toBe(false);
+    const vertex = (body.inputs ?? []).find((i) => i.defaultIsSet === true);
+    expect(vertex, `no input vertex carries a default: ${JSON.stringify(body.inputs)}`).toBeTruthy();
+    expect(vertex?.defaultSource).toBe("graphInput");
+    expect(Number(vertex?.default)).toBeCloseTo(440, 3);
   }, 300_000);
 
   it("lists a node's pins and counts the ones nothing drives", async () => {
