@@ -73,9 +73,22 @@ export interface EngineIndex {
   symbols: Record<string, EngineSymbol[]>;
 }
 
-/** The trees indexed by default. Plugins are excluded: 51,178 headers, mostly
- *  vendored third-party code, for a small fraction of the questions asked. */
-export const DEFAULT_TREES = ["Runtime", "Editor", "Developer"] as const;
+/**
+ * What gets indexed.
+ *
+ * The first three are the engine's own trees under `Engine/Source`. `Plugins`
+ * is `Engine/Plugins`, and it is not optional: Gameplay Abilities, Niagara,
+ * PCG, Enhanced Input, StateTree and Chooser are all plugins, so an index
+ * without them cannot answer the questions most often asked of it.
+ *
+ * It is filtered rather than taken whole. All 51,178 plugin headers include a
+ * great deal of vendored third-party code and a great deal of `Private`.
+ * Restricting to `Public` and `Classes` leaves 14,154 and loses nothing
+ * usable, because a `Private` header cannot be included from another module in
+ * the first place: it could only ever answer "does this exist" with a symbol
+ * the caller is unable to reach.
+ */
+export const DEFAULT_TREES = ["Runtime", "Editor", "Developer", "Plugins"] as const;
 
 /* ── declaration recognition ───────────────────────────────────────── */
 
@@ -101,23 +114,42 @@ const FUNCTION_RE =
 const DEPRECATED_RE = /UE_DEPRECATED\s*\(\s*([\d.]+)\s*,\s*"([^"]*)"/;
 
 /**
- * The include path for a header, which is the part below `Public/`,
- * `Classes/` or `Internal/`.
+ * The include path for a header: the part below `Public/`, `Classes/` or
+ * `Internal/`.
  *
- * `Runtime/Engine/Classes/GameFramework/Actor.h` is included as
- * `GameFramework/Actor.h`, not by its path in the tree. A header under
- * `Private/` has no include path that works from another module, and is
- * reported by its tree path so the caller can see why.
+ * `Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h` is included as
+ * `GameFramework/Actor.h`, not by its path on disk. A header under `Private/`
+ * has no include path that works from another module, and is reported by its
+ * full path so the caller can see why.
  */
 export function includePathFor(relHeader: string): string {
   const m = /(?:^|\/)(?:Public|Classes|Internal)\/(.+)$/.exec(relHeader);
   return m ? m[1] : relHeader;
 }
 
-/** The module a header belongs to: the segment after the tree root. */
+/**
+ * The module a header belongs to.
+ *
+ * Two layouts, because the engine and its plugins are laid out differently
+ * and both have to end up as one table:
+ *
+ *   Engine/Source/Runtime/Engine/Classes/GameFramework/Actor.h   -> Engine
+ *   Engine/Plugins/Runtime/GameplayAbilities/Source/
+ *       GameplayAbilities/Public/AbilitySystemComponent.h        -> GameplayAbilities
+ *
+ * A plugin's module is the segment after its `Source/`, which is also the name
+ * that goes in a Build.cs dependency list. For the engine trees it is the
+ * segment after the tree.
+ */
 export function moduleFor(relHeader: string): string {
   const parts = relHeader.split("/");
-  return parts.length >= 2 ? parts[1] : parts[0] ?? "";
+  if (parts[0] === "Engine" && parts[1] === "Plugins") {
+    const at = parts.lastIndexOf("Source");
+    if (at >= 0 && at + 1 < parts.length) return parts[at + 1];
+    return parts[parts.length - 2] ?? "";
+  }
+  // Engine/Source/<Tree>/<Module>/...
+  return parts[3] ?? parts[parts.length - 2] ?? "";
 }
 
 /** Whether a header can be included from another module at all. */
@@ -239,10 +271,20 @@ export function scanHeader(source: string, relHeader: string): EngineSymbol[] {
 
 /* ── building ──────────────────────────────────────────────────────── */
 
-/** Every .h under the given trees, as paths relative to Engine/Source. */
-function collectHeaders(sourceRoot: string, trees: readonly string[]): string[] {
+/** Directories that never hold a header worth indexing. */
+const SKIP_DIRS = new Set(["ThirdParty", "Intermediate", "Binaries", "Saved", "node_modules"]);
+
+/**
+ * Every .h under the requested trees, as paths relative to the engine root.
+ *
+ * Relative to the ENGINE root rather than to Engine/Source, because the
+ * plugin tree is a sibling of Source rather than under it, and one
+ * representation for both is what lets them share a table.
+ */
+function collectHeaders(engineRoot: string, trees: readonly string[]): string[] {
   const found: string[] = [];
-  const walk = (dir: string): void => {
+
+  const walk = (dir: string, keep: (rel: string) => boolean): void => {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -250,14 +292,26 @@ function collectHeaders(sourceRoot: string, trees: readonly string[]): string[] 
       return; // an unreadable directory is not a reason to fail the build
     }
     for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith(".h")) {
-        found.push(path.relative(sourceRoot, full).replace(/\\/g, "/"));
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        walk(path.join(dir, entry.name), keep);
+        continue;
       }
+      if (!entry.name.endsWith(".h")) continue;
+      const rel = path.relative(engineRoot, path.join(dir, entry.name)).replace(/\\/g, "/");
+      if (keep(rel)) found.push(rel);
     }
   };
-  for (const tree of trees) walk(path.join(sourceRoot, tree));
+
+  const all = (): boolean => true;
+  // Only a Public or Classes header can be included from another module, so
+  // for plugins those are the only ones that could answer a question.
+  const includable = (rel: string): boolean => /\/(?:Public|Classes)\//.test(rel);
+
+  for (const tree of trees) {
+    if (tree === "Plugins") walk(path.join(engineRoot, "Engine", "Plugins"), includable);
+    else walk(path.join(engineRoot, "Engine", "Source", tree), all);
+  }
   return found;
 }
 
@@ -289,7 +343,7 @@ export function buildEngineIndex(
   if (!fs.existsSync(sourceRoot)) {
     throw new Error(`Engine source not found: ${sourceRoot}`);
   }
-  const headers = collectHeaders(sourceRoot, trees);
+  const headers = collectHeaders(engineRoot, trees);
   const symbols: Record<string, EngineSymbol[]> = {};
   let symbolCount = 0;
 
@@ -297,7 +351,7 @@ export function buildEngineIndex(
     const rel = headers[i];
     let source: string;
     try {
-      source = fs.readFileSync(path.join(sourceRoot, rel), "utf-8");
+      source = fs.readFileSync(path.join(engineRoot, rel), "utf-8");
     } catch {
       continue;
     }
@@ -418,12 +472,12 @@ export function lookupSymbol(index: EngineIndex, name: string): EngineSymbol[] {
     if (path.basename(s.header, ".h").toLowerCase() === wanted) value += 16;
     // A reflection stub is never the answer; including it yields an
     // incomplete type.
-    if (STUB_HEADERS.includes(s.header.replace(/^[^/]+\/[^/]+\/(?:Public|Classes|Internal)\//, ""))) value -= 32;
+    if (STUB_HEADERS.includes(s.include)) value -= 32;
     // A type beats a constructor or a free function of the same name.
     if (s.kind === "class" || s.kind === "struct" || s.kind === "enum") value += 6;
     if (s.exported) value += 4;
     if (!isPrivateHeader(s.header)) value += 2;
-    if (s.header.startsWith("Runtime/")) value += 1;
+    if (s.header.startsWith("Engine/Source/Runtime/")) value += 1;
     return value;
   };
   return [...found].sort((a, b) => score(b) - score(a));
@@ -446,7 +500,7 @@ export function lookupMember(
   for (const owner of lookupSymbol(index, className)) {
     let source: string;
     try {
-      source = fs.readFileSync(path.join(index.engineRoot, "Engine", "Source", owner.header), "utf-8");
+      source = fs.readFileSync(path.join(index.engineRoot, owner.header), "utf-8");
     } catch {
       continue;
     }
