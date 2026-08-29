@@ -760,6 +760,12 @@ function callBridgeOnce(
       }
     });
     ws.on("error", () => { clearTimeout(timer); finish(silent); });
+    // A socket that closes without answering is the same fact as a timeout,
+    // eight seconds earlier: the frame went out and nothing came back. Without
+    // this the call sat out the full budget for an editor that had already
+    // gone, and `finish` is idempotent, so the close that follows our own
+    // ws.close() changes nothing.
+    ws.on("close", () => { clearTimeout(timer); finish(silent); });
   });
 }
 
@@ -929,16 +935,24 @@ async function readBlockingDialog(port: number, host: string): Promise<BlockingD
  */
 export function describeBlockingDialog(
   dialog: BlockingDialog,
-  opts: { pressCalls?: boolean; answeredByUser?: string } = {},
+  opts: { pressCalls?: boolean; answeredByUser?: string; unconfirmedPress?: string } = {},
 ): string {
   const pressCalls = opts.pressCalls !== false;
   // "Nothing was answered for you" is false once the user has answered one
   // through the elicitation prompt and a second dialog has come up behind it.
   // The line has to describe the call it is part of, not the common case.
+  //
+  // And it is equally false when the press went out and the editor never
+  // answered: what happened to that button is unknown, which is neither "you
+  // answered it" nor "nothing was sent".
   const lead = opts.answeredByUser
     ? `A modal dialog is blocking the editor. You answered "${opts.answeredByUser}" and this one came up ` +
       "behind it; nothing else was sent to it and no button was pressed here that you did not choose."
-    : "A modal dialog is blocking the editor, so nothing was sent to it and nothing was answered for you.";
+    : opts.unconfirmedPress
+      ? `A modal dialog is blocking the editor. Your choice "${opts.unconfirmedPress}" was sent to it and the ` +
+        "editor did not answer, so whether that button was pressed is unknown; nothing else was sent to it and " +
+        "no button was pressed here that you did not choose."
+      : "A modal dialog is blocking the editor, so nothing was sent to it and nothing was answered for you.";
   const lines = [
     lead,
     "",
@@ -1098,6 +1112,23 @@ function dialogModeGuidance(
 }
 
 /**
+ * What happened to the button the user picked.
+ *
+ * Three outcomes, not two. `confirmed` separates "the editor acknowledged the
+ * press" from "the frame went out and nothing came back", which is what an 8s
+ * timeout or a socket error on callBridgeOnce leaves behind - AFTER the press
+ * has been sent. Collapsing the second into "nothing happened" is how a report
+ * came to say the editor was untouched after the user chose Save All and
+ * packages were written.
+ */
+export interface DialogPress {
+  /** The label the user picked, which is the label that was sent. */
+  button: string;
+  /** True when the editor answered that it pressed it. */
+  confirmed: boolean;
+}
+
+/**
  * Put the dialog to the person, through MCP elicitation, and press whichever
  * button they choose.
  *
@@ -1106,14 +1137,16 @@ function dialogModeGuidance(
  * dialog's own labels, in a prompt carrying its full text. Declining leaves the
  * dialog exactly where it is.
  *
- * Returns the label pressed, or null when nothing was.
+ * Returns null ONLY when nothing was sent, or when the editor answered saying
+ * it pressed nothing. A send whose outcome is unknown comes back as a press
+ * with confirmed: false, because that is what it is.
  */
 async function askUserToAnswerDialog(
   port: number,
   host: string,
   dialog: BlockingDialog,
   elicit: ElicitFn,
-): Promise<string | null> {
+): Promise<DialogPress | null> {
   if (dialog.choices.length === 0) return null;
 
   const LEAVE_OPEN = "Leave the dialog open";
@@ -1153,7 +1186,14 @@ async function askUserToAnswerDialog(
   if (!dialog.buttons.includes(chosen)) return null;
 
   const pressed = await callBridgeOnce(port, "respond_to_dialog", { buttonLabel: chosen }, host);
-  return accepted(pressed) ? chosen : null;
+  if (accepted(pressed)) return { button: chosen, confirmed: true };
+  // The bridge answered and said it did not press: an unregistered method on an
+  // older plugin build, or a handler that refused. Nothing happened to the
+  // dialog, and "nothing was sent" is the honest report.
+  if (pressed.answered) return null;
+  // It did not answer at all. The frame was already on the wire, so whether the
+  // button was pressed is genuinely unknown and must not be reported either way.
+  return { button: chosen, confirmed: false };
 }
 
 /**
@@ -1167,7 +1207,7 @@ async function askUserToAnswerDialog(
  */
 function blockedStopDetail(
   state: EngineState,
-  opts: { pressCalls?: boolean; answeredByUser?: string } = {},
+  opts: { pressCalls?: boolean; answeredByUser?: string; unconfirmedPress?: string } = {},
 ): string {
   const modal = state.snapshot?.modal;
   if (!modal) return ` ${state.summary}`;
@@ -1186,7 +1226,11 @@ function blockedStopDetail(
       // AFTER the interactive path may have pressed a button, and the lead line
       // describeBlockingDialog writes without it says nothing was answered for
       // you, which is a denial of the press that just happened.
-      { pressCalls: opts.pressCalls, answeredByUser: opts.answeredByUser },
+      {
+        pressCalls: opts.pressCalls,
+        answeredByUser: opts.answeredByUser,
+        unconfirmedPress: opts.unconfirmedPress,
+      },
     )
   );
 }
@@ -1362,6 +1406,13 @@ export interface StopEditorResult {
   blockingDialog?: BlockingDialog;
   /** Set when the user answered the dialog through an elicitation prompt. */
   dialogAnsweredByUser?: string;
+  /**
+   * Set when the user's choice was SENT and the editor never answered, so
+   * whether the button was pressed is unknown. Never set together with
+   * dialogAnsweredByUser: the two are different facts and a caller branching
+   * on the first must not read this as the same thing.
+   */
+  dialogPressUnconfirmed?: string;
   /** Which dialog handling mode applied, set whenever a dialog was in the way. */
   dialogMode?: DialogMode;
   /** Why that mode applied: the env var, the stored preference, or the default. */
@@ -1382,6 +1433,7 @@ export interface RestartEditorResult {
   elapsedSeconds?: number;
   blockingDialog?: BlockingDialog;
   dialogAnsweredByUser?: string;
+  dialogPressUnconfirmed?: string;
   dialogMode?: DialogMode;
   dialogModeSource?: string;
 }
@@ -1391,16 +1443,25 @@ export interface RestartEditorResult {
  * and it offers no flag that would discard them, because there is not one:
  * losing unsaved work is not something this tool can be asked to do.
  */
-function unsavedWorkRefusal(dirty: string[], answeredByUser?: string): string {
+function unsavedWorkRefusal(dirty: string[], answeredByUser?: string, unconfirmedPress?: string): string {
   // "The editor is exactly as it was" is only true when nothing was sent, and
   // this refusal is also reached AFTER a dialog the user answered through the
   // elicitation prompt. On a save prompt that button may have written packages
   // to disk, so claiming the editor is untouched described the wrong call. The
   // sentence is now the one that matches what happened.
+  //
+  // The third case is the one that read worst: the press went out and the
+  // editor never answered, so it is not known whether the button was pressed.
+  // Saying "nothing was sent" there is a claim about the editor that the server
+  // has no evidence for, on the one path this repo requires to be exact.
   const untouched = answeredByUser
     ? `You answered its dialog with "${answeredByUser}", so that button was pressed and whatever it did has ` +
       "already happened. Nothing has been sent to the editor since, no quit went out, and no dialog is open now. "
-    : "Nothing was sent to the editor, so no save prompt is open and the editor is exactly as it was. ";
+    : unconfirmedPress
+      ? `Your choice "${unconfirmedPress}" was sent to the editor and it did not answer, so whether that button ` +
+        "was pressed is unknown - if it was, whatever it did has already happened. Nothing has been sent since " +
+        "and no quit went out. "
+      : "Nothing was sent to the editor, so no save prompt is open and the editor is exactly as it was. ";
   return (
     `Refusing to stop the editor: ${dirty.length} unsaved package${dirty.length === 1 ? " is" : "s are"} ` +
     `still dirty and stopping would lose ${dirty.length === 1 ? "it" : "them"}. Unsaved: ${dirty.join(", ")}. ` +
@@ -1532,6 +1593,8 @@ export async function stopEditor(
   // before sending, and report the whole question rather than acting on it.
   let dialog = await readBlockingDialog(port, host);
   let answeredByUser: string | undefined;
+  /** A press that went out with no answer. Not an answer, and not silence. */
+  let unconfirmedPress: string | undefined;
   /** Whether any dialog was in the way, which is when the mode decided anything. */
   let dialogSeen = dialog !== null;
 
@@ -1551,6 +1614,7 @@ export async function stopEditor(
           dialogMode: dialogMode.mode,
           dialogModeSource: dialogMode.source,
           ...(answeredByUser ? { dialogAnsweredByUser: answeredByUser } : {}),
+          ...(unconfirmedPress ? { dialogPressUnconfirmed: unconfirmedPress } : {}),
         }
       : {};
   if (dialog) {
@@ -1558,11 +1622,13 @@ export async function stopEditor(
     // user's own pick in the elicitation form. auto and defer both leave the
     // dialog exactly where it is.
     if (dialogMode.mode === "interactive" && canElicit && opts.elicit) {
-      const pressed = await askUserToAnswerDialog(port, host, dialog, opts.elicit);
-      if (pressed !== null) {
-        answeredByUser = pressed;
-        // Their choice may have raised the next one. Look again rather than
-        // assuming the editor is clear.
+      const press = await askUserToAnswerDialog(port, host, dialog, opts.elicit);
+      if (press !== null) {
+        if (press.confirmed) answeredByUser = press.button;
+        else unconfirmedPress = press.button;
+        // Their choice may have raised the next one, and on the unconfirmed
+        // path this read is also the only evidence available about whether the
+        // press landed. Look again rather than assuming the editor is clear.
         dialog = await readBlockingDialog(port, host);
       }
     }
@@ -1573,7 +1639,7 @@ export async function stopEditor(
         blockingDialog: pressCalls ? dialog : forRecognitionOnly(dialog),
         ...dialogFields(),
         message:
-          describeBlockingDialog(dialog, { pressCalls, answeredByUser }) +
+          describeBlockingDialog(dialog, { pressCalls, answeredByUser, unconfirmedPress }) +
           "\n\n" +
           dialogModeGuidance(dialogMode, canElicit),
       };
@@ -1594,7 +1660,7 @@ export async function stopEditor(
         refusedReason: "unsaved-work",
         dirtyPackages: dirty,
         ...dialogFields(),
-        message: unsavedWorkRefusal(dirty, answeredByUser),
+        message: unsavedWorkRefusal(dirty, answeredByUser, unconfirmedPress),
       };
     }
     const why = typeof shutdown.result?.error === "string" ? shutdown.result.error : "it gave no reason";
@@ -1633,7 +1699,7 @@ export async function stopEditor(
         refusedReason: "unsaved-work",
         dirtyPackages: fallbackDirty,
         ...dialogFields(),
-        message: unsavedWorkRefusal(fallbackDirty, answeredByUser),
+        message: unsavedWorkRefusal(fallbackDirty, answeredByUser, unconfirmedPress),
       };
     }
 
@@ -1674,16 +1740,24 @@ export async function stopEditor(
   // puts it to the user exactly as it would have before the quit; auto and
   // defer leave it alone, so the loop below never runs for them.
   if (late && dialogMode.mode === "interactive" && canElicit && opts.elicit) {
-    const pressed = await askUserToAnswerDialog(port, host, late, opts.elicit);
-    if (pressed !== null) {
-      answeredByUser = pressed;
+    const press = await askUserToAnswerDialog(port, host, late, opts.elicit);
+    if (press !== null) {
+      if (press.confirmed) answeredByUser = press.button;
+      else unconfirmedPress = press.button;
       // Answering it may have released the quit that was already in flight.
       for (let i = 0; i < 10; i++) {
         await new Promise((resolve) => setTimeout(resolve, confirmPollMs));
         if (!(await isBridgeAvailable(host, port))) {
           return {
             success: true,
-            message: `Editor quit itself via the bridge after you answered its dialog with "${pressed}".`,
+            // The editor going quiet after an unconfirmed send is the strongest
+            // evidence available that the button did land, and it is still
+            // evidence rather than an acknowledgement. Say which one it is.
+            message: press.confirmed
+              ? `Editor quit itself via the bridge after you answered its dialog with "${press.button}".`
+              : `Editor quit itself via the bridge after your choice "${press.button}" was sent to its dialog. ` +
+                "The editor never acknowledged that send, so the press is inferred from the editor closing, " +
+                "not confirmed by it.",
             ...dialogFields(),
           };
         }
@@ -1712,15 +1786,19 @@ export async function stopEditor(
   // it: they would contradict the block directly above them.
   const snapshotModalUp = blockedState.snapshot?.modal != null;
   const holdingItOpen = late
-    ? " " + describeBlockingDialog(late, { pressCalls, answeredByUser }) + "\n\n" + dialogModeGuidance(dialogMode, canElicit, { quitSent: true })
-    : blockedStopDetail(blockedState, { pressCalls, answeredByUser }) +
+    ? " " + describeBlockingDialog(late, { pressCalls, answeredByUser, unconfirmedPress }) + "\n\n" + dialogModeGuidance(dialogMode, canElicit, { quitSent: true })
+    : blockedStopDetail(blockedState, { pressCalls, answeredByUser, unconfirmedPress }) +
       (snapshotModalUp
         ? ""
         : answeredByUser
           ? ` You answered its dialog with "${answeredByUser}" and no dialog is up now, but the editor still has not closed.`
-          : dialogSeen
-            ? " No dialog is up now, and nothing here pressed a button for you."
-            : " Nothing was dirty and no dialog was up when the quit went out, and nothing here presses a button for you.");
+          : unconfirmedPress
+            ? ` Your choice "${unconfirmedPress}" was sent to its dialog and the editor did not answer, so whether ` +
+              "that button was pressed is unknown. No dialog is up now, and nothing here pressed a button you did " +
+              "not choose, but the editor still has not closed."
+            : dialogSeen
+              ? " No dialog is up now, and nothing here pressed a button for you."
+              : " Nothing was dirty and no dialog was up when the quit went out, and nothing here presses a button for you.");
 
   return {
     success: false,
@@ -1774,6 +1852,9 @@ export async function restartEditor(
     ...(stopResult.dialogModeSource ? { dialogModeSource: stopResult.dialogModeSource } : {}),
     ...(stopResult.blockingDialog ? { blockingDialog: stopResult.blockingDialog } : {}),
     ...(stopResult.dialogAnsweredByUser ? { dialogAnsweredByUser: stopResult.dialogAnsweredByUser } : {}),
+    ...(stopResult.dialogPressUnconfirmed
+      ? { dialogPressUnconfirmed: stopResult.dialogPressUnconfirmed }
+      : {}),
   };
   if (!stopResult.success && (await findInteractiveEditors(project.projectPath)).length > 0) {
     return { success: false, message: `Failed to stop editor: ${stopResult.message}`, ...dialogAccount };

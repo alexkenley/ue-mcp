@@ -70,8 +70,19 @@ interface FakeBridge {
  * own connection per call rather than going through the session bridge, so the
  * only honest way to observe what it sends is to listen for it.
  */
+/**
+ * Returned by a fake bridge's `reply` to model the case D8 is about: the frame
+ * arrived and the socket died before any answer came back. callBridgeOnce turns
+ * that into its `silent` reply, which is the same value an 8s timeout produces,
+ * and it does so AFTER the press has gone out.
+ */
+const DROP_SOCKET = Symbol("drop-socket");
+
 async function startFakeBridge(
-  reply: (method: string, params: Record<string, unknown>) => Record<string, unknown> | null,
+  reply: (
+    method: string,
+    params: Record<string, unknown>,
+  ) => Record<string, unknown> | null | typeof DROP_SOCKET,
 ): Promise<FakeBridge> {
   const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await new Promise<void>((resolve) => wss.once("listening", resolve));
@@ -85,6 +96,10 @@ async function startFakeBridge(
       const message = JSON.parse(String(raw)) as { id?: string; method: string; params?: Record<string, unknown> };
       calls.push({ method: message.method, params: message.params ?? {} });
       const result = reply(message.method, message.params ?? {});
+      if (result === DROP_SOCKET) {
+        socket.terminate();
+        return;
+      }
       if (result === null) {
         socket.send(JSON.stringify({ id: message.id, error: { code: -32601, message: "Unknown method" } }));
         return;
@@ -467,6 +482,75 @@ describe("stop_editor puts a blocking dialog to the user through elicitation", (
     expect(bridge.methods()).not.toContain("set_dialog_policy");
     expect(result.dialogAnsweredByUser).toBe("Save Selected");
     expect(result.success).toBe(true);
+  });
+
+  /**
+   * D8: the button was sent and the editor never said what it did with it.
+   *
+   * callBridgeOnce returns the same `silent` reply for an 8s timeout and for a
+   * socket error, and both happen AFTER the frame is on the wire. The stop path
+   * read that as "nothing was pressed", so answeredByUser stayed undefined and
+   * the unsaved-work refusal printed "Nothing was sent to the editor, so no
+   * save prompt is open and the editor is exactly as it was" - after the user
+   * picked Save All and packages may already have been written to disk.
+   *
+   * The repo's rule is that a dialog is never answered on the user's behalf and
+   * that what happened to it is reported exactly. "We do not know" is a report;
+   * "nothing happened" is a claim, and it was the wrong one.
+   */
+  it("does not claim the editor is untouched when the press went out unanswered", async () => {
+    let dialogUp = true;
+    const bridge = await startFakeBridge((method) => {
+      if (method === "list_dialogs") return dialogUp ? SAVE_CONTENT_DIALOG : NO_DIALOGS;
+      if (method === "respond_to_dialog") {
+        // The press arrived. The editor then went away without answering.
+        dialogUp = false;
+        return DROP_SOCKET;
+      }
+      if (method === "request_editor_shutdown") return DIRTY_REFUSAL;
+      return { success: true };
+    });
+    openBridges.push(bridge);
+
+    const gate = makeGate(true, () => ({ action: "accept", content: { button: "Save Selected" } }));
+    const result = await stopEditor(makeProject(bridge.port), { elicit: gate.fn, confirmPollMs: 2 });
+
+    // The frame really did go out.
+    const pressed = bridge.calls.filter((c) => c.method === "respond_to_dialog");
+    expect(pressed).toHaveLength(1);
+    expect(pressed[0].params.buttonLabel).toBe("Save Selected");
+
+    expect(result.refusedReason).toBe("unsaved-work");
+    // Not reported as answered: nothing acknowledged the press.
+    expect(result.dialogAnsweredByUser).toBeUndefined();
+    // And not reported as silence either.
+    expect(result.dialogPressUnconfirmed).toBe("Save Selected");
+    expect(result.message).not.toContain("Nothing was sent to the editor");
+    expect(result.message).toContain("was sent to the editor and it did not answer");
+    expect(result.message).toContain("Save Selected");
+  });
+
+  /**
+   * The other half of the same distinction: the editor DID answer and said it
+   * pressed nothing (an unregistered method on an older plugin build, or a
+   * handler that refused). Nothing happened to the dialog, so "nothing was
+   * sent" is the honest report and must survive.
+   */
+  it("still reports silence when the editor answers that it pressed nothing", async () => {
+    const bridge = await startFakeBridge((method) => {
+      if (method === "list_dialogs") return SAVE_CONTENT_DIALOG;
+      if (method === "respond_to_dialog") return null; // JSON-RPC error: unknown method
+      if (method === "request_editor_shutdown") return DIRTY_REFUSAL;
+      return { success: true };
+    });
+    openBridges.push(bridge);
+
+    const gate = makeGate(true, () => ({ action: "accept", content: { button: "Save Selected" } }));
+    const result = await stopEditor(makeProject(bridge.port), { elicit: gate.fn, confirmPollMs: 2 });
+
+    expect(result.dialogAnsweredByUser).toBeUndefined();
+    expect(result.dialogPressUnconfirmed).toBeUndefined();
+    expect(result.refusedReason).toBe("blocking-dialog");
   });
 
   it("presses nothing when the user declines, and reports the dialog instead", async () => {
