@@ -34,7 +34,7 @@
  * no rollback at all.
  */
 import { describe, it, expect } from "vitest";
-import { auditHandlers } from "../../scripts/audit-handler-conventions.mjs";
+import { auditHandlers, stripComments } from "../../scripts/audit-handler-conventions.mjs";
 import { ALL_TOOLS } from "../../src/tools.js";
 import { classifyActionClass } from "../../src/action-class.js";
 
@@ -45,32 +45,37 @@ import { classifyActionClass } from "../../src/action-class.js";
  * what this file exists to stop.
  */
 const BASELINE = {
-  // Re-pinned from a real measurement after the backlog wave landed, which
-  // added roughly 206 actions across 18 new handler files and took the surface
-  // from 943 registered handlers to 1096.
+  // Re-pinned from a real measurement, and the numbers moved a long way:
+  // 356 to 135 without a rollback, 129 to 21 without an idempotency marker.
+  // Almost none of that is exemption. It is three things.
   //
-  // Both counters went DOWN, which is the outcome worth protecting: 361 to 356
-  // and 149 to 129. None of that is the new work being exempted. It comes from
-  // two places.
+  // Most of it is the convention pass itself. Every category was swept and the
+  // mutations that had no inverse got one, or got an honest statement that
+  // they cannot have one.
   //
-  // Every one of the wave's own mutations carries both markers, so 206 actions
-  // arrived adding nothing to either count.
+  // Some of it is the audit getting STRICTER, which lowered a count only by
+  // making the rest of the sweep necessary. `has()` now strips C++ comments
+  // before matching. Every idempotency marker is a bare English word -
+  // "unchanged", "skipped", "nested" - so a rollbackNote explaining that a
+  // value was left unchanged used to earn the credit it was being audited for,
+  // and an adversarial audit found a handler drawing its ONLY credit from a
+  // comment. That is this file's own failure mode occurring inside this file.
   //
-  // And the auditor itself got more accurate. It used to brace-match a handler
-  // body and look for markers inside it, so a handler funnelling its write
-  // through a shared file-local helper read as having neither, which is what
-  // the seven landscape writers going through MCPLscWriteHeights and
-  // MCPLscWriteWeights did. It now follows one level of file-local call and
-  // records which helper earned the credit. It also used to key on a bare
-  // method name, so two classes sharing one collided and it audited the wrong
-  // body; keying on the class-qualified name made the numbers slightly WORSE
-  // in two places, correctly, and resolved six bodies it could never find.
+  // And some of it was never debt. `classifyActionClass` scans a whole action
+  // name for a mutating verb, because at the routing gate over-classifying
+  // costs an explicit target and nothing else. Reused here it demanded an
+  // inverse for `editor(get_frame_timing)` and nine other reads. A leading read
+  // verb now settles it; see READ_LED below.
   //
-  // The rule stands: if a number goes UP, a new handler skipped a convention.
-  // If it goes DOWN, lower it here and commit that. Never edit these to
-  // whatever makes the test pass.
-  mutationsWithoutRollback: 356,
-  mutationsWithoutIdempotency: 129,
+  // The rule is unchanged: if a number goes UP, a new handler skipped a
+  // convention. If it goes DOWN, lower it here and commit that. Never edit
+  // these to whatever makes the test pass.
+  mutationsWithoutRollback: 135,
+  mutationsWithoutIdempotency: 21,
+  // The count that matters most, and the one nothing measured before: a
+  // mutation that emits neither an inverse nor a reason there is none. The
+  // other 107 of the 135 above said out loud that they cannot be undone.
+  mutationsSilentOnRollback: 28,
   orphanedHandlers: 22,
 };
 
@@ -166,18 +171,87 @@ function bridgeToAction(): Map<string, { tool: string; action: string }> {
 type Row = {
   action: string; method: string; class: string;
   idempotent: boolean; rollback: boolean; bodyFound: boolean;
+  /** True when the body emits `rollbackPossible`, i.e. it CONSIDERED the inverse. */
+  declaresNoRollback: boolean;
+  /** The TS action name, which is what the read-verb test above reads. */
+  tsAction?: string;
 };
 
 function audit(): Row[] {
   const byBridge = bridgeToAction();
-  return auditHandlers((bridgeName: string) => {
+  const rows = auditHandlers((bridgeName: string) => {
     const hit = byBridge.get(bridgeName);
     if (!hit) return "orphan";
     return classifyActionClass(hit.tool, hit.action).class;
   }) as Row[];
+  // The audit keys on the bridge method name; the read-verb test has to read
+  // the TS spelling, which is what a caller actually types and is not always
+  // the same word (landscape(export_heightmap) is export_landscape_heightmap
+  // on the bridge).
+  for (const row of rows) row.tsAction = byBridge.get(row.action)?.action;
+  return rows;
 }
 
-const isMutation = (r: Row): boolean => r.class === "mutate" || r.class === "unknown";
+/**
+ * Read verbs that settle the question no matter what else the name contains.
+ *
+ * `classifyActionClass` scans the WHOLE action name for a mutating verb and is
+ * deliberately generous, because it answers a different question: while this
+ * server drives more than one editor, an unaddressed call falls through to the
+ * active session, so over-classifying costs an explicit target and nothing
+ * else. Erring that way is right at the gate.
+ *
+ * It is wrong here. `editor(get_frame_timing)` matches on nothing it does,
+ * `level(get_relative_transform)` reads a transform, `editor(list_dirty_packages)`
+ * lists, and `asset(read_import_sources)` reads - and each was being counted as
+ * a mutation owing a rollback. Ten actions of pure invented debt, and debt that
+ * is not real is worse than no ledger, because the next person spends a day
+ * writing inverses for reads.
+ *
+ * So a LEADING read verb wins, and only a leading one. `save_level` starts with
+ * `save` and stays a mutation; `get_post_process_settings` does not become a
+ * mutation because `process` appears later in it. The list is short on purpose:
+ * `run`, `check`, `validate` and `analyze` really can change things, so they are
+ * not here.
+ */
+const READ_LED = /^(get|list|read|inspect|describe)_/;
+
+const isMutation = (r: Row): boolean =>
+  (r.class === "mutate" || r.class === "unknown") && !READ_LED.test(r.tsAction ?? r.action);
+
+const NL_C = String.fromCharCode(10);
+
+describe("the audit's own marker scan", () => {
+  // This file audits handlers for a convention. Its scan was itself violating
+  // the thing it checks: it matched raw source, so prose counted as code. Every
+  // idempotency marker is an ordinary English word, and a rollbackNote saying a
+  // value was left "unchanged" earned the credit. Fixing that without testing it
+  // would repeat the original mistake one level up.
+
+  it("does not let a comment stand in for a marker", () => {
+    const prose = "// the value is left unchanged and the rest is skipped" + NL_C;
+    expect(stripComments(prose)).not.toContain("unchanged");
+    expect(stripComments("/* nested structs are skipped */")).not.toContain("skipped");
+  });
+
+  it("keeps the markers that really do live in string literals", () => {
+    // These are code, not prose, and a scan that dropped them would report
+    // false violations for every handler using the hand-rolled form.
+    const code = `Result->SetBoolField(TEXT("alreadyRemoved"), true);`;
+    expect(stripComments(code)).toContain("alreadyRemoved");
+    expect(stripComments(`SetBoolField(TEXT("changed"), b); // changed`)).toContain(
+      `SetBoolField(TEXT("changed")`,
+    );
+  });
+
+  it("is not fooled by a comment marker inside a string, or a quote inside a comment", () => {
+    // The reason this cannot be a regex: it has to know which quotes it is in.
+    expect(stripComments(`FString Url = TEXT("http://x/unchanged");`)).toContain("unchanged");
+    expect(stripComments(`// he said "unchanged" here` + NL_C + "int x;")).not.toContain("unchanged");
+    // An escaped quote does not end its literal, so the tail is still code.
+    expect(stripComments(`TEXT("a\\"b") // alreadySet`)).not.toContain("alreadySet");
+  });
+});
 
 describe("handler conventions", () => {
   const rows = audit();
@@ -214,6 +288,34 @@ describe("handler conventions", () => {
         + `rollback_on_failure can undo it. If this went UP, a new handler skipped it.\n`
         + `If it went DOWN, lower the baseline in this file and commit that.`,
     ).toBeLessThanOrEqual(BASELINE.mutationsWithoutRollback);
+  });
+
+  it("does not add a mutation that stays SILENT about its inverse", () => {
+    // The rollback ratchet above cannot tell a mutation that forgot from one
+    // that decided. Both emit no MCPSetRollback, and until this existed an
+    // honest `rollbackPossible: false` with a note explaining why read exactly
+    // like an omission - so the 149 mutations with no rollback looked like 149
+    // holes when 109 of them are considered decisions.
+    //
+    // That distinction is the one a CALLER can already see in the result body,
+    // which is the argument for auditing it: a handler that says "there is no
+    // inverse, here is why" has finished the job, and one that says nothing has
+    // not. This is the assertion nothing in the repo made.
+    const silent = mutations
+      .filter((r) => !r.rollback && !r.declaresNoRollback && !(r.action in NO_INVERSE))
+      .map((r) => r.action);
+    expect(
+      silent.length,
+      [
+        `Mutations that emit neither a rollback nor rollbackPossible: ${silent.length}, `
+          + `baseline ${BASELINE.mutationsSilentOnRollback}.`,
+        `A mutation must either emit MCPSetRollback(Result, "<inverse>", Payload), or set`,
+        `rollbackPossible:false with a note saying WHY there is no inverse. Saying nothing`,
+        `leaves the caller unable to tell a considered decision from an oversight.`,
+        `Offenders:`,
+        ...silent.map((a) => `  ${a}`),
+      ].join(String.fromCharCode(10)),
+    ).toBeLessThanOrEqual(BASELINE.mutationsSilentOnRollback);
   });
 
   it("does not add a mutation without an idempotency marker", () => {

@@ -77,6 +77,20 @@ const ROLLBACK_MARKERS = [
 ];
 
 /**
+ * Markers that say a handler has CONSIDERED its inverse and reported that
+ * there is not one.
+ *
+ * This is the difference between a mutation that forgot and a mutation that
+ * decided. Both emit no rollback, and until this existed the audit could not
+ * tell them apart, so an honest `rollbackPossible: false` with a note read
+ * exactly like an omission. A caller reading the result can tell them apart,
+ * which is the whole point of emitting the field.
+ */
+const NO_ROLLBACK_MARKERS = [
+  "rollbackPossible", "MCPSetNoRollback",
+];
+
+/**
  * Words that take a parenthesised head and a brace body without being a
  * function definition. Without these the definition scan below reads every
  * `if (...) {` as a function named `if`.
@@ -271,7 +285,67 @@ function functionRangesFor(file, text) {
   return rangeCache.get(file);
 }
 
-const has = (body, markers) => markers.some((marker) => body.includes(marker));
+/**
+ * Strip C++ comments, preserving string and character literals.
+ *
+ * Without this the marker scan reads prose. Every marker below is a bare word
+ * that occurs naturally in English - "unchanged", "skipped", "nested" - so a
+ * rollbackNote explaining that a value was left unchanged earned a handler the
+ * idempotency credit it was being audited for. An adversarial audit found a
+ * handler drawing its ONLY credit from a comment, which is the failure this
+ * whole file exists to catch, happening inside the catcher.
+ *
+ * String literals are kept because real markers live inside them:
+ * `SetBoolField(TEXT("changed")` and `SetStringField(TEXT("alreadyRemoved")`
+ * are code, not prose. So this cannot be a regex; it has to know which quotes
+ * it is inside. A `//` inside a string stays, a `"` inside a comment is
+ * ignored, and an escaped quote does not end its literal.
+ */
+// Written as a code point so the literal survives every layer of quoting
+// between here and the file on disk.
+const NEWLINE = String.fromCharCode(10);
+
+export function stripComments(text) {
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    const next = text[i + 1];
+    if (c === "/" && next === "/") {
+      while (i < n && text[i] !== NEWLINE) i++;
+      continue;
+    }
+    if (c === "/" && next === "*") {
+      i += 2;
+      while (i < n && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i += 2;
+      // Keep a space so two tokens either side of a comment do not fuse.
+      out += " ";
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      const quote = c;
+      out += c;
+      i++;
+      while (i < n) {
+        if (text[i] === "\\") { out += text.slice(i, i + 2); i += 2; continue; }
+        out += text[i];
+        if (text[i] === quote) { i++; break; }
+        i++;
+      }
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+const has = (body, markers) => {
+  const code = stripComments(body);
+  return markers.some((marker) => code.includes(marker));
+};
 
 /** Names this body calls as free or static functions, deduped, in call order.
  *
@@ -337,6 +411,9 @@ export function auditHandlers(classify) {
       ? markerViaLocalHelper(found, text, IDEMPOTENCY_MARKERS) : null;
     const rollbackVia = found && !rollbackDirect
       ? markerViaLocalHelper(found, text, ROLLBACK_MARKERS) : null;
+    // Only meaningful when no rollback is emitted, but recorded either way so
+    // a handler that emits both can be spotted as the contradiction it is.
+    const declaresNoRollback = found ? has(found.body, NO_ROLLBACK_MARKERS) : false;
 
     rows.push({
       action,
@@ -349,6 +426,7 @@ export function auditHandlers(classify) {
       class: classify(action),
       idempotent: idempotentDirect || Boolean(idempotentVia),
       rollback: rollbackDirect || Boolean(rollbackVia),
+      declaresNoRollback,
       idempotentVia,
       rollbackVia,
     });
