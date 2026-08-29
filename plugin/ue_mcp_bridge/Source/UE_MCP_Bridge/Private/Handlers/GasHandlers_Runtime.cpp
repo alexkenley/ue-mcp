@@ -1212,3 +1212,43 @@ TSharedPtr<FJsonValue> FGasHandlers::TraceAbilityActivation(const TSharedPtr<FJs
 
 	return MCPResult(Result);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared resolution, exported for the other GAS translation units.
+//
+// The four helpers above are file-local, and the module is a unity build, so a
+// second copy of any of them in another .cpp is a redefinition on some grouping
+// (and the grouping shifts with file count, file order and the adaptive-unity
+// working set, so the duplicate builds clean locally and breaks elsewhere).
+// These thin wrappers are the one exported spelling. They forward rather than
+// move the definitions, so the actions already verified against a live editor
+// keep calling exactly the code they were verified against.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace MCPGas
+{
+
+UAbilitySystemComponent* ResolveActorASC(
+	const TSharedPtr<FJsonObject>& Params,
+	AActor*& OutActor,
+	TSharedPtr<FJsonValue>& OutError)
+{
+	return ResolveASC(Params, OutActor, OutError);
+}
+
+UClass* ResolveGameplayAbilityClass(const FString& Spec, TSharedPtr<FJsonValue>& OutError)
+{
+	return ResolveAbilityClass(Spec, OutError);
+}
+
+UClass* ResolveClassDerivingFrom(const FString& Spec, UClass* Base)
+{
+	return ResolveClassDeriving(Spec, Base);
+}
+
+TSharedPtr<FJsonObject> DescribeAbilitySpec(const FGameplayAbilitySpec& Spec)
+{
+	return DescribeSpec(Spec);
+}
+
+}

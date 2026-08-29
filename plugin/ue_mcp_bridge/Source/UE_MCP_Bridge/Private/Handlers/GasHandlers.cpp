@@ -79,6 +79,24 @@ void FGasHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("revoke_ability"), &RevokeAbility);
 	Registry.RegisterHandler(TEXT("get_active_effects"), &GetActiveEffects);
 	Registry.RegisterHandler(TEXT("trace_ability_activation"), &TraceAbilityActivation);
+
+	// Input binding, cues and the attribute audit (GasHandlers_Abilities.cpp).
+	Registry.RegisterHandler(TEXT("bind_ability_input"), &BindAbilityInput);
+	Registry.RegisterHandler(TEXT("clear_ability_input"), &ClearAbilityInput);
+	Registry.RegisterHandler(TEXT("send_ability_input"), &SendAbilityInput);
+	Registry.RegisterHandler(TEXT("add_effect_cue"), &AddEffectCue);
+	Registry.RegisterHandler(TEXT("remove_effect_cue"), &RemoveEffectCue);
+	Registry.RegisterHandler(TEXT("validate_cue_coverage"), &ValidateCueCoverage);
+	// Named audit_attributes, not audit_attribute_set: the read/mutate lexicon
+	// takes a mutate verb anywhere in an action name and "set" is one, so the
+	// longer spelling would have been gated as a write it never performs.
+	Registry.RegisterHandler(TEXT("audit_attributes"), &AuditAttributeSet);
+
+	// Snapshot and diff (GasHandlers_Snapshot.cpp).
+	Registry.RegisterHandler(TEXT("capture_gas_state"), &CaptureGasState);
+	Registry.RegisterHandler(TEXT("compare_gas_states"), &CompareGasStates);
+	Registry.RegisterHandler(TEXT("list_gas_snapshots"), &ListGasSnapshots);
+	Registry.RegisterHandler(TEXT("delete_gas_snapshot"), &DeleteGasSnapshot);
 }
 
 TSharedPtr<FJsonValue> FGasHandlers::CreateGasBlueprint(

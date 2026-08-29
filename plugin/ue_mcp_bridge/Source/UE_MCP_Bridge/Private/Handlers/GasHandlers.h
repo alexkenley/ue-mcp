@@ -51,6 +51,31 @@ FStructProperty* FindAttributeDataProperty(UClass* SetClass, const FString& Name
 /** Every FGameplayAttributeData property name on a set class, comma separated. */
 FString ListAttributeDataPropertyNames(UClass* SetClass);
 
+/**
+ * Actor + AbilitySystemComponent resolution for a runtime GAS call.
+ *
+ * Defined once, in GasHandlers_Runtime.cpp, and declared here rather than
+ * copied: the module is a unity build, so a second file-local copy of this is
+ * a redefinition on some grouping, and the grouping shifts with file count and
+ * file order. Reads actorLabel / actorPath / world / pieInstance out of Params
+ * exactly as the runtime actions already document them, and writes a
+ * structured error to OutError on any failure.
+ */
+UAbilitySystemComponent* ResolveActorASC(
+	const TSharedPtr<FJsonObject>& Params,
+	AActor*& OutActor,
+	TSharedPtr<FJsonValue>& OutError);
+
+/** Resolve a UGameplayAbility subclass from a Blueprint path, a generated
+ *  class path or a native class name. Error names the accepted spellings. */
+UClass* ResolveGameplayAbilityClass(const FString& Spec, TSharedPtr<FJsonValue>& OutError);
+
+/** Resolve any class deriving from Base from a content path or short name. */
+UClass* ResolveClassDerivingFrom(const FString& Spec, UClass* Base);
+
+/** One granted ability spec as JSON: handle, class, level, inputID, active. */
+TSharedPtr<FJsonObject> DescribeAbilitySpec(const struct FGameplayAbilitySpec& Spec);
+
 }
 
 class FGasHandlers
@@ -120,4 +145,33 @@ private:
 	static TSharedPtr<FJsonValue> RevokeAbility(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> GetActiveEffects(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> TraceAbilityActivation(const TSharedPtr<FJsonObject>& Params);
+
+	// ── T4 remainder: input, cues, attribute diagnosis ──────────────────
+	// Implemented in GasHandlers_Abilities.cpp.
+	//
+	// Input binding is a live-spec write plus MarkAbilitySpecDirty, which is
+	// runtime state no property write reaches: FGameplayAbilitySpec lives in a
+	// fast-array serialiser on a live component, not on any asset.
+	// Cue linking is a CDO array write that a property write COULD make, and it
+	// earns a handler anyway because the tag has to resolve through the tag
+	// manager, has to sit under the GameplayCue root to be routed at all, and is
+	// worth nothing if no notify answers it. The handler checks all three.
+	// The attribute audit walks a set class and reports what is provable about
+	// clamping and replication; it writes nothing.
+	static TSharedPtr<FJsonValue> BindAbilityInput(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ClearAbilityInput(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SendAbilityInput(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> AddEffectCue(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveEffectCue(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ValidateCueCoverage(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> AuditAttributeSet(const TSharedPtr<FJsonObject>& Params);
+
+	// ── T5 remainder: snapshot and diff ─────────────────────────────────
+	// Implemented in GasHandlers_Snapshot.cpp. A snapshot is the whole
+	// ability-system state of one actor at one instant; the diff names each
+	// change rather than handing back two blobs for the caller to compare.
+	static TSharedPtr<FJsonValue> CaptureGasState(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> CompareGasStates(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ListGasSnapshots(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> DeleteGasSnapshot(const TSharedPtr<FJsonObject>& Params);
 };
