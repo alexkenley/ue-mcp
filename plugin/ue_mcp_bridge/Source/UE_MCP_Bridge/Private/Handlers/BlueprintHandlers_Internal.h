@@ -14,9 +14,71 @@
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "UObject/Class.h"
 
 class UBlueprint;
 class UActorComponent;
+
+// ── Inherited interfaces ────────────────────────────────────────────────────
+//
+// UClass::Interfaces is per-class: it lists what THAT class declares and
+// nothing it inherited. Reading Blueprint->ParentClass->Interfaces therefore
+// answers a one-level question, and an interface declared on a GRANDPARENT
+// reads as absent. UClass::ImplementsInterface exists because the real answer
+// needs the super chain and the interface-extends-interface stack, so that is
+// the authority add_blueprint_interface and remove_blueprint_interface ask.
+//
+// ImplementsInterface returns a bool, and those handlers also have to NAME the
+// class the contract came from, while list_blueprint_interfaces has to
+// enumerate the whole set. The walk below is the single definition of that
+// reach, so the three handlers cannot drift into disagreeing about which
+// interfaces a Blueprint already has.
+
+/** Every interface StartClass implements, with the same reach
+ *  UClass::ImplementsInterface has, each paired with the nearest ancestor class
+ *  that brings it in. Nearest wins, so the pair names the class a caller should
+ *  be pointed at. */
+inline void GatherImplementedInterfaces(UClass* StartClass, TArray<TPair<UClass*, UClass*>>& OutInterfaceAndProvider)
+{
+	TSet<UClass*> Seen;
+	for (UClass* Current = StartClass; Current; Current = Current->GetSuperClass())
+	{
+		for (const FImplementedInterface& Declared : Current->Interfaces)
+		{
+			// An interface may extend other interfaces, and a class that
+			// declares the derived one implements those too. Walking that stack
+			// is what keeps this in step with ImplementsInterface.
+			TArray<UClass*> Pending;
+			if (Declared.Class) Pending.Add(Declared.Class);
+			while (Pending.Num() > 0)
+			{
+				UClass* Iface = Pending.Pop();
+				if (!Iface || Seen.Contains(Iface)) continue;
+				Seen.Add(Iface);
+				OutInterfaceAndProvider.Emplace(Iface, Current);
+				for (const FImplementedInterface& Super : Iface->Interfaces)
+				{
+					if (Super.Class) Pending.Add(Super.Class);
+				}
+			}
+		}
+	}
+}
+
+/** The nearest ancestor of StartClass (StartClass itself included) that brings
+ *  InterfaceClass in, or nullptr. Built on the gather above so the name a
+ *  handler reports and the set another handler lists can never disagree. */
+inline UClass* FindInterfaceProvider(UClass* StartClass, const UClass* InterfaceClass)
+{
+	if (!StartClass || !InterfaceClass) return nullptr;
+	TArray<TPair<UClass*, UClass*>> Implemented;
+	GatherImplementedInterfaces(StartClass, Implemented);
+	for (const TPair<UClass*, UClass*>& Pair : Implemented)
+	{
+		if (Pair.Key == InterfaceClass) return Pair.Value;
+	}
+	return nullptr;
+}
 
 // ── Graph selectors ─────────────────────────────────────────────────────────
 //

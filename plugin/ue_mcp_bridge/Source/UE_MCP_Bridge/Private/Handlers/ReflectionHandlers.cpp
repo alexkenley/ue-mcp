@@ -722,16 +722,98 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateGameplayTag(const TSharedPtr<F
 	FString Section = TEXT("[/Script/GameplayTags.GameplayTagsSettings]");
 	FString Entry = FString::Printf(TEXT("+GameplayTagList=(Tag=\"%s\",DevComment=\"%s\")"), *Tag, *Comment);
 
+	// The identity of a tag entry is the TAG, not the whole line. Keying the
+	// duplicate check on the full Entry text matched only when the DevComment
+	// was byte-identical too, so calling twice with a different comment (or
+	// with a comment after one without) appended a SECOND +GameplayTagList line
+	// for the same tag and reported it as created.
+	//
+	// A raw substring scan over the whole file is not enough either, and a
+	// hand-edited ini carries both ways of defeating it. A COMMENTED-OUT
+	// declaration (`;+GameplayTagList=(Tag="Ability.Fire",...)`) contains the
+	// key, so a whole-file scan reports the tag as existing and never writes it,
+	// leaving it undeclared as far as the engine is concerned. And an ini is
+	// tolerant of spacing, so `Tag = "Ability.Fire"` does not contain
+	// `Tag="Ability.Fire"` and the duplicate line comes straight back.
+	//
+	// So the scan is per line: comment lines are skipped the way the ini parser
+	// skips them, and the rest are compared with EVERY whitespace character
+	// removed, tabs included. FString::RemoveSpacesInline is not that: it is
+	// documented and implemented as removing the SPACE CHARACTER ONLY, so a
+	// tab-aligned `Tag<TAB>=<TAB>"Ability.Fire"` survived it and the duplicate
+	// line came straight back. TrimStartAndEnd already deals with leading and
+	// trailing tabs, which is exactly not where the problem is: the tabs that
+	// matter sit inside the entry. A gameplay tag name can never contain
+	// whitespace, so stripping it cannot merge two distinct tags; the stripped
+	// copy is used only for the comparison and never written back.
+	//
+	// FString::Contains and Equals default to case-INSENSITIVE, which is what is
+	// wanted here because FGameplayTag compares as an FName and FName is itself
+	// case-insensitive. That agreement is stated rather than left to be
+	// rediscovered, since it reads like an accident.
+	auto StripWhitespace = [](const FString& In)
+	{
+		FString Out;
+		Out.Reserve(In.Len());
+		for (const TCHAR C : In)
+		{
+			if (!FChar::IsWhitespace(C)) Out.AppendChar(C);
+		}
+		return Out;
+	};
+	const FString TagKey = FString::Printf(TEXT("Tag=\"%s\""), *Tag);
+	const FString CompactTagKey = StripWhitespace(TagKey);
+
 	FString FileContent;
+	bool bTagAlreadyDeclared = false;
 	if (FFileHelper::LoadFileToString(FileContent, *TagFile))
 	{
-		if (!FileContent.Contains(Section))
+		TArray<FString> Lines;
+		FileContent.ParseIntoArrayLines(Lines, /*bCullEmpty=*/false);
+		int32 SectionLine = INDEX_NONE;
+		for (int32 i = 0; i < Lines.Num(); ++i)
 		{
-			FileContent += TEXT("\n\n") + Section + TEXT("\n") + Entry + TEXT("\n");
+			FString Trimmed = Lines[i].TrimStartAndEnd();
+			// Both comment markers an Unreal ini honours.
+			if (Trimmed.IsEmpty() || Trimmed.StartsWith(TEXT(";")) || Trimmed.StartsWith(TEXT("#"))) continue;
+			const FString Compact = StripWhitespace(Trimmed);
+			if (Compact.Contains(CompactTagKey))
+			{
+				bTagAlreadyDeclared = true;
+				break;
+			}
+			// The section header is read the same way and for the same reason:
+			// a raw whole-file scan for it would match a COMMENTED-OUT header
+			// and the new entry would be spliced in underneath a line the ini
+			// parser ignores, landing the tag in whatever section precedes it.
+			// IgnoreCase to keep the tolerance the previous whole-file
+			// Contains() had by default, so a differently cased header does not
+			// suddenly grow a second section.
+			if (SectionLine == INDEX_NONE && Compact.Equals(Section, ESearchCase::IgnoreCase)) SectionLine = i;
 		}
-		else if (!FileContent.Contains(Entry))
+		if (!bTagAlreadyDeclared)
 		{
-			FileContent = FileContent.Replace(*Section, *(Section + TEXT("\n") + Entry));
+			// The separator the file already uses. Both branches below write
+			// with it: silently converting a CRLF ini to LF, or appending LF
+			// lines onto a CRLF file, would be an unrelated change landing in
+			// someone's config diff. The append branch used to hardcode "\n"
+			// and produce exactly the mixed line endings the join branch went
+			// out of its way to avoid.
+			const TCHAR* LineEnd = FileContent.Contains(TEXT("\r\n")) ? TEXT("\r\n") : TEXT("\n");
+			if (SectionLine == INDEX_NONE)
+			{
+				FileContent += FString(LineEnd) + LineEnd + Section + LineEnd + Entry + LineEnd;
+			}
+			else
+			{
+				// Rejoin. ParseIntoArrayLines was called with bCullEmpty=false,
+				// and FString::ParseIntoArray appends the trailing remainder
+				// unconditionally in that mode, so a file ending in a newline
+				// yields a final empty element and the join puts that newline
+				// back. The rewrite does not eat the file's last line ending.
+				Lines.Insert(Entry, SectionLine + 1);
+				FileContent = FString::Join(Lines, LineEnd);
+			}
 		}
 	}
 	else
@@ -739,10 +821,38 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateGameplayTag(const TSharedPtr<F
 		FileContent = Section + TEXT("\n") + Entry + TEXT("\n");
 	}
 
+	// Idempotency: this tag is already declared, so there is nothing to write.
+	// A differing DevComment is deliberately NOT treated as a change: rewriting
+	// it would mean editing the caller's ini in place, which this handler has
+	// never done and which is not what "create" was asked for.
+	if (bTagAlreadyDeclared)
+	{
+		MCPSetExisted(Result);
+		Result->SetBoolField(TEXT("unchanged"), true);
+		Result->SetStringField(TEXT("method"), TEXT("ini_append"));
+		Result->SetStringField(TEXT("note"),
+			TEXT("DefaultGameplayTags.ini already declares this tag, so the file was not rewritten. Any comment "
+			     "passed on this call was not applied: edit the existing GameplayTagList entry to change it."));
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), TEXT("Nothing was written, so there is nothing to undo."));
+		return MCPResult(Result);
+	}
+
 	if (FFileHelper::SaveStringToFile(FileContent, *TagFile))
 	{
+		MCPSetCreated(Result);
+		Result->SetBoolField(TEXT("unchanged"), false);
 		Result->SetStringField(TEXT("method"), TEXT("ini_append"));
 		Result->SetStringField(TEXT("note"), TEXT("Restart editor to pick up new tag"));
+
+		// The bridge registers no action that removes a gameplay tag: the tag
+		// surface is list_gameplay_tags and this one. Nothing is named as an
+		// inverse, because nothing would answer to the name.
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), TEXT(
+			"No action removes a gameplay tag. This appended a GameplayTagList entry to "
+			"Config/DefaultGameplayTags.ini, and undoing it means deleting that line from the file by hand or "
+			"through the Gameplay Tags editor."));
 		return MCPResult(Result);
 	}
 
@@ -970,6 +1080,20 @@ TSharedPtr<FJsonValue> FReflectionHandlers::SetEnumEntries(const TSharedPtr<FJso
 		return MCPError(TEXT("Missing 'entries' (array of strings or {name, displayName})"));
 	}
 
+	// The list as it stands, read before the clear loop destroys it. This is
+	// the payload of the inverse call: set_enum_entries replaces the whole list,
+	// so handing it the previous list back is its own exact undo. Index
+	// NumEnums()-1 is the auto _MAX sentinel, which is regenerated and is not an
+	// authored entry.
+	TArray<TSharedPtr<FJsonValue>> PreviousEntries;
+	for (int32 i = 0; i < Enum->NumEnums() - 1; ++i)
+	{
+		TSharedPtr<FJsonObject> Was = MakeShared<FJsonObject>();
+		Was->SetStringField(TEXT("name"), Enum->GetNameStringByIndex(i));
+		Was->SetStringField(TEXT("displayName"), Enum->GetDisplayNameTextByIndex(i).ToString());
+		PreviousEntries.Add(MakeShared<FJsonValueObject>(Was));
+	}
+
 	// Clear existing entries (UE editor utils does this safely).
 	while (Enum->NumEnums() > 1)
 	{
@@ -1007,5 +1131,21 @@ TSharedPtr<FJsonValue> FReflectionHandlers::SetEnumEntries(const TSharedPtr<FJso
 	MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("assetPath"), AssetPath);
 	Result->SetNumberField(TEXT("entries"), Added);
+	Result->SetArrayField(TEXT("previousEntries"), PreviousEntries);
+
+	// This action replaces the whole list, so replaying it with the previous
+	// list is the inverse. It is lossy in one named way: a user-defined enum's
+	// underlying enumerator names are minted by the engine, so restoring the
+	// list restores the display names and their order, not the raw names that
+	// were there before.
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("assetPath"), AssetPath);
+	Payload->SetArrayField(TEXT("entries"), PreviousEntries);
+	MCPSetRollback(Result, TEXT("set_enum_entries"), Payload);
+	Result->SetBoolField(TEXT("rollbackLossy"), true);
+	Result->SetStringField(TEXT("rollbackNote"), TEXT(
+		"Replaying set_enum_entries with previousEntries restores the display names and their order. The underlying "
+		"enumerator names are minted by FEnumEditorUtils rather than written by this handler, so anything that "
+		"stored a raw enumerator name may not rebind, and enum values already saved on assets resolve by index."));
 	return MCPResult(Result);
 }

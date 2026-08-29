@@ -22,6 +22,8 @@
 #include "K2Node_CallParentFunction.h"
 #include "K2Node_Event.h"
 #include "K2Node_FunctionEntry.h"
+#include "K2Node_FunctionTerminator.h"
+#include "K2Node_Tunnel.h"
 #include "K2Node_EditablePinBase.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_MacroInstance.h"
@@ -1087,6 +1089,30 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ConnectPins(const TSharedPtr<FJsonObj
 	}
 	const int32 BrokenSourceLinks = PreviousSourceLinks.Num();
 	const int32 BrokenTargetLinks = PreviousTargetLinks.Num();
+
+	// Identity of every link about to be broken, recorded while the pins are
+	// still linked. There is no action that breaks a pin link, so the only undo
+	// is re-making these with connect_pins; a result that said "re-connect them"
+	// while reporting nothing but a COUNT prescribed something the caller had no
+	// way to do.
+	auto DescribeLinks = [](const TArray<UEdGraphPin*>& Links)
+	{
+		TArray<TSharedPtr<FJsonValue>> Out;
+		for (const UEdGraphPin* LinkedPin : Links)
+		{
+			if (!LinkedPin) continue;
+			const UEdGraphNode* Owner = LinkedPin->GetOwningNode();
+			TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+			O->SetStringField(TEXT("nodeId"), Owner ? Owner->NodeGuid.ToString() : FString());
+			O->SetStringField(TEXT("pinName"), LinkedPin->PinName.ToString());
+			O->SetStringField(TEXT("direction"),
+				LinkedPin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
+			Out.Add(MakeShared<FJsonValueObject>(O));
+		}
+		return Out;
+	};
+	const TArray<TSharedPtr<FJsonValue>> BrokenSourceDetail = DescribeLinks(PreviousSourceLinks);
+	const TArray<TSharedPtr<FJsonValue>> BrokenTargetDetail = DescribeLinks(PreviousTargetLinks);
 	UPackage* Package = Blueprint->GetOutermost();
 	const bool bWasPackageDirty = Package && Package->IsDirty();
 
@@ -1132,7 +1158,23 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ConnectPins(const TSharedPtr<FJsonObj
 		Result->SetStringField(TEXT("targetPinName"), TargetPinName);
 		Result->SetNumberField(TEXT("brokenSourceLinks"), BrokenSourceLinks);
 		Result->SetNumberField(TEXT("brokenTargetLinks"), BrokenTargetLinks);
-		// No rollback: broken links are intentionally opt-in via breakExistingSource/Target.
+		Result->SetArrayField(TEXT("brokenSourceLinkDetail"), BrokenSourceDetail);
+		Result->SetArrayField(TEXT("brokenTargetLinkDetail"), BrokenTargetDetail);
+		// Undoing a wire means breaking it, and the Blueprint surface has no
+		// action that breaks a pin link: delete_node removes whole nodes, which
+		// would destroy work this call never touched. Nothing is invented here.
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), (BrokenSourceLinks + BrokenTargetLinks) > 0
+			? FString::Printf(TEXT(
+				"No action breaks a Blueprint pin link, so this connection has no inverse call. delete_node is not "
+				"it: it would remove a whole node this call only wired up. The %d link(s) that breakExistingSource "
+				"or breakExistingTarget severed are named in brokenSourceLinkDetail and brokenTargetLinkDetail, "
+				"each with its nodeId, pinName and direction; feed those back through connect_pins to re-make them."),
+				BrokenSourceLinks + BrokenTargetLinks)
+			: FString(TEXT(
+				"No action breaks a Blueprint pin link, so this connection has no inverse call. delete_node is not "
+				"it: it would remove a whole node this call only wired up. This call broke no existing links, so "
+				"the only thing to undo is the one wire it made.")));
 		return MCPResult(Result);
 	}
 	else
@@ -1201,6 +1243,82 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObje
 		return MCPResult(Noop);
 	}
 
+	const FString NodeClassName = NodeToDelete->GetClass()->GetName();
+
+	// Refuse what the engine itself refuses. CanUserDeleteNode is the per-node
+	// authority the editor's own delete consults, and it is context sensitive in
+	// a way no class list here could be: a function entry always returns false,
+	// a function result returns false only while its signature is not editable,
+	// a tunnel returns false inside a tunnel graph but true for a stray one at
+	// top level, and macro instances and composites return true. The AnimGraph
+	// singletons answer it too - AnimGraphNode_Root, AnimGraphNode_StateResult,
+	// AnimGraphNode_TransitionResult and AnimStateEntryNode all return false -
+	// and delete_node reaches those graphs, because FindGraph searches every
+	// graph the Blueprint owns. Destroying an output pose node or a state
+	// machine entry and answering success:true with a note about there being no
+	// way to undo it was the wrong question answered politely: the call should
+	// not have run.
+	if (!NodeToDelete->CanUserDeleteNode())
+	{
+		return MCPError(FString::Printf(TEXT(
+			"Node '%s' (%s) in graph '%s' cannot be deleted: the engine marks it CanUserDeleteNode=false, which is "
+			"what a function entry, a locked function return, a tunnel inside its own tunnel graph, an AnimGraph "
+			"output pose or a state machine entry node reports. The editor refuses this delete too, and there is no "
+			"way to put the node back afterwards, so it is refused here rather than performed and then reported as "
+			"unrecoverable. Delete the owning function, macro or state instead if that is what you meant."),
+			*NodeId, *NodeClassName, *GraphName));
+	}
+
+	// Everything below runs only on a node the engine agreed may be deleted.
+	// PrepareForCopying is the editor's own pre-Copy step and the editor always
+	// pairs it with PostCopyNode. Here the node is destroyed a few lines later
+	// instead, which reaches the same end state, but ONLY because the node is
+	// destroyed. So it is called after the CanUserDeleteNode guard, never
+	// before: a refused node survives the call and would be left carrying
+	// whatever PrepareForCopying did to it with no PostCopyNode to undo it. The
+	// base implementation is empty, but it is a real override on several
+	// classes (UK2Node_Timeline, UK2Node_AddComponent and
+	// UAnimStateTransitionNode among them), and CanUserDeleteNode is a per-node
+	// answer any instance can give, so the ordering is what makes the pairing
+	// safe rather than any class list.
+	//
+	// Nothing after the delete can read the node back, so the text the inverse
+	// would paste is captured while the node still exists.
+	//
+	// The EXPORT gate is the node CLASS, not CanDuplicateNode(). This says
+	// nothing about whether the delete is allowed - CanUserDeleteNode above is
+	// the only authority on that - it only decides whether rollback text is
+	// captured. Across the whole BlueprintGraph module UK2Node_Tunnel is the
+	// only class that overrides CanDuplicateNode, and UEdGraphNode's base
+	// returns true, so an entry, result or event node reports itself
+	// duplicatable and would be exported happily. (The AnimGraph nodes do
+	// override it and mostly answer false, which is what the other rollback
+	// note below covers.) Pasting that text back does not restore the graph: a
+	// second UK2Node_FunctionEntry, a second UK2Node_FunctionResult or a second
+	// Event node with the same signature is a Blueprint that no longer
+	// compiles, and a tunnel-derived node (composite, macro instance) keeps its
+	// body in a separate UEdGraph it only points at, so its text carries a
+	// reference rather than the contents. import_nodes_t3d drives
+	// FEdGraphUtilities::ImportNodesFromText directly and never consults
+	// UK2Node_Event::CanPasteHere, so nothing downstream catches it either. A
+	// rollback that corrupts the asset is worse than none.
+	FString DeletedT3D;
+	int32 DeletedLinkCount = 0;
+	const bool bSingularNode = NodeToDelete->IsA<UK2Node_FunctionTerminator>()
+		|| NodeToDelete->IsA<UK2Node_Tunnel>()
+		|| NodeToDelete->IsA<UK2Node_Event>();
+	for (const UEdGraphPin* Pin : NodeToDelete->Pins)
+	{
+		if (Pin) DeletedLinkCount += Pin->LinkedTo.Num();
+	}
+	if (!bSingularNode && NodeToDelete->CanDuplicateNode())
+	{
+		NodeToDelete->PrepareForCopying();
+		TSet<UObject*> NodeSet;
+		NodeSet.Add(NodeToDelete);
+		FEdGraphUtilities::ExportNodesToText(NodeSet, DeletedT3D);
+	}
+
 	NodeToDelete->BreakAllNodeLinks();
 	TargetGraph->RemoveNode(NodeToDelete);
 
@@ -1212,7 +1330,47 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObje
 	Result->SetStringField(TEXT("graphName"), GraphName);
 	Result->SetStringField(TEXT("nodeId"), NodeId);
 	Result->SetBoolField(TEXT("deleted"), true);
-	// Not reversible by default.
+
+	// The inverse is import_nodes_t3d fed the node's own exported text. It puts
+	// an equivalent node back in the same graph, but BreakAllNodeLinks already
+	// severed every wire and the paste mints a fresh GUID, so this is lossy in
+	// two named ways rather than a clean undo.
+	if (!DeletedT3D.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("path"), AssetPath);
+		Payload->SetStringField(TEXT("graphName"), GraphName);
+		Payload->SetStringField(TEXT("t3d"), DeletedT3D);
+		MCPSetRollback(Result, TEXT("import_nodes_t3d"), Payload);
+		Result->SetBoolField(TEXT("rollbackLossy"), true);
+		Result->SetStringField(TEXT("rollbackNote"), FString::Printf(TEXT(
+			"import_nodes_t3d pastes the node back with its properties intact, but the %d pin link(s) this delete "
+			"broke do NOT come back and have to be re-made with connect_pins. The pasted node also gets a new "
+			"nodeId, so '%s' will not address it afterwards."),
+			DeletedLinkCount, *NodeId));
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), bSingularNode
+			? FString::Printf(TEXT(
+				"Node '%s' (%s) belongs to the class family delete_node never exports rollback text for: "
+				"K2Node_Event, K2Node_FunctionTerminator (function entry and function result) and K2Node_Tunnel "
+				"together with everything derived from it, which includes collapsed-graph (K2Node_Composite) and "
+				"macro instance nodes. The delete itself was allowed - the engine's own CanUserDeleteNode said so, "
+				"and it says so for an event, a function result whose signature is editable, a stray top-level "
+				"tunnel, a composite and a macro instance - so this is about the paste being wrong, not the delete "
+				"being refused. Pasting an event or a function terminator back adds a SECOND node with the same "
+				"signature and the Blueprint stops compiling. A composite or macro instance keeps its body in a "
+				"separate graph the node only points at, so its exported text carries a reference and not the "
+				"contents, and the paste would not rebuild what was deleted. No inverse is offered rather than one "
+				"that corrupts the asset: rebuild the node with add_node, or re-collapse the nodes."),
+				*NodeId, *NodeClassName)
+			: FString::Printf(TEXT(
+				"Node '%s' (%s) reported itself non-duplicatable through CanDuplicateNode, or exported to empty "
+				"text, so there is nothing for import_nodes_t3d to paste back and no inverse is offered."),
+				*NodeId, *NodeClassName));
+	}
 	return MCPResult(Result);
 }
 
@@ -1688,13 +1846,35 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJson
 		return MCPError(TEXT("No nodes to export"));
 	}
 
-	// FEdGraphUtilities::ExportNodesToText only writes nodes that are flagged
-	// CanDuplicateNode == true; mirrors how the editor's Copy filters root
-	// entry/return nodes. Pre-filter so the count we report matches reality.
+	// FEdGraphUtilities::ExportNodesToText only writes nodes flagged
+	// CanDuplicateNode == true, so they are pre-filtered here for the count to
+	// match reality.
+	//
+	// That flag does NOT filter entry and return nodes, which an older comment
+	// here claimed. UEdGraphNode's base implementation returns true and only
+	// UK2Node_Tunnel overrides it; UK2Node_FunctionEntry and
+	// UK2Node_FunctionResult descend from UK2Node_FunctionTerminator and
+	// UK2Node_Event from UK2Node_EditablePinBase, so all three export happily.
+	// That is fine for an export, which is a read. It is not fine for the
+	// import: a graph holds one entry, one return and one event per signature,
+	// and pasting a second stops it compiling. The ones in this payload are
+	// therefore named in `singularNodes` so a caller round-tripping the text
+	// into a graph that already has them knows what to strip first.
 	TSet<UObject*> NodeSet;
 	int32 SkippedCount = 0;
+	TArray<TSharedPtr<FJsonValue>> SingularNodes;
 	for (UEdGraphNode* Node : SelectedNodes)
 	{
+		if (Node && Node->CanDuplicateNode()
+			&& (Node->IsA<UK2Node_FunctionTerminator>()
+				|| Node->IsA<UK2Node_Tunnel>()
+				|| Node->IsA<UK2Node_Event>()))
+		{
+			TSharedPtr<FJsonObject> Singular = MakeShared<FJsonObject>();
+			Singular->SetStringField(TEXT("nodeId"), Node->NodeGuid.ToString());
+			Singular->SetStringField(TEXT("class"), Node->GetClass()->GetName());
+			SingularNodes.Add(MakeShared<FJsonValueObject>(Singular));
+		}
 		if (Node && Node->CanDuplicateNode())
 		{
 			Node->PrepareForCopying();
@@ -1720,6 +1900,16 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJson
 	Result->SetStringField(TEXT("t3d"), ExportedText);
 	Result->SetNumberField(TEXT("count"), NodeSet.Num());
 	Result->SetNumberField(TEXT("skipped"), SkippedCount);
+	Result->SetArrayField(TEXT("singularNodes"), SingularNodes);
+	if (SingularNodes.Num() > 0)
+	{
+		Result->SetStringField(TEXT("warning"), FString::Printf(TEXT(
+			"%d exported node(s) are singular: a function entry, a function return, a tunnel or an event. A graph "
+			"holds one of each signature, so importing this text into a graph that already has them adds duplicates "
+			"and the Blueprint stops compiling. They are listed in singularNodes; import into an empty graph, or "
+			"strip them from the t3d first."),
+			SingularNodes.Num()));
+	}
 	return MCPResult(Result);
 }
 
@@ -1815,8 +2005,26 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ImportNodesT3D(const TSharedPtr<FJson
 	Result->SetStringField(TEXT("graphName"), GraphName);
 	Result->SetArrayField(TEXT("nodeIds"), NodeIds);
 	Result->SetNumberField(TEXT("count"), NodeIds.Num());
-	// No rollback: delete_node only deletes one node at a time and the bulk
-	// import has no natural key. Caller must clean up by node id if needed.
+
+	// A rollback record is one call, and delete_node takes one nodeId. A paste
+	// of exactly one node therefore has an exact inverse; a bulk paste does not,
+	// and the ids are reported above so a caller can undo it deliberately.
+	if (NodeIds.Num() == 1)
+	{
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("path"), AssetPath);
+		Payload->SetStringField(TEXT("graphName"), GraphName);
+		Payload->SetStringField(TEXT("nodeId"), NodeIds[0]->AsString());
+		MCPSetRollback(Result, TEXT("delete_node"), Payload);
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), FString::Printf(TEXT(
+			"This paste created %d nodes and delete_node removes one nodeId per call, so no single inverse call "
+			"undoes it. Every new nodeId is listed in nodeIds; delete them individually to reverse this import."),
+			NodeIds.Num()));
+	}
 	return MCPResult(Result);
 }
 
@@ -1836,7 +2044,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CompileBlueprints(const TSharedPtr<FJ
 	bool bSave = OptionalBool(Params, TEXT("save"), true);
 
 	TArray<TSharedPtr<FJsonValue>> Results;
-	int32 Compiled = 0, Failed = 0, NotFound = 0;
+	int32 Compiled = 0, Failed = 0, NotFound = 0, AlreadyUpToDate = 0;
 	for (const TSharedPtr<FJsonValue>& Entry : *PathsArray)
 	{
 		FString AssetPath = Entry->AsString();
@@ -1851,6 +2059,16 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CompileBlueprints(const TSharedPtr<FJ
 			Results.Add(MakeShared<FJsonValueObject>(Item));
 			continue;
 		}
+
+		// Asked before the compile: afterwards every Blueprint reads as up to
+		// date. BS_UpToDateWithWarnings is a DISTINCT status from BS_UpToDate
+		// and has to be counted here too, or a Blueprint that compiles clean
+		// with warnings reports itself stale forever.
+		const bool bWasUpToDate =
+			Blueprint->Status == EBlueprintStatus::BS_UpToDate
+			|| Blueprint->Status == EBlueprintStatus::BS_UpToDateWithWarnings;
+		Item->SetBoolField(TEXT("wasUpToDate"), bWasUpToDate);
+		if (bWasUpToDate) AlreadyUpToDate++;
 
 		FCompilerResultsLog CompileLog;
 		FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None, &CompileLog);
@@ -1877,7 +2095,25 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CompileBlueprints(const TSharedPtr<FJ
 	Result->SetNumberField(TEXT("compiled"), Compiled);
 	Result->SetNumberField(TEXT("failed"), Failed);
 	Result->SetNumberField(TEXT("notFound"), NotFound);
+	Result->SetNumberField(TEXT("alreadyUpToDate"), AlreadyUpToDate);
 	Result->SetArrayField(TEXT("results"), Results);
+
+	// No no-op flag here either: CompileBlueprint rebuilds and reinstances on
+	// every call regardless of status, so a batch where every Blueprint was
+	// already up to date still did the full work. alreadyUpToDate reports what
+	// the statuses were on the way in, nothing more.
+	Result->SetBoolField(TEXT("idempotent"), false);
+	Result->SetStringField(TEXT("idempotencyNote"),
+		TEXT("A compile always rebuilds each generated class and reinstances its objects, so calling twice does "
+		     "real work twice. alreadyUpToDate counts the Blueprints whose status said up to date BEFORE this ran; "
+		     "it is not a count of calls that did nothing."));
+
+	// Same as the single-Blueprint compile: a compile rebuilds the generated
+	// class from graphs that were already saved, and nothing un-compiles one.
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"), TEXT(
+		"Compiling rebuilds each generated class from graphs that were already saved. There is no inverse action, "
+		"and the pre-compile generated classes are not retained to restore from."));
 	return MCPResult(Result);
 }
 
@@ -1905,6 +2141,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CleanupGraph(const TSharedPtr<FJsonOb
 	}
 
 	int32 Removed = 0;
+	int32 Restorable = 0;
 	TArray<TSharedPtr<FJsonValue>> RemovedIds;
 	for (UEdGraph* Graph : Graphs)
 	{
@@ -1931,6 +2168,29 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CleanupGraph(const TSharedPtr<FJsonOb
 				Entry->SetStringField(TEXT("graph"), Graph->GetName());
 				Entry->SetStringField(TEXT("nodeGuid"), Node->NodeGuid.ToString());
 				Entry->SetStringField(TEXT("class"), Node->GetClass() ? Node->GetClass()->GetName() : TEXT("<null>"));
+
+				// Not every orphan is unrecoverable. The first two tests catch
+				// genuinely corrupt nodes with nothing to export, but the third
+				// catches an ordinary UK2Node_CallFunction whose target UFunction
+				// is merely absent right now: a renamed function, or a plugin
+				// that is not loaded in this session. That node exports fine, so
+				// its text is captured per node and reported rather than thrown
+				// away on the claim that it could not be exported.
+				FString OrphanT3D;
+				if (Node->GetClass() && Node->CanDuplicateNode()
+					&& !Node->IsA<UK2Node_FunctionTerminator>()
+					&& !Node->IsA<UK2Node_Tunnel>()
+					&& !Node->IsA<UK2Node_Event>())
+				{
+					Node->PrepareForCopying();
+					TSet<UObject*> OrphanSet;
+					OrphanSet.Add(Node);
+					FEdGraphUtilities::ExportNodesToText(OrphanSet, OrphanT3D);
+				}
+				Entry->SetStringField(TEXT("t3d"), OrphanT3D);
+				Entry->SetBoolField(TEXT("restorable"), !OrphanT3D.IsEmpty());
+				if (!OrphanT3D.IsEmpty()) Restorable++;
+
 				RemovedIds.Add(MakeShared<FJsonValueObject>(Entry));
 				Graph->RemoveNode(Node);
 				Removed++;
@@ -1948,6 +2208,24 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CleanupGraph(const TSharedPtr<FJsonOb
 	Result->SetStringField(TEXT("path"), AssetPath);
 	Result->SetNumberField(TEXT("removed"), Removed);
 	Result->SetArrayField(TEXT("removedNodes"), RemovedIds);
+	Result->SetBoolField(TEXT("unchanged"), Removed == 0);
+
+	// This sweeps whole graphs and removes as many nodes as match, so there is
+	// no single inverse call: import_nodes_t3d pastes into ONE named graph and a
+	// rollback record carries one call. That is the honest reason. It is NOT
+	// that the nodes are unrecoverable: the third orphan test catches an
+	// ordinary call node whose target UFunction is merely missing right now (a
+	// renamed function, an unloaded plugin), and those export cleanly. Each
+	// removed node therefore carries its own t3d and a `restorable` flag.
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"), FString::Printf(TEXT(
+		"No single inverse call exists: this sweeps every graph on the Blueprint and import_nodes_t3d pastes into "
+		"one named graph per call. %d of the %d removed node(s) are restorable and carry their exported text in "
+		"removedNodes[].t3d, with the owning graph in removedNodes[].graph; replay them one graph at a time. The "
+		"rest had no UClass or no pins and could not be exported. Pin links are not restored either way. Note that "
+		"a call node whose target function is merely renamed or in an unloaded plugin looks like an orphan here, "
+		"which is the case worth checking before treating this cleanup as final."),
+		Restorable, Removed));
 	return MCPResult(Result);
 }
 
@@ -2054,6 +2332,15 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ConnectPinsBatch(const TSharedPtr<FJs
 	Result->SetNumberField(TEXT("existed"), Existed);
 	Result->SetNumberField(TEXT("failed"), Failed);
 	Result->SetArrayField(TEXT("results"), Detail);
+	Result->SetBoolField(TEXT("unchanged"), Connected == 0);
+
+	// Same hole as connect_pins: nothing in the Blueprint surface breaks a pin
+	// link, so a batch of wirings has no inverse call either.
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"), TEXT(
+		"No action breaks a Blueprint pin link, so these connections have no inverse call. delete_node is not it: it "
+		"would remove nodes this call only wired up. The per-connection results say which links were newly made, "
+		"which is what a manual undo would have to break."));
 	return MCPResult(Result);
 }
 
@@ -2076,17 +2363,50 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetNodePosition(const TSharedPtr<FJso
 	UEdGraphNode* Node = FindNodeByGuidOrName(Graph, NodeId);
 	if (!Node) return MCPError(FString::Printf(TEXT("Node not found: %s"), *NodeId));
 
-	Node->NodePosX = PosX;
-	Node->NodePosY = PosY;
-	Node->Modify();
-	Graph->NotifyGraphChanged();
+	// Where it was, which is both the idempotency answer and the exact inverse.
+	const int32 PrevPosX = Node->NodePosX;
+	const int32 PrevPosY = Node->NodePosY;
+	const bool bUnchanged = (PrevPosX == PosX && PrevPosY == PosY);
+
+	// A node already at these coordinates is not dirtied, not marked modified
+	// and does not notify the graph: writing the same numbers back and then
+	// reporting unchanged:true beside MCPSetUpdated was two contradictory
+	// claims in one result.
+	if (!bUnchanged)
+	{
+		Node->NodePosX = PosX;
+		Node->NodePosY = PosY;
+		Node->Modify();
+		Graph->NotifyGraphChanged();
+	}
 
 	auto Result = MCPSuccess();
+	if (bUnchanged) MCPSetExisted(Result); else MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("path"), AssetPath);
 	Result->SetStringField(TEXT("graphName"), GraphName);
 	Result->SetStringField(TEXT("nodeId"), NodeId);
 	Result->SetNumberField(TEXT("posX"), PosX);
 	Result->SetNumberField(TEXT("posY"), PosY);
+	Result->SetNumberField(TEXT("previousPosX"), PrevPosX);
+	Result->SetNumberField(TEXT("previousPosY"), PrevPosY);
+	Result->SetBoolField(TEXT("unchanged"), bUnchanged);
+
+	if (bUnchanged)
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("The node was already at these coordinates, so nothing was moved and there is nothing to undo."));
+	}
+	else
+	{
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("path"), AssetPath);
+		Payload->SetStringField(TEXT("graphName"), GraphName);
+		Payload->SetStringField(TEXT("nodeId"), NodeId);
+		Payload->SetNumberField(TEXT("posX"), PrevPosX);
+		Payload->SetNumberField(TEXT("posY"), PrevPosY);
+		MCPSetRollback(Result, TEXT("set_node_position"), Payload);
+	}
 	return MCPResult(Result);
 }
 
@@ -2156,26 +2476,96 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AutoLayoutGraph(const TSharedPtr<FJso
 		Buckets.FindOrAdd(Col).Add(Node);
 	}
 
+	// Where every node sat before the layout ran. There is no bulk position
+	// writer to hand this back to, so it is reported instead of thrown away:
+	// it is what a caller needs to walk set_node_position back node by node.
+	//
+	// It is capped, and off by default above the cap. An EventGraph can hold
+	// hundreds of nodes and this is a rollback aid, not a graph dump: emitting
+	// one object per node unconditionally would put an unbounded array in every
+	// response. `capturePreviousPositions` forces it on, `previousPositionsLimit`
+	// raises the cap, and the result always says which of the two happened.
+	const int32 NodeCount = Order.Num();
+	const int32 PositionsLimit = FMath::Max(0, OptionalInt(Params, TEXT("previousPositionsLimit"), 200));
+	const bool bForcePositions = OptionalBool(Params, TEXT("capturePreviousPositions"), false);
+	const bool bCapturePositions = bForcePositions || NodeCount <= PositionsLimit;
+
 	int32 Repositioned = 0;
+	int32 Moved = 0;
+	TArray<TSharedPtr<FJsonValue>> PreviousPositions;
 	for (auto& Pair : Buckets)
 	{
 		int32 Col = Pair.Key;
 		int32 Row = 0;
 		for (UEdGraphNode* Node : Pair.Value)
 		{
-			Node->NodePosX = Col * ColumnGap;
-			Node->NodePosY = Row * RowGap;
-			Node->Modify();
+			const int32 PrevPosX = Node->NodePosX;
+			const int32 PrevPosY = Node->NodePosY;
+			const int32 NewPosX = Col * ColumnGap;
+			const int32 NewPosY = Row * RowGap;
+
+			if (bCapturePositions)
+			{
+				TSharedPtr<FJsonObject> Was = MakeShared<FJsonObject>();
+				Was->SetStringField(TEXT("nodeId"), Node->NodeGuid.ToString());
+				Was->SetNumberField(TEXT("posX"), PrevPosX);
+				Was->SetNumberField(TEXT("posY"), PrevPosY);
+				PreviousPositions.Add(MakeShared<FJsonValueObject>(Was));
+			}
+
+			// Only a node that actually moves is marked modified. Calling
+			// Modify() on every node dirtied the package for a layout that
+			// produced the coordinates it found, and the result then reported
+			// unchanged:true beside N nodes marked dirty: the same
+			// claim-and-contradiction the marker fix two lines below removed.
+			if (PrevPosX != NewPosX || PrevPosY != NewPosY)
+			{
+				Node->NodePosX = NewPosX;
+				Node->NodePosY = NewPosY;
+				Node->Modify();
+				Moved++;
+			}
 			Repositioned++;
 			Row++;
 		}
 	}
-	Graph->NotifyGraphChanged();
+	// Nothing moved means nothing to notify. The graph is only told it changed
+	// when it did.
+	if (Moved > 0)
+	{
+		Graph->NotifyGraphChanged();
+	}
 
 	auto Result = MCPSuccess();
+	// `repositioned` counts nodes this walked; `moved` counts the ones whose
+	// coordinates actually differ. A layout that produced the same positions it
+	// found is not an update, and saying MCPSetUpdated for it contradicted the
+	// unchanged flag sitting next to it.
+	if (Moved == 0) MCPSetExisted(Result); else MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("path"), AssetPath);
 	Result->SetStringField(TEXT("graphName"), GraphName);
 	Result->SetNumberField(TEXT("repositioned"), Repositioned);
+	Result->SetNumberField(TEXT("moved"), Moved);
+	Result->SetBoolField(TEXT("unchanged"), Moved == 0);
 	Result->SetNumberField(TEXT("columns"), Buckets.Num());
+	Result->SetArrayField(TEXT("previousPositions"), PreviousPositions);
+	Result->SetBoolField(TEXT("previousPositionsCaptured"), bCapturePositions);
+
+	// A layout rewrites the position of every node in the graph, and
+	// set_node_position moves one node per call, so no single inverse call
+	// restores it. The previous coordinates are reported above rather than a
+	// rollback being invented for them.
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"), bCapturePositions
+		? FString(TEXT(
+			"A layout rewrites every node's position and set_node_position moves one node per call, so there is no "
+			"single inverse call. previousPositions carries each node's coordinates from before this ran; replay "
+			"them through set_node_position to restore the old layout."))
+		: FString::Printf(TEXT(
+			"A layout rewrites every node's position and set_node_position moves one node per call, so there is no "
+			"single inverse call. This graph has %d nodes, over the %d-node cap, so previousPositions was NOT "
+			"captured and the old layout is gone. Pass capturePreviousPositions=true (or raise "
+			"previousPositionsLimit) BEFORE running this if you need to be able to put it back."),
+			NodeCount, PositionsLimit));
 	return MCPResult(Result);
 }

@@ -450,24 +450,37 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListBlueprintInterfaces(const TShared
 	};
 
 	TArray<TSharedPtr<FJsonValue>> Interfaces;
+	TSet<UClass*> Listed;
 	for (const FBPInterfaceDescription& Impl : Blueprint->ImplementedInterfaces)
 	{
 		UClass* IfaceClass = Impl.Interface;
 		if (!IfaceClass) continue;
+		Listed.Add(IfaceClass);
 		TSharedPtr<FJsonObject> Entry = DescribeInterface(IfaceClass, &Impl.Graphs, TEXT("own"));
 		// Only an interface listed here can be removed; an inherited one belongs
-		// to the parent class.
+		// to the class that declares it.
 		Entry->SetBoolField(TEXT("removable"), true);
 		Interfaces.Add(MakeShared<FJsonValueObject>(Entry));
 	}
+	// The inherited half walks the whole parent chain rather than reading
+	// ParentClass->Interfaces, which is per-class and would leave an interface
+	// declared on a GRANDPARENT out of a list whose whole job is to say what is
+	// in force. add_blueprint_interface and remove_blueprint_interface decide
+	// with UClass::ImplementsInterface, and this gather has the same reach, so
+	// nothing can be missing here that those two call inherited.
 	if (UClass* ParentClass = Blueprint->ParentClass.Get())
 	{
-		for (const FImplementedInterface& Inherited : ParentClass->Interfaces)
+		TArray<TPair<UClass*, UClass*>> Inherited;
+		GatherImplementedInterfaces(ParentClass, Inherited);
+		for (const TPair<UClass*, UClass*>& Pair : Inherited)
 		{
-			UClass* IfaceClass = Inherited.Class;
-			if (!IfaceClass) continue;
+			UClass* IfaceClass = Pair.Key;
+			if (!IfaceClass || Listed.Contains(IfaceClass)) continue;
+			Listed.Add(IfaceClass);
 			TSharedPtr<FJsonObject> Entry = DescribeInterface(IfaceClass, nullptr, TEXT("inherited"));
 			Entry->SetBoolField(TEXT("removable"), false);
+			// Which ancestor declares it, which is not always the direct parent.
+			Entry->SetStringField(TEXT("inheritedFrom"), Pair.Value ? Pair.Value->GetPathName() : ParentClass->GetPathName());
 			Interfaces.Add(MakeShared<FJsonValueObject>(Entry));
 		}
 	}
@@ -520,18 +533,23 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RemoveBlueprintInterface(const TShare
 
 	if (!Found)
 	{
-		// Distinguish "already gone" from "belongs to the parent", because the
+		// Distinguish "already gone" from "belongs to an ancestor", because the
 		// second is never going away and a caller retrying will never succeed.
+		// ImplementsInterface rather than a scan of ParentClass->Interfaces:
+		// that array is per-class, so a scan sees one level and an interface
+		// declared on a GRANDPARENT would be reported as already removed when
+		// it is still in force. FindInterfaceProvider names the class that
+		// actually declares it, which is the class the caller has to edit.
+		// add_blueprint_interface asks the same two helpers.
 		if (UClass* ParentClass = Blueprint->ParentClass.Get())
 		{
-			for (const FImplementedInterface& Inherited : ParentClass->Interfaces)
+			if (ParentClass->ImplementsInterface(InterfaceClass))
 			{
-				if (Inherited.Class == InterfaceClass)
-				{
-					return MCPError(FString::Printf(
-						TEXT("'%s' is inherited from parent class '%s', not implemented on this Blueprint, so it cannot be removed here. Reparent the Blueprint, or edit the parent."),
-						*InterfaceClass->GetName(), *ParentClass->GetName()));
-				}
+				UClass* Provider = FindInterfaceProvider(ParentClass, InterfaceClass);
+				const FString ProviderName = Provider ? Provider->GetPathName() : ParentClass->GetPathName();
+				return MCPError(FString::Printf(
+					TEXT("'%s' is inherited: it is declared on ancestor class '%s' and reached through parent '%s', not implemented on this Blueprint, so it cannot be removed here. Reparent the Blueprint, or edit the class that declares it."),
+					*InterfaceClass->GetName(), *ProviderName, *ParentClass->GetPathName()));
 			}
 		}
 		auto Noop = MCPSuccess();

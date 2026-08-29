@@ -66,14 +66,77 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddBlueprintInterface(const TSharedPt
 		{
 			auto Existed = MCPSuccess();
 			MCPSetExisted(Existed);
+			Existed->SetBoolField(TEXT("alreadyImplemented"), true);
+			Existed->SetStringField(TEXT("source"), TEXT("self"));
 			Existed->SetStringField(TEXT("blueprintPath"), BlueprintPath);
 			Existed->SetStringField(TEXT("interfacePath"), InterfacePathStr);
 			return MCPResult(Existed);
 		}
 	}
 
-	// Use FBlueprintEditorUtils to add interface
-	FBlueprintEditorUtils::ImplementNewInterface(Blueprint, InterfaceAssetPath);
+	// The loop above reads this Blueprint's OWN list, which is not the whole
+	// question: the contract can already be satisfied because an ANCESTOR class
+	// implements it. Adding a second, redundant entry on the child would be a
+	// write with no meaning, and its rollback would then remove an entry the
+	// caller never needed.
+	//
+	// ImplementsInterface, not a scan of ParentClass->Interfaces. That array is
+	// per-class, so scanning it answers only one level and an interface from a
+	// GRANDPARENT reads as absent - which would send this call on to
+	// ImplementNewInterface and have the refusal message below tell the caller
+	// in as many words that inheritance is not what happened. FindInterfaceProvider
+	// then names the class it actually came from, so inheritedFrom stays useful
+	// however far up the chain that is. remove_blueprint_interface and
+	// list_blueprint_interfaces ask the same two helpers, so all three halves
+	// agree about a state the codebase knows is real.
+	if (UClass* ParentClass = Blueprint->ParentClass.Get())
+	{
+		if (ParentClass->ImplementsInterface(InterfaceClass))
+		{
+			UClass* Provider = FindInterfaceProvider(ParentClass, InterfaceClass);
+			const FString ProviderPath = Provider ? Provider->GetPathName() : ParentClass->GetPathName();
+			auto Existed = MCPSuccess();
+			MCPSetExisted(Existed);
+			Existed->SetBoolField(TEXT("alreadyImplemented"), true);
+			Existed->SetStringField(TEXT("source"), TEXT("inherited"));
+			Existed->SetStringField(TEXT("blueprintPath"), BlueprintPath);
+			Existed->SetStringField(TEXT("interfacePath"), InterfacePathStr);
+			Existed->SetStringField(TEXT("inheritedFrom"), ProviderPath);
+			Existed->SetStringField(TEXT("parentClass"), ParentClass->GetPathName());
+			Existed->SetStringField(TEXT("reason"), FString::Printf(TEXT(
+				"'%s' already implements '%s', declared on ancestor class '%s' and reached through parent '%s', so "
+				"nothing was added. The contract is in force and its functions can be overridden with "
+				"override_function. Implementing it again on the child would write a redundant entry that "
+				"remove_blueprint_interface refuses to remove."),
+				*BlueprintPath, *InterfaceClass->GetName(), *ProviderPath, *ParentClass->GetPathName()));
+			Existed->SetBoolField(TEXT("rollbackPossible"), false);
+			Existed->SetStringField(TEXT("rollbackNote"),
+				TEXT("Nothing was added, so there is nothing to undo."));
+			return MCPResult(Existed);
+		}
+	}
+
+	// ImplementNewInterface RETURNS whether it did anything, and discarding that
+	// was how this handler came to report created:true for calls that added
+	// nothing. When it returns false, ImplementedInterfaces is left untouched,
+	// so a rollback naming remove_blueprint_interface would find no entry to
+	// remove. The two causes below are the ones the engine's own source names;
+	// the message says "known causes" rather than enumerating the world,
+	// because a future engine can add a third and prose that promises a
+	// complete list would then be a confident misdiagnosis.
+	if (!FBlueprintEditorUtils::ImplementNewInterface(Blueprint, InterfaceAssetPath))
+	{
+		return MCPError(FString::Printf(TEXT(
+			"Unreal refused to implement '%s' on '%s', so nothing was added. Known causes: the interface declares "
+			"an animation-only function and this is not an Animation Blueprint, or the Blueprint already owns a "
+			"function or graph whose name collides with one of the interface's functions - rename it "
+			"(list_blueprint_graphs reports every graph) and call again. Already implemented, on this Blueprint or "
+			"inherited from anywhere in its parent chain, is reported as existed above and is not this error. The "
+			"inherited half is answered by UClass::ImplementsInterface, so a grandparent counts. Note that the engine "
+			"bails out part-way, so any interface function graph it had already created before refusing is still "
+			"there and can be removed with delete_function."),
+			*InterfacePathStr, *BlueprintPath));
+	}
 
 	FKismetEditorUtilities::CompileBlueprint(Blueprint);
 	// Save asset
@@ -83,7 +146,23 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddBlueprintInterface(const TSharedPt
 	MCPSetCreated(Result);
 	Result->SetStringField(TEXT("blueprintPath"), BlueprintPath);
 	Result->SetStringField(TEXT("interfacePath"), InterfacePathStr);
-	// No rollback: no paired remove_blueprint_interface handler yet.
+
+	// remove_blueprint_interface is the paired remove this handler used to say
+	// it did not have. preserveFunctions=false is the exact inverse of
+	// ImplementNewInterface: it drops the interface AND the function graphs
+	// implementing it, which is precisely what the add created.
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("blueprintPath"), BlueprintPath);
+	Payload->SetStringField(TEXT("interfacePath"), InterfacePathStr);
+	Payload->SetBoolField(TEXT("preserveFunctions"), false);
+	MCPSetRollback(Result, TEXT("remove_blueprint_interface"), Payload);
+	Result->SetStringField(TEXT("rollbackNote"), TEXT(
+		"preserveFunctions=false is exact for what this call created: ImplementNewInterface only ever mints NEW "
+		"graphs into the interface description, and refuses outright when an existing graph's name collides, so the "
+		"inverse can only delete graphs this call added and never a function that predated it. It does delete "
+		"whatever was written INTO those stubs afterwards, which is the ordinary rollback window; remove the "
+		"interface by hand with preserveFunctions=true instead if an implementation was authored between the add "
+		"and the undo."));
 	return MCPResult(Result);
 }
 
@@ -182,7 +261,12 @@ namespace
 		return Obj;
 	}
 
-	/** Interface declaring FnName, whether implemented on this Blueprint or inherited. */
+	/** Interface declaring FnName, whether implemented on this Blueprint or
+	 *  inherited from anywhere in its parent chain. The inherited half uses the
+	 *  same gather add_blueprint_interface, remove_blueprint_interface and
+	 *  list_blueprint_interfaces use, because ParentClass->Interfaces is
+	 *  per-class and reading it directly would report declaringClass as absent
+	 *  for a function whose interface a GRANDPARENT declares. */
 	UClass* FindDeclaringInterface(UBlueprint* Blueprint, const FName& FnName)
 	{
 		for (const FBPInterfaceDescription& Impl : Blueprint->ImplementedInterfaces)
@@ -190,13 +274,11 @@ namespace
 			UClass* IfaceClass = Impl.Interface;
 			if (IfaceClass && IfaceClass->FindFunctionByName(FnName)) return IfaceClass;
 		}
-		if (UClass* ParentClass = Blueprint->ParentClass.Get())
+		TArray<TPair<UClass*, UClass*>> Inherited;
+		GatherImplementedInterfaces(Blueprint->ParentClass.Get(), Inherited);
+		for (const TPair<UClass*, UClass*>& Pair : Inherited)
 		{
-			for (const FImplementedInterface& Inherited : ParentClass->Interfaces)
-			{
-				UClass* IfaceClass = Inherited.Class;
-				if (IfaceClass && IfaceClass->FindFunctionByName(FnName)) return IfaceClass;
-			}
+			if (Pair.Key && Pair.Key->FindFunctionByName(FnName)) return Pair.Key;
 		}
 		return nullptr;
 	}
@@ -679,6 +761,10 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteFunction(const TSharedPtr<FJson
 		return MCPResult(Noop);
 	}
 
+	// What the graph held, counted before it is destroyed, so the rollback note
+	// can say how much the inverse does not bring back.
+	const int32 DeletedNodeCount = FoundGraph->Nodes.Num();
+
 	FBlueprintEditorUtils::RemoveGraph(Blueprint, FoundGraph);
 
 	FKismetEditorUtilities::CompileBlueprint(Blueprint);
@@ -688,7 +774,21 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteFunction(const TSharedPtr<FJson
 	Result->SetStringField(TEXT("path"), AssetPath);
 	Result->SetStringField(TEXT("functionName"), FunctionName);
 	Result->SetBoolField(TEXT("deleted"), true);
-	// Delete of a function is not reversible by default.
+	Result->SetNumberField(TEXT("deletedNodeCount"), DeletedNodeCount);
+
+	// create_function is the declared inverse of this call: it is what
+	// create_function itself names as ITS rollback, in the other direction. It
+	// restores the name and an empty graph, and nothing else, so this is lossy.
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("path"), AssetPath);
+	Payload->SetStringField(TEXT("functionName"), FunctionName);
+	MCPSetRollback(Result, TEXT("create_function"), Payload);
+	Result->SetBoolField(TEXT("rollbackLossy"), true);
+	Result->SetStringField(TEXT("rollbackNote"), FString::Printf(TEXT(
+		"create_function restores a function of this name with an EMPTY graph. The %d node(s) it held, its input and "
+		"output parameters, its local variables and its flags are gone, and call sites that referenced the old "
+		"signature will not rebind to the empty one."),
+		DeletedNodeCount));
 	return MCPResult(Result);
 }
 
