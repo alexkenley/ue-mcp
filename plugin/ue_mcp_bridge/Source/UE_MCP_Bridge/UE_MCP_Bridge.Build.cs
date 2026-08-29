@@ -1,5 +1,8 @@
 using UnrealBuildTool;
 
+// GameplayHandlers_EQS.cpp added: UBT caches the module file list and will not
+// pick up a new source file until this file changes.
+
 public class UE_MCP_Bridge : ModuleRules
 {
 	// Touched when Private/EngineStatus.cpp was added, and again for

@@ -127,6 +127,14 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("create_blackboard"), &CreateBlackboard);
 	Registry.RegisterHandler(TEXT("create_behavior_tree"), &CreateBehaviorTree);
 	Registry.RegisterHandler(TEXT("create_eqs_query"), &CreateEqsQuery);
+	Registry.RegisterHandler(TEXT("list_eqs_types"), &ListEqsTypes);
+	Registry.RegisterHandler(TEXT("read_eqs_query"), &ReadEqsQuery);
+	Registry.RegisterHandler(TEXT("add_eqs_generator"), &AddEqsGenerator);
+	Registry.RegisterHandler(TEXT("add_eqs_test"), &AddEqsTest);
+	Registry.RegisterHandler(TEXT("remove_eqs_test"), &RemoveEqsTest);
+	Registry.RegisterHandler(TEXT("remove_eqs_option"), &RemoveEqsOption);
+	Registry.RegisterHandler(TEXT("reorder_eqs_tests"), &ReorderEqsTests);
+	Registry.RegisterHandler(TEXT("run_eqs_query"), &RunEqsQuery);
 	Registry.RegisterHandler(TEXT("create_state_tree"), &CreateStateTree);
 	Registry.RegisterHandler(TEXT("get_input_mapping_contexts"), &GetInputMappingContexts);
 	Registry.RegisterHandler(TEXT("get_state_tree_runtime"), &GetStateTreeRuntime);
@@ -774,10 +782,15 @@ TSharedPtr<FJsonValue> FGameplayHandlers::CreateEqsQuery(const TSharedPtr<FJsonO
 	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/AI/EQS"));
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
-	UClass* EQSClass = FindObject<UClass>(nullptr, TEXT("/Script/AIModule.EnvironmentQuery"));
+	// The asset type reads as "Environment Query" in the editor, but the UClass
+	// is UEnvQuery. Looking up the display name found nothing, so this action
+	// refused every call it was ever given.
+	UClass* EQSClass = FindObject<UClass>(nullptr, TEXT("/Script/AIModule.EnvQuery"));
 	if (!EQSClass)
 	{
-		return MCPError(TEXT("EnvironmentQuery class not found."));
+		return MCPError(TEXT(
+			"UEnvQuery class not found: the AIModule is not loaded in this editor. "
+			"EQS lives in AIModule, which a project with no AI content may never load."));
 	}
 
 	auto Created = MCPCreateAssetIdempotent<UObject>(Name, PackagePath, OnConflict, TEXT("EnvironmentQuery"), EQSClass, nullptr);

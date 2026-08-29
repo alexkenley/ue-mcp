@@ -931,12 +931,18 @@ TSharedPtr<FJsonValue> FGasHandlers::RevokeAbility(const TSharedPtr<FJsonObject>
 		return MCPError(TEXT("ClearAbility only runs on the authority. Target the server/primary PIE world."));
 	}
 
+	// The level and input binding have to be read BEFORE the specs go, or the
+	// rollback can only restore the ability at defaults it never had.
 	TArray<FGameplayAbilitySpecHandle> ToClear;
+	int32 RevokedLevel = 1;
+	int32 RevokedInputID = INDEX_NONE;
 	for (const FGameplayAbilitySpec& Existing : ASC->GetActivatableAbilities())
 	{
 		if (Existing.Ability && Existing.Ability->GetClass() == AbilityClass)
 		{
 			ToClear.Add(Existing.Handle);
+			RevokedLevel = Existing.Level;
+			RevokedInputID = Existing.InputID;
 		}
 	}
 
@@ -955,6 +961,13 @@ TSharedPtr<FJsonValue> FGasHandlers::RevokeAbility(const TSharedPtr<FJsonObject>
 
 	for (const FGameplayAbilitySpecHandle& Handle : ToClear) ASC->ClearAbility(Handle);
 	Result->SetNumberField(TEXT("activatableCount"), ASC->GetActivatableAbilities().Num());
+
+	TSharedPtr<FJsonObject> RollbackPayload = MakeShared<FJsonObject>();
+	RollbackPayload->SetStringField(TEXT("actorPath"), Actor->GetPathName());
+	RollbackPayload->SetStringField(TEXT("abilityClass"), AbilityClass->GetPathName());
+	RollbackPayload->SetNumberField(TEXT("level"), RevokedLevel);
+	RollbackPayload->SetNumberField(TEXT("inputId"), RevokedInputID);
+	MCPSetRollback(Result, TEXT("grant_ability"), RollbackPayload);
 	return MCPResult(Result);
 }
 

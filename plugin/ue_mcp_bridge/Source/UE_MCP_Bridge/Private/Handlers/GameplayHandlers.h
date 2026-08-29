@@ -13,6 +13,23 @@ class FGameplayHandlers
 public:
 	static void RegisterHandlers(class FMCPHandlerRegistry& Registry);
 
+	// Environment Query System authoring and execution, in
+	// GameplayHandlers_EQS.cpp. The bridge could create an EQS asset and list
+	// the ones that exist; a query with no generator produces no items, so
+	// what it could create was an empty asset.
+	//
+	// There are no typed setters for generator or test parameters on purpose:
+	// every tunable is a UPROPERTY, read_eqs_query returns each object's path,
+	// and editor(set_property) writes a property at an object path.
+	static TSharedPtr<FJsonValue> ListEqsTypes(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ReadEqsQuery(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> AddEqsGenerator(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> AddEqsTest(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveEqsTest(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveEqsOption(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ReorderEqsTests(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RunEqsQuery(const TSharedPtr<FJsonObject>& Params);
+
 	// BehaviorTree introspection primitives, shared by the BT handlers and
 	// exercised directly by the automation tests in Private/Tests, which build
 	// nodes in memory rather than round-tripping an asset through disk.
