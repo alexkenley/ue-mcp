@@ -1514,9 +1514,11 @@ TSharedPtr<FJsonValue> FWidgetHandlers::WrapRoot(const TSharedPtr<FJsonObject>& 
 		for (UObject* Object : Owned)
 		{
 			UWidget* Widget = Cast<UWidget>(Object);
-			// The wrapper is excluded by name rather than by ordering: ConstructWidget
-			// above already outered it to the tree, and it is not root yet, so the walk
-			// cannot reach it and would otherwise count this call's own new widget as a
+			// The wrapper is excluded by POINTER IDENTITY, not by name: a rename
+			// cannot break this test. ConstructWidget above already outered the
+			// wrapper to the tree, so it shows up in the owned set, and it is not
+			// the root yet, so the reachability walk above cannot reach it. Without
+			// this exclusion this call's own new widget would be counted as a
 			// pre-existing orphan.
 			if (Widget && Widget != Wrapper && !Reachable.Contains(Widget)) { ++PreExistingOrphans; }
 		}
@@ -1526,6 +1528,11 @@ TSharedPtr<FJsonValue> FWidgetHandlers::WrapRoot(const TSharedPtr<FJsonObject>& 
 	Wrapper->AddChild(OldRoot);
 
 	TWeakObjectPtr<UPanelWidget> AddedWrapper(Wrapper);
+	// Read BEFORE the compile, for the same reason the child's name is: if the
+	// compile replaces the widget objects the weak pointer goes stale, and the
+	// fallback has to be the name this call knew rather than a dereference of a
+	// raw pointer that is exactly what went stale.
+	FString WrapperName = Wrapper->GetName();
 	// Held the same way, and for the same reason: the compile below can
 	// replace the widget objects, so the name is read back off a weak pointer
 	// rather than off a raw one that may no longer be the live widget.
@@ -1547,11 +1554,14 @@ TSharedPtr<FJsonValue> FWidgetHandlers::WrapRoot(const TSharedPtr<FJsonObject>& 
 	{
 		WrappedChildName = WrappedChild->GetName();
 	}
+	if (AddedWrapper.IsValid())
+	{
+		WrapperName = AddedWrapper->GetName();
+	}
 
 	auto Result = MCPSuccess();
 	MCPSetCreated(Result);
-	Result->SetStringField(TEXT("wrapperName"),
-		AddedWrapper.IsValid() ? AddedWrapper->GetName() : Wrapper->GetName());
+	Result->SetStringField(TEXT("wrapperName"), WrapperName);
 	Result->SetStringField(TEXT("wrapperClass"), WrapperCls->GetName());
 	Result->SetStringField(TEXT("wrappedChild"), WrappedChildName);
 	MCPSetWidgetGuidOutcome(Result, GuidSync, AssetPath);

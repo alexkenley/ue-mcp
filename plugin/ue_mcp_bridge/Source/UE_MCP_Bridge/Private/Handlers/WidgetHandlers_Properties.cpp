@@ -503,6 +503,16 @@ TSharedPtr<FJsonValue> FWidgetHandlers::SetWidgetProperty(const TSharedPtr<FJson
 	// string as a missing parameter. set_style takes its value as JSON and
 	// accepts an empty one, so it is the rollback for that case.
 	bool bCapturedOnFlatWidgetProperty = false;
+	// The single path segment the capture came off, which is what the set_style
+	// rollback has to be handed. It is NOT always the incoming propertyName:
+	// ParseIntoArray drops empty segments, so "Foo." parses to one part and
+	// still counts as flat, while the raw string would be looked up verbatim by
+	// FindPropertyByName and would not be found.
+	FString FlatWidgetPropertyName;
+	// True when the flat capture came off an FStrProperty. That is the one
+	// property kind whose empty-string round trip through set_style is
+	// established rather than assumed (see the rollback note below).
+	bool bFlatCaptureWasStringProperty = false;
 
 	// Handle well-known properties by type
 	if (UTextBlock* TextBlock = Cast<UTextBlock>(FoundWidget))
@@ -1043,6 +1053,11 @@ TSharedPtr<FJsonValue> FWidgetHandlers::SetWidgetProperty(const TSharedPtr<FJson
 				PreviousPropertyValue = PreviousText;
 				bCapturedPreviousValue = true;
 				bCapturedOnFlatWidgetProperty = (PathParts.Num() == 1);
+				if (bCapturedOnFlatWidgetProperty)
+				{
+					FlatWidgetPropertyName = PathParts[0];
+					bFlatCaptureWasStringProperty = FinalProp->IsA<FStrProperty>();
+				}
 			}
 			else
 			{
@@ -1090,21 +1105,36 @@ TSharedPtr<FJsonValue> FWidgetHandlers::SetWidgetProperty(const TSharedPtr<FJson
 			// FString is the case that reaches here - and this action's propertyValue
 			// is required and non-empty, so replaying it here would come back
 			// "Missing required parameter 'propertyValue'". widget(set_style) takes
-			// its value as JSON, accepts an empty string, and hands it to the same
-			// engine importer at the same port flags, so it restores exactly the
-			// value that was there. It addresses one top-level UPROPERTY on the
-			// widget, which is what bCapturedOnFlatWidgetProperty guarantees this is.
+			// its value as JSON, accepts an empty string, and reaches the same engine
+			// importer entry point at the same port flags (PPF_None, since that write
+			// is at depth 0). It addresses one top-level UPROPERTY on the widget,
+			// which is what bCapturedOnFlatWidgetProperty guarantees this is.
+			//
+			// The two routes are NOT identical, so the note claims only what holds.
+			// set_style imports with no owner object where the write above passed
+			// FoundWidget, and it does not call PostEditChange where the reflection
+			// path does. Neither matters to FStrProperty, which is the kind whose
+			// empty-string round trip is established. For any other flat kind whose
+			// empty value exports to the empty string, the importer may refuse the
+			// empty text, in which case the rollback reports that error rather than
+			// writing a wrong value.
 			TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 			Payload->SetStringField(TEXT("assetPath"), AssetPath);
 			Payload->SetStringField(TEXT("widgetName"), WidgetName);
-			Payload->SetStringField(TEXT("propertyName"), PropertyName);
+			Payload->SetStringField(TEXT("propertyName"), FlatWidgetPropertyName);
 			Payload->SetStringField(TEXT("value"), PreviousPropertyValue);
 			MCPSetRollback(Result, TEXT("set_widget_style"), Payload);
 			Result->SetBoolField(TEXT("rollbackLossy"), false);
 			Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
 				TEXT("'%s' held a value that exports to the empty string, which set_widget_property cannot be handed back because its ")
 				TEXT("propertyValue is a required non-empty parameter. The rollback therefore goes through widget(set_style), which ")
-				TEXT("carries the value as JSON and writes it through the same importer. The restored value is exact."), *PropertyName));
+				TEXT("carries the value as JSON and reaches the same engine importer at the same port flags. %s"),
+				*FlatWidgetPropertyName,
+				bFlatCaptureWasStringProperty
+					? TEXT("This is a string property, so the restored value is exact.")
+					: TEXT("This is not a string property, so whether the engine importer accepts the empty text for this kind is not ")
+					  TEXT("established here: the rollback either restores the value exactly or fails with the importer's own error, and ")
+					  TEXT("it cannot write a different value. Read the property back afterwards to confirm which happened.")));
 		}
 		else if (bCapturedPreviousValue)
 		{
@@ -1347,15 +1377,34 @@ TSharedPtr<FJsonValue> FWidgetHandlers::BulkSetWidgetProperties(const TSharedPtr
 	// nothing it did not.
 	TArray<TSharedPtr<FJsonValue>> InversePropertyEntries;
 	int32 Applied = 0, Failed = 0;
+	int32 EntryIndex = -1;
 	for (const TSharedPtr<FJsonValue>& EV : *Entries)
 	{
+		++EntryIndex;
 		const TSharedPtr<FJsonObject>* EObj = nullptr;
-		if (!EV->TryGetObject(EObj) || !EObj) { ++Failed; continue; }
+		if (!EV->TryGetObject(EObj) || !EObj)
+		{
+			// An entry that is not a JSON object carries no widgetName or
+			// propertyName to report it by, so it is reported by its position in
+			// the array instead. It still gets a row: `failed` counts it, and a
+			// caller told only the count would have no way to learn WHICH entry
+			// the batch could not read. Every entry produces exactly one row, so
+			// `results` lines up with `properties` index for index.
+			TSharedPtr<FJsonObject> Malformed = MakeShared<FJsonObject>();
+			Malformed->SetNumberField(TEXT("index"), EntryIndex);
+			Malformed->SetBoolField(TEXT("ok"), false);
+			Malformed->SetStringField(TEXT("error"),
+				TEXT("entry is not a JSON object ({widgetName, propertyName, value} expected)"));
+			Results.Add(MakeShared<FJsonValueObject>(Malformed));
+			++Failed;
+			continue;
+		}
 		FString WName, PName;
 		(*EObj)->TryGetStringField(TEXT("widgetName"), WName);
 		(*EObj)->TryGetStringField(TEXT("propertyName"), PName);
 		TSharedPtr<FJsonValue> Val = (*EObj)->TryGetField(TEXT("value"));
 		TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
+		R->SetNumberField(TEXT("index"), EntryIndex);
 		R->SetStringField(TEXT("widgetName"), WName);
 		R->SetStringField(TEXT("propertyName"), PName);
 

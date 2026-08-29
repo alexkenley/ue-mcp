@@ -973,10 +973,18 @@ TSharedPtr<FJsonValue> FSequencerHandlers::SetPlaybackRange(const TSharedPtr<FJs
 	FFrameNumber PreviousUpper(0);
 	if (bHadPreviousRange)
 	{
-		PreviousLower = PreviousRange.GetLowerBound().IsExclusive()
+		// The +1 is guarded against the top of the frame-number space. A bound
+		// already at MAX_int32 has no next tick to normalise to, and signed
+		// overflow is undefined behaviour rather than a wrap, so such a bound is
+		// left at its stored value. It is not reachable from any real sequence:
+		// at the default 24000 tick resolution MAX_int32 ticks is about 24 hours
+		// of playback.
+		PreviousLower = (PreviousRange.GetLowerBound().IsExclusive()
+			&& PreviousRange.GetLowerBoundValue().Value < MAX_int32)
 			? FFrameNumber(PreviousRange.GetLowerBoundValue().Value + 1)
 			: PreviousRange.GetLowerBoundValue();
-		PreviousUpper = PreviousRange.GetUpperBound().IsInclusive()
+		PreviousUpper = (PreviousRange.GetUpperBound().IsInclusive()
+			&& PreviousRange.GetUpperBoundValue().Value < MAX_int32)
 			? FFrameNumber(PreviousRange.GetUpperBoundValue().Value + 1)
 			: PreviousRange.GetUpperBoundValue();
 	}
@@ -1222,6 +1230,14 @@ TSharedPtr<FJsonValue> FSequencerHandlers::SetKeyframes(const TSharedPtr<FJsonOb
 	// so the rollback would write a value at a frame that originally held
 	// nothing and keysOverwritten would count a key this call made.
 	TSet<int32> FramesWrittenHere;
+	// The three reported counts do not all count the same thing, so this closes
+	// the arithmetic instead of leaving a caller to work it out. keysAdded
+	// counts INPUT ENTRIES written; keysOverwritten and keyFramesCreated count
+	// DISTINCT FRAMES, because the guard above only classifies a frame once.
+	// This is every entry that landed on a frame an earlier entry in the same
+	// batch had already written, so
+	// keysAdded == keysOverwritten + keyFramesCreated + duplicateFrameWrites.
+	int32 DuplicateFrameWrites = 0;
 	FMovieSceneChannelProxy& Proxy = Section->GetChannelProxy();
 
 	// Try double channels (transform) by metadata name.
@@ -1260,6 +1276,10 @@ TSharedPtr<FJsonValue> FSequencerHandlers::SetKeyframes(const TSharedPtr<FJsonOb
 						++NewKeyFrames;
 					}
 					FramesWrittenHere.Add(Frame.Value);
+				}
+				else
+				{
+					++DuplicateFrameWrites;
 				}
 
 				if (bLinear) DoubleChannels[i]->AddLinearKey(Frame, Val);
@@ -1312,6 +1332,10 @@ TSharedPtr<FJsonValue> FSequencerHandlers::SetKeyframes(const TSharedPtr<FJsonOb
 					}
 					FramesWrittenHere.Add(Frame.Value);
 				}
+				else
+				{
+					++DuplicateFrameWrites;
+				}
 
 				if (bLinear) FloatChannels[ChosenIdx]->AddLinearKey(Frame, (float)Val);
 				else FloatChannels[ChosenIdx]->AddCubicKey(Frame, (float)Val);
@@ -1337,6 +1361,13 @@ TSharedPtr<FJsonValue> FSequencerHandlers::SetKeyframes(const TSharedPtr<FJsonOb
 	Result->SetNumberField(TEXT("keysAdded"), KeysAdded);
 	Result->SetNumberField(TEXT("keysOverwritten"), OverwrittenKeys.Num());
 	Result->SetNumberField(TEXT("keyFramesCreated"), NewKeyFrames);
+	Result->SetNumberField(TEXT("duplicateFrameWrites"), DuplicateFrameWrites);
+	Result->SetStringField(TEXT("keyCountsNote"), FString::Printf(
+		TEXT("keysAdded counts input keyframe entries written (%d). keysOverwritten (%d) and keyFramesCreated (%d) count DISTINCT frames, ")
+		TEXT("since each frame is classified once. duplicateFrameWrites (%d) is the entries that landed on a frame an earlier entry in this ")
+		TEXT("same batch had already written, which is what closes the sum: %d = %d + %d + %d."),
+		KeysAdded, OverwrittenKeys.Num(), NewKeyFrames, DuplicateFrameWrites,
+		KeysAdded, OverwrittenKeys.Num(), NewKeyFrames, DuplicateFrameWrites));
 
 	if (OverwrittenKeys.Num() > 0)
 	{
