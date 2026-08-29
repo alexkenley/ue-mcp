@@ -381,6 +381,7 @@ export const animationTool: ToolDef = categoryTool(
   undefined,
   {
     assetPath: z.string().optional(),
+    path: z.string().optional().describe("Alias for assetPath, accepted by sample_pose and measure_natural_speed"),
     directory: z.string().optional(),
     recursive: z.boolean().optional(),
     targetTrackCount: z.number().optional().describe("Flag sequences with more than this many bone tracks"),

@@ -188,3 +188,6 @@ tests/ue_mcp/.ue-mcp/
 
 ## Local benchmark scratch
 bench/
+
+# Agent scratch space, never committed.
+.scratch/

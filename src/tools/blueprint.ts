@@ -189,6 +189,7 @@ export const blueprintTool: ToolDef = categoryTool(
     offset: z.number().int().nonnegative().optional().describe("Pagination offset for read_graph"),
     limit: z.number().int().positive().optional().describe("Pagination limit for read_graph"),
     includePins: z.boolean().optional().describe("Include pins in read_graph results (default true)"),
+    includeGraphNodes: z.boolean().optional().describe("search_node_types: include UEdGraphNode classes alongside function-library entries (default true) (#808)"),
     includeDefaults: z.boolean().optional().describe("Include pin default values in read_graph results (default true)"),
     includeComments: z.boolean().optional().describe("Include node comments in read_graph results (default true)"),
     dumpToFile: z.boolean().optional().describe("Write read_graph JSON to a file instead of returning nodes inline; without offset/limit this dumps the full graph, otherwise it dumps the requested slice"),
