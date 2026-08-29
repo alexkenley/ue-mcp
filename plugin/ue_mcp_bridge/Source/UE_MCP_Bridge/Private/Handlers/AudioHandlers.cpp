@@ -75,6 +75,16 @@ void FAudioHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("set_sound_attenuation"), &SetSoundAttenuation);
 	Registry.RegisterHandler(TEXT("set_sound_concurrency"), &SetSoundConcurrency);
 	Registry.RegisterHandler(TEXT("set_audio_property"), &SetAudioProperty);
+
+	// ── Authoring depth (AudioHandlers_Depth.cpp) ───────────────────────
+	Registry.RegisterHandler(TEXT("metasound_remove_node"), &MetaSoundRemoveNode);
+	Registry.RegisterHandler(TEXT("metasound_disconnect"), &MetaSoundDisconnect);
+	Registry.RegisterHandler(TEXT("metasound_remove_member"), &MetaSoundRemoveMember);
+	Registry.RegisterHandler(TEXT("metasound_rename_member"), &MetaSoundRenameMember);
+	Registry.RegisterHandler(TEXT("soundcue_remove_node"), &SoundCueRemoveNode);
+	Registry.RegisterHandler(TEXT("soundcue_disconnect"), &SoundCueDisconnect);
+	Registry.RegisterHandler(TEXT("set_sound_class_parent"), &SetSoundClassParent);
+	Registry.RegisterHandler(TEXT("read_sound_routing"), &ReadSoundRouting);
 }
 
 // #664: import a WAV/OGG/FLAC file as a USoundWave. Passing a null factory lets

@@ -191,6 +191,28 @@ private:
 	static TSharedPtr<FJsonValue> RebindLeaderPose(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> PreviewAnimation(const TSharedPtr<FJsonObject>& Params);
 
+	// Animation authoring depth, in AnimationHandlers_Depth.cpp. The removal
+	// half of the surface plus the two things that could not be authored at
+	// all. Five adds already documented their own missing inverse in a source
+	// comment ("No rollback: no paired remove_* handler"); those are the five
+	// removals here. set_state_machine_entry is the one that made state
+	// machines work: nothing ever wired the entry node, so a machine authored
+	// through the bridge had no initial state and output the reference pose.
+	static TSharedPtr<FJsonValue> SetStateMachineEntry(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveState(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveTransition(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveStateMachine(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveMontageSection(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveAnimCurve(const TSharedPtr<FJsonObject>& Params);
+	// Windowed notifies. add_anim_notify only ever writes FAnimNotifyEvent::Notify,
+	// so a notify STATE (NotifyStateClass + Duration + EndLink) had no route in,
+	// and remove_anim_notify's class filter cannot see one either.
+	static TSharedPtr<FJsonValue> AddNotifyState(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveNotifyState(const TSharedPtr<FJsonObject>& Params);
+	// Sync markers: apply, refresh, register on the skeleton, read back. A raw
+	// property write reaches AuthoredSyncMarkers and leaves it inert.
+	static TSharedPtr<FJsonValue> SetSyncMarkers(const TSharedPtr<FJsonObject>& Params);
+
 	// #922/#926 - the evaluated pose off a live SkeletalMeshComponent, for a set
 	// of bones at once. Lives in AnimationHandlers_SkeletalLive.cpp.
 	static TSharedPtr<FJsonValue> GetLiveBoneTransforms(const TSharedPtr<FJsonObject>& Params);

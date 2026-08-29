@@ -213,6 +213,19 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("get_live_bone_transforms"), &GetLiveBoneTransforms);
 	Registry.RegisterHandler(TEXT("sample_pose"), &SamplePose);
 	Registry.RegisterHandler(TEXT("measure_natural_speed"), &MeasureNaturalSpeed);
+
+	// Authoring depth (AnimationHandlers_Depth.cpp): the entry wiring that made
+	// state machines run, the five removals whose adds documented their own
+	// missing inverse, windowed notifies, and sync markers.
+	Registry.RegisterHandler(TEXT("set_state_machine_entry"), &SetStateMachineEntry);
+	Registry.RegisterHandler(TEXT("remove_state"), &RemoveState);
+	Registry.RegisterHandler(TEXT("remove_transition"), &RemoveTransition);
+	Registry.RegisterHandler(TEXT("remove_state_machine"), &RemoveStateMachine);
+	Registry.RegisterHandler(TEXT("remove_montage_section"), &RemoveMontageSection);
+	Registry.RegisterHandler(TEXT("remove_anim_curve"), &RemoveAnimCurve);
+	Registry.RegisterHandler(TEXT("add_anim_notify_state"), &AddNotifyState);
+	Registry.RegisterHandler(TEXT("remove_anim_notify_state"), &RemoveNotifyState);
+	Registry.RegisterHandler(TEXT("set_sync_markers"), &SetSyncMarkers);
 }
 
 TSharedPtr<FJsonValue> FAnimationHandlers::ListAnimAssets(const TSharedPtr<FJsonObject>& Params)
