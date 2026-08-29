@@ -420,9 +420,18 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ClearWidgetBinding(const TSharedPtr<FJso
 	}
 
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
-	FKismetEditorUtilities::CompileBlueprint(WidgetBP);
+	// #728: every compile of a WidgetBlueprint is a chance for the compiler to
+	// meet a widget it generates a variable for that owns no entry in
+	// WidgetVariableNameToGuidMap, which it reports as a failure. CompileChecked
+	// makes the map match first and refuses to compile if it cannot.
+	const MCPWidgetGuidMap::FSyncReport GuidSync = MCPWidgetGuidMap::CompileChecked(WidgetBP);
+	if (!GuidSync.bCompiled)
+	{
+		return MCPWidgetGuidMap::BlockedError(AssetPath, GuidSync);
+	}
 	UEditorAssetLibrary::SaveAsset(AssetPath);
 	MCPSetUpdated(Result);
+	MCPSetWidgetGuidOutcome(Result, GuidSync, AssetPath);
 	return MCPResult(Result);
 }
 
@@ -1003,13 +1012,20 @@ TSharedPtr<FJsonValue> FWidgetHandlers::SetWidgetProperty(const TSharedPtr<FJson
 	{
 		// Mark package dirty and save
 		WidgetBP->MarkPackageDirty();
-		FKismetEditorUtilities::CompileBlueprint(WidgetBP);
+		// #728: see ClearWidgetBinding. A property write compiles the blueprint,
+		// and the compile is where a missing widget variable GUID surfaces.
+		const MCPWidgetGuidMap::FSyncReport GuidSync = MCPWidgetGuidMap::CompileChecked(WidgetBP);
+		if (!GuidSync.bCompiled)
+		{
+			return MCPWidgetGuidMap::BlockedError(AssetPath, GuidSync);
+		}
 		UEditorAssetLibrary::SaveAsset(AssetPath);
 
 		auto Result = MCPSuccess();
 		Result->SetStringField(TEXT("widgetName"), WidgetName);
 		Result->SetStringField(TEXT("propertyName"), PropertyName);
 		Result->SetStringField(TEXT("propertyValue"), PropertyValue);
+		MCPSetWidgetGuidOutcome(Result, GuidSync, AssetPath);
 
 		return MCPResult(Result);
 	}
@@ -1171,7 +1187,12 @@ TSharedPtr<FJsonValue> FWidgetHandlers::SetWidgetStyle(const TSharedPtr<FJsonObj
 	{
 		return MCPError(FString::Printf(TEXT("Failed to set '%s': %s"), *PropertyName, *SetErr));
 	}
-	FKismetEditorUtilities::CompileBlueprint(WidgetBP);
+	// #728: see ClearWidgetBinding.
+	const MCPWidgetGuidMap::FSyncReport GuidSync = MCPWidgetGuidMap::CompileChecked(WidgetBP);
+	if (!GuidSync.bCompiled)
+	{
+		return MCPWidgetGuidMap::BlockedError(AssetPath, GuidSync);
+	}
 	SaveAssetPackage(WidgetBP);
 
 	auto Result = MCPSuccess();
@@ -1179,6 +1200,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::SetWidgetStyle(const TSharedPtr<FJsonObj
 	Result->SetStringField(TEXT("assetPath"), AssetPath);
 	Result->SetStringField(TEXT("widgetName"), WidgetName);
 	Result->SetStringField(TEXT("propertyName"), PropertyName);
+	MCPSetWidgetGuidOutcome(Result, GuidSync, AssetPath);
 	return MCPResult(Result);
 }
 
@@ -1242,7 +1264,12 @@ TSharedPtr<FJsonValue> FWidgetHandlers::BulkSetWidgetProperties(const TSharedPtr
 		Results.Add(MakeShared<FJsonValueObject>(R));
 	}
 
-	FKismetEditorUtilities::CompileBlueprint(WidgetBP);
+	// #728: see ClearWidgetBinding.
+	const MCPWidgetGuidMap::FSyncReport GuidSync = MCPWidgetGuidMap::CompileChecked(WidgetBP);
+	if (!GuidSync.bCompiled)
+	{
+		return MCPWidgetGuidMap::BlockedError(AssetPath, GuidSync);
+	}
 	SaveAssetPackage(WidgetBP);
 
 	auto Result = MCPSuccess();
@@ -1250,6 +1277,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::BulkSetWidgetProperties(const TSharedPtr
 	Result->SetNumberField(TEXT("applied"), Applied);
 	Result->SetNumberField(TEXT("failed"), Failed);
 	Result->SetArrayField(TEXT("results"), Results);
+	MCPSetWidgetGuidOutcome(Result, GuidSync, AssetPath);
 	return MCPResult(Result);
 }
 
@@ -1281,7 +1309,12 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ReorderChild(const TSharedPtr<FJsonObjec
 
 	Parent->Modify();
 	Parent->ShiftChild(ClampedIndex, Widget);
-	FKismetEditorUtilities::CompileBlueprint(WidgetBP);
+	// #728: see ClearWidgetBinding.
+	const MCPWidgetGuidMap::FSyncReport GuidSync = MCPWidgetGuidMap::CompileChecked(WidgetBP);
+	if (!GuidSync.bCompiled)
+	{
+		return MCPWidgetGuidMap::BlockedError(AssetPath, GuidSync);
+	}
 	SaveAssetPackage(WidgetBP);
 
 	auto Result = MCPSuccess();
@@ -1291,5 +1324,6 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ReorderChild(const TSharedPtr<FJsonObjec
 	Result->SetStringField(TEXT("parent"), Parent->GetName());
 	Result->SetNumberField(TEXT("oldIndex"), OldIndex);
 	Result->SetNumberField(TEXT("newIndex"), ClampedIndex);
+	MCPSetWidgetGuidOutcome(Result, GuidSync, AssetPath);
 	return MCPResult(Result);
 }

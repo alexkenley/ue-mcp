@@ -16,6 +16,12 @@
 #include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#include "Misc/Guid.h"
+#include "UObject/UObjectHash.h"
+#include "Templates/Casts.h"
+
+#include <type_traits>
 
 // Engine API tiers. One macro per supported minor version, so a gate reads the
 // same everywhere and nobody writes a second scheme. The supported range is
@@ -2052,3 +2058,374 @@ inline FProperty* FindPropertyChecked(
  *  assertion surfaces the bug loudly rather than producing a silent race. */
 #define MCP_CHECK_GAME_THREAD() \
 	checkf(IsInGameThread(), TEXT("MCP handler ran off the game thread - UObject access would be racy"))
+
+// ── Object graph ─────────────────────────────────────────────────────────────
+
+/** Objects an outer owns directly, skipping nested subobjects and anything
+ *  already garbage. Spelled the way each engine wants it: 5.8 deprecated the
+ *  bool form of GetObjectsWithOuter in favour of EGetObjectsFlags, and the enum
+ *  does not exist before it. */
+inline void MCPGetDirectSubobjects(const UObjectBase* Outer, TArray<UObject*>& OutObjects)
+{
+	if (!Outer)
+	{
+		return;
+	}
+#if UE_MCP_HAS_5_8_API
+	GetObjectsWithOuter(Outer, OutObjects, EGetObjectsFlags::None,
+		RF_NoFlags, EInternalObjectFlags::Garbage);
+#else
+	GetObjectsWithOuter(Outer, OutObjects, /*bIncludeNestedObjects*/ false,
+		RF_NoFlags, EInternalObjectFlags::Garbage);
+#endif
+}
+
+// ── Widget variable GUID metadata (#728, #799) ───────────────────────────────
+//
+// A UWidgetBlueprint keeps WidgetVariableNameToGuidMap so external references
+// to a widget variable survive a rename of that widget. The
+// WidgetBlueprintCompiler validates the map on every compile and raises
+//
+//   "Widget [X] was added but did not get a GUID"
+//
+// for any widget variable it is about to generate that owns no entry. That is
+// an engine ensure, so the editor survives it, but the asset is left in a state
+// the UMG editor does not consider valid and every later compile repeats it.
+//
+// The set the compiler validates is the blueprint's SOURCE widgets, which
+// UBaseWidgetBlueprint gathers without walking the hierarchy. Its own header
+// says the accessor "avoids calling virtual functions on instances and is
+// therefore safe to use throughout compilation", so the set is every UWidget
+// the WidgetTree still OWNS, not the widgets a walk down from RootWidget
+// reaches. The two part company the moment a widget is detached from its parent
+// without being moved out of the tree: the walk stops seeing it while the
+// compiler still generates a variable for it. Bookkeeping driven by the walk
+// alone therefore deletes the GUID of a widget that still needs one, which is
+// how the ensure fires on a widget that was just removed. The enumeration below
+// is by outer for that reason, with the walk folded in as a union rather than
+// used on its own.
+//
+// The map is editor-only data that landed in 5.5, so its presence is detected
+// at compile time here rather than tracked with a hand-maintained version
+// window.
+namespace MCPWidgetGuidMap
+{
+	template <typename T, typename = void>
+	struct THasMap : std::false_type {};
+
+	template <typename T>
+	struct THasMap<T, std::void_t<decltype(T::WidgetVariableNameToGuidMap)>> : std::true_type {};
+
+	/** What a sync changed, and what it could not fix. */
+	struct FSyncReport
+	{
+		/** False when this engine has no WidgetVariableNameToGuidMap at all. */
+		bool bSupported = false;
+		/** True once CompileChecked has actually run the compile. */
+		bool bCompiled = false;
+		int32 Added = 0;
+		int32 Pruned = 0;
+		/** Widgets moved out of the tree because nothing reached them. */
+		int32 Evicted = 0;
+		/** Variables the compiler will look for that still own no GUID. A
+		 *  non-empty list means the next compile of this asset ensures. */
+		TArray<FName> StillMissing;
+
+		bool IsClean() const { return StillMissing.Num() == 0; }
+
+		FString MissingList() const
+		{
+			TArray<FString> Names;
+			Names.Reserve(StillMissing.Num());
+			for (const FName& Name : StillMissing)
+			{
+				Names.Add(Name.ToString());
+			}
+			return Names.Num() ? FString::Join(Names, TEXT(", ")) : FString(TEXT("(none)"));
+		}
+	};
+
+	/** Every name the compiler will generate a variable for: each widget the
+	 *  WidgetTree owns (reachable from the root or not), plus each animation. */
+	template <typename TWidgetBP>
+	TSet<FName> RequiredNames(TWidgetBP* WidgetBP)
+	{
+		TSet<FName> Names;
+		if (!WidgetBP)
+		{
+			return Names;
+		}
+
+		// UWidgetTree and UWidget named without naming them. This header is
+		// included by every handler and must not drag the UMG headers into all
+		// of them, and a type spelled off the template parameter stays
+		// dependent, so the lookup happens where UMG is included.
+		using FTreeType = std::remove_reference_t<decltype(*WidgetBP->WidgetTree)>;
+		using FWidgetType = std::remove_reference_t<decltype(*WidgetBP->WidgetTree->RootWidget)>;
+
+		if (FTreeType* Tree = WidgetBP->WidgetTree)
+		{
+			TArray<UObject*> Owned;
+			MCPGetDirectSubobjects(Tree, Owned);
+			for (UObject* Object : Owned)
+			{
+				if (FWidgetType* Widget = Cast<FWidgetType>(Object))
+				{
+					Names.Add(Widget->GetFName());
+				}
+			}
+
+			Tree->ForEachWidget([&Names](FWidgetType* Widget)
+			{
+				if (Widget)
+				{
+					Names.Add(Widget->GetFName());
+				}
+			});
+		}
+
+		for (const auto& Animation : WidgetBP->Animations)
+		{
+			if (Animation)
+			{
+				Names.Add(Animation->GetFName());
+			}
+		}
+		return Names;
+	}
+
+	/**
+	 * Make the map say exactly what the compiler is about to check: give every
+	 * required name the GUID it lacks, and drop every entry no live name backs.
+	 * Call immediately before a compile, and again after, because the compile
+	 * itself can rename a widget whose name collided.
+	 */
+	template <typename TWidgetBP>
+	FSyncReport Sync(TWidgetBP* WidgetBP)
+	{
+		FSyncReport Report;
+		if constexpr (THasMap<TWidgetBP>::value)
+		{
+			if (!WidgetBP)
+			{
+				return Report;
+			}
+			Report.bSupported = true;
+
+			const TSet<FName> Required = RequiredNames(WidgetBP);
+			for (const FName& Name : Required)
+			{
+				if (Name.IsNone())
+				{
+					continue;
+				}
+				if (!WidgetBP->WidgetVariableNameToGuidMap.Contains(Name))
+				{
+					WidgetBP->WidgetVariableNameToGuidMap.Add(Name, FGuid::NewGuid());
+					++Report.Added;
+				}
+			}
+
+			// Pruning is measured against a wider set: an entry naming one of
+			// the blueprint's own declared variables is not proof of drift, so
+			// it is left alone rather than dropped and re-added.
+			TSet<FName> Known = Required;
+			for (const auto& Variable : WidgetBP->NewVariables)
+			{
+				Known.Add(Variable.VarName);
+			}
+
+			TArray<FName> Stale;
+			for (const auto& Entry : WidgetBP->WidgetVariableNameToGuidMap)
+			{
+				if (!Known.Contains(Entry.Key))
+				{
+					Stale.Add(Entry.Key);
+				}
+			}
+			for (const FName& Name : Stale)
+			{
+				WidgetBP->WidgetVariableNameToGuidMap.Remove(Name);
+			}
+			Report.Pruned = Stale.Num();
+
+			for (const FName& Name : Required)
+			{
+				if (!Name.IsNone() && !WidgetBP->WidgetVariableNameToGuidMap.Contains(Name))
+				{
+					Report.StillMissing.Add(Name);
+				}
+			}
+		}
+		return Report;
+	}
+
+	/**
+	 * Move every widget the tree no longer reaches out of the WidgetTree and
+	 * into the transient package, and report the ones that would not move.
+	 *
+	 * Detaching a widget from its parent panel does not end its membership of
+	 * the blueprint: ownership is what makes the compiler generate a variable
+	 * for it, so a detached widget still outered to the tree is still compiled,
+	 * still needs a GUID, and still holds its name against a later add. Only a
+	 * handler whose contract is removal may call this, since it is destructive
+	 * by design.
+	 */
+	template <typename TWidgetBP>
+	TArray<FName> EvictUnreachableWidgets(TWidgetBP* WidgetBP, int32& OutEvicted)
+	{
+		OutEvicted = 0;
+		TArray<FName> Stuck;
+		if (!WidgetBP || !WidgetBP->WidgetTree)
+		{
+			return Stuck;
+		}
+
+		using FTreeType = std::remove_reference_t<decltype(*WidgetBP->WidgetTree)>;
+		using FWidgetType = std::remove_reference_t<decltype(*WidgetBP->WidgetTree->RootWidget)>;
+
+		FTreeType* Tree = WidgetBP->WidgetTree;
+
+		TSet<const UObject*> Reachable;
+		Tree->ForEachWidget([&Reachable](FWidgetType* Widget)
+		{
+			if (Widget)
+			{
+				Reachable.Add(Widget);
+			}
+		});
+		// Named slot content hangs off the tree rather than off the root, so it
+		// is reachable in every sense that matters even where the root walk
+		// never visits it. Evicting it would delete authored content.
+		for (const auto& Binding : Tree->NamedSlotBindings)
+		{
+			if (Binding.Value)
+			{
+				Reachable.Add(Binding.Value);
+				FTreeType::ForWidgetAndChildren(Binding.Value, [&Reachable](FWidgetType* Widget)
+				{
+					if (Widget)
+					{
+						Reachable.Add(Widget);
+					}
+				});
+			}
+		}
+
+		TArray<UObject*> Owned;
+		MCPGetDirectSubobjects(Tree, Owned);
+		for (UObject* Object : Owned)
+		{
+			FWidgetType* Widget = Cast<FWidgetType>(Object);
+			if (!Widget || Reachable.Contains(Widget))
+			{
+				continue;
+			}
+
+			// A unique name rather than the one it has: the transient package is
+			// shared, and the same widget name is evicted from the same asset
+			// on every run of a script that adds and removes it.
+			const FName EvictedName = Widget->GetFName();
+			const FName ParkedName = MakeUniqueObjectName(
+				GetTransientPackage(), Widget->GetClass(), EvictedName);
+			Widget->Rename(*ParkedName.ToString(), GetTransientPackage(),
+				REN_DontCreateRedirectors | REN_NonTransactional);
+			if (Widget->GetOuter() == Tree)
+			{
+				Stuck.Add(EvictedName);
+			}
+			else
+			{
+				++OutEvicted;
+			}
+		}
+		return Stuck;
+	}
+
+	/**
+	 * Sync, compile, sync again.
+	 *
+	 * When the map cannot be made to match what the compiler checks, the
+	 * compile does NOT run and bCompiled stays false. The ensure inside the
+	 * compiler is the thing this exists to prevent, and a handler that compiled
+	 * anyway would be reporting success on an asset it had just broken.
+	 */
+	template <typename TWidgetBP>
+	FSyncReport CompileChecked(TWidgetBP* WidgetBP)
+	{
+		FSyncReport Report = Sync(WidgetBP);
+		if (!Report.IsClean())
+		{
+			return Report;
+		}
+
+		FKismetEditorUtilities::CompileBlueprint(WidgetBP);
+
+		const FSyncReport After = Sync(WidgetBP);
+		Report.Added += After.Added;
+		Report.Pruned += After.Pruned;
+		Report.StillMissing = After.StillMissing;
+		Report.bCompiled = true;
+		return Report;
+	}
+
+	/** The error a handler returns when CompileChecked refused to compile. */
+	inline TSharedPtr<FJsonValue> BlockedError(const FString& AssetPath, const FSyncReport& Report)
+	{
+		return MCPError(FString::Printf(
+			TEXT("Refusing to compile '%s': the widget variable GUID entry for %s could not be written. ")
+			TEXT("The UMG editor rebuilds its designer view from WidgetVariableNameToGuidMap and reports ")
+			TEXT("a failure for any widget missing from it, so nothing was compiled or saved. Reload the ")
+			TEXT("bridge with editor(reload_bridge) and retry; if it repeats, the asset needs opening in ")
+			TEXT("the UMG editor."),
+			*AssetPath, *Report.MissingList()));
+	}
+}
+
+/** Stamp GUID bookkeeping onto a widget mutation result, and withdraw the
+ *  success claim when a widget the compiler generates a variable for was left
+ *  without an entry. Silence there is what turns into an editor ensure the
+ *  next time anything compiles the asset. */
+inline void MCPSetWidgetGuidOutcome(
+	const TSharedPtr<FJsonObject>& Result,
+	const MCPWidgetGuidMap::FSyncReport& Report,
+	const FString& AssetPath)
+{
+	if (!Result.IsValid())
+	{
+		return;
+	}
+
+	// Only when there was something to report: a property write that changed no
+	// metadata should not carry three zeroes describing the metadata it left
+	// alone.
+	if (Report.Pruned > 0)
+	{
+		Result->SetNumberField(TEXT("prunedGuidEntries"), Report.Pruned);
+	}
+	if (Report.Added > 0)
+	{
+		Result->SetNumberField(TEXT("widgetGuidEntriesAdded"), Report.Added);
+	}
+	if (Report.Evicted > 0)
+	{
+		Result->SetNumberField(TEXT("evictedWidgets"), Report.Evicted);
+	}
+	if (Report.IsClean())
+	{
+		return;
+	}
+
+	TArray<TSharedPtr<FJsonValue>> Missing;
+	for (const FName& Name : Report.StillMissing)
+	{
+		Missing.Add(MakeShared<FJsonValueString>(Name.ToString()));
+	}
+	Result->SetArrayField(TEXT("widgetsMissingGuid"), Missing);
+	Result->SetBoolField(TEXT("success"), false);
+	Result->SetStringField(TEXT("error"), FString::Printf(
+		TEXT("'%s' was changed, but %s ended up without a widget variable GUID. The UMG editor rebuilds ")
+		TEXT("its designer view from WidgetVariableNameToGuidMap and reports a failure for any widget ")
+		TEXT("missing from it, so this asset reports one until that widget is renamed or removed."),
+		*AssetPath, *Report.MissingList()));
+}
