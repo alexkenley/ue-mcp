@@ -55,6 +55,12 @@ export const TIMEOUT_ENV_VAR = "UE_MCP_BRIDGE_TIMEOUT_MS";
 export const REGISTERED_HANDLER_TIMEOUT_SECONDS: Readonly<Record<string, number>> = {
   analyze_landscape_terrain: 120,
   apply_landscape_erosion: 600,
+  apply_mesh_fracture: 600,
+  apply_mesh_hole_fill: 300,
+  apply_mesh_mirror: 300,
+  apply_mesh_remesh: 300,
+  apply_mesh_simplify: 300,
+  audit_asset_hygiene: 300,
   batch_retarget_animations: 300,
   batch_set_actor_properties: 300,
   batch_set_foliage_settings_where: 300,
@@ -66,7 +72,9 @@ export const REGISTERED_HANDLER_TIMEOUT_SECONDS: Readonly<Record<string, number>
   create_cpp_class: 300,
   delete_exact_labeled_actors_in_levels: 300,
   export_landscape_heightmap: 300,
+  fix_asset_hygiene: 300,
   fixup_redirectors: 300,
+  generate_mesh_collision: 300,
   get_landscape_height_region: 120,
   get_landscape_holes: 120,
   get_landscape_layer_weight_region: 120,
@@ -93,9 +101,11 @@ export const REGISTERED_HANDLER_TIMEOUT_SECONDS: Readonly<Record<string, number>
   set_landscape_height_region: 300,
   set_landscape_holes: 300,
   set_landscape_layer_weight_region: 300,
+  simulate_procedural_foliage: 600,
   snap_instances_to_surface: 300,
   spawn_actors_batch: 300,
   summarize_static_mesh_usage: 300,
+  trigger_hitch: 30,
 };
 
 /** What the editor will wait for this method, in ms, or undefined for the default. */
