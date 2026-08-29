@@ -977,4 +977,81 @@ describe("MetaSound introspection", () => {
     expect(body.error).toContain("11111111111111111111111111111111");
     expect(body.error).toContain("Pages present");
   }, 300_000);
+
+  // ---------------------------------------------------------------------------
+  // The edit half, on the same fixture, LAST because it mutates it.
+  //
+  // These two exist for one reason: the edit actions walked the document with
+  // FMetasoundFrontendGraphClass::GetConstDefaultGraph(), which check()s rather
+  // than returning null on a document with no default page, and a check is a
+  // fatal assert that takes the editor down. The read path hit exactly that,
+  // twice. Both cases below reach a page walk, so a return of any kind is the
+  // assertion that matters and the field contents are the second half.
+  // ---------------------------------------------------------------------------
+  it("removes a node, capturing the class it removed off the page it read", async () => {
+    expect(addedNodeId, "metasound_add_node returned no nodeId").toBeTruthy();
+
+    const removed = resultJson<{
+      success?: boolean;
+      error?: string;
+      alreadyDeleted?: boolean;
+      nodeClassName?: string;
+      source?: string;
+      pendingBuild?: boolean;
+      pageId?: string;
+    }>(
+      await call("audio", {
+        action: "metasound_remove_node",
+        assetPath: METASOUND_OBJECT,
+        nodeId: addedNodeId,
+      }),
+    );
+
+    expect(removed.success, removed.error).not.toBe(false);
+    expect(removed.alreadyDeleted).toBe(false);
+    // The rollback payload comes from walking the page for the node's class, so
+    // this being right is what says the walk ran rather than being skipped.
+    expect(removed.nodeClassName).toBe("Saw");
+    expect(removed.pageId).toBeTruthy();
+    // One document, edited and saved in place: nothing is left pending a build.
+    expect(removed.pendingBuild).toBe(false);
+    expect(removed.source).toBeTruthy();
+
+    const after = await readDoc();
+    expect((after.nodes ?? []).some((n) => n.nodeId === addedNodeId)).toBe(false);
+
+    // A replayed step must not fail on its own prior success, and the replay is
+    // also the path that builds the "valid ids are" listing off the page.
+    const replay = resultJson<{ success?: boolean; alreadyDeleted?: boolean; error?: string }>(
+      await call("audio", {
+        action: "metasound_remove_node",
+        assetPath: METASOUND_OBJECT,
+        nodeId: addedNodeId,
+      }),
+    );
+    expect(replay.success, replay.error).not.toBe(false);
+    expect(replay.alreadyDeleted).toBe(true);
+  }, 300_000);
+
+  it("answers for a variable this graph never declared instead of asserting", async () => {
+    // The variable branch of metasound_remove_member is the third page walk, and
+    // a graph with no variables is the case that exercises it end to end.
+    const body = resultJson<{
+      success?: boolean;
+      error?: string;
+      alreadyDeleted?: boolean;
+      note?: string;
+    }>(
+      await call("audio", {
+        action: "metasound_remove_member",
+        assetPath: METASOUND_OBJECT,
+        memberKind: "variable",
+        name: "MCPNoSuchVariable",
+      }),
+    );
+
+    expect(body.success, body.error).not.toBe(false);
+    expect(body.alreadyDeleted).toBe(true);
+    expect(body.note ?? "").toContain("MCPNoSuchVariable");
+  }, 300_000);
 });

@@ -9,16 +9,20 @@
 // rather than a broad shortfall against the 42 audio actions already shipped.
 //
 //  1. EVERY METASOUND WRITE REQUIRED A SESSION OPENED THIS EDITOR RUN.
-//     AudioHandlers_MetaSound.cpp keeps its builders in a file-local map keyed
-//     by asset path, filled only by create_metasound / metasound_author, and
-//     every authoring action begins "No active MetaSound builder for this
-//     asset. Call create_metasound first." Restart the editor, or try to edit a
-//     MetaSound somebody else made, and the whole authoring half is closed. The
-//     read half already documents this in its own result text. The actions here
-//     resolve differently: a live session builder if one exists, otherwise
-//     Metasound::Engine::FDocumentBuilderRegistry::FindOrBeginBuilding, which
-//     attaches a builder to the asset's own document exactly as the MetaSound
-//     editor does. Every result says which one it used, in `source`.
+//     The authoring half used to keep its builders in a file-local map filled
+//     only by create_metasound / metasound_author, so restarting the editor, or
+//     trying to edit a MetaSound somebody else made, closed the whole authoring
+//     half. Every action here resolves through
+//     Metasound::Engine::FDocumentBuilderRegistry::FindOrBeginBuilding instead,
+//     which attaches a builder to the asset's own document exactly as the
+//     MetaSound editor does, so an asset already on disk is editable with no
+//     create call. AudioHandlers_MetaSound.cpp now resolves the same way.
+//
+//     There is therefore ONE document, the asset's own RootMetasoundDocument.
+//     An edit lands in it immediately and this file saves it, so no result is
+//     ever pending a build and audio(metasound_build) is a save. `source` says
+//     whether a builder was already attached when the call arrived, which is
+//     the same thing the read half's `source` says.
 //  2. METASOUND ADD WITH NO REMOVE. add_node, add_graph_input, add_graph_output
 //     and four connect actions had no inverse of any kind, so an authoring
 //     mistake could only be fixed by deleting the asset.
@@ -61,7 +65,6 @@
 #include "EdGraph/EdGraphNode.h"
 
 #include "MetasoundBuilderBase.h"
-#include "MetasoundBuilderSubsystem.h"
 #include "MetasoundDocumentBuilderRegistry.h"
 #include "MetasoundDocumentInterface.h"
 #include "MetasoundFrontendDocument.h"
@@ -87,7 +90,13 @@ namespace
 		UMetaSoundBuilderBase* Builder = nullptr;
 		UObject* Asset = nullptr;
 		FString AssetPath;
-		/** "builder" = an unflushed session document; "asset" = the asset's own document. */
+		/** A builder was already attached to this document before this call, so
+		 *  another authoring path may be mid-edit on the same document. Asked
+		 *  before attaching, because attaching makes the answer true. */
+		bool bBuilderWasAttached = false;
+		/** "builder" = a builder was already attached; "asset" = one was attached
+		 *  on demand by this call. Both write the same document: the asset's own
+		 *  RootMetasoundDocument. Same meaning as the read half's `source`. */
 		FString Source;
 	};
 
@@ -119,15 +128,28 @@ namespace
 	/**
 	 * Resolve assetPath to a WRITABLE builder.
 	 *
-	 * Order matters and mirrors the read half. A live session builder holds a
-	 * document that has not been flushed to the asset yet, and editing the asset
-	 * underneath it would be silently discarded by the next metasound_build. So
-	 * the session wins when it exists, and the caller is told to build.
+	 * There is one document and it is the asset's own RootMetasoundDocument, so
+	 * there is nothing to choose between: this attaches a builder to that
+	 * document if none is attached already, through
+	 * Metasound::Engine::FDocumentBuilderRegistry::FindOrBeginBuilding. That is
+	 * how the MetaSound editor itself opens an asset and what the authoring half
+	 * in AudioHandlers_MetaSound.cpp uses, and it is what makes these actions
+	 * work on a MetaSound this editor run did not create.
 	 *
-	 * With no session, FindOrBeginBuilding attaches a builder to the asset's own
-	 * document. That is how the MetaSound editor itself opens an asset, and it
-	 * is what makes these actions work on a MetaSound this editor run did not
-	 * create - which every other authoring action in this category cannot do.
+	 * Every caller below is a MUTATION, which is why this takes the find-OR-BEGIN
+	 * form. The find-only form, IDocumentBuilderRegistry::FindBuilder, is what a
+	 * read must use so that reading cannot attach a session as a side effect; it
+	 * is used here too, but only to answer whether a builder was already there,
+	 * never to obtain the one that does the writing.
+	 *
+	 * This used to begin with UMetaSoundBuilderSubsystem::FindSourceBuilder /
+	 * FindBuilder(FName(*assetPath)), and that could never have matched. That
+	 * subsystem's map is keyed by a caller-chosen BuilderName and holds only
+	 * builders somebody passed to RegisterBuilder; its own header says "the
+	 * builder manually registered ... with the provided custom name". Nothing in
+	 * this plugin ever registered one, so the lookup missed on every call,
+	 * silently, and the whole branch it guarded was dead. The registry actually
+	 * keyed by the MetaSound is Metasound::Frontend::IDocumentBuilderRegistry.
 	 */
 	bool MSEditResolve(const TSharedPtr<FJsonObject>& Params, FMSEditTarget& Out, TSharedPtr<FJsonValue>& OutError)
 	{
@@ -135,22 +157,6 @@ namespace
 		{
 			OutError = Err;
 			return false;
-		}
-
-		if (UMetaSoundBuilderSubsystem* Sub = UMetaSoundBuilderSubsystem::Get())
-		{
-			UMetaSoundBuilderBase* Session = Sub->FindSourceBuilder(FName(*Out.AssetPath));
-			if (!Session)
-			{
-				Session = Sub->FindBuilder(FName(*Out.AssetPath));
-			}
-			if (Session)
-			{
-				Out.Builder = Session;
-				Out.Source = TEXT("builder");
-				Out.Asset = MCPLoadAssetObject(Out.AssetPath);
-				return true;
-			}
 		}
 
 		Out.Asset = MCPLoadAssetObject(Out.AssetPath);
@@ -177,35 +183,52 @@ namespace
 			OutError = MCPError(TEXT("The MetaSound document builder registry is not available, so an existing MetaSound cannot be opened for editing. Enable the MetaSound plugin."));
 			return false;
 		}
+
+		// Asked BEFORE attaching, because FindOrBeginBuilding makes the answer
+		// true whatever it was. FindBuilder only asks.
+		{
+			TScriptInterface<IMetaSoundDocumentInterface> DocIface(Out.Asset);
+			Out.bBuilderWasAttached = Registry->FindBuilder(DocIface) != nullptr;
+		}
+
+		// FindOrBeginBuilding check()s that the object is an asset, and a check
+		// is a fatal assert rather than a failure a handler can report. Refuse
+		// the transient case here instead of taking the editor down with it.
+		if (!Out.Asset->IsAsset())
+		{
+			OutError = MCPError(FString::Printf(
+				TEXT("'%s' resolves to a %s that is not a saved asset, and the MetaSound builder registry only opens assets. ")
+				TEXT("Pass the path of a MetaSound asset on disk, such as one of: %s."),
+				*Out.AssetPath, *Out.Asset->GetClass()->GetName(), *MSEditKnownMetaSounds()));
+			return false;
+		}
+
 		Metasound::Engine::FDocumentBuilderRegistry& EngineRegistry =
 			static_cast<Metasound::Engine::FDocumentBuilderRegistry&>(*Registry);
 		Out.Builder = &EngineRegistry.FindOrBeginBuilding<UMetaSoundBuilderBase>(*Out.Asset);
-		Out.Source = TEXT("asset");
-		return Out.Builder != nullptr;
+		Out.Source = Out.bBuilderWasAttached ? TEXT("builder") : TEXT("asset");
+		return true;
 #else
 		OutError = MCPError(TEXT("MetaSound graph editing requires an editor build."));
 		return false;
 #endif
 	}
 
-	/** Persist, or say why the change is still pending. Every edit ends here. */
+	/** Persist. Every edit ends here. */
 	void MSEditFinish(const TSharedPtr<FJsonObject>& Res, const FMSEditTarget& T)
 	{
 		Res->SetStringField(TEXT("assetPath"), T.AssetPath);
 		Res->SetStringField(TEXT("source"), T.Source);
+		Res->SetBoolField(TEXT("hasActiveBuilder"), true);
 
-		if (T.Source == TEXT("builder"))
-		{
-			Res->SetBoolField(TEXT("pendingBuild"), true);
-			Res->SetStringField(TEXT("sourceNote"),
-				TEXT("Applied to the live builder session opened by create_metasound / metasound_author, which is the document those actions are still writing into. ")
-				TEXT("Call audio(metasound_build) to write it to the asset."));
-			return;
-		}
-
+		// The builder writes into the asset's own document, so an edit is never
+		// waiting on a flush. The field is kept because it is advertised, and it
+		// is now always false: metasound_build is a save, and this already saved.
 		Res->SetBoolField(TEXT("pendingBuild"), false);
-		Res->SetStringField(TEXT("sourceNote"),
-			TEXT("Applied directly to the saved asset's own document, so no metasound_build is needed. This is the path that works on a MetaSound this editor session did not create."));
+		Res->SetStringField(TEXT("sourceNote"), T.bBuilderWasAttached
+			? TEXT("Applied to the asset's own document through the builder that was already attached to it, and saved. audio(metasound_build) is a save, so it is not needed after this call.")
+			: TEXT("Applied to the asset's own document through a builder attached on demand, and saved. This is the path that works on a MetaSound this editor session did not create."));
+
 		if (T.Asset)
 		{
 			T.Asset->MarkPackageDirty();
@@ -222,6 +245,69 @@ namespace
 		return Iface ? &Iface->GetConstDocument() : nullptr;
 	}
 
+	/**
+	 * The page graph of the document being edited, asked SAFELY.
+	 *
+	 * NEVER GetConstDefaultGraph(). FMetasoundFrontendGraphClass::GetConstDefaultGraph()
+	 * ends in a check() rather than returning null when the document holds no
+	 * page under Metasound::Frontend::DefaultPageID, and a fatal assert takes the
+	 * whole editor down. That happened twice from the sibling read path, which is
+	 * why AudioHandlers_MetaSoundRead.cpp::MSReadResolve resolves this way; this
+	 * follows the same pattern rather than inventing a second one.
+	 *
+	 * FindConstGraph returns a pointer and asks the same question. A document
+	 * whose default page is missing but which holds pages under other ids is
+	 * still editable, so the first page it does hold is used and bOutFellBack
+	 * says so. Only a document with no pages at all yields null, and the caller
+	 * reports that as an ordinary error naming the asset.
+	 */
+	const FMetasoundFrontendGraph* MSEditFindGraph(const FMetasoundFrontendDocument* Doc, bool* bOutFellBackFromDefaultPage = nullptr)
+	{
+		if (bOutFellBackFromDefaultPage) { *bOutFellBackFromDefaultPage = false; }
+		if (!Doc) { return nullptr; }
+
+		if (const FMetasoundFrontendGraph* Graph = Doc->RootGraph.FindConstGraph(Metasound::Frontend::DefaultPageID))
+		{
+			return Graph;
+		}
+
+		const TArray<FMetasoundFrontendGraph>& Pages = Doc->RootGraph.GetConstGraphPages();
+		if (Pages.Num() == 0) { return nullptr; }
+
+		if (bOutFellBackFromDefaultPage) { *bOutFellBackFromDefaultPage = true; }
+		return &Pages[0];
+	}
+
+	/** A document with no graph pages, told as the recreate it needs. */
+	TSharedPtr<FJsonValue> MSEditNoGraphPagesError(const FMSEditTarget& T)
+	{
+		const FMetasoundFrontendDocument* Doc = MSEditDocument(T);
+		return MCPError(FString::Printf(
+			TEXT("'%s' holds no graph pages at all, so there is nothing to edit: its document is empty ")
+			TEXT("(%d interfaces declared, %d dependencies). A MetaSound is only initialized by its own ")
+			TEXT("asset factory, so an asset built any other way loads as a valid MetaSound with a ")
+			TEXT("completely blank document. Recreate it with audio(metasound_author) or ")
+			TEXT("audio(create_metasound), which go through the factory, and delete this one."),
+			*T.AssetPath,
+			Doc ? Doc->Interfaces.Num() : 0,
+			Doc ? Doc->Dependencies.Num() : 0));
+	}
+
+	/** Say which page was read whenever it was not the default one, because two
+	 *  calls that silently disagree about the page are unreadable. */
+	void MSEditStampPage(const TSharedPtr<FJsonObject>& Res, const FMetasoundFrontendGraph* Graph, bool bFellBackFromDefaultPage)
+	{
+		if (!Graph) { return; }
+		Res->SetStringField(TEXT("pageId"), Graph->PageID.ToString());
+		Res->SetBoolField(TEXT("readDefaultPage"), !bFellBackFromDefaultPage);
+		if (bFellBackFromDefaultPage)
+		{
+			Res->SetStringField(TEXT("pageNote"), FString::Printf(
+				TEXT("This document holds no page under the default page id, so page '%s' was read instead."),
+				*Graph->PageID.ToString()));
+		}
+	}
+
 	FMetaSoundNodeHandle MSEditNodeFromId(const FString& Id)
 	{
 		FMetaSoundNodeHandle Handle;
@@ -232,18 +318,34 @@ namespace
 	/** "That node id is not in this graph", told with the ids that are. */
 	TSharedPtr<FJsonValue> MSEditUnknownNodeError(const FMSEditTarget& T, const FString& NodeId)
 	{
-		TArray<FString> Ids;
-		if (const FMetasoundFrontendDocument* Doc = MSEditDocument(T))
+		const FMetasoundFrontendDocument* Doc = MSEditDocument(T);
+		bool bFellBack = false;
+		const FMetasoundFrontendGraph* Graph = MSEditFindGraph(Doc, &bFellBack);
+		if (Doc && !Graph)
 		{
-			for (const FMetasoundFrontendNode& Node : Doc->RootGraph.GetConstDefaultGraph().Nodes)
+			// The blank-document case is a better answer than "no nodes": it says
+			// why there are none and what to do about it.
+			return MSEditNoGraphPagesError(T);
+		}
+
+		TArray<FString> Ids;
+		FString PageNote;
+		if (Graph)
+		{
+			for (const FMetasoundFrontendNode& Node : Graph->Nodes)
 			{
 				if (Ids.Num() >= 25) break;
 				Ids.Add(FString::Printf(TEXT("%s (%s)"), *Node.GetID().ToString(), *Node.Name.ToString()));
 			}
+			if (bFellBack)
+			{
+				PageNote = FString::Printf(
+					TEXT(" (page '%s', since the document holds no default page)"), *Graph->PageID.ToString());
+			}
 		}
 		return MCPError(FString::Printf(
-			TEXT("Node id '%s' is not in '%s'. Nodes in this graph: %s. Call audio(metasound_read_document) or audio(metasound_search_nodes) for the full list."),
-			*NodeId, *T.AssetPath,
+			TEXT("Node id '%s' is not in '%s'%s. Nodes in this graph: %s. Call audio(metasound_read_document) or audio(metasound_search_nodes) for the full list."),
+			*NodeId, *T.AssetPath, *PageNote,
 			Ids.Num() > 0 ? *FString::Join(Ids, TEXT(", ")) : TEXT("(none)")));
 	}
 
@@ -320,9 +422,18 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRemoveNode(const TSharedPtr<FJso
 	// Capture the class before the node goes, because it is the rollback payload.
 	FString NodeName, NodeClassName, NodeNamespace, NodeVariant;
 	int32 MajorVersion = 1;
-	if (const FMetasoundFrontendDocument* Doc = MSEditDocument(Target))
+	const FMetasoundFrontendDocument* Doc = MSEditDocument(Target);
+	bool bFellBackFromDefaultPage = false;
+	const FMetasoundFrontendGraph* Graph = MSEditFindGraph(Doc, &bFellBackFromDefaultPage);
+	if (Doc && !Graph)
 	{
-		for (const FMetasoundFrontendNode& N : Doc->RootGraph.GetConstDefaultGraph().Nodes)
+		// ContainsNode said the node is there, so a document with no pages at all
+		// is a contradiction rather than a miss. Report it instead of asserting.
+		return MSEditNoGraphPagesError(Target);
+	}
+	if (Doc && Graph)
+	{
+		for (const FMetasoundFrontendNode& N : Graph->Nodes)
 		{
 			if (N.GetID() != Node.NodeID) continue;
 			NodeName = N.Name.ToString();
@@ -358,6 +469,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRemoveNode(const TSharedPtr<FJso
 	Result->SetStringField(TEXT("nodeNamespace"), NodeNamespace);
 	Result->SetStringField(TEXT("nodeVariant"), NodeVariant);
 	Result->SetNumberField(TEXT("majorVersion"), MajorVersion);
+	MSEditStampPage(Result, Graph, bFellBackFromDefaultPage);
 	MSEditFinish(Result, Target);
 
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
@@ -597,6 +709,9 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRemoveMember(const TSharedPtr<FJ
 	bool bPresent = false;
 	FString DataType;
 	TArray<FString> Known;
+	// Only the variable branch walks the document, so only it has a page to name.
+	const FMetasoundFrontendGraph* VariablePage = nullptr;
+	bool bVariablePageFellBack = false;
 
 	if (Kind == TEXT("input"))
 	{
@@ -632,9 +747,19 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRemoveMember(const TSharedPtr<FJ
 	}
 	else
 	{
-		if (const FMetasoundFrontendDocument* Doc = MSEditDocument(Target))
+		const FMetasoundFrontendDocument* Doc = MSEditDocument(Target);
+		bool bFellBackFromDefaultPage = false;
+		const FMetasoundFrontendGraph* Graph = MSEditFindGraph(Doc, &bFellBackFromDefaultPage);
+		if (Doc && !Graph)
 		{
-			for (const FMetasoundFrontendVariable& Variable : Doc->RootGraph.GetConstDefaultGraph().Variables)
+			// Variables live on a page, so with no page there is no honest answer
+			// to "is it present": reporting alreadyDeleted here would tell a
+			// caller the variable was removed from a document that holds nothing.
+			return MSEditNoGraphPagesError(Target);
+		}
+		if (Graph)
+		{
+			for (const FMetasoundFrontendVariable& Variable : Graph->Variables)
 			{
 				Known.Add(Variable.Name.ToString());
 				if (Variable.Name == FName(*Name))
@@ -643,6 +768,8 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRemoveMember(const TSharedPtr<FJ
 					DataType = Variable.TypeName.ToString();
 				}
 			}
+			VariablePage = Graph;
+			bVariablePageFellBack = bFellBackFromDefaultPage;
 		}
 	}
 
@@ -678,6 +805,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRemoveMember(const TSharedPtr<FJ
 	Result->SetStringField(TEXT("memberKind"), Kind);
 	Result->SetStringField(TEXT("name"), Name);
 	Result->SetStringField(TEXT("dataType"), DataType);
+	MSEditStampPage(Result, VariablePage, bVariablePageFellBack);
 	MSEditFinish(Result, Target);
 
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
