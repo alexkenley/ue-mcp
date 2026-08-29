@@ -46,6 +46,10 @@ namespace
 		FString AssetPath;
 		FString Source;                             // "builder" | "asset"
 		FString PageId;
+		/** The document had no page under the default id, so the first page it
+		 *  does hold was read instead. Reported, because a caller comparing two
+		 *  reads has to know they may be looking at different pages. */
+		bool bFellBackFromDefaultPage = false;
 	};
 
 	/** Every MetaSound asset in the project, so a bad path can name the good ones. */
@@ -181,7 +185,39 @@ namespace
 		}
 		else
 		{
-			Out.Graph = &Out.Doc->RootGraph.GetConstDefaultGraph();
+			// NEVER GetConstDefaultGraph() here.
+			//
+			// FMetasoundFrontendGraphClass::GetConstDefaultGraph() ends in a
+			// check() rather than returning null when the document holds no page
+			// under Metasound::Frontend::DefaultPageID, and a MetaSoundSource
+			// written by audio(metasound_author) is such a document. Calling it
+			// took the whole editor down with a fatal assert, from the saved
+			// asset as well as from a live builder session, and every one of the
+			// seven read actions resolves through here.
+			//
+			// FindConstGraph returns a pointer and asks the same question
+			// safely. A document whose default page is missing but which holds
+			// pages under other ids is still readable, so fall back to the first
+			// one and say which page was read rather than refusing; only a
+			// document with no graph pages at all is an error, and it is
+			// reported as one instead of as a crash.
+			Out.Graph = Out.Doc->RootGraph.FindConstGraph(Metasound::Frontend::DefaultPageID);
+			if (!Out.Graph)
+			{
+				const TArray<FMetasoundFrontendGraph>& Pages = Out.Doc->RootGraph.GetConstGraphPages();
+				if (Pages.Num() == 0)
+				{
+					OutError = MCPError(FString::Printf(
+						TEXT("'%s' holds no graph pages at all, so there is nothing to read. Its document "
+							 "was resolved from the %s. Author a graph with audio(metasound_author), or "
+							 "audio(create_metasound) followed by audio(metasound_add_node) and "
+							 "audio(metasound_build)."),
+						*Out.AssetPath, *Out.Source));
+					return false;
+				}
+				Out.Graph = &Pages[0];
+				Out.bFellBackFromDefaultPage = true;
+			}
 		}
 
 		Out.PageId = Out.Graph->PageID.ToString();
@@ -195,6 +231,16 @@ namespace
 		Res->SetStringField(TEXT("source"), T.Source);
 		Res->SetStringField(TEXT("pageId"), T.PageId);
 		Res->SetBoolField(TEXT("hasActiveBuilder"), T.Builder != nullptr);
+		Res->SetBoolField(TEXT("readDefaultPage"), !T.bFellBackFromDefaultPage);
+		if (T.bFellBackFromDefaultPage)
+		{
+			// Silence here would let two reads of the same asset disagree with
+			// no visible reason, which is worse than the page being unusual.
+			Res->SetStringField(TEXT("pageNote"), FString::Printf(
+				TEXT("This document holds no page under the default page id, so page '%s' was read "
+					 "instead. Pass pageId to choose another one."),
+				*T.PageId));
+		}
 		if (T.Builder)
 		{
 			Res->SetStringField(TEXT("sourceNote"),
