@@ -1,5 +1,5 @@
 /**
- * Caller-controlled field selection on any result (T3).
+ * Caller-controlled field selection on any result.
  *
  * Some reads on this surface are large by nature. `level(get_component_tree)`
  * on a character dumps every component with transforms, collision, materials

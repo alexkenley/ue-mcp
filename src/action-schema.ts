@@ -1,5 +1,5 @@
 /**
- * The live parameter schema for one action (T2).
+ * The live parameter schema for one action.
  *
  * `project(search_tools)` finds an action by keyword but hands back only its
  * prose. An agent that has located `asset.set_property` still has to guess

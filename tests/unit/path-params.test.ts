@@ -1,5 +1,5 @@
 /**
- * Backslash repair on path parameters (T3).
+ * Backslash repair on path parameters.
  *
  * The risk here is not the repair, it is over-reach: a rule that rewrites a
  * value it should not have touched turns a working call into a broken one, and

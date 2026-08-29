@@ -1,5 +1,5 @@
 /**
- * Backslash repair on path parameters, with the repair reported back (T3).
+ * Backslash repair on path parameters, with the repair reported back.
  *
  * Unreal addresses content with forward slashes, and so does every bridge
  * handler. An agent running on Windows does not reliably produce them: it

@@ -1,6 +1,6 @@
 /**
- * The T2 and T3 ergonomics work, driven through the shipped server against a
- * real editor.
+ * The action-schema and dispatch-ergonomics work, driven through the shipped
+ * server against a real editor.
  *
  * The unit tests hold these behaviours against constructed inputs. That leaves
  * the thing that actually breaks unproven: whether the SERVER wires them

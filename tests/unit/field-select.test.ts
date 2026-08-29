@@ -1,5 +1,5 @@
 /**
- * Caller-controlled field selection (T3).
+ * Caller-controlled field selection.
  *
  * The property that matters most here is that a bad selection degrades to the
  * full result with an explanation, never to an empty one. An agent that asked
