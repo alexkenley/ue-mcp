@@ -4,12 +4,36 @@
 // create -> add nodes -> add graph inputs/outputs -> connect vertices / audio out
 // -> set input defaults -> build to the asset.
 //
-// Session model: a live UMetaSoundSourceBuilder is created by create_metasound and
-// held (with its OnPlay / OnFinished / audio-out vertex handles) keyed by the
-// asset path for the life of the editor session. Authoring actions look that
-// session up; metasound_build overwrites the persistent asset with the builder's
-// document and saves. Authoring is therefore session-scoped: create, author, and
-// build within one editor run.
+// Builder model - and the two engine facts that decide it.
+//
+// 1. A MetaSoundSource cannot be created by a bare NewObject. Its document lives
+//    in the UPROPERTY RootMetasoundDocument, and a default-constructed one holds
+//    no interfaces, no dependencies and no graph pages at all. The asset loads,
+//    reports as a MetaSoundSource and is completely empty. Only
+//    UMetaSoundSourceFactory runs the initialization that installs UE.Source,
+//    UE.Source.OneShot and the output-format interface and mints the default
+//    graph page, so every asset here is created through that factory. It is
+//    resolved by class path rather than linked, because it lives in the
+//    MetasoundEditor module and this plugin does not depend on it.
+//
+// 2. UMetaSoundBuilderBase::BuildAndOverwriteMetaSound CANNOT write to an asset.
+//    Its own header says so: "Not permissible to overwrite MetaSound asset, only
+//    transient MetaSound". It returns no result and reports no failure, so the
+//    old create-a-transient-builder-then-overwrite shape reported success on
+//    every call and left the asset's document empty forever.
+//
+// So the builder is attached to the ASSET's own document, through
+// Metasound::Engine::FDocumentBuilderRegistry::FindOrBeginBuilding - the same
+// route the MetaSound editor itself uses to open an asset, and the one the
+// removal/disconnect actions in AudioHandlers_Depth.cpp already take. Every
+// authoring call therefore writes straight into the document that
+// audio(metasound_read_document) reads and that the package serializes, and the
+// node ids handed out by metasound_add_node are the ids a read hands back.
+//
+// One consequence worth stating: authoring is no longer session-scoped. A
+// MetaSound this editor run did not create can be edited, because the session is
+// attached on demand rather than remembered from a create call. metasound_build
+// now means "persist the document to disk", not "flush a detached builder".
 
 #include "AudioHandlers.h"
 #include "HandlerRegistry.h"
@@ -17,16 +41,23 @@
 #include "HandlerAssetCreate.h"
 #include "EditorScriptingUtilities/Public/EditorAssetLibrary.h"
 
+#include "Factories/Factory.h"
+
 #include "MetasoundBuilderSubsystem.h"
 #include "MetasoundBuilderBase.h"
+#include "MetasoundDocumentBuilderRegistry.h"
+#include "MetasoundDocumentInterface.h"
+#include "MetasoundFrontendDocumentBuilderRegistry.h"
 #include "MetasoundSource.h"
 #include "MetasoundFrontendLiteral.h"
 #include "MetasoundFrontendDocument.h"
+#include "Interfaces/MetasoundFrontendSourceInterface.h"
 #include "Interfaces/MetasoundOutputFormatInterfaces.h"
 
 namespace
 {
-	/** A live builder plus the interface vertex handles CreateSourceBuilder returns. */
+	/** A builder attached to a MetaSoundSource asset, plus the interface vertex
+	 *  handles the source and output-format interfaces put on its graph. */
 	struct FMSSession
 	{
 		TWeakObjectPtr<UMetaSoundSourceBuilder> Builder;
@@ -36,22 +67,203 @@ namespace
 		bool bOneShot = true;
 	};
 
-	/** Session builders keyed by MetaSound asset object path. Editor-session lived. */
+	/** Sessions keyed by MetaSound asset object path. Editor-session lived, and a
+	 *  cache rather than a gate: a miss re-attaches instead of refusing. */
 	static TMap<FString, FMSSession> GMetaSoundSessions;
 
-	UMetaSoundBuilderSubsystem* BuilderSubsystem()
+	bool Ok(EMetaSoundBuilderResult R);
+
+	/**
+	 * The MetaSoundSource factory, resolved by class path.
+	 *
+	 * UMetaSoundSourceFactory is in the MetasoundEditor module, which this plugin
+	 * does not link (and must not, since it is editor-only). Its FactoryCreateNew
+	 * is what runs UMetaSoundEditorSubsystem::InitAsset, and that is the ONLY
+	 * route that produces a MetaSoundSource with interfaces and a graph page.
+	 * Creating one without it yields an asset whose document is empty, which
+	 * every read then correctly reports as having nothing to read.
+	 */
+	UFactory* MSAuthorSourceFactory()
 	{
-		return UMetaSoundBuilderSubsystem::Get();
+		UClass* FactoryClass = FindObject<UClass>(nullptr, TEXT("/Script/MetasoundEditor.MetaSoundSourceFactory"));
+		if (!FactoryClass)
+		{
+			return nullptr;
+		}
+		return NewObject<UFactory>(GetTransientPackage(), FactoryClass);
 	}
 
+	/**
+	 * The builder that edits this asset's own document, attached if it is not
+	 * already. Mirrors MSEditResolve in AudioHandlers_Depth.cpp, which is the
+	 * proven path: an edit made through this builder lands in the asset's
+	 * RootMetasoundDocument immediately, with no separate flush step.
+	 */
+	UMetaSoundSourceBuilder* MSAuthorAssetBuilder(UMetaSoundSource* Source, TSharedPtr<FJsonValue>& OutError)
+	{
+#if WITH_EDITORONLY_DATA
+		using namespace Metasound::Frontend;
+		if (!Source)
+		{
+			return nullptr;
+		}
+		IDocumentBuilderRegistry* Registry = IDocumentBuilderRegistry::Get();
+		if (!Registry)
+		{
+			OutError = MCPError(TEXT("The MetaSound document builder registry is not available, so no MetaSound can be authored. Enable the MetaSound plugin."));
+			return nullptr;
+		}
+		Metasound::Engine::FDocumentBuilderRegistry& EngineRegistry =
+			static_cast<Metasound::Engine::FDocumentBuilderRegistry&>(*Registry);
+		return &EngineRegistry.FindOrBeginBuilding<UMetaSoundSourceBuilder>(*Source);
+#else
+		OutError = MCPError(TEXT("MetaSound authoring requires an editor build."));
+		return nullptr;
+#endif
+	}
+
+	/**
+	 * Read OnPlay / OnFinished / the audio outs back off the graph.
+	 *
+	 * CreateSourceBuilder used to hand these out; an asset builder does not,
+	 * because the interfaces already put the nodes on the graph. The audio-out
+	 * vertex names are taken from the builder's own format info rather than
+	 * spelled out, so "Out Mono" versus "Out Left"/"Out Right" versus the 5.1 and
+	 * 7.1 orders come from the engine's table and the channel ORDER is the
+	 * engine's, which is what makes audioOut:<n> mean the nth channel.
+	 */
+	void MSAuthorFillInterfaceHandles(UMetaSoundSourceBuilder& B, FMSSession& Session)
+	{
+		using namespace Metasound::Frontend;
+
+		EMetaSoundBuilderResult R = EMetaSoundBuilderResult::Failed;
+		FName DataType;
+
+		B.FindGraphInputNode(SourceInterface::Inputs::OnPlay, DataType, Session.OnPlay, R);
+		B.FindGraphOutputNode(SourceOneShotInterface::Outputs::OnFinished, DataType, Session.OnFinished, R);
+
+		Session.AudioOuts.Reset();
+		if (const Metasound::Engine::FOutputAudioFormatInfoPair* FormatInfo = B.FindOutputAudioFormatInfo())
+		{
+			for (const Metasound::FVertexName& VertexName : FormatInfo->Value.OutputVertexChannelOrder)
+			{
+				FMetaSoundBuilderNodeInputHandle Handle;
+				B.FindGraphOutputNode(VertexName, DataType, Handle, R);
+				if (Ok(R))
+				{
+					Session.AudioOuts.Add(Handle);
+				}
+			}
+		}
+
+		Session.bOneShot = B.InterfaceIsDeclared(SourceOneShotInterface::GetVersion().Name);
+	}
+
+	/** Is a builder already attached to this MetaSound's document? Asks only:
+	 *  FindBuilder, never FindOrBeginBuilding, so a read stays a read. */
+	bool MSAuthorHasBuilder(UObject* Asset)
+	{
+		if (!Asset)
+		{
+			return false;
+		}
+		TScriptInterface<IMetaSoundDocumentInterface> DocIface(Asset);
+		if (Metasound::Frontend::IDocumentBuilderRegistry* Registry = Metasound::Frontend::IDocumentBuilderRegistry::Get())
+		{
+			return Registry->FindBuilder(DocIface) != nullptr;
+		}
+		return false;
+	}
+
+	/** Attach a session to an already-created MetaSoundSource asset. */
+	FMSSession* MSAuthorOpenOnAsset(UMetaSoundSource* Source, const FString& AssetPath, TSharedPtr<FJsonValue>& OutError)
+	{
+		UMetaSoundSourceBuilder* B = MSAuthorAssetBuilder(Source, OutError);
+		if (!B)
+		{
+			if (!OutError.IsValid())
+			{
+				OutError = MCPError(FString::Printf(
+					TEXT("Could not open a MetaSound builder for '%s'."), *AssetPath));
+			}
+			return nullptr;
+		}
+
+		FMSSession Session;
+		Session.Builder = B;
+		MSAuthorFillInterfaceHandles(*B, Session);
+		return &GMetaSoundSessions.Add(AssetPath, Session);
+	}
+
+	/**
+	 * The builder session for this asset, attaching one if none is cached.
+	 *
+	 * This used to be a lookup that failed when create_metasound had not run in
+	 * this editor session, which made every authoring action refuse on a
+	 * MetaSound already on disk. The builder registry answers for any asset, so
+	 * the cache is now only a cache.
+	 */
 	FMSSession* FindSession(const FString& AssetPath)
 	{
-		FMSSession* S = GMetaSoundSessions.Find(AssetPath);
-		if (S && S->Builder.IsValid())
+		if (FMSSession* S = GMetaSoundSessions.Find(AssetPath))
 		{
-			return S;
+			if (S->Builder.IsValid())
+			{
+				return S;
+			}
+			GMetaSoundSessions.Remove(AssetPath);
 		}
-		return nullptr;
+
+		UMetaSoundSource* Source = Cast<UMetaSoundSource>(MCPLoadAssetObject(AssetPath));
+		if (!Source)
+		{
+			return nullptr;
+		}
+
+		// The cache is keyed by the resolved object path; a caller may pass the
+		// package form of the same asset.
+		const FString Resolved = Source->GetPathName();
+		if (FMSSession* S = GMetaSoundSessions.Find(Resolved))
+		{
+			if (S->Builder.IsValid())
+			{
+				return S;
+			}
+			GMetaSoundSessions.Remove(Resolved);
+		}
+
+		TSharedPtr<FJsonValue> Ignored;
+		return MSAuthorOpenOnAsset(Source, Resolved, Ignored);
+	}
+
+	/** "No builder for that path", told as the reason rather than as a refusal. */
+	TSharedPtr<FJsonValue> MSAuthorNoSessionError(const FString& AssetPath)
+	{
+		UObject* Asset = MCPLoadAssetObject(AssetPath);
+		if (!Asset)
+		{
+			return MCPAssetNotFoundError(AssetPath, TEXT("MetaSoundSource"));
+		}
+		if (!Cast<UMetaSoundSource>(Asset))
+		{
+			return MCPError(FString::Printf(
+				TEXT("'%s' is a %s, not a MetaSoundSource. The audio(metasound_*) authoring actions build sources; ")
+				TEXT("audio(metasound_read_document) reads any MetaSound document."),
+				*AssetPath, *Asset->GetClass()->GetName()));
+		}
+		return MCPError(FString::Printf(
+			TEXT("Could not open a MetaSound builder for '%s'. The MetaSound plugin must be enabled and this must be an editor build."),
+			*AssetPath));
+	}
+
+	/** Persist the asset's document. Every authoring entry point ends here. */
+	void MSAuthorSave(const FString& AssetPath)
+	{
+		if (UObject* Asset = MCPLoadAssetObject(AssetPath))
+		{
+			Asset->MarkPackageDirty();
+			UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty*/ false);
+		}
 	}
 
 	FMetaSoundNodeHandle NodeFromId(const FString& Id)
@@ -106,10 +318,10 @@ namespace
 	bool Ok(EMetaSoundBuilderResult R) { return R == EMetaSoundBuilderResult::Succeeded; }
 
 	/**
-	 * Create (idempotently) the MetaSoundSource asset shell and open a source
-	 * builder session for it. On success returns the stored session and sets
-	 * OutAssetPath. On failure returns nullptr and sets OutEarly (error / existed).
-	 * Shared by create_metasound and the one-shot metasound_author.
+	 * Create (idempotently) the MetaSoundSource asset and attach a builder to its
+	 * own document. On success returns the stored session and sets OutAssetPath.
+	 * On failure returns nullptr and sets OutEarly (error / existed).
+	 * Shared by create_metasound_source and the one-shot metasound_author.
 	 */
 	FMSSession* OpenBuilderSession(const TSharedPtr<FJsonObject>& Params, FString& OutAssetPath, TSharedPtr<FJsonValue>& OutEarly)
 	{
@@ -124,25 +336,52 @@ namespace
 		UClass* Cls = FindObject<UClass>(nullptr, TEXT("/Script/MetasoundEngine.MetaSoundSource"));
 		if (!Cls) { OutEarly = MCPError(TEXT("MetaSoundSource class not found. Enable the MetaSound plugin.")); return nullptr; }
 
-		auto Created = MCPCreateAssetIdempotent<UObject>(Name, PackagePath, OnConflict, TEXT("MetaSoundSource"), Cls, nullptr);
+		// The factory is not optional. Without it the asset is a shell whose
+		// document holds no interfaces and no graph pages, which is exactly the
+		// state that makes every read report there is nothing to read.
+		UFactory* Factory = MSAuthorSourceFactory();
+		if (!Factory)
+		{
+			OutEarly = MCPError(
+				TEXT("UMetaSoundSourceFactory was not found, so a MetaSoundSource cannot be initialized. ")
+				TEXT("It lives in the MetasoundEditor module: this needs an editor build with the MetaSound plugin enabled."));
+			return nullptr;
+		}
+
+		auto Created = MCPCreateAssetIdempotent<UMetaSoundSource>(Name, PackagePath, OnConflict, TEXT("MetaSoundSource"), Cls, Factory);
 		if (Created.EarlyReturn) { OutEarly = Created.EarlyReturn; return nullptr; }
 		OutAssetPath = Created.Asset->GetPathName();
 
-		UMetaSoundBuilderSubsystem* Sub = BuilderSubsystem();
-		if (!Sub) { OutEarly = MCPError(TEXT("MetaSound Builder subsystem unavailable.")); return nullptr; }
+		FMSSession* Session = MSAuthorOpenOnAsset(Created.Asset, OutAssetPath, OutEarly);
+		if (!Session)
+		{
+			if (!OutEarly.IsValid()) { OutEarly = MSAuthorNoSessionError(OutAssetPath); }
+			return nullptr;
+		}
 
-		FMSSession Session;
-		Session.bOneShot = bOneShot;
+		UMetaSoundSourceBuilder* B = Session->Builder.Get();
 		EMetaSoundBuilderResult R = EMetaSoundBuilderResult::Failed;
+
+		// Format and one-shot are asked for by the caller, and the factory always
+		// initializes a mono one-shot source, so both are applied rather than
+		// assumed. The vertex handles are re-read afterwards because changing
+		// either replaces the interface nodes they point at.
 		const EMetaSoundOutputAudioFormat Fmt =
 			(Format == TEXT("stereo")) ? EMetaSoundOutputAudioFormat::Stereo : EMetaSoundOutputAudioFormat::Mono;
+		B->SetFormat(Fmt, R);
 
-		UMetaSoundSourceBuilder* Builder = Sub->CreateSourceBuilder(
-			FName(*OutAssetPath), Session.OnPlay, Session.OnFinished, Session.AudioOuts, R, Fmt, bOneShot);
-		if (!Builder || !Ok(R)) { OutEarly = MCPError(TEXT("Failed to create MetaSound source builder.")); return nullptr; }
-		Session.Builder = Builder;
+		const FName OneShotInterface = Metasound::Frontend::SourceOneShotInterface::GetVersion().Name;
+		if (bOneShot && !B->InterfaceIsDeclared(OneShotInterface))
+		{
+			B->AddInterface(OneShotInterface, R);
+		}
+		else if (!bOneShot && B->InterfaceIsDeclared(OneShotInterface))
+		{
+			B->RemoveInterface(OneShotInterface, R);
+		}
 
-		return &GMetaSoundSessions.Add(OutAssetPath, Session);
+		MSAuthorFillInterfaceHandles(*B, *Session);
+		return Session;
 	}
 
 	/** Split "prefixOrNodeId:vertex" on the first ':'. */
@@ -163,21 +402,16 @@ TSharedPtr<FJsonValue> FAudioHandlers::CreateMetaSoundSource(const TSharedPtr<FJ
 	FMSSession* S = OpenBuilderSession(Params, AssetPath, Early);
 	if (!S) return Early;
 
-	// Write the (empty but interface-valid) document into the asset so it is a
-	// loadable, silent MetaSound until authored further.
-	if (UMetaSoundSource* Source = Cast<UMetaSoundSource>(UEditorAssetLibrary::LoadAsset(AssetPath)))
-	{
-		TScriptInterface<IMetaSoundDocumentInterface> DocIface(Source);
-		S->Builder->BuildAndOverwriteMetaSound(DocIface, /*bForceUniqueClassName*/ false);
-		UEditorAssetLibrary::SaveAsset(AssetPath);
-	}
+	// The builder writes into the asset's own document, so the asset is already
+	// a loadable, interface-valid, silent MetaSound. Only the save is left.
+	MSAuthorSave(AssetPath);
 
 	auto Res = MCPSuccess();
 	MCPSetCreated(Res);
 	Res->SetStringField(TEXT("path"), AssetPath);
 	Res->SetBoolField(TEXT("oneShot"), S->bOneShot);
 	Res->SetNumberField(TEXT("audioOutputs"), S->AudioOuts.Num());
-	Res->SetStringField(TEXT("note"), TEXT("Builder session active. Author with metasound_* actions (or use metasound_author to stamp a whole graph), then metasound_build."));
+	Res->SetStringField(TEXT("note"), TEXT("Builder attached to the asset's own document. Author with metasound_* actions (or use metasound_author to stamp a whole graph); metasound_build saves. audio(metasound_read_document) reads back what has been authored so far."));
 	MCPSetDeleteAssetRollback(Res, AssetPath);
 	return MCPResult(Res);
 }
@@ -351,13 +585,9 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundAuthor(const TSharedPtr<FJsonObj
 		}
 	}
 
-	// 5. Build + save.
-	if (UMetaSoundSource* Source = Cast<UMetaSoundSource>(UEditorAssetLibrary::LoadAsset(AssetPath)))
-	{
-		TScriptInterface<IMetaSoundDocumentInterface> DocIface(Source);
-		B->BuildAndOverwriteMetaSound(DocIface, false);
-		UEditorAssetLibrary::SaveAsset(AssetPath);
-	}
+	// 5. Save. Every step above wrote into the asset's own document, so there is
+	//    no separate build to run.
+	MSAuthorSave(AssetPath);
 
 	auto Res = MCPSuccess();
 	MCPSetCreated(Res);
@@ -378,7 +608,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundAddNode(const TSharedPtr<FJsonOb
 	if (auto Err = RequireString(Params, TEXT("nodeClassName"), ClassName)) return Err;
 
 	FMSSession* S = FindSession(AssetPath);
-	if (!S) return MCPError(TEXT("No active MetaSound builder for this asset. Call create_metasound in this editor session first."));
+	if (!S) return MSAuthorNoSessionError(AssetPath);
 
 	const FString Namespace = OptionalString(Params, TEXT("nodeNamespace"), TEXT("UE"));
 	const FString Variant = OptionalString(Params, TEXT("nodeVariant"));
@@ -417,7 +647,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundAddGraphInput(const TSharedPtr<F
 	if (auto Err = RequireString(Params, TEXT("dataType"), DataType)) return Err;
 
 	FMSSession* S = FindSession(AssetPath);
-	if (!S) return MCPError(TEXT("No active MetaSound builder for this asset. Call create_metasound first."));
+	if (!S) return MSAuthorNoSessionError(AssetPath);
 
 	FMetasoundFrontendLiteral Default = MakeLiteral(Params->TryGetField(TEXT("defaultValue")), DataType);
 	EMetaSoundBuilderResult Result = EMetaSoundBuilderResult::Failed;
@@ -439,7 +669,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundAddGraphOutput(const TSharedPtr<
 	if (auto Err = RequireString(Params, TEXT("dataType"), DataType)) return Err;
 
 	FMSSession* S = FindSession(AssetPath);
-	if (!S) return MCPError(TEXT("No active MetaSound builder for this asset. Call create_metasound first."));
+	if (!S) return MSAuthorNoSessionError(AssetPath);
 
 	FMetasoundFrontendLiteral Empty;
 	EMetaSoundBuilderResult Result = EMetaSoundBuilderResult::Failed;
@@ -463,7 +693,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundConnect(const TSharedPtr<FJsonOb
 	if (auto Err = RequireString(Params, TEXT("toInput"), ToInput)) return Err;
 
 	FMSSession* S = FindSession(AssetPath);
-	if (!S) return MCPError(TEXT("No active MetaSound builder for this asset. Call create_metasound first."));
+	if (!S) return MSAuthorNoSessionError(AssetPath);
 
 	EMetaSoundBuilderResult R = EMetaSoundBuilderResult::Failed;
 	const FMetaSoundNodeHandle FromNode = NodeFromId(FromNodeId);
@@ -491,7 +721,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundConnectGraphInput(const TSharedP
 	if (auto Err = RequireString(Params, TEXT("toInput"), ToInput)) return Err;
 
 	FMSSession* S = FindSession(AssetPath);
-	if (!S) return MCPError(TEXT("No active MetaSound builder for this asset. Call create_metasound first."));
+	if (!S) return MSAuthorNoSessionError(AssetPath);
 
 	EMetaSoundBuilderResult R = EMetaSoundBuilderResult::Failed;
 	S->Builder->ConnectGraphInputToNode(FName(*GraphInput), NodeFromId(ToNodeId), FName(*ToInput), R);
@@ -511,7 +741,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundConnectGraphOutput(const TShared
 	if (auto Err = RequireString(Params, TEXT("graphOutput"), GraphOutput)) return Err;
 
 	FMSSession* S = FindSession(AssetPath);
-	if (!S) return MCPError(TEXT("No active MetaSound builder for this asset. Call create_metasound first."));
+	if (!S) return MSAuthorNoSessionError(AssetPath);
 
 	EMetaSoundBuilderResult R = EMetaSoundBuilderResult::Failed;
 	S->Builder->ConnectNodeToGraphOutput(NodeFromId(FromNodeId), FName(*FromOutput), FName(*GraphOutput), R);
@@ -530,7 +760,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundConnectAudioOut(const TSharedPtr
 	if (auto Err = RequireString(Params, TEXT("fromOutput"), FromOutput)) return Err;
 
 	FMSSession* S = FindSession(AssetPath);
-	if (!S) return MCPError(TEXT("No active MetaSound builder for this asset. Call create_metasound first."));
+	if (!S) return MSAuthorNoSessionError(AssetPath);
 
 	const int32 Channel = (int32)OptionalNumber(Params, TEXT("channel"), 0);
 	if (!S->AudioOuts.IsValidIndex(Channel))
@@ -557,7 +787,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundSetInputDefault(const TSharedPtr
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FMSSession* S = FindSession(AssetPath);
-	if (!S) return MCPError(TEXT("No active MetaSound builder for this asset. Call create_metasound first."));
+	if (!S) return MSAuthorNoSessionError(AssetPath);
 
 	const TSharedPtr<FJsonValue> Value = Params->TryGetField(TEXT("value"));
 	const FString TypeHint = OptionalString(Params, TEXT("dataType"));
@@ -591,20 +821,22 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundBuild(const TSharedPtr<FJsonObje
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
+	// The builder edits the asset's own document, so there is nothing to flush:
+	// build means persist. Resolving the session first is still the right shape,
+	// because it is what reports a path that names no MetaSoundSource.
 	FMSSession* S = FindSession(AssetPath);
-	if (!S) return MCPError(TEXT("No active MetaSound builder for this asset. Call create_metasound first."));
+	if (!S) return MSAuthorNoSessionError(AssetPath);
 
-	UMetaSoundSource* Source = Cast<UMetaSoundSource>(UEditorAssetLibrary::LoadAsset(AssetPath));
-	if (!Source) return MCPError(FString::Printf(TEXT("MetaSoundSource not found at %s."), *AssetPath));
+	UMetaSoundSource* Source = Cast<UMetaSoundSource>(MCPLoadAssetObject(AssetPath));
+	if (!Source) return MCPAssetNotFoundError(AssetPath, TEXT("MetaSoundSource"));
 
-	TScriptInterface<IMetaSoundDocumentInterface> DocIface(Source);
-	S->Builder->BuildAndOverwriteMetaSound(DocIface, /*bForceUniqueClassName*/ false);
-	UEditorAssetLibrary::SaveAsset(AssetPath);
+	MSAuthorSave(Source->GetPathName());
 
 	auto Res = MCPSuccess();
 	MCPSetUpdated(Res);
-	Res->SetStringField(TEXT("path"), AssetPath);
-	Res->SetStringField(TEXT("note"), TEXT("Builder document written to the asset and saved."));
+	Res->SetStringField(TEXT("path"), Source->GetPathName());
+	Res->SetStringField(TEXT("note"),
+		TEXT("Document saved to the asset. Authoring writes into the asset's own document as it goes, so this persists it to disk rather than flushing a separate builder."));
 	return MCPResult(Res);
 }
 
@@ -647,18 +879,19 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundGetGraph(const TSharedPtr<FJsonO
 			*AssetPath, *Asset->GetClass()->GetName()));
 	}
 
-	// The session map is keyed by the path create_metasound was given, which is
-	// not always the form the caller passes back. Try the resolved object path
-	// as well before concluding no session is open.
-	FMSSession* S = FindSession(AssetPath);
-	if (!S) S = FindSession(Source->GetPathName());
+	// This is a READ, so it asks whether a builder is attached and never attaches
+	// one. FindSession would attach on demand, which is right for the write
+	// actions and wrong here.
+	const bool bHasBuilder = MSAuthorHasBuilder(Source);
+	const FMSSession* S = GMetaSoundSessions.Find(Source->GetPathName());
+	if (S && !S->Builder.IsValid()) { S = nullptr; }
 
 	auto Res = MCPSuccess();
 	Res->SetStringField(TEXT("path"), AssetPath);
 	Res->SetStringField(TEXT("assetPath"), Source->GetPathName());
 	Res->SetStringField(TEXT("assetClass"), Source->GetClass()->GetName());
 	Res->SetBoolField(TEXT("assetExists"), true);
-	Res->SetBoolField(TEXT("hasActiveBuilder"), S != nullptr);
+	Res->SetBoolField(TEXT("hasActiveBuilder"), bHasBuilder);
 	if (S)
 	{
 		Res->SetNumberField(TEXT("audioOutputs"), S->AudioOuts.Num());
@@ -666,19 +899,18 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundGetGraph(const TSharedPtr<FJsonO
 	}
 
 	Res->SetStringField(TEXT("supersededBy"), TEXT("metasound_read_document"));
-	Res->SetStringField(TEXT("note"), S
-		? TEXT("Builder-session state only. An authoring session from this editor run is open on this ")
-		  TEXT("asset, so its unbuilt edits are what audio(metasound_read_document) reports under ")
-		  TEXT("source: \"builder\"; audio(metasound_build) writes them to the asset. For nodes, pins, ")
-		  TEXT("connections, variables, defaults and problems call metasound_read_document, ")
+	Res->SetStringField(TEXT("note"), bHasBuilder
+		? TEXT("Builder state only. A builder is attached to this asset's own document, so the metasound_* ")
+		  TEXT("write actions are editing exactly what audio(metasound_read_document) reads, and ")
+		  TEXT("audio(metasound_build) saves it to disk. For nodes, pins, connections, variables, defaults ")
+		  TEXT("and problems call metasound_read_document, metasound_list_connections, ")
+		  TEXT("metasound_inspect_node, metasound_list_node_pins, metasound_search_nodes, ")
+		  TEXT("metasound_list_variables or metasound_validate.")
+		: TEXT("Builder state only. No builder is attached to this asset yet, so nothing is unsaved; the ")
+		  TEXT("metasound_* write actions attach one on demand and do not need a create call first. For ")
+		  TEXT("nodes, pins, connections, variables, defaults and problems call metasound_read_document, ")
 		  TEXT("metasound_list_connections, metasound_inspect_node, metasound_list_node_pins, ")
-		  TEXT("metasound_search_nodes, metasound_list_variables or metasound_validate.")
-		: TEXT("Builder-session state only. No authoring session from this editor run is open on this ")
-		  TEXT("asset, so audio(metasound_read_document) will read the saved asset and report ")
-		  TEXT("source: \"asset\". For nodes, pins, connections, variables, defaults and problems call ")
-		  TEXT("metasound_read_document, metasound_list_connections, metasound_inspect_node, ")
-		  TEXT("metasound_list_node_pins, metasound_search_nodes, metasound_list_variables or ")
-		  TEXT("metasound_validate."));
+		  TEXT("metasound_search_nodes, metasound_list_variables or metasound_validate."));
 	return MCPResult(Res);
 }
 

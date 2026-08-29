@@ -15,10 +15,21 @@
 // back already shaped as the argument list of the write action that would
 // recreate it.
 //
-// Document source: the live builder session is preferred (that is the document
-// the write actions are mutating, before metasound_build flushes it to the
-// asset), falling back to the saved asset. Every result says which one it read
-// via "source", so a caller can tell "authored but not built" from "on disk".
+// Document source. There is one document, and it is the asset's own
+// RootMetasoundDocument: the authoring actions attach their builder to the asset
+// through the document builder registry rather than to a detached transient
+// object, so what a builder has written is already in the asset in memory and
+// metasound_build only persists it. So this reads the asset and separately
+// reports whether a builder is attached, via "hasActiveBuilder", which is the
+// fact a caller actually needs (it says whether unsaved edits may be in flight).
+//
+// The lookup used to be UMetaSoundBuilderSubsystem::FindSourceBuilder(assetPath),
+// and that could never have matched. That subsystem's map is keyed by a caller-
+// chosen BuilderName and holds only builders passed to RegisterBuilder; its own
+// header says "the builder manually registered ... with the provided custom
+// name". Nothing here ever registered one, so the lookup missed every time and
+// every read silently reported source "asset". IDocumentBuilderRegistry is the
+// registry that is actually keyed by the MetaSound.
 
 #include "AudioHandlers.h"
 #include "HandlerRegistry.h"
@@ -30,6 +41,7 @@
 #include "MetasoundBuilderBase.h"
 #include "MetasoundDocumentInterface.h"
 #include "MetasoundFrontendDocument.h"
+#include "MetasoundFrontendDocumentBuilderRegistry.h"
 #include "MetasoundFrontendLiteral.h"
 #include "MetasoundSource.h"
 
@@ -42,7 +54,8 @@ namespace
 	{
 		const FMetasoundFrontendDocument* Doc = nullptr;
 		const FMetasoundFrontendGraph* Graph = nullptr;
-		UMetaSoundBuilderBase* Builder = nullptr;   // null when read from the saved asset
+		/** A builder is attached to this asset's document, so edits may be unsaved. */
+		bool bHasBuilder = false;
 		FString AssetPath;
 		FString Source;                             // "builder" | "asset"
 		FString PageId;
@@ -98,9 +111,12 @@ namespace
 	}
 
 	/**
-	 * Resolve assetPath to a readable document. Prefers the live builder session
-	 * opened by create_metasound / metasound_author, because that is the document
-	 * the write actions mutate and the one whose node ids they hand out.
+	 * Resolve assetPath to a readable document.
+	 *
+	 * The document is the asset's, always. The authoring builder is attached to
+	 * that same document, so there is no second copy to prefer; what varies is
+	 * only whether a builder is currently attached, which is reported rather than
+	 * used to pick a source.
 	 */
 	bool MSReadResolve(const TSharedPtr<FJsonObject>& Params, FMSReadTarget& Out, TSharedPtr<FJsonValue>& OutError)
 	{
@@ -110,49 +126,33 @@ namespace
 			return false;
 		}
 
-		const IMetaSoundDocumentInterface* DocIface = nullptr;
-
-		// 1. Live builder session, looked up through the subsystem's public
-		//    registry rather than the authoring file's private session map.
-		if (UMetaSoundBuilderSubsystem* Sub = UMetaSoundBuilderSubsystem::Get())
+		UObject* Obj = MCPLoadAssetObject(Out.AssetPath);
+		if (!Obj)
 		{
-			UMetaSoundBuilderBase* Builder = Sub->FindSourceBuilder(FName(*Out.AssetPath));
-			if (!Builder)
-			{
-				Builder = Sub->FindBuilder(FName(*Out.AssetPath));
-			}
-			if (Builder)
-			{
-				TScriptInterface<IMetaSoundDocumentInterface> Live = Builder->GetMetaSound();
-				if (Live.GetInterface())
-				{
-					Out.Builder = Builder;
-					DocIface = Live.GetInterface();
-					Out.Source = TEXT("builder");
-				}
-			}
+			OutError = MSReadNoAssetError(Out.AssetPath);
+			return false;
 		}
 
-		// 2. The saved asset.
+		const IMetaSoundDocumentInterface* DocIface = Cast<IMetaSoundDocumentInterface>(Obj);
 		if (!DocIface)
 		{
-			UObject* Obj = MCPLoadAssetObject(Out.AssetPath);
-			if (!Obj)
-			{
-				OutError = MSReadNoAssetError(Out.AssetPath);
-				return false;
-			}
-			DocIface = Cast<IMetaSoundDocumentInterface>(Obj);
-			if (!DocIface)
-			{
-				OutError = MCPError(FString::Printf(
-					TEXT("'%s' is a %s, not a MetaSound. audio(metasound_*) reads MetaSoundSource and ")
-					TEXT("MetaSoundPatch assets only: call asset(read) for other asset types."),
-					*Out.AssetPath, *Obj->GetClass()->GetName()));
-				return false;
-			}
-			Out.Source = TEXT("asset");
+			OutError = MCPError(FString::Printf(
+				TEXT("'%s' is a %s, not a MetaSound. audio(metasound_*) reads MetaSoundSource and ")
+				TEXT("MetaSoundPatch assets only: call asset(read) for other asset types."),
+				*Out.AssetPath, *Obj->GetClass()->GetName()));
+			return false;
 		}
+
+		// Is a builder attached to this document? This is a read, so it asks and
+		// does not attach: FindBuilder, never FindOrBeginBuilding.
+		{
+			TScriptInterface<IMetaSoundDocumentInterface> DocScriptIface(Obj);
+			if (Metasound::Frontend::IDocumentBuilderRegistry* Registry = Metasound::Frontend::IDocumentBuilderRegistry::Get())
+			{
+				Out.bHasBuilder = Registry->FindBuilder(DocScriptIface) != nullptr;
+			}
+		}
+		Out.Source = Out.bHasBuilder ? TEXT("builder") : TEXT("asset");
 
 		Out.Doc = &DocIface->GetConstDocument();
 
@@ -207,12 +207,21 @@ namespace
 				const TArray<FMetasoundFrontendGraph>& Pages = Out.Doc->RootGraph.GetConstGraphPages();
 				if (Pages.Num() == 0)
 				{
+					// This is a real diagnosis rather than a shrug. A MetaSound
+					// initialized by its factory always holds a default graph
+					// page plus the UE.Source and output-format interfaces. A
+					// document with no pages AND no interfaces is an asset that
+					// was constructed without that initialization, which is a
+					// shell no read and no write can do anything with. Recreating
+					// it is the only fix, so the error says so.
 					OutError = MCPError(FString::Printf(
-						TEXT("'%s' holds no graph pages at all, so there is nothing to read. Its document "
-							 "was resolved from the %s. Author a graph with audio(metasound_author), or "
-							 "audio(create_metasound) followed by audio(metasound_add_node) and "
-							 "audio(metasound_build)."),
-						*Out.AssetPath, *Out.Source));
+						TEXT("'%s' holds no graph pages at all, so there is nothing to read: its document "
+							 "is empty (%d interfaces declared, %d dependencies). A MetaSound is only "
+							 "initialized by its own asset factory, so an asset built any other way loads "
+							 "as a valid MetaSoundSource with a completely blank document. Recreate it with "
+							 "audio(metasound_author) or audio(create_metasound), which go through "
+							 "the factory, and delete this one."),
+						*Out.AssetPath, Out.Doc->Interfaces.Num(), Out.Doc->Dependencies.Num()));
 					return false;
 				}
 				Out.Graph = &Pages[0];
@@ -230,7 +239,7 @@ namespace
 		Res->SetStringField(TEXT("path"), T.AssetPath);
 		Res->SetStringField(TEXT("source"), T.Source);
 		Res->SetStringField(TEXT("pageId"), T.PageId);
-		Res->SetBoolField(TEXT("hasActiveBuilder"), T.Builder != nullptr);
+		Res->SetBoolField(TEXT("hasActiveBuilder"), T.bHasBuilder);
 		Res->SetBoolField(TEXT("readDefaultPage"), !T.bFellBackFromDefaultPage);
 		if (T.bFellBackFromDefaultPage)
 		{
@@ -241,15 +250,15 @@ namespace
 					 "instead. Pass pageId to choose another one."),
 				*T.PageId));
 		}
-		if (T.Builder)
+		if (T.bHasBuilder)
 		{
 			Res->SetStringField(TEXT("sourceNote"),
-				TEXT("Read from the live builder session: these are the unbuilt edits. Call metasound_build to write them to the asset."));
+				TEXT("Read from the asset's document with an authoring builder attached to it. Edits made through the metasound_* write actions are already in what you are reading; audio(metasound_build) saves them to disk."));
 		}
 		else
 		{
 			Res->SetStringField(TEXT("sourceNote"),
-				TEXT("Read from the saved asset. No builder session is open, so the authoring actions (metasound_add_node, metasound_connect) would refuse until create_metasound opens one."));
+				TEXT("Read from the asset's document with no authoring builder attached, so nothing is unsaved. The metasound_* write actions attach one on demand, so they work on this asset without a create call."));
 		}
 	}
 

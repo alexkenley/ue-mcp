@@ -13,19 +13,23 @@
  * duplicated skeleton, so every write these cases make lands on an asset this
  * file created and deletes.
  *
- * MetaSound is the exception, and it is not a test-authoring problem: all seven
- * of T13's read actions resolve through MSReadResolve, which ended in
- * FMetasoundFrontendGraphClass::GetConstDefaultGraph(). That accessor asserts
- * rather than returning null when the document has no default graph page, and
- * on a MetaSoundSource written by audio(metasound_author) it did exactly that
- * and took the editor down with a fatal check, from the saved asset as well as
- * from a live builder session.
+ * The MetaSound fixture is authored rather than duplicated, because authoring it
+ * IS the thing under test: the seven read actions only mean anything if what
+ * audio(metasound_author) wrote is what they read back.
  *
- * The resolver now asks the same question with FindConstGraph, but THE PLUGIN
- * HAS NOT BEEN REBUILT, so the editor a live run attaches to still carries the
- * crashing code. Until a rebuild lands, nothing here may read a real MetaSound.
- * The cases below exercise only the resolution failures, which return before
- * that call is reached, and the seven reads stay unverified.
+ * Two defects these cases pin, both of which reported success while doing
+ * nothing:
+ *
+ * - A MetaSoundSource created without UMetaSoundSourceFactory has a completely
+ *   blank document: no interfaces, no dependencies, no graph pages. It loads,
+ *   it is a valid MetaSoundSource, and there is nothing in it. So the fixture
+ *   asserts the document declares interfaces, which is false for any asset that
+ *   skipped the factory.
+ * - UMetaSoundBuilderBase::BuildAndOverwriteMetaSound cannot write to an asset
+ *   ("Not permissible to overwrite MetaSound asset, only transient MetaSound"),
+ *   and says so by doing nothing. Authoring now attaches its builder to the
+ *   asset's own document through the document builder registry, so the cases
+ *   read the graph back after a build and expect the nodes to be there.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LiveServer, resultJson } from "./server.js";
@@ -36,6 +40,10 @@ let server: LiveServer;
 
 const ROOT = "/Game/MCPLive/SkelUV";
 const STATIC_MESH = `${ROOT}/SM_MCPUVCube`;
+/** The MetaSound fixture. Package form; the object form is what the actions
+ *  resolve to and what the reads report back as `path`. */
+const METASOUND = `${ROOT}/MS_MCPProbe`;
+const METASOUND_OBJECT = `${METASOUND}.MS_MCPProbe`;
 const SKELETAL_MESH = `${ROOT}/SKM_MCPProbe`;
 const SKELETON = `${ROOT}/SK_MCPProbe`;
 /** Where the fixture came from, and the skeleton a compatibility registration
@@ -56,7 +64,7 @@ const animation = async (action: string, args: Record<string, unknown> = {}) =>
 /** Remove the fixture, whoever left it. Run before the build as well as after,
  *  so a run never inherits the channel count or curve table a previous one left. */
 const wipeFixture = async (): Promise<void> => {
-  for (const assetPath of [STATIC_MESH, SKELETAL_MESH, SKELETON]) {
+  for (const assetPath of [STATIC_MESH, SKELETAL_MESH, SKELETON, METASOUND]) {
     try {
       await call("asset", { action: "delete", assetPath, force: true });
     } catch {
@@ -579,27 +587,394 @@ describe("MetaSound introspection", () => {
     expect(missing.error).toContain("Asset Registry");
   }, 300_000);
 
-  it.skip(
-    "reads back an authored graph - BLOCKED until the plugin is rebuilt with the MSReadResolve fix",
-    async () => {
-      // All seven T13 read actions (metasound_read_document, list_connections,
-      // list_variables, search_nodes, inspect_node, list_node_pins, validate)
-      // resolve through MSReadResolve in AudioHandlers_MetaSoundRead.cpp. Its
-      // last step was
-      //     Out.Graph = &Out.Doc->RootGraph.GetConstDefaultGraph();
-      // and FMetasoundFrontendGraphClass::GetConstDefaultGraph() ends in a
-      // check(FoundGraph) rather than returning null when the document holds no
-      // page under Metasound::Frontend::DefaultPageID. A MetaSoundSource written
-      // by audio(metasound_author) is such a document, so the first read of it
-      // took the editor down with a fatal assert.
-      //
-      // The resolver now calls FindConstGraph(DefaultPageID), falls back to the
-      // first page the document does hold (reporting readDefaultPage/pageNote),
-      // and returns an MCPError when there are no pages at all. That fix is
-      // SOURCE ONLY: a live editor is running the previously built DLL, so this
-      // case stays skipped until a rebuild lands. Reinstate it then, and assert
-      // that an authored graph reads back with the node ids metasound_add_node
-      // handed out and the connections in metasound_connect's own field names.
-    },
-  );
+  // -------------------------------------------------------------------------
+  // The seven reads, against a MetaSound this file authors.
+  //
+  // Authored once and shared, because the point is the round trip: every id
+  // asserted below is an id an authoring call handed out.
+  // -------------------------------------------------------------------------
+  interface AuthorResult {
+    success?: boolean;
+    error?: string;
+    path?: string;
+    nodes?: number;
+    errors?: number;
+    elements?: Array<{ kind?: string; ref?: string; ok?: boolean; error?: string }>;
+  }
+
+  interface ReadDocument {
+    success?: boolean;
+    error?: string;
+    path?: string;
+    source?: string;
+    pageId?: string;
+    readDefaultPage?: boolean;
+    hasActiveBuilder?: boolean;
+    documentVersion?: string;
+    interfaces?: string[];
+    pages?: string[];
+    nodeCount?: number;
+    connectionCount?: number;
+    graphInputs?: Array<{ nodeId?: string; name?: string; dataType?: string; default?: unknown }>;
+    graphOutputs?: Array<{ nodeId?: string; name?: string; dataType?: string; incomingConnections?: number }>;
+    nodes?: Array<{
+      nodeId?: string;
+      name?: string;
+      class?: { nodeClassName?: string; nodeNamespace?: string; nodeVariant?: string };
+      incomingConnections?: number;
+      outgoingConnections?: number;
+    }>;
+    connections?: Array<{
+      fromNodeId?: string;
+      fromOutput?: string;
+      toNodeId?: string;
+      toInput?: string;
+      fromDataType?: string;
+      toDataType?: string;
+      graphInput?: string;
+      graphOutput?: string;
+      typeMismatch?: boolean;
+      dangling?: boolean;
+    }>;
+    variables?: unknown[];
+  }
+
+  /** The graph input the fixture exposes, and the oscillator it drives. */
+  const GRAPH_INPUT = "Pitch";
+  /** One authoring run backs all seven read cases. */
+  let authored: AuthorResult;
+  /** The node id metasound_add_node returned, which every id assertion echoes. */
+  let addedNodeId = "";
+
+  const readDoc = async (args: Record<string, unknown> = {}): Promise<ReadDocument> =>
+    resultJson<ReadDocument>(
+      await call("audio", { action: "metasound_read_document", assetPath: METASOUND_OBJECT, ...args }),
+    );
+
+  beforeAll(async () => {
+    // Stamp the whole graph in one call: a Float graph input driving a Sine
+    // oscillator whose Audio output drives the mono graph output. Variant
+    // matters - "UE.Sine" with no variant does not resolve, "UE.Sine.Audio"
+    // does, and metasound_list_node_classes is where that comes from.
+    authored = resultJson<AuthorResult>(
+      await call("audio", {
+        action: "metasound_author",
+        name: "MS_MCPProbe",
+        packagePath: ROOT,
+        format: "mono",
+        oneShot: true,
+        inputs: [{ name: GRAPH_INPUT, dataType: "Float", default: 440 }],
+        nodes: [{ id: "osc", class: "Sine", namespace: "UE", variant: "Audio" }],
+        connections: [
+          { from: `input:${GRAPH_INPUT}`, to: "osc:Frequency" },
+          { from: "osc:Audio", to: "audioOut:0" },
+        ],
+      }),
+    );
+
+    // A second node added by hand, so the identity contract is asserted against
+    // an id a caller was actually handed rather than one only the read invented.
+    const added = resultJson<{ success?: boolean; nodeId?: string; error?: string }>(
+      await call("audio", {
+        action: "metasound_add_node",
+        assetPath: METASOUND_OBJECT,
+        nodeClassName: "Saw",
+        nodeNamespace: "UE",
+        nodeVariant: "Audio",
+      }),
+    );
+    addedNodeId = added.nodeId ?? "";
+
+    await call("audio", { action: "metasound_build", assetPath: METASOUND_OBJECT });
+  }, 600_000);
+
+  it("authors a graph into an asset whose document is actually initialized", async () => {
+    expect(authored.success, authored.error).not.toBe(false);
+    expect(authored.errors ?? 0, JSON.stringify(authored.elements)).toBe(0);
+    expect(authored.nodes ?? 0).toBeGreaterThan(0);
+
+    const body = await readDoc();
+    expect(body.success, body.error).not.toBe(false);
+    // The regression this pins: an asset created without UMetaSoundSourceFactory
+    // holds no interfaces, no pages and no nodes, and every read of it correctly
+    // reports there is nothing to read. A real source declares UE.Source plus an
+    // output format, and has exactly one default page.
+    expect((body.interfaces ?? []).length, "the document declares no interfaces at all").toBeGreaterThan(0);
+    expect((body.pages ?? []).length).toBeGreaterThan(0);
+    expect(body.readDefaultPage).toBe(true);
+    expect(body.pageId).toBeTruthy();
+  }, 300_000);
+
+  it("reads back the nodes and connections that were authored, by id", async () => {
+    const body = await readDoc();
+    expect(body.success, body.error).not.toBe(false);
+
+    const sine = (body.nodes ?? []).find((n) => n.class?.nodeClassName === "Sine");
+    expect(sine, `no Sine node in ${JSON.stringify(body.nodes)}`).toBeTruthy();
+    expect(sine?.nodeId).toBeTruthy();
+    expect(sine?.class?.nodeNamespace).toBe("UE");
+    expect(sine?.class?.nodeVariant).toBe("Audio");
+
+    // The graph input keeps the name and type it was authored with, and its
+    // default survives the round trip.
+    const pitch = (body.graphInputs ?? []).find((i) => i.name === GRAPH_INPUT);
+    expect(pitch, `no ${GRAPH_INPUT} graph input`).toBeTruthy();
+    expect(pitch?.dataType).toBe("Float");
+    expect(Number(pitch?.default)).toBeCloseTo(440, 3);
+
+    // Both authored edges are present, and each one is shaped as the argument
+    // list of the write action that would recreate it.
+    const edges = body.connections ?? [];
+    expect(body.connectionCount ?? 0).toBeGreaterThanOrEqual(2);
+
+    const intoSine = edges.find((e) => e.toNodeId === sine?.nodeId && e.toInput === "Frequency");
+    expect(intoSine, `nothing drives Frequency: ${JSON.stringify(edges)}`).toBeTruthy();
+    expect(intoSine?.graphInput).toBe(GRAPH_INPUT);
+    expect(intoSine?.fromDataType).toBe("Float");
+    expect(intoSine?.toDataType).toBe("Float");
+
+    const outOfSine = edges.find((e) => e.fromNodeId === sine?.nodeId && e.fromOutput === "Audio");
+    expect(outOfSine, `Sine drives nothing: ${JSON.stringify(edges)}`).toBeTruthy();
+    expect(outOfSine?.graphOutput, "the Sine output does not reach a graph output").toBeTruthy();
+    expect(outOfSine?.fromDataType).toBe("Audio");
+    expect(outOfSine?.toDataType).toBe("Audio");
+
+    // No edge crosses data types and none dangles.
+    for (const edge of edges) {
+      expect(edge.typeMismatch, JSON.stringify(edge)).not.toBe(true);
+      expect(edge.dangling, JSON.stringify(edge)).not.toBe(true);
+    }
+  }, 300_000);
+
+  it("hands back the same node id metasound_add_node returned", async () => {
+    // The identity contract, asserted at both ends: the id a write handed out
+    // is an id a read reports, and the same id can be handed straight back to
+    // an action that takes a nodeId.
+    expect(addedNodeId, "metasound_add_node returned no nodeId").toBeTruthy();
+
+    const body = await readDoc();
+    const byId = (body.nodes ?? []).find((n) => n.nodeId === addedNodeId);
+    expect(byId, `${addedNodeId} is not in ${JSON.stringify((body.nodes ?? []).map((n) => n.nodeId))}`).toBeTruthy();
+    expect(byId?.class?.nodeClassName).toBe("Saw");
+
+    const inspected = resultJson<{ success?: boolean; nodeId?: string; error?: string }>(
+      await call("audio", {
+        action: "metasound_inspect_node",
+        assetPath: METASOUND_OBJECT,
+        nodeId: addedNodeId,
+      }),
+    );
+    expect(inspected.success, inspected.error).not.toBe(false);
+    expect(inspected.nodeId).toBe(addedNodeId);
+  }, 300_000);
+
+  it("lists connections in metasound_connect's own parameter names", async () => {
+    const body = resultJson<{
+      success?: boolean;
+      error?: string;
+      connections?: ReadDocument["connections"];
+      count?: number;
+      totalInGraph?: number;
+      malformed?: number;
+    }>(await call("audio", { action: "metasound_list_connections", assetPath: METASOUND_OBJECT }));
+
+    expect(body.success, body.error).not.toBe(false);
+    expect(body.count ?? 0).toBeGreaterThanOrEqual(2);
+    expect(body.totalInGraph).toBe(body.count);
+    expect(body.malformed).toBe(0);
+    for (const edge of body.connections ?? []) {
+      expect(edge.fromNodeId).toBeTruthy();
+      expect(edge.fromOutput).toBeTruthy();
+      expect(edge.toNodeId).toBeTruthy();
+      expect(edge.toInput).toBeTruthy();
+    }
+
+    // Narrowing to one node returns a subset, not everything.
+    const doc = await readDoc();
+    const sineId = (doc.nodes ?? []).find((n) => n.class?.nodeClassName === "Sine")?.nodeId;
+    const outbound = resultJson<{ success?: boolean; count?: number; connections?: ReadDocument["connections"] }>(
+      await call("audio", {
+        action: "metasound_list_connections",
+        assetPath: METASOUND_OBJECT,
+        nodeId: sineId,
+        direction: "out",
+      }),
+    );
+    expect(outbound.success).not.toBe(false);
+    expect(outbound.count ?? 0).toBeGreaterThan(0);
+    for (const edge of outbound.connections ?? []) {
+      expect(edge.fromNodeId).toBe(sineId);
+    }
+  }, 300_000);
+
+  it("reports a graph with no variables as normal rather than as an error", async () => {
+    const body = resultJson<{ success?: boolean; error?: string; variables?: unknown[]; count?: number; note?: string }>(
+      await call("audio", { action: "metasound_list_variables", assetPath: METASOUND_OBJECT }),
+    );
+    expect(body.success, body.error).not.toBe(false);
+    expect(Array.isArray(body.variables)).toBe(true);
+    expect(body.count).toBe((body.variables ?? []).length);
+    // The fixture declares none, and the note has to say that is fine rather
+    // than leaving an empty array to read as a failure.
+    expect(body.count).toBe(0);
+    expect(body.note ?? "").toContain("no variables");
+  }, 300_000);
+
+  it("finds a node by class name and reports what did not match", async () => {
+    const hit = resultJson<{
+      success?: boolean;
+      error?: string;
+      nodes?: ReadDocument["nodes"];
+      matched?: number;
+      searched?: number;
+    }>(await call("audio", { action: "metasound_search_nodes", assetPath: METASOUND_OBJECT, query: "sine" }));
+
+    expect(hit.success, hit.error).not.toBe(false);
+    expect(hit.matched ?? 0).toBe(1);
+    expect(hit.searched ?? 0).toBeGreaterThan(1);
+    expect(hit.nodes?.[0]?.class?.nodeClassName).toBe("Sine");
+
+    const miss = resultJson<{ success?: boolean; matched?: number; note?: string }>(
+      await call("audio", {
+        action: "metasound_search_nodes",
+        assetPath: METASOUND_OBJECT,
+        query: "__no_such_node__",
+      }),
+    );
+    expect(miss.success).not.toBe(false);
+    expect(miss.matched).toBe(0);
+    // An empty result names the call that would widen it rather than stopping.
+    expect(miss.note ?? "").toContain("metasound_read_document");
+  }, 300_000);
+
+  it("inspects one node down to vertex types, defaults and connection state", async () => {
+    const doc = await readDoc();
+    const sineId = (doc.nodes ?? []).find((n) => n.class?.nodeClassName === "Sine")?.nodeId;
+    expect(sineId).toBeTruthy();
+
+    const body = resultJson<{
+      success?: boolean;
+      error?: string;
+      nodeId?: string;
+      name?: string;
+      inputs?: Array<{ name?: string; dataType?: string; connected?: boolean; defaultIsSet?: boolean }>;
+      outputs?: Array<{ name?: string; dataType?: string; connected?: boolean }>;
+      incoming?: unknown[];
+      outgoing?: unknown[];
+    }>(await call("audio", { action: "metasound_inspect_node", assetPath: METASOUND_OBJECT, nodeId: sineId }));
+
+    expect(body.success, body.error).not.toBe(false);
+    expect(body.nodeId).toBe(sineId);
+
+    const frequency = (body.inputs ?? []).find((i) => i.name === "Frequency");
+    expect(frequency, `Sine has no Frequency input: ${JSON.stringify(body.inputs)}`).toBeTruthy();
+    expect(frequency?.dataType).toBe("Float");
+    // Connection state is measured, not assumed: the fixture wired this one.
+    expect(frequency?.connected).toBe(true);
+
+    const audioOut = (body.outputs ?? []).find((o) => o.name === "Audio");
+    expect(audioOut?.dataType).toBe("Audio");
+    expect(audioOut?.connected).toBe(true);
+
+    expect((body.incoming ?? []).length).toBeGreaterThan(0);
+    expect((body.outgoing ?? []).length).toBeGreaterThan(0);
+  }, 300_000);
+
+  it("lists a node's pins and counts the ones nothing drives", async () => {
+    const doc = await readDoc();
+    const sineId = (doc.nodes ?? []).find((n) => n.class?.nodeClassName === "Sine")?.nodeId;
+
+    const body = resultJson<{
+      success?: boolean;
+      error?: string;
+      inputs?: Array<{ name?: string; dataType?: string }>;
+      outputs?: Array<{ name?: string }>;
+      inputCount?: number;
+      outputCount?: number;
+      unconnectedInputs?: number;
+    }>(await call("audio", { action: "metasound_list_node_pins", assetPath: METASOUND_OBJECT, nodeId: sineId }));
+
+    expect(body.success, body.error).not.toBe(false);
+    expect(body.inputCount).toBe((body.inputs ?? []).length);
+    expect(body.outputCount).toBe((body.outputs ?? []).length);
+    expect(body.inputCount ?? 0).toBeGreaterThan(1);
+    // Frequency is wired, so the unconnected count is short of the total by at
+    // least one. A count equal to the total would mean the edge never landed.
+    expect(body.unconnectedInputs ?? 0).toBeLessThan(body.inputCount ?? 0);
+
+    // Filtering by data type returns only that type, on both sides.
+    const floats = resultJson<{ success?: boolean; inputs?: Array<{ dataType?: string }> }>(
+      await call("audio", {
+        action: "metasound_list_node_pins",
+        assetPath: METASOUND_OBJECT,
+        nodeId: sineId,
+        dataType: "Float",
+        direction: "inputs",
+      }),
+    );
+    expect(floats.success).not.toBe(false);
+    expect((floats.inputs ?? []).length).toBeGreaterThan(0);
+    for (const pin of floats.inputs ?? []) {
+      expect(pin.dataType).toBe("Float");
+    }
+  }, 300_000);
+
+  it("diagnoses the graph, naming the node in each problem", async () => {
+    const body = resultJson<{
+      success?: boolean;
+      error?: string;
+      problems?: string[];
+      runnable?: boolean;
+      nodeCount?: number;
+      connectionCount?: number;
+      unconnectedGraphOutputs?: number;
+    }>(await call("audio", { action: "metasound_validate", assetPath: METASOUND_OBJECT }));
+
+    expect(body.success, body.error).not.toBe(false);
+    expect(Array.isArray(body.problems)).toBe(true);
+    expect(body.runnable).toBe((body.problems ?? []).length === 0);
+    expect(body.nodeCount ?? 0).toBeGreaterThan(0);
+
+    const problems = body.problems ?? [];
+    const doc = await readDoc();
+    const sineId = (doc.nodes ?? []).find((n) => n.class?.nodeClassName === "Sine")?.nodeId ?? "";
+
+    // The wired node must NOT be reported as orphaned: that is the assertion
+    // separating a real diagnosis from one that flags everything.
+    expect(problems.filter((p) => p.includes(sineId) && p.includes("orphaned"))).toEqual([]);
+
+    // The unwired one must be, and by id, so a caller can act on it.
+    expect(addedNodeId).toBeTruthy();
+    expect(
+      problems.some((p) => p.includes(addedNodeId)),
+      `no problem names the unwired node ${addedNodeId}: ${JSON.stringify(problems)}`,
+    ).toBe(true);
+  }, 300_000);
+
+  it("refuses a node id that is not in the graph, listing the ones that are", async () => {
+    const body = resultJson<{ success?: boolean; error?: string }>(
+      await call("audio", {
+        action: "metasound_inspect_node",
+        assetPath: METASOUND_OBJECT,
+        nodeId: "00000000000000000000000000000000",
+      }),
+    );
+    expect(body.success).toBe(false);
+    // A bad id is only actionable if the refusal hands back an id that works.
+    expect(body.error).toContain("00000000000000000000000000000000");
+    expect(body.error).toContain(addedNodeId);
+  }, 300_000);
+
+  it("refuses a page the document does not hold, listing the pages it does", async () => {
+    const body = resultJson<{ success?: boolean; error?: string }>(
+      await call("audio", {
+        action: "metasound_read_document",
+        assetPath: METASOUND_OBJECT,
+        pageId: "11111111111111111111111111111111",
+      }),
+    );
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("11111111111111111111111111111111");
+    expect(body.error).toContain("Pages present");
+  }, 300_000);
 });
