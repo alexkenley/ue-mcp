@@ -2184,11 +2184,16 @@ namespace MCPWidgetGuidMap
 			});
 		}
 
+		// TObjectPtr::GetFName reads the name off the object handle, so it does
+		// not need UWidgetAnimation defined. WidgetBlueprint.h only forward
+		// declares that class, and dereferencing the pointer here would force
+		// every translation unit that includes this header to pull in UMG.
 		for (const auto& Animation : WidgetBP->Animations)
 		{
-			if (Animation)
+			const FName AnimationName = Animation.GetFName();
+			if (!AnimationName.IsNone())
 			{
-				Names.Add(Animation->GetFName());
+				Names.Add(AnimationName);
 			}
 		}
 		return Names;

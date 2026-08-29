@@ -176,12 +176,21 @@ public class UE_MCP_Bridge : ModuleRules
 				"NavigationSystem",
 				"Niagara",
 				"NiagaraEditor",
+				// FNiagaraCompileEventSeverity lives here, and reading a compile
+				// event's severity through StaticEnum needs the module that
+				// generated its reflection data, not just the header.
+				"NiagaraShader",
 				"PCG",
 				"PCGEditor",
 				"PoseSearch",
 				"PoseSearchEditor",
 				"PropertyBindingUtils",
 				"PropertyEditor",
+				// IPluginManager, IProjectManager and FProjectDescriptor, which
+				// project(enable_plugin) writes and widget(audit_commonui) reads.
+				// UnrealEd exposes these headers transitively but does not export
+				// the symbols, so the include compiles and the link fails.
+				"Projects",
 				"PythonScriptPlugin",
 				"Sequencer",
 				"Settings",
@@ -195,6 +204,10 @@ public class UE_MCP_Bridge : ModuleRules
 				"ClothingSystemRuntimeInterface",
 				"SubobjectDataInterface",
 				"ToolMenus",
+				// UE::Trace::IsChannel, ToggleChannel, EnumerateChannels and
+				// GetStatistics, which editor(start_trace) and its channel actions
+				// call. Core includes the header but does not re-export these.
+				"TraceLog",
 				// The engine-status snapshot, in its own module so it can load
 				// at PostConfigInit and cover the startup window that exists
 				// before this module does.

@@ -1338,7 +1338,9 @@ TSharedPtr<FJsonValue> FAudioHandlers::ReadSoundRouting(const TSharedPtr<FJsonOb
 		O->SetStringField(TEXT("objectPath"), Conc->GetPathName());
 		O->SetNumberField(TEXT("maxCount"), Conc->Concurrency.MaxCount);
 		O->SetBoolField(TEXT("limitToOwner"), Conc->Concurrency.bLimitToOwner != 0);
-		O->SetNumberField(TEXT("volumeScale"), Conc->Concurrency.VolumeScale);
+		// VolumeScale is private on FSoundConcurrencySettings; GetVolumeScale()
+		// is the public accessor (Sound/SoundConcurrency.h).
+		O->SetNumberField(TEXT("volumeScale"), Conc->Concurrency.GetVolumeScale());
 		Concurrencies.Add(MakeShared<FJsonValueObject>(O));
 
 		if (Conc->Concurrency.MaxCount <= 0)

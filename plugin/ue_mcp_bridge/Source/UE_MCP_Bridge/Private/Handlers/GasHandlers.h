@@ -5,6 +5,14 @@
 #include "Dom/JsonObject.h"
 #include "Templates/Function.h"
 
+// FGameplayAbilitySpec is named by a declaration inside namespace MCPGas below.
+// The real type has to be visible BEFORE that namespace opens, otherwise an
+// elaborated-type-specifier there ("const struct FGameplayAbilitySpec&")
+// declares a brand new MCPGas::FGameplayAbilitySpec that shadows the engine
+// type for every use inside the namespace, in this header and in every .cpp
+// that includes it first.
+#include "GameplayAbilitySpec.h"
+
 class AActor;
 class UAbilitySystemComponent;
 class UClass;
@@ -74,7 +82,7 @@ UClass* ResolveGameplayAbilityClass(const FString& Spec, TSharedPtr<FJsonValue>&
 UClass* ResolveClassDerivingFrom(const FString& Spec, UClass* Base);
 
 /** One granted ability spec as JSON: handle, class, level, inputID, active. */
-TSharedPtr<FJsonObject> DescribeAbilitySpec(const struct FGameplayAbilitySpec& Spec);
+TSharedPtr<FJsonObject> DescribeAbilitySpec(const FGameplayAbilitySpec& Spec);
 
 }
 

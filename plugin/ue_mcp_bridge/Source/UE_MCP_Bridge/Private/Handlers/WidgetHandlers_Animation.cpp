@@ -200,7 +200,10 @@ static TSharedPtr<FJsonValue> WAnim_CommitBlueprint(
 /** Seconds -> frames on this MovieScene's tick resolution. */
 static FFrameNumber WAnim_Frame(const UMovieScene* MovieScene, double Seconds)
 {
-	return (MovieScene->GetTickResolution() * Seconds).RoundToFrame();
+	// FFrameRate has no operator* taking seconds on the right. AsFrameTime is
+	// the engine's own seconds -> tick conversion, and RoundToFrame lands on the
+	// nearest tick rather than flooring it the way AsFrameNumber does.
+	return MovieScene->GetTickResolution().AsFrameTime(Seconds).RoundToFrame();
 }
 
 static double WAnim_Seconds(const UMovieScene* MovieScene, FFrameNumber Frame)

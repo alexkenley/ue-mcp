@@ -360,11 +360,17 @@ struct FMCPGeoCall
 		return Prop->GetPropertyValue_InContainer(const_cast<uint8*>(Frame.GetData()));
 	}
 
-	/** An FBox return or out parameter, which is how the mesh bounds come back. */
+	/** An FBox return or out parameter, which is how the mesh bounds come back.
+	 *  FBox is a noexport core struct: it is declared as USTRUCT in
+	 *  NoExportTypes.h but the C++ type is UE::Math::TBox<double>, which has no
+	 *  StaticStruct() and no TBaseStructure specialisation (Class.h only
+	 *  specialises Box2D, not Box). The reflected type is
+	 *  /Script/CoreUObject.Box, so its name is the identity check available. */
 	bool GetBox(const TCHAR* Name, FBox& Out) const
 	{
 		FStructProperty* Prop = CastField<FStructProperty>(Param(Name));
-		if (!Prop || Prop->Struct != TBaseStructure<FBox>::Get()) return false;
+		if (!Prop || !Prop->Struct) return false;
+		if (Prop->Struct->GetFName() != FName(NAME_Box)) return false;
 		Out = *Prop->ContainerPtrToValuePtr<FBox>(const_cast<uint8*>(Frame.GetData()));
 		return true;
 	}
