@@ -30,6 +30,23 @@ void FFoliageHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// assets outlives the default handler timeout.
 	Registry.RegisterHandlerWithTimeout(
 		TEXT("batch_set_foliage_settings_where"), &BatchSetFoliageSettingsWhere, 300.0f);
+
+	// V12 depth (FoliageHandlers_Depth.cpp): the surface above could create and
+	// configure a FoliageType and count instances inside a sphere, but could not
+	// place one, remove one, say where any of them are, or put a type into the
+	// level's palette at all.
+	Registry.RegisterHandler(TEXT("add_foliage_instances"), &AddFoliageInstances);
+	Registry.RegisterHandler(TEXT("remove_foliage_instances"), &RemoveFoliageInstances);
+	Registry.RegisterHandler(TEXT("get_foliage_instances"), &GetFoliageInstances);
+	Registry.RegisterHandler(TEXT("add_foliage_type_to_level"), &AddFoliageTypeToLevel);
+	Registry.RegisterHandler(TEXT("remove_foliage_type_from_level"), &RemoveFoliageTypeFromLevel);
+	Registry.RegisterHandler(TEXT("read_procedural_foliage_spawner"), &ReadProceduralFoliageSpawner);
+	Registry.RegisterHandler(TEXT("set_procedural_foliage_spawner_types"), &SetProceduralFoliageSpawnerTypes);
+	// A tile simulation over a large volume plus a world trace per generated
+	// point outlives the default handler timeout on anything but a small volume.
+	Registry.RegisterHandlerWithTimeout(
+		TEXT("simulate_procedural_foliage"), &SimulateProceduralFoliage, 600.0f);
+	Registry.RegisterHandler(TEXT("clear_procedural_foliage"), &ClearProceduralFoliage);
 }
 
 TSharedPtr<FJsonValue> FFoliageHandlers::ListFoliageTypes(const TSharedPtr<FJsonObject>& Params)

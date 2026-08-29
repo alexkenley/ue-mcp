@@ -90,6 +90,20 @@ void FStateTreeHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("set_state_tree_root_parameters"), &SetRootParameters);
 	Registry.RegisterHandler(TEXT("compile_state_tree"), &CompileStateTree);
 	Registry.RegisterHandler(TEXT("validate_state_tree"), &ValidateStateTree);
+
+	// V8 depth (StateTreeHandlers_Depth.cpp). Everything above could author a
+	// tree; these close the parts of it that had no route at all.
+	Registry.RegisterHandler(TEXT("list_state_tree_node_types"), &ListStateTreeNodeTypes);
+	Registry.RegisterHandler(TEXT("read_state_tree_state"), &ReadState);
+	Registry.RegisterHandler(TEXT("add_state_tree_consideration"), &AddConsideration);
+	Registry.RegisterHandler(TEXT("remove_state_tree_consideration"), &RemoveConsideration);
+	Registry.RegisterHandler(TEXT("remove_state_tree_transition_condition"), &RemoveTransitionCondition);
+	Registry.RegisterHandler(TEXT("set_state_tree_state_link"), &SetStateLink);
+	Registry.RegisterHandler(TEXT("move_state_tree_state"), &MoveState);
+	Registry.RegisterHandler(TEXT("set_state_tree_node_class"), &SetNodeClass);
+	Registry.RegisterHandler(TEXT("read_state_tree_runtime"), &ReadRuntime);
+	Registry.RegisterHandler(TEXT("send_state_tree_event"), &SendEvent);
+	Registry.RegisterHandler(TEXT("request_state_tree_transition"), &RequestTransition);
 #endif // UE_MCP_HAS_5_5_API
 }
 

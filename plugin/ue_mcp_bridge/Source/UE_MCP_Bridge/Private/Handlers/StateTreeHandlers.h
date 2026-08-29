@@ -81,4 +81,21 @@ private:
 	// Lifecycle
 	static TSharedPtr<FJsonValue> CompileStateTree(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ValidateStateTree(const TSharedPtr<FJsonObject>& Params);
+
+	// V8 depth. All in StateTreeHandlers_Depth.cpp; see that file's header for
+	// why each one needs a handler rather than a property write, and for the
+	// dead ends they close (no node-type discovery, no utility considerations,
+	// no in-asset subtree link, no state reordering, no Blueprint node class,
+	// no transition-condition removal, no way to drive a running tree).
+	static TSharedPtr<FJsonValue> ListStateTreeNodeTypes(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ReadState(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> AddConsideration(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveConsideration(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveTransitionCondition(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SetStateLink(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> MoveState(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SetNodeClass(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ReadRuntime(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SendEvent(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RequestTransition(const TSharedPtr<FJsonObject>& Params);
 };
