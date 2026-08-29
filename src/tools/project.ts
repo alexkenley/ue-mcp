@@ -27,6 +27,9 @@ import { readDeployedBridgeApiVersion } from "../plugin/bridge-api.js";
 import { CLIENT_PROTOCOL_VERSION, describeProtocolMismatch } from "../bridge.js";
 import { searchTools, type ToolSearchHit } from "../tool-search.js";
 import { actionSchema, resolveActionRef, suggestActions } from "../action-schema.js";
+import { availabilityReport } from "../offline.js";
+import { inspectInstall } from "../install-check.js";
+import { listContent } from "../content-index.js";
 import { getWorkarounds } from "../workaround-tracker.js";
 import { readLogState, readEngineSnapshot } from "../engine-observer.js";
 import { switchProject, isTargetDiverged } from "../project-switch.js";
@@ -711,6 +714,91 @@ export const projectTool: ToolDef = categoryTool(
             };
       },
     },
+    list_available_actions: {
+      description:
+        "Report which actions this server can serve RIGHT NOW and why the rest cannot. With no editor "
+        + "attached the surface is advertised in full but most of it cannot run, and this is the line "
+        + "between the two halves: an action either runs in this Node process (availability 'always') or "
+        + "dispatches to a bridge method only a running editor answers (availability 'editor', with "
+        + "bridgeMethod naming it). The offline half is the engine symbol index and the C++ correctness "
+        + "checks, the project config, source and file readers, the surface introspection, and the "
+        + "process lifecycle actions that start, stop and build. An action contributed by a plugin whose "
+        + "route is undeclared reports 'unknown' and should be treated as needing an editor. "
+        + "Counts come back by default, per category as well as overall; includeNames=true adds the actions "
+        + "themselves, and category narrows the whole report to one. With an editor attached everything "
+        + "is available and the classification still answers the question worth asking then, which is "
+        + "what keeps working once the editor is stopped for a rebuild. "
+        + "Params: category?, includeNames? (default false), state? (available|blocked|all, default available)",
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        const { getLiveToolGraph } = await import("../tools.js");
+        const graph: ToolDef[] = getLiveToolGraph();
+
+        const category = (p.category as string | undefined)?.trim();
+        if (category && !graph.some((t) => t.name === category.toLowerCase())) {
+          throw new Error(
+            `Unknown category '${category}'. Available: ${graph.map((t) => t.name).join(", ")}`,
+          );
+        }
+
+        const state = (p.state as string | undefined)?.trim() ?? "available";
+        if (state !== "available" && state !== "blocked" && state !== "all") {
+          throw new Error(`'state' must be 'available', 'blocked' or 'all' (got '${state}').`);
+        }
+
+        const report = availabilityReport(graph, {
+          editorConnected: ctx.bridge.isConnected,
+          category,
+          state,
+          names: p.includeNames === true,
+        });
+        const target = ctx.bridge.getTarget();
+        return {
+          ...report,
+          editorTarget: { projectPath: target.projectPath, port: target.port, portSource: target.portSource },
+          hint: report.blocked > 0
+            ? "editor(action='start_editor') launches the editor and blocks until its bridge answers."
+            : undefined,
+        };
+      },
+    },
+    list_content_assets: {
+      description:
+        "List the project's assets from the package files on DISK, which is the one asset query that "
+        + "works with no editor running. Takes a mount path (/Game, /Game/Characters, or a plugin's "
+        + "/MyPlugin) and resolves it through the same mount table the live path uses, so an offline "
+        + "listing names assets exactly as the editor would. It answers existence, layout, size and "
+        + "modified time, and it deliberately does not answer class, registry tags or dependencies: "
+        + "those live in the editor's asset registry and are not in the file, so asset(list) and "
+        + "asset(search) remain the answer once an editor is up. maxResults stops the walk rather "
+        + "than trimming the result, and truncated says when it did. "
+        + "Params: contentPath? (default /Game), recursive? (default true), namePattern? "
+        + "(case-insensitive substring of the asset name), maxResults? (default 1000)",
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => listContent(ctx.project, {
+        contentPath: p.contentPath as string | undefined,
+        recursive: p.recursive as boolean | undefined,
+        namePattern: p.namePattern as string | undefined,
+        maxResults: p.maxResults as number | undefined,
+      }),
+    },
+    check_install: {
+      description:
+        "Answer whether this project can run the bridge at all, from disk, with no editor running and "
+        + "nothing compiled. Reports the project kind (a project declaring no native modules of its own "
+        + "is Blueprint-only, which is NOT a blocker: UnrealBuildTool writes temporary target and module "
+        + "files under Intermediate/Source/ and compiles the plugin against them), the engine that will "
+        + "be used and where it was resolved from, whether the plugin is deployed, enabled in the "
+        + ".uproject, compiled and up to date with its source, and whether this machine has the C++ "
+        + "toolchain Unreal needs. Every problem carries a stable code, what is wrong and the exact fix, "
+        + "and nextSteps is those fixes in order. Read-only: it never deploys, enables or builds "
+        + "anything. Params: projectPath? (default the loaded project), skipToolchain? (skip the "
+        + "toolchain probe, which shells out to vswhere or the compiler)",
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        const requested = (p.projectPath as string | undefined)?.trim();
+        if (!requested) ctx.project.ensureLoaded();
+        const uproject = requested || ctx.project.projectPath!;
+        return inspectInstall(uproject, { skipToolchain: p.skipToolchain === true });
+      },
+    },
     execute_python_report: {
       description: "Measurement for #704: reads this session's execute_python calls and, for each, runs its taskSummary back through search_tools to flag calls that OVERLAPPED an existing dedicated action ('you used Python for X, but tool Y does X'). Returns totalCalls, overlapping[] and an overlapRate. Params: none (#704)",
       handler: async (ctx) => {
@@ -1358,7 +1446,7 @@ export const projectTool: ToolDef = categoryTool(
   },
   undefined,
   {
-    projectPath: z.string().optional().describe("For set_project / add_editor: path to .uproject"),
+    projectPath: z.string().optional().describe("For set_project / add_editor / check_install: path to .uproject"),
     editorName: z.string().optional().describe("For add_editor: name to address the new session by (default the project name) (#817)"),
     editorTarget: z.string().optional().describe("For use_editor / drop_editor: session name, project name, or .uproject path (#817)"),
     start: z.boolean().optional().describe("For add_editor: launch the editor for that project and wait until it is ready (#817)"),
@@ -1371,9 +1459,14 @@ export const projectTool: ToolDef = categoryTool(
     loadedOnly: z.boolean().optional().describe("For list_loaded_modules: only loaded modules (#689)"),
     limit: z.number().optional().describe("Max results: search_tools (default 20), find_example_usage (10), find_references (40), find_callers (25), find_callees (100), class_hierarchy descendants (100) (#704)"),
     name: z.string().optional().describe("describe_action: the action to describe, as 'tool.action' or a bare action name"),
-    category: z.string().optional().describe("describe_action: return every action of this category instead of one action"),
+    category: z.string().optional().describe("describe_action / list_available_actions: narrow to one category instead of the whole surface"),
+    includeNames: z.boolean().optional().describe("list_available_actions: list the action names, not just the counts (default false)"),
+    state: z.enum(["available", "blocked", "all"]).optional().describe("list_available_actions: which side of the line to list when includeNames=true (default available)"),
+    skipToolchain: z.boolean().optional().describe("check_install: skip the C++ toolchain probe, which shells out to vswhere or the compiler"),
+    contentPath: z.string().optional().describe("list_content_assets: mount path to list, e.g. /Game or /Game/Characters (default /Game)"),
+    namePattern: z.string().optional().describe("list_content_assets: case-insensitive substring the asset name must contain"),
     extensions: z.union([z.string(), z.array(z.string())]).optional().describe("For list_files: extension filter (#608)"),
-    recursive: z.boolean().optional().describe("For list_files: recurse into subdirectories (#608)"),
+    recursive: z.boolean().optional().describe("For list_files / list_content_assets: recurse into subdirectories (#608)"),
     directory: z.string().optional().describe("For search_cpp: subdirectory"),
     section: z.string().optional().describe("For set_config: INI section"),
     key: z.string().optional().describe("For set_config: INI key"),
@@ -1392,7 +1485,7 @@ export const projectTool: ToolDef = categoryTool(
     includeProject: z.boolean().optional().describe("find_references / find_callers: also search this project's own Source and Plugins trees (default true)"),
     contextBefore: z.number().optional().describe("symbol_context: lines of source before the declaration (default 8)"),
     contextAfter: z.number().optional().describe("symbol_context: lines of source after the declaration (default 40)"),
-    maxResults: z.number().optional().describe("Cap on find_engine_symbol / search_engine_cpp hits (default 100 / 500)"),
+    maxResults: z.number().optional().describe("Cap on find_engine_symbol / search_engine_cpp / list_content_assets hits (default 100 / 500 / 1000)"),
     tree: z.string().optional().describe("For search_engine_cpp: Runtime|Editor|Developer|Plugins|all (default Runtime)"),
     subdirectory: z.string().optional().describe("For search_engine_cpp: subdirectory within the chosen tree"),
 
