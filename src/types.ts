@@ -4,6 +4,7 @@ import type { ProjectContext } from "./project.js";
 import type { EditorSession, SessionRegistry } from "./session.js";
 import { McpError, ErrorCode } from "./errors.js";
 import { MAX_BRIDGE_TIMEOUT_MS } from "./bridge-timeouts.js";
+import { nearestActions } from "./action-schema.js";
 
 /**
  * Elicit a deterministic, user-mediated form response via the MCP client.
@@ -377,7 +378,20 @@ export function categoryTool(
         // Read the live keys, not the construction-time tuple: enrichment adds
         // epic_* actions after the fact, and a stale list here sends an agent
         // hunting for an action the tool actually has.
-        throw new McpError(ErrorCode.UNKNOWN_ACTION, `Unknown action '${action}'. Available: ${Object.keys(actions).join(", ")}`);
+        //
+        // A category can carry hundreds of actions, and pasting all of them
+        // into every typo's error spends more context than the call would
+        // have. Lead with the closest spellings, which is what a typo needs,
+        // and name the two ways to see the rest.
+        const available = Object.keys(actions);
+        const close = nearestActions(action, available);
+        throw new McpError(
+          ErrorCode.UNKNOWN_ACTION,
+          `Unknown action '${action}' on '${name}'.`
+            + (close.length ? ` Did you mean: ${close.join(", ")}?` : "")
+            + ` ${available.length} actions available - project(action="describe_action", category="${name}")`
+            + ` lists them with their parameters, and project(action="search_tools") searches by intent.`,
+        );
       }
       // Routing, not an argument. Pulled out before normalizeParams so no
       // mapParams can forward it into a bridge call as a parameter (#989).

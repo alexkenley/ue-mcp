@@ -96,6 +96,7 @@ const PER_SESSION: Record<string, string> = {
 /** No editor concept, or one deliberate answer for the whole process. */
 const SESSION_INDEPENDENT: Record<string, string> = {
   "action-class.ts": "A static classification of the action surface; the same answer in every editor.",
+  "action-schema.ts": "Derives one action's parameter schema from whichever tool graph it is handed; holds nothing of its own.",
   "bridge-timeouts.ts": "The call budget table and its resolution; the same answer for every editor.",
   "asset-path.ts": "Pure Unreal path handling.",
   "auth.ts": "GitHub identity for feedback authorship: per user, not per project.",

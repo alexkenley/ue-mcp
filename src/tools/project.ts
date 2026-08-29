@@ -11,6 +11,7 @@ import { parseHeader, collectFiles, findSourceRoots, resolveModuleDir } from "..
 import { readDeployedBridgeApiVersion } from "../plugin/bridge-api.js";
 import { CLIENT_PROTOCOL_VERSION, describeProtocolMismatch } from "../bridge.js";
 import { searchTools, type ToolSearchHit } from "../tool-search.js";
+import { actionSchema, resolveActionRef, suggestActions } from "../action-schema.js";
 import { getWorkarounds } from "../workaround-tracker.js";
 import { readLogState, readEngineSnapshot } from "../engine-observer.js";
 import { switchProject, isTargetDiverged } from "../project-switch.js";
@@ -597,6 +598,64 @@ export const projectTool: ToolDef = categoryTool(
         };
       },
     },
+    describe_action: {
+      description:
+        "Return the live parameter schema for one action: every parameter it accepts, "
+        + "with type, required/optional, description, allowed values and default, plus the "
+        + "bridge method it dispatches to. search_tools finds an action by keyword and hands "
+        + "back only prose; this answers what to actually pass, so the first call is the "
+        + "right one. name takes 'tool.action' (asset.set_property) or a bare action name, "
+        + "which reports every category providing it. A name that does not resolve comes back "
+        + "with the closest spellings rather than a bare failure. Reads the graph THIS editor "
+        + "advertises, so injected Epic and plugin actions are included. "
+        + "Params: name (required), category? (return every action of one category instead of one action)",
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        const { getLiveToolGraph } = await import("../tools.js");
+        // The advertised graph, which is the union across every registered
+        // editor: exactly the set of actions the connected client is able to
+        // call, so a schema is never reported for something it cannot reach.
+        const graph: ToolDef[] = getLiveToolGraph();
+
+        const category = (p.category as string | undefined)?.trim();
+        if (category) {
+          const tool = graph.find((t) => t.name === category.toLowerCase());
+          if (!tool) {
+            throw new Error(
+              `Unknown category '${category}'. Available: ${graph.map((t) => t.name).join(", ")}`,
+            );
+          }
+          return {
+            tool: tool.name,
+            actionCount: Object.keys(tool.actions).length,
+            actions: Object.keys(tool.actions).map((a) => actionSchema(tool, a)),
+          };
+        }
+
+        const name = (p.name as string | undefined)?.trim();
+        if (!name) throw new Error("Missing 'name'. Pass 'tool.action', a bare action name, or use category= for a whole category.");
+
+        const matches = resolveActionRef(name, graph);
+        if (matches.length === 0) {
+          const suggestions = suggestActions(name, graph);
+          throw new Error(
+            `Unknown action '${name}'.`
+            + (suggestions.length ? ` Closest: ${suggestions.join(", ")}.` : "")
+            + " project(search_tools) searches by intent when the name is not known.",
+          );
+        }
+        const schemas = matches.map(({ tool, action }) => actionSchema(tool, action));
+        // One match is the common case, and returning it bare keeps the shape
+        // an agent has to read as small as the question it asked.
+        return schemas.length === 1
+          ? schemas[0]
+          : {
+              name,
+              matchCount: schemas.length,
+              hint: `'${name}' is provided by ${schemas.length} categories. Qualify it as '<tool>.${matches[0].action}' to get one.`,
+              matches: schemas,
+            };
+      },
+    },
     execute_python_report: {
       description: "Measurement for #704: reads this session's execute_python calls and, for each, runs its taskSummary back through search_tools to flag calls that OVERLAPPED an existing dedicated action ('you used Python for X, but tool Y does X'). Returns totalCalls, overlapping[] and an overlapRate. Params: none (#704)",
       handler: async (ctx) => {
@@ -988,6 +1047,8 @@ export const projectTool: ToolDef = categoryTool(
     filter: z.string().optional().describe("For list_loaded_modules: case-insensitive name substring (#689)"),
     loadedOnly: z.boolean().optional().describe("For list_loaded_modules: only loaded modules (#689)"),
     limit: z.number().optional().describe("For search_tools: max results (default 20) (#704)"),
+    name: z.string().optional().describe("describe_action: the action to describe, as 'tool.action' or a bare action name"),
+    category: z.string().optional().describe("describe_action: return every action of this category instead of one action"),
     extensions: z.union([z.string(), z.array(z.string())]).optional().describe("For list_files: extension filter (#608)"),
     recursive: z.boolean().optional().describe("For list_files: recurse into subdirectories (#608)"),
     directory: z.string().optional().describe("For search_cpp: subdirectory"),
