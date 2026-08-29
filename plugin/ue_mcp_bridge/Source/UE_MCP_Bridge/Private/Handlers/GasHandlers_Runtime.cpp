@@ -1110,6 +1110,22 @@ TSharedPtr<FJsonValue> FGasHandlers::TraceAbilityActivation(const TSharedPtr<FJs
 	// a guess.
 	FGameplayTagContainer RelevantTags;
 	const FGameplayAbilityActorInfo* ActorInfo = ASC->AbilityActorInfo.Get();
+
+	// 3a. The ASC has to have been initialised before anything can activate.
+	//     An actor spawned into the editor world never ran InitAbilityActorInfo,
+	//     because there is no BeginPlay in a world that has not begun play, so
+	//     CanActivateAbility refuses with no tag to point at. Without this the
+	//     result read "wouldActivate: false, blockedBy: []", which is the exact
+	//     self-contradiction this action exists to stop a caller hitting.
+	const bool bAscInitialised = ActorInfo != nullptr
+		&& ActorInfo->OwnerActor.IsValid()
+		&& ActorInfo->AvatarActor.IsValid();
+	if (!bAscInitialised)
+	{
+		Block(TEXT("the ASC has no valid actor info: InitAbilityActorInfo has not run. "
+				   "In PIE that happens at BeginPlay; in the editor world call gas(init_asc) first."));
+	}
+	Result->SetBoolField(TEXT("ascInitialized"), bAscInitialised);
 	const bool bCanActivate = Ability->CanActivateAbility(
 		Spec->Handle,
 		ActorInfo,
@@ -1150,6 +1166,15 @@ TSharedPtr<FJsonValue> FGasHandlers::TraceAbilityActivation(const TSharedPtr<FJs
 		Block(FString::Printf(
 			TEXT("cost not met%s."),
 			CostEffect ? *FString::Printf(TEXT(" (%s)"), *CostEffect->GetClass()->GetName()) : TEXT("")));
+	}
+
+	// A verdict of "will not activate" with an empty reason list is worse than
+	// no answer, so the last resort names itself as the last resort.
+	if (!bCanActivate && Blockers.Num() == 0)
+	{
+		Block(TEXT("CanActivateAbility refused without reporting a reason. The remaining "
+				   "explanation is the ability's own CanActivateAbility override, or a "
+				   "Blueprint-side check inside it."));
 	}
 
 	Result->SetBoolField(TEXT("wouldActivate"), bCanActivate && Blockers.Num() == 0);
