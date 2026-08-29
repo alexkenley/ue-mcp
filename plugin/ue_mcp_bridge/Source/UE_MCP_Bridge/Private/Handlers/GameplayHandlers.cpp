@@ -124,6 +124,22 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("remove_imc_mapping"), &RemoveImcMapping);
 	Registry.RegisterHandler(TEXT("set_imc_mapping_key"), &SetImcMappingKey);
 	Registry.RegisterHandler(TEXT("set_imc_mapping_action"), &SetImcMappingAction);
+	// V11 Enhanced Input depth: the read half authoring never had, the
+	// action's own instanced trigger/modifier arrays, live apply/remove of a
+	// mapping context, the live action value, and the audit.
+	Registry.RegisterHandler(TEXT("read_input_action"), &ReadInputAction);
+	Registry.RegisterHandler(TEXT("set_action_triggers"), &SetActionTriggers);
+	Registry.RegisterHandler(TEXT("apply_mapping_context"), &ApplyMappingContext);
+	Registry.RegisterHandler(TEXT("remove_mapping_context"), &RemoveMappingContext);
+	Registry.RegisterHandler(TEXT("get_action_value"), &GetActionValue);
+	Registry.RegisterHandler(TEXT("validate_input"), &ValidateInput);
+	// T18 Mass Entity and Zone Graph. ensure_mass_entity_config and
+	// read_mass_entity_config already ship from MassHandlers.cpp.
+	Registry.RegisterHandler(TEXT("list_mass_types"), &ListMassTypes);
+	Registry.RegisterHandler(TEXT("remove_mass_trait"), &RemoveMassTrait);
+	Registry.RegisterHandler(TEXT("reorder_mass_traits"), &ReorderMassTraits);
+	Registry.RegisterHandler(TEXT("validate_mass_entity_config"), &ValidateMassEntityConfig);
+	Registry.RegisterHandler(TEXT("query_zone_graph"), &QueryZoneGraph);
 	Registry.RegisterHandler(TEXT("create_blackboard"), &CreateBlackboard);
 	Registry.RegisterHandler(TEXT("create_behavior_tree"), &CreateBehaviorTree);
 	Registry.RegisterHandler(TEXT("create_eqs_query"), &CreateEqsQuery);

@@ -111,6 +111,32 @@ private:
 	static TSharedPtr<FJsonValue> RemoveImcMapping(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetImcMappingKey(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetImcMappingAction(const TSharedPtr<FJsonObject>& Params);
+
+	// Enhanced Input depth (V11), in GameplayHandlers_Input.cpp. No typed
+	// setters for ValueType, the consumption flags, AccumulationBehavior or
+	// any tunable on an existing trigger/modifier: those are UPROPERTYs and
+	// read_input_action returns the objectPath editor(set_property) writes at.
+	// set_action_triggers earns its place because the ACTION's own Triggers
+	// and Modifiers are Instanced arrays, and the JSON property setter can
+	// only assign an object it can LOAD FROM A PATH, never mint one.
+	static TSharedPtr<FJsonValue> ReadInputAction(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SetActionTriggers(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ApplyMappingContext(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveMappingContext(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> GetActionValue(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ValidateInput(const TSharedPtr<FJsonObject>& Params);
+
+	// Mass Entity trait-list CRUD and Zone Graph lane queries (T18), in
+	// GameplayHandlers_Mass.cpp. Creation and trait authoring already ship in
+	// MassHandlers.cpp (ensure_mass_entity_config / read_mass_entity_config);
+	// these are the removal, reorder, discovery, audit and query halves that
+	// no property write can reach. Mass and ZoneGraph classes are resolved by
+	// reflection so the bridge still loads where those plugins are off.
+	static TSharedPtr<FJsonValue> ListMassTypes(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveMassTrait(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ReorderMassTraits(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ValidateMassEntityConfig(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> QueryZoneGraph(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> CreateBlackboard(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> CreateBehaviorTree(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> CreateEqsQuery(const TSharedPtr<FJsonObject>& Params);
