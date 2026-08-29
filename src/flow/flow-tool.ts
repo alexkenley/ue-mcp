@@ -12,6 +12,7 @@ import type {
 import type { FlowContext } from "./context.js";
 import type { FlowConfig } from "./schema.js";
 import type { ToolDef, ToolContext } from "../types.js";
+import { actionEnum } from "../types.js";
 import {
   takeSnapshot,
   restoreSnapshot,
@@ -76,7 +77,7 @@ export function createFlowTool(
       `rollback_on_failure: When true, rollback records from completed steps are invoked ` +
       `in reverse order if a subsequent step fails.`,
     schema: {
-      action: z.enum(["run", "plan", "list"]).describe("Action to perform"),
+      action: actionEnum(["run", "plan", "list"]),
       flowName: z.string().optional().describe("Flow name from ue-mcp.yml"),
       skip: z.array(z.string()).optional().describe("Step names or numbers to skip"),
       params: z.record(z.unknown()).optional().describe("Runtime options merged into every step's options (highest priority)"),

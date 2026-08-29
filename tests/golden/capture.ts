@@ -210,9 +210,17 @@ function byCodeUnit(a: string, b: string): number {
  */
 function actionEnumOf(tool: GoldenTool): string[] | null {
   const schema = tool.inputSchema as
-    | { properties?: { action?: { enum?: unknown } } }
+    | { properties?: { action?: { enum?: unknown; anyOf?: Array<{ enum?: unknown }> } } }
     | undefined;
-  const values = schema?.properties?.action?.enum;
+  const action = schema?.properties?.action;
+  // `action` is advertised as an enum but parsed as a string, so its schema is
+  // an anyOf of the enum and a bare string. The enum is still the thing this
+  // file canonicalises; it just sits one level down. Reading only the top
+  // level silently returned null for every tool, which turned the enriched-
+  // action sort into a no-op without failing anything that said so.
+  const values = Array.isArray(action?.enum)
+    ? action.enum
+    : action?.anyOf?.find((branch) => Array.isArray(branch.enum))?.enum;
   if (!Array.isArray(values)) return null;
   if (!values.every((v) => typeof v === "string")) return null;
   return values as string[];

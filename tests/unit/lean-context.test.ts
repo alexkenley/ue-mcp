@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { z } from "zod";
-import { categoryTool, bp, type ToolDef, type ToolContext } from "../../src/types.js";
+import { actionEnumValues, categoryTool, bp, type ToolDef, type ToolContext } from "../../src/types.js";
 import {
   resolveContextStrategy,
   splitDescription,
@@ -98,7 +98,7 @@ describe("applyLeanContext", () => {
     const bpTool = leaned.find((t) => t.name === "blueprint")!;
     expect(Object.keys(bpTool.actions)).toEqual(["create", "add_node", "describe"]);
     // The action enum must include the injected describe so it validates.
-    const enumValues = (bpTool.schema.action as z.ZodEnum<[string, ...string[]]>).options;
+    const enumValues = actionEnumValues(bpTool.schema.action);
     expect(enumValues).toContain("describe");
   });
 

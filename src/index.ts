@@ -49,6 +49,7 @@ import * as path from "node:path";
 import yaml from "js-yaml";
 
 import { ALL_TOOLS, setLiveToolGraph } from "./tools.js";
+import { nearestActions } from "./action-schema.js";
 import { enrichToolsWithEpicCatalog, type EpicCatalog } from "./epic-enrich.js";
 import { checkPluginFreshness } from "./plugin-freshness.js";
 import { saveCatalogCache, loadCatalogCache, loadBakedCatalog } from "./epic-cache.js";
@@ -555,6 +556,33 @@ async function main() {
       if (refusal) {
         return {
           content: withUpgradeNotice([{ type: "text" as const, text: `Error [NOT_FOUND]: ${refusal}` }]),
+          isError: true,
+        };
+      }
+
+      // An action this registry does not have, on a server driving one editor.
+      //
+      // `action` is advertised as an enum but parsed as a string, because a
+      // strict enum made the MCP layer reject a typo with the serialized zod
+      // issue - the full options array, every action named twice, about 8KB on
+      // a large category. Parsing it loosely moves the refusal here, where the
+      // answer can be the two spellings the caller probably meant. Without
+      // this, a typo reaches flowkit's registry and comes back as a list of
+      // .ts paths it tried to load the action from, which is worse than what
+      // it replaced.
+      if (!sessionRegistry.listRegistered().includes(taskName)) {
+        const available = Object.keys(tool.actions);
+        const close = nearestActions(action, available);
+        return {
+          content: withUpgradeNotice([
+            {
+              type: "text" as const,
+              text: `Error [NOT_FOUND]: Unknown action '${action}' on '${tool.name}'.`
+                + (close.length ? ` Did you mean: ${close.join(", ")}?` : "")
+                + ` ${available.length} actions available - project(action="describe_action", category="${tool.name}")`
+                + ` lists them with their parameters, and project(action="search_tools") searches by intent.`,
+            },
+          ]),
           isError: true,
         };
       }

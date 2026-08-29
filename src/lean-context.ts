@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { categoryTool, takeTimeout, type ActionSpec, type ToolDef } from "./types.js";
+import { actionEnum, categoryTool, takeTimeout, type ActionSpec, type ToolDef } from "./types.js";
 import { McpError, ErrorCode } from "./errors.js";
 
 /**
@@ -81,7 +81,7 @@ function leanTool(tool: ToolDef): ToolDef {
     actions,
     schema: {
       ...tool.schema,
-      action: z.enum(actionNames).describe("Action to perform"),
+      action: actionEnum(actionNames),
     },
   };
 }
