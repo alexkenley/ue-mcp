@@ -2,6 +2,7 @@
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
 #include "HandlerAssetCreate.h"
+#include "HandlerPagination.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"
@@ -45,6 +46,8 @@ void FReflectionHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("is_module_loaded"), &IsModuleLoaded);
 	Registry.RegisterHandler(TEXT("list_loaded_modules"), &ListLoadedModules);
 	Registry.RegisterHandler(TEXT("inspect_save_game"), &InspectSaveGame);
+	// T1: per-instance writable schema (ReflectionHandlers_Schema.cpp).
+	Registry.RegisterHandler(TEXT("reflect_instance"), &ReflectInstance);
 }
 
 // #689: report whether a UClass is currently loaded, and (separately) whether
@@ -113,10 +116,21 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ListLoadedModules(const TSharedPtr<F
 	const FString Filter = OptionalString(Params, TEXT("filter"));
 	const bool bLoadedOnly = OptionalBool(Params, TEXT("loadedOnly"), false);
 
+	// T3: paged. A project with its plugins enabled reports several hundred
+	// modules, and the whole list is rarely what the caller wanted.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_loaded_modules|filter=%s|loadedOnly=%d"), *Filter, bLoadedOnly ? 1 : 0),
+			/*DefaultLimit*/ 500, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
+
 	TArray<FModuleStatus> Statuses;
 	FModuleManager::Get().QueryModules(Statuses);
 
-	TArray<TSharedPtr<FJsonValue>> Out;
+	TArray<MCPPagination::FPageRow> Rows;
 	int32 LoadedCount = 0;
 	for (const FModuleStatus& S : Statuses)
 	{
@@ -127,14 +141,15 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ListLoadedModules(const TSharedPtr<F
 		E->SetStringField(TEXT("name"), S.Name);
 		E->SetBoolField(TEXT("loaded"), S.bIsLoaded);
 		E->SetBoolField(TEXT("gameModule"), S.bIsGameModule);
-		Out.Add(MakeShared<FJsonValueObject>(E));
+		// The module name is the page anchor: unique, and stable across two
+		// enumerations even when modules load in between.
+		Rows.Add({ S.Name, MakeShared<FJsonValueObject>(E) });
 	}
 
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("modules"), Out);
-	Result->SetNumberField(TEXT("count"), Out.Num());
 	Result->SetNumberField(TEXT("totalLoaded"), LoadedCount);
 	Result->SetNumberField(TEXT("totalModules"), Statuses.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("modules"), Result);
 	return MCPResult(Result);
 }
 
@@ -550,8 +565,17 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ListClasses(const TSharedPtr<FJsonOb
 {
 	FString ParentFilter = OptionalString(Params, TEXT("parentFilter"));
 
-	int32 Limit = 100;
-	Params->TryGetNumberField(TEXT("limit"), Limit);
+	// T3: paged. This used to stop at `limit` matches and say nothing about
+	// what it had cut, so a caller filtering on Actor read the first 100
+	// classes as if they were all of them.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_classes|parentFilter=%s"), *ParentFilter),
+			/*DefaultLimit*/ 100, /*MaxLimit*/ 1000, Page))
+	{
+		return Err;
+	}
 
 	auto Result = MCPSuccess();
 
@@ -563,7 +587,7 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ListClasses(const TSharedPtr<FJsonOb
 			return MCPClassNotFoundError(ParentFilter, TEXT("parentFilter"));
 		}
 
-		TArray<TSharedPtr<FJsonValue>> ClassesArray;
+		TArray<MCPPagination::FPageRow> Rows;
 		for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
 		{
 			UClass* Class = *ClassIt;
@@ -571,20 +595,25 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ListClasses(const TSharedPtr<FJsonOb
 			{
 				TSharedPtr<FJsonObject> ClassObj = MakeShared<FJsonObject>();
 				ClassObj->SetStringField(TEXT("name"), Class->GetName());
+				ClassObj->SetStringField(TEXT("path"), Class->GetPathName());
 				if (Class->GetSuperClass())
 				{
 					ClassObj->SetStringField(TEXT("parent"), Class->GetSuperClass()->GetName());
 				}
-				ClassesArray.Add(MakeShared<FJsonValueObject>(ClassObj));
-				if (ClassesArray.Num() >= Limit)
-				{
-					break;
-				}
+				// The class PATH is the page anchor, not the short name: two
+				// modules may each define a class called Settings, and a page
+				// boundary has to name exactly one of them.
+				Rows.Add({ Class->GetPathName(), MakeShared<FJsonValueObject>(ClassObj) });
 			}
 		}
+		// TObjectIterator walks the object hash, whose order is not a contract,
+		// so the rows are sorted before paging. Without it the same page can
+		// come back in a different order between two calls, and the anchor
+		// would report a change that is only the enumeration reshuffling.
+		Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+			{ return A.Id < B.Id; });
 		Result->SetStringField(TEXT("parentFilter"), ParentFilter);
-		Result->SetArrayField(TEXT("classes"), ClassesArray);
-		Result->SetNumberField(TEXT("count"), ClassesArray.Num());
+		MCPPagination::EmitPage(Page, Rows, TEXT("classes"), Result);
 	}
 	else
 	{
@@ -601,7 +630,7 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ListClasses(const TSharedPtr<FJsonOb
 			TEXT("LocalPlayerSubsystem"),
 		};
 
-		TArray<TSharedPtr<FJsonValue>> ClassesArray;
+		TArray<MCPPagination::FPageRow> Rows;
 		for (const FString& ClassName : CommonClasses)
 		{
 			UClass* Class = FindClass(ClassName);
@@ -609,16 +638,19 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ListClasses(const TSharedPtr<FJsonOb
 			{
 				TSharedPtr<FJsonObject> ClassObj = MakeShared<FJsonObject>();
 				ClassObj->SetStringField(TEXT("name"), Class->GetName());
+				ClassObj->SetStringField(TEXT("path"), Class->GetPathName());
 				if (Class->GetSuperClass())
 				{
 					ClassObj->SetStringField(TEXT("parent"), Class->GetSuperClass()->GetName());
 				}
-				ClassesArray.Add(MakeShared<FJsonValueObject>(ClassObj));
+				Rows.Add({ Class->GetPathName(), MakeShared<FJsonValueObject>(ClassObj) });
 			}
 		}
+		// Authored order, so this list is deliberately NOT sorted: it is a
+		// curated starting point rather than an enumeration, and alphabetising
+		// it would bury Actor under AnimInstance.
 		Result->SetStringField(TEXT("note"), TEXT("Showing common base classes. Use parentFilter to find derived classes."));
-		Result->SetArrayField(TEXT("classes"), ClassesArray);
-		Result->SetNumberField(TEXT("count"), ClassesArray.Num());
+		MCPPagination::EmitPage(Page, Rows, TEXT("classes"), Result);
 	}
 
 	return MCPResult(Result);
@@ -628,29 +660,47 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ListGameplayTags(const TSharedPtr<FJ
 {
 	FString FilterPrefix = OptionalString(Params, TEXT("filter"));
 
+	// T3: paged. A project that has adopted gameplay tags seriously carries
+	// thousands of them, and the unpaged list was the largest read on this
+	// category.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_gameplay_tags|filter=%s"), *FilterPrefix),
+			/*DefaultLimit*/ 500, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
+
 	auto Result = MCPSuccess();
 
 	UGameplayTagsManager& TagsManager = UGameplayTagsManager::Get();
 	FGameplayTagContainer AllTags;
 	TagsManager.RequestAllGameplayTags(AllTags, false);
 
-	TArray<TSharedPtr<FJsonValue>> TagsArray;
+	TArray<FString> TagStrings;
 	for (const FGameplayTag& Tag : AllTags)
 	{
 		FString TagString = Tag.ToString();
 		if (FilterPrefix.IsEmpty() || TagString.StartsWith(FilterPrefix))
 		{
-			TagsArray.Add(MakeShared<FJsonValueString>(TagString));
+			TagStrings.Add(MoveTemp(TagString));
 		}
 	}
+	// Sorted before paging, as it always was: the tag container enumerates in
+	// registration order, which moves when a tag is added, and a page anchor
+	// needs a stable sequence to resume into.
+	TagStrings.Sort();
 
-	TagsArray.Sort([](const TSharedPtr<FJsonValue>& A, const TSharedPtr<FJsonValue>& B) {
-		return A->AsString() < B->AsString();
-	});
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(TagStrings.Num());
+	for (const FString& TagString : TagStrings)
+	{
+		Rows.Add({ TagString, MakeShared<FJsonValueString>(TagString) });
+	}
 
 	Result->SetStringField(TEXT("filter"), FilterPrefix.IsEmpty() ? TEXT("(all)") : FilterPrefix);
-	Result->SetArrayField(TEXT("tags"), TagsArray);
-	Result->SetNumberField(TEXT("count"), TagsArray.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("tags"), Result);
 
 	return MCPResult(Result);
 }
