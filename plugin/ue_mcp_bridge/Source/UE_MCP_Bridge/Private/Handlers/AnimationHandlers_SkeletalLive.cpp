@@ -413,10 +413,22 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RebindLeaderPose(const TSharedPtr<FJs
 	if (!Body) return MCPError(TEXT("Could not resolve a body SkeletalMeshComponent"));
 
 	int32 Rebound = 0;
+	int32 AlreadyBoundToBody = 0;
 	TArray<TSharedPtr<FJsonValue>> Bound;
+	// What each component was following before, reported so a caller can see
+	// what the rebind displaced. It is not a rollback payload: no action points
+	// a component at an arbitrary leader or clears one.
+	TArray<TSharedPtr<FJsonValue>> PreviousLeaders;
 	for (USkeletalMeshComponent* C : Comps)
 	{
 		if (C == Body) continue;
+		const USkinnedMeshComponent* PrevLeader = C->LeaderPoseComponent.Get();
+		if (PrevLeader == Body) ++AlreadyBoundToBody;
+		TSharedPtr<FJsonObject> Prev = MakeShared<FJsonObject>();
+		Prev->SetStringField(TEXT("component"), C->GetName());
+		Prev->SetStringField(TEXT("previousLeader"), PrevLeader ? PrevLeader->GetName() : FString());
+		PreviousLeaders.Add(MakeShared<FJsonValueObject>(Prev));
+
 		C->SetLeaderPoseComponent(nullptr, /*bForceUpdate*/ true);
 		C->SetLeaderPoseComponent(Body, /*bForceUpdate*/ true);
 		Bound.Add(MakeShared<FJsonValueString>(C->GetName()));
@@ -425,11 +437,18 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RebindLeaderPose(const TSharedPtr<FJs
 
 	auto Result = MCPSuccess();
 	MCPSetUpdated(Result);
+	Result->SetBoolField(TEXT("unchanged"), Rebound > 0 && AlreadyBoundToBody == Rebound);
 	Result->SetStringField(TEXT("actorLabel"), ActorLabel);
 	Result->SetStringField(TEXT("actorPath"), Actor->GetPathName());
 	Result->SetStringField(TEXT("body"), Body->GetName());
 	Result->SetNumberField(TEXT("rebound"), Rebound);
+	Result->SetNumberField(TEXT("alreadyBoundToBody"), AlreadyBoundToBody);
 	Result->SetArrayField(TEXT("components"), Bound);
+	Result->SetArrayField(TEXT("previousLeaders"), PreviousLeaders);
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("This points every other skeletal mesh component at one body component. No action sets a component's leader pose to an arbitrary component or clears one, so the previous bindings listed in previousLeaders cannot be replayed. ")
+		TEXT("The binding is live component state on the spawned actor rather than saved asset data, so it is rebuilt from the actor's construction when the world reloads."));
 	return MCPResult(Result);
 }
 
