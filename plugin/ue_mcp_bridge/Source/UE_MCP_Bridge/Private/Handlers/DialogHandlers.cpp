@@ -1,11 +1,21 @@
 // Dialog policy and dialog answering.
 //
+// THE ONLY BUTTON THIS PLUGIN EVER PRESSES IS ONE A CALLER NAMED.
+//
+// A modal dialog is a question for a person. Nothing in this module arms a
+// policy of its own, and nothing invents an answer so that a request can carry
+// on: when a dialog goes up with no policy armed for it, it stays up, the
+// status snapshot publishes it, and list_dialogs reports its full text and
+// every button so somebody can read the question and press a button with
+// respond_to_dialog. A caller who genuinely wants a prompt answered without
+// seeing it arms set_dialog_policy for it in advance, which is their decision
+// and is recorded as such.
+//
 // THERE ARE TWO KINDS OF MODAL AND ONLY ONE OF THEM IS A MESSAGE DIALOG.
 //
 // FMessageDialog::Open routes through FCoreDelegates::ModalMessageDialog when
-// something is bound to it, so HandleModalDialog below can answer those without
-// a window ever reaching the screen. That covers "already exists", "Overwrite?"
-// and the other FMessageDialog prompts.
+// something is bound to it, so HandleModalDialog below can apply an armed
+// policy to those without a window ever reaching the screen.
 //
 // It covers nothing else. The editor's own modals are ordinary Slate windows
 // shown with FSlateApplication::AddModalWindow, and they never touch that
@@ -15,12 +25,13 @@
 // (Editor/UnrealEd/Public/FileHelpers.h), and its buttons are Save Selected /
 // Don't Save / Cancel. None of those are EAppReturnType values, and the delegate
 // is never called, so a policy armed against it could never fire no matter how
-// well its pattern matched. An automated stop therefore hung on it every time,
-// and answering it by hand with respond_to_dialog was the only way out.
+// well its pattern matched, and a caller was told their policy was armed while
+// nothing could ever act on it.
 //
 // ApplyPolicyToActiveModal is the missing half: it presses a real button on a
 // real modal window, from Slate's modal-loop tick, which keeps running while
-// the game thread is parked inside the modal loop.
+// the game thread is parked inside the modal loop. It runs only for a policy a
+// caller armed, because that is the only kind there is.
 
 #include "DialogHandlers.h"
 #include "UE_MCP_BridgeModule.h"
@@ -28,7 +39,6 @@
 #include "HandlerUtils.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/MessageDialog.h"     // #603 re-show real dialog
-#include "GameThreadExecutor.h"     // #603 IsHandlerInFlight
 #include "GenericPlatform/GenericPlatformMisc.h" // EAppMsgCategory
 #include "HAL/PlatformTime.h"
 #include "Framework/Application/SlateApplication.h"
@@ -171,8 +181,9 @@ void FDialogHandlers::InstallDialogHook()
 	}
 
 	// UE 5.7 routes FMessageDialog::Open through FCoreDelegates::ModalMessageDialog
-	// when bound. Bind our handler so SetDialogPolicy can auto-answer "save changes?",
-	// "overwrite?", and other prompts that would otherwise block the editor.
+	// when bound. Bind our handler so a policy a caller armed with
+	// set_dialog_policy can answer the prompt they armed it for. A prompt nobody
+	// armed anything for is handed straight back to the real dialog.
 	//
 	// This delegate is only half the coverage. Slate modal WINDOWS never reach
 	// it; ApplyPolicyToActiveModal answers those, driven from the modal-loop
@@ -200,15 +211,6 @@ void FDialogHandlers::RemoveDialogHook()
 EAppReturnType::Type FDialogHandlers::HandleModalDialogV2(EAppMsgCategory /*Category*/, EAppMsgType::Type MsgType, const FText& Text, const FText& Title)
 {
 	return HandleModalDialog(MsgType, Text, Title);
-}
-
-void FDialogHandlers::AddDefaultPolicy(const FString& Pattern, EAppReturnType::Type Response)
-{
-	FDialogPolicy Policy;
-	Policy.Pattern = Pattern;
-	Policy.Response = Response;
-	Policy.bExplicit = false;
-	Policies.Add(Policy);
 }
 
 auto FDialogHandlers::FindMatchingPolicy(const FString& Title, const FString& Message) -> const FDialogPolicy*
@@ -316,24 +318,10 @@ bool FDialogHandlers::ApplyPolicyToActiveModal()
 		return false;
 	}
 
-	// A policy a caller armed applies to any modal, because the caller asked
-	// for it. The module's own safety nets are narrower on this path: they were
-	// written to stop a BRIDGE request wedging the game thread, and pressing
-	// "Don't Save" on a prompt a human raised by closing their own editor would
-	// throw that person's work away without being asked. The FMessageDialog
-	// path keeps its existing wider contract; only this one is gated.
-	if (!Policy->bExplicit && !FMCPGameThreadExecutor::IsHandlerInFlight())
-	{
-		if (WindowId != LastDeclinedWindow)
-		{
-			LastDeclinedWindow = WindowId;
-			UE_LOG(LogMCPBridge, Log,
-				TEXT("[UE-MCP] Modal '%s' matches the built-in safety net '%s' but no bridge request is in flight, so it is left for the user. Arm it explicitly with editor(set_dialog_policy) to have the bridge answer it."),
-				*Title, *Policy->Pattern);
-		}
-		return false;
-	}
-
+	// Every policy in the list was armed by a caller through set_dialog_policy,
+	// so a match here is somebody's standing instruction being carried out.
+	// Nothing else can put a policy in the list, which is what keeps this from
+	// pressing a button on a dialog nobody asked about.
 	FString Reason;
 	const int32 Index = ResolveButtonForPolicy(*Policy, Buttons, Reason);
 	if (Index == INDEX_NONE)
@@ -370,56 +358,43 @@ EAppReturnType::Type FDialogHandlers::HandleModalDialog(EAppMsgType::Type MsgTyp
 	FString MessageStr = Text.ToString();
 	FString TitleStr = Title.ToString();
 
-	// Check policies for a match
+	// A policy a caller armed is a standing instruction, so it answers.
 	for (const FDialogPolicy& Policy : Policies)
 	{
+		if (Policy.Pattern.IsEmpty())
+		{
+			continue;
+		}
 		if (MessageStr.Contains(Policy.Pattern) || TitleStr.Contains(Policy.Pattern))
 		{
-			UE_LOG(LogMCPBridge, Log, TEXT("[UE-MCP] Dialog auto-responded: pattern='%s' title='%s' response=%s"),
+			UE_LOG(LogMCPBridge, Log, TEXT("[UE-MCP] Dialog answered by the policy a caller armed: pattern='%s' title='%s' response=%s"),
 				*Policy.Pattern, *TitleStr, *ResponseTypeToString(Policy.Response));
 			return Policy.Response;
 		}
 	}
 
-	// #603: No policy matched. If this modal was NOT raised by an in-flight
-	// bridge request, it belongs to the human (e.g. a Content Browser rename
-	// confirm) - synthesizing Cancel/No silently eats the user's action. Detach
-	// the hook momentarily and re-show the real dialog so the user can answer.
-	// The always-on safety-net policies above still auto-answer overwrite/save/
-	// shutdown prompts regardless of origin, so automation and editor-stop never hang.
-	if (!FMCPGameThreadExecutor::IsHandlerInFlight())
-	{
-		UE_LOG(LogMCPBridge, Log, TEXT("[UE-MCP] User-initiated dialog passed through (no bridge request in flight): title='%s'"), *TitleStr);
-		FCoreDelegates::ModalMessageDialog.Unbind();
-		const EAppReturnType::Type UserAnswer = FMessageDialog::Open(MsgType, Text, Title);
-		// Reattach for subsequent dialogs.
-		FCoreDelegates::ModalMessageDialog.BindStatic(&FDialogHandlers::HandleModalDialogV2);
-		return UserAnswer;
-	}
-
-	// Bridge-initiated dialog with no matching policy - synthesize a safe default
-	// so the in-flight request does not block forever.
-	UE_LOG(LogMCPBridge, Log, TEXT("[UE-MCP] Bridge dialog auto-defaulted (no policy match): title='%s' message='%s'"),
-		*TitleStr, *MessageStr.Left(200));
-
-	// Return the "default" response based on message type
-	switch (MsgType)
-	{
-	case EAppMsgType::Ok:
-		return EAppReturnType::Ok;
-	case EAppMsgType::YesNo:
-	case EAppMsgType::YesNoCancel:
-		return EAppReturnType::No;
-	case EAppMsgType::OkCancel:
-	case EAppMsgType::YesNoYesAllNoAll:
-	case EAppMsgType::YesNoYesAllNoAllCancel:
-	case EAppMsgType::YesNoYesAll:
-		return EAppReturnType::Cancel;
-	case EAppMsgType::CancelRetryContinue:
-		return EAppReturnType::Cancel;
-	default:
-		return EAppReturnType::No;
-	}
+	// Nothing a caller armed matches, so nobody has said how to answer this and
+	// this module does not get to decide. Detach the hook and re-show the real
+	// dialog.
+	//
+	// #603 did this only for a dialog the person at the keyboard raised, and
+	// SYNTHESIZED an answer for one a bridge request raised, so the request would
+	// not block. That synthesis was the bug in its purest form: on a save prompt
+	// the invented answer was "No", which discards, and the caller was told the
+	// request succeeded while a question they never saw had been answered for
+	// them. Blocking is the honest outcome. The dialog is now on screen, the
+	// status snapshot publishes its title and buttons, and editor(list_dialogs)
+	// and editor(respond_to_dialog) both run while the game thread is parked
+	// inside the modal loop, so the caller can read the exact question and press
+	// the button they choose.
+	UE_LOG(LogMCPBridge, Warning,
+		TEXT("[UE-MCP] Modal dialog raised with no policy armed for it, so it is left for a person to answer: title='%s' message='%s'. Read it with editor(list_dialogs) and answer it with editor(respond_to_dialog)."),
+		*TitleStr, *MessageStr);
+	FCoreDelegates::ModalMessageDialog.Unbind();
+	const EAppReturnType::Type UserAnswer = FMessageDialog::Open(MsgType, Text, Title);
+	// Reattach for subsequent dialogs.
+	FCoreDelegates::ModalMessageDialog.BindStatic(&FDialogHandlers::HandleModalDialogV2);
+	return UserAnswer;
 }
 
 TSharedPtr<FJsonValue> FDialogHandlers::SetDialogPolicy(const TSharedPtr<FJsonObject>& Params)
@@ -459,7 +434,7 @@ TSharedPtr<FJsonValue> FDialogHandlers::SetDialogPolicy(const TSharedPtr<FJsonOb
 	// Idempotency: an identical policy is already armed.
 	for (const FDialogPolicy& P : Policies)
 	{
-		if (P.Pattern == Pattern && P.Response == Response && P.ButtonLabel == ButtonLabel && P.bExplicit)
+		if (P.Pattern == Pattern && P.Response == Response && P.ButtonLabel == ButtonLabel)
 		{
 			auto Existed = MCPSuccess();
 			MCPSetExisted(Existed);
@@ -482,18 +457,21 @@ TSharedPtr<FJsonValue> FDialogHandlers::SetDialogPolicy(const TSharedPtr<FJsonOb
 	NewPolicy.Pattern = Pattern;
 	NewPolicy.Response = Response;
 	NewPolicy.ButtonLabel = ButtonLabel;
-	NewPolicy.bExplicit = true;
-	// Explicit policies go in front of the module's safety nets, and behind the
-	// explicit policies already armed. Matching is first-wins, so a caller who
-	// says what to do with "Save Content" must not lose to the built-in default
-	// for the same words, and two calls in a row must keep the order they were
-	// made in rather than reversing it.
-	int32 InsertAt = 0;
-	while (InsertAt < Policies.Num() && Policies[InsertAt].bExplicit)
-	{
-		++InsertAt;
-	}
-	Policies.Insert(NewPolicy, InsertAt);
+	// Appended, because matching is first-wins and every policy in the list was
+	// armed by a caller: two calls in a row must keep the order they were made
+	// in rather than reversing it.
+	Policies.Add(NewPolicy);
+
+	// Said out loud in the editor's own log, because from here on a prompt
+	// matching this pattern is answered and dismissed and the person at the
+	// keyboard never sees it. That is what the caller asked for, and it should
+	// leave a trace they can find afterwards.
+	const FString ButtonNote = ButtonLabel.IsEmpty()
+		? FString()
+		: FString::Printf(TEXT(" (button '%s')"), *ButtonLabel);
+	UE_LOG(LogMCPBridge, Warning,
+		TEXT("[UE-MCP] A caller armed a dialog policy: any dialog matching '%s' will be answered with '%s'%s and dismissed WITHOUT being shown. Clear it with editor(clear_dialog_policy)."),
+		*Pattern, *ResponseTypeToString(Response), *ButtonNote);
 
 	// Ensure hook is installed
 	if (!bHookInstalled)
@@ -556,8 +534,10 @@ TSharedPtr<FJsonValue> FDialogHandlers::GetDialogPolicy(const TSharedPtr<FJsonOb
 		P->SetStringField(TEXT("response"), ResponseTypeToString(Policy.Response));
 		P->SetStringField(TEXT("buttonLabel"), Policy.ButtonLabel);
 		// Which policies answer a Slate modal that no bridge request raised.
-		P->SetStringField(TEXT("source"), Policy.bExplicit ? TEXT("caller") : TEXT("built-in safety net"));
-		P->SetBoolField(TEXT("answersUserRaisedModals"), Policy.bExplicit);
+		// Constant on purpose. A policy can only get into this list through
+		// set_dialog_policy, so there is no other source to report; the module
+		// arms none of its own.
+		P->SetStringField(TEXT("source"), TEXT("caller"));
 		PoliciesArray.Add(MakeShared<FJsonValueObject>(P));
 	}
 
@@ -680,17 +660,45 @@ TSharedPtr<FJsonValue> FDialogHandlers::ListDialogs(const TSharedPtr<FJsonObject
 	{
 		TSharedPtr<FJsonObject> DialogObj = MakeShared<FJsonObject>();
 		DialogObj->SetStringField(TEXT("title"), Title);
+		// THE FULL TEXT, never a prefix of it. This is how a person reads what
+		// the editor actually asked, and a question truncated mid-sentence is a
+		// question answered on incomplete information.
 		DialogObj->SetStringField(TEXT("message"), Message);
+		DialogObj->SetBoolField(TEXT("messageTruncated"), false);
 
+		// Every button, in the order Slate laid them out, each paired with the
+		// exact call that presses it. No button is marked recommended and none is
+		// ordered ahead of another: choosing is the caller's job, and this is the
+		// list they choose from.
 		TArray<TSharedPtr<FJsonValue>> ButtonsJsonArray;
+		TArray<TSharedPtr<FJsonValue>> ChoicesJsonArray;
 		for (const FModalButton& Button : Buttons)
 		{
-			if (!Button.Label.IsEmpty())
+			if (Button.Label.IsEmpty())
 			{
-				ButtonsJsonArray.Add(MakeShared<FJsonValueString>(Button.Label));
+				continue;
 			}
+			ButtonsJsonArray.Add(MakeShared<FJsonValueString>(Button.Label));
+
+			TSharedPtr<FJsonObject> Choice = MakeShared<FJsonObject>();
+			Choice->SetStringField(TEXT("buttonLabel"), Button.Label);
+			// "Don't Save" carries an apostrophe, so a single-quoted literal
+			// would hand back a call that does not parse - on the exact button
+			// where getting it wrong costs the most.
+			const bool bHasApostrophe = Button.Label.Contains(TEXT("'")) || Button.Label.Contains(FString::Chr(TCHAR(0x2019)));
+			const FString RespondWith = bHasApostrophe
+				? FString::Printf(TEXT("editor(action='respond_to_dialog', buttonLabel=\"%s\")"), *Button.Label)
+				: FString::Printf(TEXT("editor(action='respond_to_dialog', buttonLabel='%s')"), *Button.Label);
+			Choice->SetStringField(TEXT("respondWith"), RespondWith);
+			ChoicesJsonArray.Add(MakeShared<FJsonValueObject>(Choice));
 		}
 		DialogObj->SetArrayField(TEXT("buttons"), ButtonsJsonArray);
+		DialogObj->SetArrayField(TEXT("choices"), ChoicesJsonArray);
+		if (ChoicesJsonArray.Num() == 0)
+		{
+			DialogObj->SetStringField(TEXT("choicesNote"),
+				TEXT("This dialog exposes no button label this walk can read. editor(action='respond_to_dialog', action='close') destroys the window, which is not the same as answering it."));
+		}
 
 		// Why an armed policy is or is not clearing this dialog. Without it the
 		// caller sees a dialog, sees a matching policy, and has nothing that
@@ -700,7 +708,7 @@ TSharedPtr<FJsonValue> FDialogHandlers::ListDialogs(const TSharedPtr<FJsonObject
 		{
 			DialogObj->SetBoolField(TEXT("policyMatched"), false);
 			DialogObj->SetStringField(TEXT("policyNote"),
-				TEXT("No armed policy matches this dialog. Arm one with editor(set_dialog_policy) or answer it with editor(respond_to_dialog)."));
+				TEXT("No policy is armed for this dialog, and nothing will answer it on its own. Press one of the buttons above with editor(respond_to_dialog)."));
 		}
 		else
 		{
@@ -709,7 +717,7 @@ TSharedPtr<FJsonValue> FDialogHandlers::ListDialogs(const TSharedPtr<FJsonObject
 			DialogObj->SetBoolField(TEXT("policyMatched"), true);
 			DialogObj->SetStringField(TEXT("policyPattern"), Policy->Pattern);
 			DialogObj->SetStringField(TEXT("policyResponse"), ResponseTypeToString(Policy->Response));
-			DialogObj->SetStringField(TEXT("policySource"), Policy->bExplicit ? TEXT("caller") : TEXT("built-in safety net"));
+			DialogObj->SetStringField(TEXT("policySource"), TEXT("caller"));
 			if (Index != INDEX_NONE)
 			{
 				DialogObj->SetStringField(TEXT("policyWouldPress"), Buttons[Index].Label);
@@ -718,11 +726,6 @@ TSharedPtr<FJsonValue> FDialogHandlers::ListDialogs(const TSharedPtr<FJsonObject
 			{
 				DialogObj->SetStringField(TEXT("policyNote"),
 					FString::Printf(TEXT("The policy matches but presses nothing: %s"), *Reason));
-			}
-			if (!Policy->bExplicit && !FMCPGameThreadExecutor::IsHandlerInFlight())
-			{
-				DialogObj->SetStringField(TEXT("policyHeldBack"),
-					TEXT("This is a built-in safety net and no bridge request raised the dialog, so it is left for the user. Arm the same pattern with editor(set_dialog_policy) to have the bridge answer it."));
 			}
 		}
 

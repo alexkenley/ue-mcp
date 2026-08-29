@@ -17,7 +17,7 @@ import {
 } from "./engine-observer.js";
 import { findLiveInstanceRecord, isPidAlive, lockfileIsFromThisLaunch, resolveBridgeTarget } from "./editor-target.js";
 import { startProgress } from "./ui/progress.js";
-import type { ProgressFn } from "./types.js";
+import type { ElicitFn, ProgressFn } from "./types.js";
 
 // Process control is cross-platform: the editor binary path and the running-
 // process probe differ per OS, and stopping goes through the bridge (#790).
@@ -329,11 +329,20 @@ async function waitForEditorReady(
       return finish({ ready: false, elapsedSeconds: elapsed(), timeline, reason: "the editor crashed during startup", state: await readEngineState(projectPath ?? null) });
     }
     if (snapshot?.modal) {
+      // The whole question, not a summary of it. A startup that stops on a
+      // dialog stops because somebody has to read it and decide, and nothing
+      // here answers it for them.
+      const buttons = (snapshot.modal.buttons ?? []).filter((b) => b !== "");
       return finish({
         ready: false,
         elapsedSeconds: elapsed(),
         timeline,
-        reason: `blocked on dialog "${snapshot.modal.title}" [${(snapshot.modal.buttons ?? []).join(", ")}] - answer it with editor(respond_to_dialog)`,
+        reason: describeBlockingDialog({
+          title: snapshot.modal.title,
+          message: snapshot.modal.message ?? "",
+          buttons,
+          choices: buttons.map((label) => ({ buttonLabel: label, respondWith: respondCallFor(label) })),
+        }),
         state: await readEngineState(projectPath ?? null),
       });
     }
@@ -614,87 +623,290 @@ function uprojectInDir(projectDir?: string): string | null {
 }
 
 /**
- * Send one bridge call on a throwaway socket and report whether the handler
- * accepted it. A reply alone is not acceptance: an unregistered method answers
- * with a JSON-RPC error, and a handler that refuses answers with
- * `result.success === false`, both of which have to be told apart from a real
- * acknowledgement so the caller can decide what to do next.
+ * What one bridge call on a throwaway socket came back with.
+ *
+ * A reply alone is not acceptance, and the three ways a call can fail need
+ * telling apart: the socket never answered, the bridge answered with a
+ * JSON-RPC error (which is what an unregistered method does, so it is how an
+ * older plugin build announces itself), or the handler answered by refusing
+ * with `result.success === false`. The stop path decides something different
+ * in each case, and it needs the handler's own payload to say why.
  */
+interface BridgeReply {
+  /** The socket answered at all. */
+  answered: boolean;
+  /** JSON-RPC error: usually a method this plugin build does not register. */
+  methodError: boolean;
+  /** The handler answered with `success: false`. */
+  refused: boolean;
+  /** The handler's payload, when the reply carried a readable one. */
+  result: Record<string, unknown> | null;
+}
+
+function callBridgeOnce(
+  port: number,
+  method: string,
+  params: Record<string, unknown>,
+  host: string = bridgeHost(),
+): Promise<BridgeReply> {
+  return new Promise<BridgeReply>((resolve) => {
+    let settled = false;
+    // Same host the reachability probe uses. Probing one host and sending the
+    // quit to another is its own way of reaching an editor nobody addressed.
+    const ws = new WebSocket(`ws://${host}:${port}`);
+    const finish = (reply: BridgeReply) => {
+      if (settled) return;
+      settled = true;
+      try { ws.close(); } catch { /* ignore */ }
+      resolve(reply);
+    };
+    const silent: BridgeReply = { answered: false, methodError: false, refused: false, result: null };
+    const timer = setTimeout(() => finish(silent), 8000);
+    ws.on("open", () => ws.send(JSON.stringify({ id: "ue-mcp-stop", method, params })));
+    ws.on("message", (data: unknown) => {
+      clearTimeout(timer);
+      try {
+        const msg = JSON.parse(String(data)) as { error?: unknown; result?: Record<string, unknown> };
+        if (msg.error) return finish({ answered: true, methodError: true, refused: false, result: null });
+        const result = msg.result && typeof msg.result === "object" ? msg.result : null;
+        return finish({
+          answered: true,
+          methodError: false,
+          refused: result?.success === false,
+          result,
+        });
+      } catch {
+        // An unparseable reply still means the bridge is answering; treat it
+        // the same as it was treated before the native path existed.
+        return finish({ answered: true, methodError: false, refused: false, result: null });
+      }
+    });
+    ws.on("error", () => { clearTimeout(timer); finish(silent); });
+  });
+}
+
+/** The call went out and the handler accepted it. */
+function accepted(reply: BridgeReply): boolean {
+  return reply.answered && !reply.methodError && !reply.refused;
+}
+
 function sendOneBridgeCall(
   port: number,
   method: string,
   params: Record<string, unknown>,
   host: string = bridgeHost(),
 ): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    let settled = false;
-    // Same host the reachability probe uses. Probing one host and sending the
-    // quit to another is its own way of reaching an editor nobody addressed.
-    const ws = new WebSocket(`ws://${host}:${port}`);
-    const finish = (v: boolean) => {
-      if (settled) return;
-      settled = true;
-      try { ws.close(); } catch { /* ignore */ }
-      resolve(v);
-    };
-    const timer = setTimeout(() => finish(false), 8000);
-    ws.on("open", () => ws.send(JSON.stringify({ id: "ue-mcp-stop", method, params })));
-    ws.on("message", (data: unknown) => {
-      clearTimeout(timer);
-      try {
-        const msg = JSON.parse(String(data)) as { error?: unknown; result?: { success?: unknown } };
-        if (msg.error) return finish(false);
-        if (msg.result && msg.result.success === false) return finish(false);
-      } catch {
-        // An unparseable reply still means the bridge is answering; treat it
-        // the same as it was treated before the native path existed.
-      }
-      finish(true);
-    });
-    ws.on("error", () => { clearTimeout(timer); finish(false); });
-  });
+  return callBridgeOnce(port, method, params, host).then(accepted);
 }
 
 /**
- * Ask the editor to quit itself via the bridge. Prefers the native
- * `request_editor_shutdown` handler, which ends PIE first and closes only once
- * play has actually stopped. `requireClean` is false here because the caller
- * asked for a stop, not for a save gate; use editor(request_editor_shutdown)
- * directly to get the dirty-package refusal. Falls back to the Python route
- * for editors running a plugin build that predates the handler. Never touches
- * the OS process table.
+ * Package names out of a handler payload, whatever shape it uses.
+ *
+ * `request_editor_shutdown` reports plain strings under dirtyContentPackages /
+ * dirtyMapPackages; `list_dirty_packages` reports `{ package }` objects under
+ * content / maps. Both are read here so the fallback path for an older plugin
+ * build names the same packages as the native one.
  */
-async function requestEditorSelfQuit(port: number, host: string): Promise<boolean> {
-  if (await sendOneBridgeCall(port, "request_editor_shutdown", { requireClean: false, endPIE: true }, host)) return true;
+function collectPackageNames(result: Record<string, unknown> | null, keys: readonly string[]): string[] {
+  const names = new Set<string>();
+  for (const key of keys) {
+    const value = result?.[key];
+    if (!Array.isArray(value)) continue;
+    for (const entry of value) {
+      if (typeof entry === "string" && entry !== "") names.add(entry);
+      else if (entry && typeof entry === "object") {
+        const named = (entry as { package?: unknown }).package;
+        if (typeof named === "string" && named !== "") names.add(named);
+      }
+    }
+  }
+  return [...names].sort();
+}
+
+const SHUTDOWN_DIRTY_KEYS = ["dirtyContentPackages", "dirtyMapPackages"] as const;
+const LIST_DIRTY_KEYS = ["content", "maps"] as const;
+
+/**
+ * What is unsaved, asked of an editor whose plugin build has no
+ * `request_editor_shutdown`. Null means the question could not be answered at
+ * all, which is not the same as "nothing is dirty" and is never treated as it.
+ */
+async function readDirtyPackages(port: number, host: string): Promise<string[] | null> {
+  const reply = await callBridgeOnce(port, "list_dirty_packages", {}, host);
+  if (!reply.answered || reply.methodError || reply.refused || !reply.result) return null;
+  return collectPackageNames(reply.result, LIST_DIRTY_KEYS);
+}
+
+/**
+ * Ask the editor to quit itself via the bridge, through the native
+ * `request_editor_shutdown` handler, which is also the action a caller can
+ * reach directly. It ends PIE first, closes only once play has actually
+ * stopped, and with `requireClean` it refuses on a dirty package and names
+ * every one WITHOUT scheduling anything. That refusal is what stop_editor's
+ * default is built on: the same check, in the same handler, so the two actions
+ * cannot disagree about whether closing is safe.
+ *
+ * Returns the reply rather than a verdict, because the dirty-package list in
+ * the payload is the whole point of asking.
+ */
+function requestNativeShutdown(port: number, host: string, requireClean: boolean): Promise<BridgeReply> {
+  return callBridgeOnce(port, "request_editor_shutdown", { requireClean, endPIE: true }, host);
+}
+
+/**
+ * The quit for an editor whose plugin build predates the native handler. Never
+ * touches the OS process table.
+ */
+function requestPythonSelfQuit(port: number, host: string): Promise<boolean> {
   return sendOneBridgeCall(port, "execute_python", { code: EDITOR_SELF_QUIT_PY }, host);
 }
 
 /**
- * The save prompts a shutdown raises, and the answer this stop wants.
+ * A modal dialog blocking the editor, read straight out of the engine.
  *
- * Every one of these is armed EXPLICITLY before the quit goes out, and that is
- * load-bearing. The plugin ships the same patterns as built-in safety nets, but
- * a safety net only answers a Slate modal while a bridge request is in flight,
- * so that closing the editor by hand still prompts the human who did it. A stop
- * asked for over the bridge is not that case, and the shutdown prompt arrives
- * on a later tick with no request in flight, so the stop says out loud that it
- * owns the answer.
- *
- * `response: "no"` rather than a literal button label: the plugin maps the
- * keyword onto the labels a dialog actually offers, so "no" reaches the
- * shutdown prompt's "Don't Save" button, and a dialog that spells it
- * differently still resolves. A literal label that misses presses nothing.
+ * `list_dialogs` is modal-safe, so it answers while the game thread is parked
+ * inside the modal loop, which is exactly when every other handler times out.
+ * The message is carried WHOLE: this is the text a person reads to decide, and
+ * a question cut off mid-sentence is a question answered on incomplete
+ * information.
  */
-const STOP_SAVE_PROMPT_PATTERNS = ["Save Content", "Save Changes", "Unsaved", "Untitled"] as const;
+export interface BlockingDialog {
+  title: string;
+  /** The complete message text, never truncated. */
+  message: string;
+  /** Every button label, in the order the dialog lays them out. */
+  buttons: string[];
+  /** Each button paired with the exact call that presses it. */
+  choices: { buttonLabel: string; respondWith: string }[];
+}
 
-async function armStopDialogPolicies(port: number, host: string): Promise<string[]> {
-  const armed: string[] = [];
-  for (const pattern of STOP_SAVE_PROMPT_PATTERNS) {
-    if (await sendOneBridgeCall(port, "set_dialog_policy", { pattern, response: "no" }, host)) {
-      armed.push(pattern);
+/**
+ * The exact call a caller copies to press one button.
+ *
+ * "Don't Save" carries an apostrophe, in the ASCII form or the typographic one
+ * depending on the build, so a single-quoted literal would hand back a call
+ * that does not parse - on the exact button where getting it wrong costs most.
+ */
+function respondCallFor(label: string): string {
+  return /['’]/.test(label)
+    ? `editor(action='respond_to_dialog', buttonLabel="${label}")`
+    : `editor(action='respond_to_dialog', buttonLabel='${label}')`;
+}
+
+/** The dialog blocking this editor, or null when nothing is. */
+async function readBlockingDialog(port: number, host: string): Promise<BlockingDialog | null> {
+  const reply = await callBridgeOnce(port, "list_dialogs", {}, host);
+  if (!accepted(reply) || !reply.result) return null;
+  const dialogs = reply.result.dialogs;
+  if (!Array.isArray(dialogs) || dialogs.length === 0) return null;
+
+  const first = dialogs[0] as Record<string, unknown>;
+  const buttons = Array.isArray(first.buttons)
+    ? first.buttons.filter((b): b is string => typeof b === "string" && b !== "")
+    : [];
+  const supplied = Array.isArray(first.choices) ? (first.choices as Record<string, unknown>[]) : [];
+  const choices = buttons.map((label) => {
+    const match = supplied.find((c) => c.buttonLabel === label);
+    return {
+      buttonLabel: label,
+      respondWith: typeof match?.respondWith === "string" ? match.respondWith : respondCallFor(label),
+    };
+  });
+  return {
+    title: typeof first.title === "string" ? first.title : "",
+    message: typeof first.message === "string" ? first.message : "",
+    buttons,
+    choices,
+  };
+}
+
+/**
+ * The dialog, in full, with the exact call for every button.
+ *
+ * Nothing here is truncated, ranked or recommended. Which button to press is
+ * the reader's decision and the report exists so they can make it from what the
+ * editor actually asked, rather than from a summary of it.
+ */
+export function describeBlockingDialog(dialog: BlockingDialog): string {
+  const lines = [
+    `A modal dialog is blocking the editor, so nothing was sent to it and nothing was answered for you.`,
+    "",
+    `Title: ${dialog.title}`,
+    "Message:",
+    dialog.message === "" ? "(the dialog carries no readable message text)" : dialog.message,
+    "",
+  ];
+  if (dialog.choices.length > 0) {
+    lines.push("Buttons, in the order the dialog lays them out. Press one:");
+    for (const [index, choice] of dialog.choices.entries()) {
+      lines.push(`  ${index + 1}. ${choice.buttonLabel}   ${choice.respondWith}`);
     }
+  } else {
+    lines.push(
+      "The dialog exposes no button label that can be read, so there is nothing to name. " +
+        "editor(action='respond_to_dialog', action='close') destroys the window, which is not the same as answering it.",
+    );
   }
-  return armed;
+  return lines.join("\n");
+}
+
+/**
+ * Put the dialog to the person, through MCP elicitation, and press whichever
+ * button they choose.
+ *
+ * This is the one path that ends with a button being pressed without a separate
+ * respond_to_dialog call, and it presses only what the user picked from the
+ * dialog's own labels, in a prompt carrying its full text. Declining leaves the
+ * dialog exactly where it is.
+ *
+ * Returns the label pressed, or null when nothing was.
+ */
+async function askUserToAnswerDialog(
+  port: number,
+  host: string,
+  dialog: BlockingDialog,
+  elicit: ElicitFn,
+): Promise<string | null> {
+  if (dialog.choices.length === 0) return null;
+
+  const LEAVE_OPEN = "Leave the dialog open";
+  let answer;
+  try {
+    answer = await elicit({
+      message: [
+        "Unreal Editor is blocked on a modal dialog and is waiting for an answer.",
+        "",
+        `Title: ${dialog.title}`,
+        dialog.message === "" ? "(no message text)" : dialog.message,
+        "",
+        "Choose the button to press. Nothing is pressed unless you choose it.",
+      ].join("\n"),
+      requestedSchema: {
+        type: "object",
+        properties: {
+          button: {
+            type: "string",
+            title: "Button",
+            description: "The dialog's own buttons, in the order it lays them out.",
+            enum: [...dialog.buttons, LEAVE_OPEN],
+          },
+        },
+        required: ["button"],
+      },
+    });
+  } catch {
+    // No elicitation UI, or the prompt failed. The dialog stays up and the
+    // report is what the caller gets.
+    return null;
+  }
+
+  if (answer.action !== "accept") return null;
+  const chosen = answer.content?.button;
+  if (typeof chosen !== "string" || chosen === LEAVE_OPEN) return null;
+  if (!dialog.buttons.includes(chosen)) return null;
+
+  const pressed = await callBridgeOnce(port, "respond_to_dialog", { buttonLabel: chosen }, host);
+  return accepted(pressed) ? chosen : null;
 }
 
 /**
@@ -702,28 +914,24 @@ async function armStopDialogPolicies(port: number, host: string): Promise<string
  *
  * A stop that times out used to say only "close it manually", which left the
  * caller to make two more calls (get_engine_state, then list_dialogs) to learn
- * something the bridge already knew. If a modal is up, name it and its buttons
- * and the exact call that answers it.
+ * something the bridge already knew. If a modal is up, the whole question goes
+ * in the report: title, the message in full, and the exact call for every
+ * button. Nothing is truncated and no button is recommended.
  */
 function blockedStopDetail(state: EngineState): string {
   const modal = state.snapshot?.modal;
-  if (modal) {
-    const buttons = (modal.buttons ?? []).filter((b) => b !== "");
-    // Which button to press is the caller's decision, so the buttons are listed
-    // and none is picked for them. Guessing here would be guessing about
-    // discarding somebody's unsaved work.
-    const suggestion =
-      buttons.length > 0
-        ? ` Press one with editor(action='respond_to_dialog', buttonLabel='<one of: ${buttons.join(" | ")}>'), ` +
-          `or arm it for next time with editor(action='set_dialog_policy', pattern='${modal.title}', buttonLabel='<the same>').`
-        : " It exposes no button this walk can read; editor(action='respond_to_dialog', action='close') destroys the window.";
-    return (
-      ` It is blocked on the modal "${modal.title}" [${buttons.length > 0 ? buttons.join(", ") : "no readable buttons"}]` +
-      (modal.message ? `: ${modal.message.replace(/\s+/g, " ").trim().slice(0, 300)}` : "") +
-      `.${suggestion}`
-    );
-  }
-  return ` ${state.summary}`;
+  if (!modal) return ` ${state.summary}`;
+
+  const buttons = (modal.buttons ?? []).filter((b) => b !== "");
+  return (
+    " " +
+    describeBlockingDialog({
+      title: modal.title,
+      message: modal.message ?? "",
+      buttons,
+      choices: buttons.map((label) => ({ buttonLabel: label, respondWith: respondCallFor(label) })),
+    })
+  );
 }
 
 /**
@@ -845,20 +1053,65 @@ export async function resolveOwnedEditor(
   };
 }
 
+export interface StopEditorResult {
+  success: boolean;
+  message: string;
+  state?: EngineState;
+  /** Why the stop refused, for a caller that would rather branch than parse. */
+  refusedReason?: "unsaved-work" | "blocking-dialog" | "unknown-dirty-state";
+  /** Every package that was dirty when the stop was asked for. */
+  dirtyPackages?: string[];
+  /** The dialog holding the editor, reported whole so a person can answer it. */
+  blockingDialog?: BlockingDialog;
+  /** Set when the user answered the dialog through an elicitation prompt. */
+  dialogAnsweredByUser?: string;
+}
+
+/**
+ * How the refusal reads. It names every dirty package and the ways forward,
+ * and it offers no flag that would discard them, because there is not one:
+ * losing unsaved work is not something this tool can be asked to do.
+ */
+function unsavedWorkRefusal(dirty: string[]): string {
+  return (
+    `Refusing to stop the editor: ${dirty.length} unsaved package${dirty.length === 1 ? " is" : "s are"} ` +
+    `still dirty and stopping would lose ${dirty.length === 1 ? "it" : "them"}. Unsaved: ${dirty.join(", ")}. ` +
+    "Nothing was sent to the editor, so no save prompt is open and the editor is exactly as it was. " +
+    "Save them with editor(action='save_dirty') and re-call this, save the ones you want with level(save) or " +
+    "asset(save) first, or close the editor yourself and answer its save prompt by hand."
+  );
+}
+
 /**
  * Stop the editor by asking it to quit ITSELF through the bridge. ue-mcp NEVER
  * issues an OS kill: `taskkill /IM UnrealEditor.exe` matches by image name and
- * would also close the user's other editors (e.g. their real project). `force`
- * is accepted for back-compat but there is deliberately no force-kill path.
+ * would also close the user's other editors (e.g. their real project).
  * Success is confirmed by the project's own bridge port going quiet, so it is
  * specific to this editor even when others are open.
+ *
+ * IT NEVER PRESSES A BUTTON AND IT NEVER DISCARDS. Two questions are asked
+ * before anything is sent: is a modal dialog blocking the editor, and is any
+ * package unsaved. Either one refuses, in under a second, with the whole
+ * question in the report - the dialog's full text and every button paired with
+ * the exact call that presses it, or every dirty package by name. The quit is
+ * not sent in that case, so no save prompt is raised, nothing hangs, and
+ * nothing is lost.
+ *
+ * There is deliberately no flag that discards. Where the client supports MCP
+ * elicitation, a blocking dialog is put to the person instead, with the
+ * dialog's own buttons as the choices, and only the button THEY pick is
+ * pressed.
  *
  * The port comes from what this project published and nowhere else, and the
  * process behind it is checked before the quit goes out (#819).
  */
-export async function stopEditor(force = false, projectDir?: string): Promise<{ success: boolean; message: string; state?: EngineState }> {
-  void force;
-
+export async function stopEditor(
+  projectDir?: string,
+  opts: {
+    /** Ask the connected client's user, when it advertised elicitation. */
+    elicit?: ElicitFn;
+  } = {},
+): Promise<StopEditorResult> {
   const projectPath = uprojectInDir(projectDir);
   const ownership = await resolveOwnedEditor(projectDir, projectPath);
   if (!ownership.owned) {
@@ -878,23 +1131,102 @@ export async function stopEditor(force = false, projectDir?: string): Promise<{ 
     const state = await readEngineState(projectPath, { probeWindows: true });
     return {
       success: false,
-      message: `Editor is running but its bridge is unreachable, so it cannot be asked to quit cleanly. ${state.summary} Close it manually - ue-mcp never force-kills processes.`,
+      message: `Editor is running but its bridge is unreachable, so it cannot be asked to quit cleanly.${blockedStopDetail(state)} Close it manually - ue-mcp never force-kills processes.`,
       state,
     };
   }
 
-  // Arm the save prompts BEFORE asking it to quit. The shutdown prompt is a
-  // Slate modal window, not an FMessageDialog, so nothing answers it unless a
-  // policy is armed for it, and once it is up the game thread is parked and
-  // this is no longer a call that can be made in time.
-  const armedPolicies = await armStopDialogPolicies(port, host);
+  // FIRST: is a modal already up? list_dialogs is modal-safe, so it answers
+  // while the game thread is parked inside the modal loop, which is exactly the
+  // state where sending a quit would time out and teach nobody anything. Ask
+  // before sending, and report the whole question rather than acting on it.
+  let dialog = await readBlockingDialog(port, host);
+  let answeredByUser: string | undefined;
+  if (dialog) {
+    if (opts.elicit) {
+      const pressed = await askUserToAnswerDialog(port, host, dialog, opts.elicit);
+      if (pressed !== null) {
+        answeredByUser = pressed;
+        // Their choice may have raised the next one. Look again rather than
+        // assuming the editor is clear.
+        dialog = await readBlockingDialog(port, host);
+      }
+    }
+    if (dialog) {
+      return {
+        success: false,
+        refusedReason: "blocking-dialog",
+        blockingDialog: dialog,
+        ...(answeredByUser ? { dialogAnsweredByUser: answeredByUser } : {}),
+        message:
+          describeBlockingDialog(dialog) +
+          (answeredByUser
+            ? `\n\nYou pressed "${answeredByUser}" on the previous dialog and this one came up behind it. `
+            : "\n\n") +
+          "The editor was not asked to quit. Answer the dialog, then call editor(action='stop_editor') again.",
+      };
+    }
+  }
 
-  const quitSent = await requestEditorSelfQuit(port, host);
-  if (!quitSent) {
+  // SECOND: what is unsaved. `requireClean` is the editor's own dirty check,
+  // the one editor(request_editor_shutdown) applies, and with it set the
+  // handler refuses and names every dirty package WITHOUT scheduling a close.
+  // So a refusal here means nothing was asked to quit.
+  const shutdown = await requestNativeShutdown(port, host, true);
+  const dirty = collectPackageNames(shutdown.result, SHUTDOWN_DIRTY_KEYS);
+
+  if (shutdown.refused) {
+    if (dirty.length > 0) {
+      return {
+        success: false,
+        refusedReason: "unsaved-work",
+        dirtyPackages: dirty,
+        message: unsavedWorkRefusal(dirty),
+      };
+    }
+    const why = typeof shutdown.result?.error === "string" ? shutdown.result.error : "it gave no reason";
     return {
       success: false,
-      message: "Could not deliver a quit request to the editor bridge. Close the editor manually - ue-mcp never force-kills processes.",
+      message:
+        `The editor refused to schedule its own shutdown: ${why}. Nothing was asked to quit. ` +
+        "ue-mcp never force-kills processes.",
     };
+  }
+
+  if (!accepted(shutdown)) {
+    // No native handler (an older plugin build), or no answer at all. Ask the
+    // dirty question separately before falling back to the Python quit. A
+    // question that cannot be answered is not an answer of "clean": it refuses
+    // too, and says so.
+    const fallbackDirty = await readDirtyPackages(port, host);
+    if (fallbackDirty === null) {
+      const cause = shutdown.answered
+        ? "This editor's plugin build answers neither request_editor_shutdown nor list_dirty_packages"
+        : "The editor's bridge stopped answering while it was being asked what is unsaved";
+      return {
+        success: false,
+        refusedReason: "unknown-dirty-state",
+        message:
+          `${cause}, so whether anything is unsaved cannot be established and stopping would risk losing it. ` +
+          "Nothing was asked to quit. Save with editor(action='save_dirty'), or close the editor yourself and " +
+          "answer whatever it asks.",
+      };
+    }
+    if (fallbackDirty.length > 0) {
+      return {
+        success: false,
+        refusedReason: "unsaved-work",
+        dirtyPackages: fallbackDirty,
+        message: unsavedWorkRefusal(fallbackDirty),
+      };
+    }
+
+    if (!(await requestPythonSelfQuit(port, host))) {
+      return {
+        success: false,
+        message: "Could not deliver a quit request to the editor bridge. Close the editor manually - ue-mcp never force-kills processes.",
+      };
+    }
   }
 
   // Confirm via the project's own bridge port closing - specific to this editor.
@@ -903,36 +1235,46 @@ export async function stopEditor(force = false, projectDir?: string): Promise<{ 
     if (!(await isBridgeAvailable(host, port))) {
       return {
         success: true,
-        message: ownership.healed
-          ? `Editor quit itself via the bridge. ${ownership.healed}`
-          : "Editor quit itself via the bridge",
+        message:
+          "Editor quit itself via the bridge." +
+          (answeredByUser ? ` You answered its dialog with "${answeredByUser}".` : "") +
+          (ownership.healed ? ` ${ownership.healed}` : ""),
+        ...(answeredByUser ? { dialogAnsweredByUser: answeredByUser } : {}),
       };
     }
   }
+
+  // It was clean and unblocked when the quit went out, so whatever is holding
+  // it started afterwards. Say what that is, in full.
   const blockedState = await readEngineState(projectPath, { probeWindows: false });
-  const armedNote =
-    armedPolicies.length > 0
-      ? ` Dialog policies were armed for ${armedPolicies.join(", ")} before the quit went out.`
-      : " No dialog policy could be armed before the quit went out, so any save prompt is unanswered.";
+  const late = await readBlockingDialog(port, host);
   return {
     success: false,
     message:
       "Asked the editor to quit but its bridge is still up after 20s." +
-      blockedStopDetail(blockedState) +
-      armedNote +
+      (late ? " " + describeBlockingDialog(late) : blockedStopDetail(blockedState)) +
+      " Nothing was dirty and no dialog was up when the quit went out, and nothing here presses a button for you." +
       " ue-mcp never force-kills processes.",
+    ...(late ? { blockingDialog: late, refusedReason: "blocking-dialog" as const } : {}),
     state: blockedState,
   };
 }
 
-export async function restartEditor(project: ProjectContext, bridge?: { connect: (timeoutMs?: number) => Promise<void> }): Promise<{ success: boolean; message: string }> {
+export async function restartEditor(
+  project: ProjectContext,
+  bridge?: { connect: (timeoutMs?: number) => Promise<void> },
+  opts: { elicit?: ElicitFn } = {},
+): Promise<{ success: boolean; message: string }> {
   // Same rule as start and stop: without a loaded project there is no editor
   // this is about, and the machine-wide answer is somebody else's editor (#819).
   if (!project.projectPath) {
     return { success: false, message: "No project loaded. Use project(action='set_project') first." };
   }
 
-  const stopResult = await stopEditor(false, project.projectDir ?? undefined);
+  // A restart inherits the stop's rules whole: it refuses on unsaved work and
+  // on a blocking dialog rather than acting on either. Restarting is not a
+  // reason to lose a package or to answer a question for somebody.
+  const stopResult = await stopEditor(project.projectDir ?? undefined, { elicit: opts.elicit });
   // Whether the stop mattered is a question about THIS project's editor: a
   // failed stop with nothing of ours left running just means it was already
   // down, and another project's editor being up says nothing either way.

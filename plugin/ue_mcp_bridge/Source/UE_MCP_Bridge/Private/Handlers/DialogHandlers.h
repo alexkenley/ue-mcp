@@ -18,15 +18,14 @@ public:
 	// Call during module shutdown to restore the original delegate
 	static void RemoveDialogHook();
 
-	// Add a default dialog policy (e.g. auto-accept overwrite dialogs). These
-	// are the module's own safety nets rather than something a caller asked
-	// for, so they are recorded as non-explicit and the Slate applier below
-	// treats them more cautiously than a policy set through the bridge.
-	static void AddDefaultPolicy(const FString& Pattern, EAppReturnType::Type Response);
-
 	/**
 	 * Answer the modal WINDOW currently blocking the editor from the armed
 	 * policies, by pressing one of its buttons.
+	 *
+	 * EVERY policy this can act on was armed by a caller through
+	 * set_dialog_policy. There is deliberately no way to add one from inside
+	 * the module: a dialog is a question for a person, and the only button this
+	 * plugin ever presses is one somebody named.
 	 *
 	 * This is the second half of the policy mechanism and the one that was
 	 * missing. FCoreDelegates::ModalMessageDialog only carries dialogs raised
@@ -78,8 +77,6 @@ private:
 		 * instead. Empty means "resolve the button from Response".
 		 */
 		FString ButtonLabel;
-		/** True when a caller armed it, false for the module's own safety nets. */
-		bool bExplicit = false;
 	};
 
 	// Handler implementations

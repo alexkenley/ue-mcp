@@ -69,7 +69,7 @@ afterEach(() => {
 
 describe("stopEditor targeting", () => {
   it("refuses without a loaded project instead of hunting for an editor", async () => {
-    const result = await stopEditor(false, undefined);
+    const result = await stopEditor(undefined);
     expect(result.success).toBe(false);
     expect(result.message).toContain("set_project");
     expect(findInteractiveEditors).not.toHaveBeenCalled();
@@ -77,7 +77,7 @@ describe("stopEditor targeting", () => {
 
   it("names the lockfile it checked when no port is published", async () => {
     const { projectDir } = makeProject();
-    const result = await stopEditor(false, projectDir);
+    const result = await stopEditor(projectDir);
     expect(result.success).toBe(false);
     expect(result.message).toContain(bridgeLockfilePath(projectDir));
     expect(result.message).not.toContain("9877");
@@ -88,7 +88,7 @@ describe("stopEditor targeting", () => {
     process.env.UE_MCP_PORT = "9877";
     try {
       const { projectDir } = makeProject();
-      const result = await stopEditor(false, projectDir);
+      const result = await stopEditor(projectDir);
       expect(result.success).toBe(false);
       expect(result.message).toContain("Editor is not running for this project");
     } finally {
@@ -101,7 +101,7 @@ describe("stopEditor targeting", () => {
     const { projectDir, projectPath } = makeProject();
     findInteractiveEditors.mockResolvedValue([editor(777, projectPath)]);
 
-    const result = await stopEditor(false, projectDir);
+    const result = await stopEditor(projectDir);
     expect(result.success).toBe(false);
     expect(result.message).toContain("777");
     expect(result.message).toContain("never force-kills");
@@ -111,7 +111,7 @@ describe("stopEditor targeting", () => {
     const { projectDir } = makeProject();
     writeLockfile(projectDir, { port: 51999, pid: 4242 });
 
-    const result = await stopEditor(false, projectDir);
+    const result = await stopEditor(projectDir);
     expect(result.success).toBe(false);
     expect(result.message).toContain("4242");
     expect(result.message).toContain("no longer running");
@@ -124,7 +124,7 @@ describe("stopEditor targeting", () => {
     writeLockfile(projectDir, { port: 51999, pid: 4242 });
     findEditorByPid.mockResolvedValue(editor(4242, otherProject));
 
-    const result = await stopEditor(false, projectDir);
+    const result = await stopEditor(projectDir);
     expect(result.success).toBe(false);
     expect(result.message).toContain("Stale lockfile");
     expect(result.message).toContain("Other.uproject");
@@ -139,7 +139,7 @@ describe("stopEditor targeting", () => {
     findEditorByPid.mockResolvedValue(editor(4242, projectPath));
     findInteractiveEditors.mockResolvedValue([editor(4242, projectPath)]);
 
-    const result = await stopEditor(false, projectDir);
+    const result = await stopEditor(projectDir);
     // Nothing is listening on 51999 in a unit test, so the stop cannot finish.
     // What matters is that it got past ownership rather than refusing there.
     expect(result.message).not.toContain("Stale lockfile");
@@ -159,7 +159,7 @@ describe("stopEditor targeting", () => {
     fs.mkdirSync(path.dirname(record), { recursive: true });
     fs.writeFileSync(record, JSON.stringify({ pid: 777, port: 52222, state: "listening" }));
 
-    const result = await stopEditor(false, projectDir);
+    const result = await stopEditor(projectDir);
     expect(result.message).not.toContain("Stale lockfile");
     expect(result.message).toContain("bridge is unreachable");
   });
@@ -168,7 +168,7 @@ describe("stopEditor targeting", () => {
     const { projectDir } = makeProject();
     writeLockfile(projectDir, { port: 51999 });
 
-    const result = await stopEditor(false, projectDir);
+    const result = await stopEditor(projectDir);
     expect(result.success).toBe(false);
     expect(result.message).toContain("no pid");
   });
