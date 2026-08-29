@@ -273,6 +273,18 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddImcMapping(const TSharedPtr<FJsonOb
 	Result->SetStringField(TEXT("inputAction"), InputAction->GetPathName());
 	Result->SetStringField(TEXT("key"), KeyName);
 
+	// The inverse drops the mapping this call added, named by the same
+	// (action, key) pair rather than by index, because a later add or remove
+	// would have moved the index. remove_imc_mapping resolves exactly that pair.
+	// Nothing is lost: the mapping was created here with no modifiers or
+	// triggers on it.
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("imcPath"), IMC->GetPathName());
+	Payload->SetStringField(TEXT("inputActionPath"), InputAction->GetPathName());
+	Payload->SetStringField(TEXT("key"), KeyName);
+	MCPSetRollback(Result, TEXT("remove_imc_mapping"), Payload);
+	Result->SetBoolField(TEXT("rollbackLossy"), false);
+
 	return MCPResult(Result);
 }
 
@@ -305,6 +317,67 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetMappingModifiers(const TSharedPtr<F
 	}
 
 	FEnhancedActionKeyMapping& Mapping = Mappings[MappingIndex];
+
+	// Both instanced lists as one comparable string: every object's class path
+	// followed by every one of its property values, exported. Class paths alone
+	// would report "unchanged" for a call that retuned a Hold threshold on the
+	// same trigger class, which is exactly the write a caller most often
+	// repeats. A list the caller did not pass contributes identically to both
+	// readings, so it cancels out and only what was written can move this.
+	// Written as a lambda rather than a file-local helper: this module is a
+	// unity build, and a second .cpp defining the same free function in the
+	// same blob is a redefinition.
+	const auto DescribeInstancedList = [](const auto& Objects) -> FString
+	{
+		FString Digest;
+		for (const auto& Entry : Objects)
+		{
+			// Taken as a raw UObject* rather than left as the TObjectPtr the
+			// array holds: ContainerPtrToValuePtr wants a void*, and going
+			// through the smart pointer's conversion operator on the way there
+			// is a needless place for the overload to pick something else.
+			const UObject* Object = Entry;
+			if (!Object) { Digest += TEXT("|<null>"); continue; }
+			Digest += TEXT("|") + Object->GetClass()->GetPathName();
+			for (TFieldIterator<FProperty> It(Object->GetClass()); It; ++It)
+			{
+				FString Exported;
+				It->ExportTextItem_Direct(
+					Exported, It->ContainerPtrToValuePtr<void>(Object), nullptr, nullptr, PPF_None);
+				Digest += TEXT("=") + Exported;
+			}
+		}
+		return Digest;
+	};
+	const FString ListsBefore =
+		DescribeInstancedList(Mapping.Modifiers) + TEXT("//") + DescribeInstancedList(Mapping.Triggers);
+
+	// The classes currently on the mapping, captured before either list is
+	// emptied, in the {class: "<path>"} shape this same action accepts. Only
+	// the list this call is about to replace is captured: a list the caller did
+	// not pass is left alone, so rewriting it would be a change, not an undo.
+	TSharedPtr<FJsonObject> RollbackPayload = MakeShared<FJsonObject>();
+	bool bCapturedAnyList = false;
+	int32 PreviousConfiguredObjects = 0;
+	{
+		auto CaptureClasses = [&](const TCHAR* ParamName, const auto& Objects)
+		{
+			if (!Params->HasField(ParamName)) return;
+			TArray<TSharedPtr<FJsonValue>> Entries;
+			for (const auto& Object : Objects)
+			{
+				if (!Object) continue;
+				TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetStringField(TEXT("class"), Object->GetClass()->GetPathName());
+				Entries.Add(MakeShared<FJsonValueObject>(Entry));
+				++PreviousConfiguredObjects;
+			}
+			RollbackPayload->SetArrayField(ParamName, Entries);
+			bCapturedAnyList = true;
+		};
+		CaptureClasses(TEXT("modifiers"), Mapping.Modifiers);
+		CaptureClasses(TEXT("triggers"), Mapping.Triggers);
+	}
 
 	// #725 reported unresolvable TRIGGER specs but the modifier loop below
 	// still dropped an unknown class, and an unknown property key on a
@@ -579,7 +652,16 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetMappingModifiers(const TSharedPtr<F
 		Pkg->MarkPackageDirty();
 	}
 
+	// The same reading, taken off the same two lists after the write. Rebuilt
+	// objects of the same classes carrying the same property values produce the
+	// same string, so a replayed call reports that it moved nothing.
+	const FString ListsAfter =
+		DescribeInstancedList(Mapping.Modifiers) + TEXT("//") + DescribeInstancedList(Mapping.Triggers);
+	const bool bListsChanged = ListsAfter != ListsBefore;
+
 	auto Result = MCPSuccess();
+	if (bListsChanged) MCPSetUpdated(Result); else Result->SetBoolField(TEXT("updated"), false);
+	Result->SetBoolField(TEXT("unchanged"), !bListsChanged);
 	Result->SetStringField(TEXT("imcPath"), IMC->GetPathName());
 	Result->SetNumberField(TEXT("mappingIndex"), MappingIndex);
 	Result->SetNumberField(TEXT("modifierCount"), Mapping.Modifiers.Num());
@@ -600,6 +682,35 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetMappingModifiers(const TSharedPtr<F
 		// to nothing. modifierCount still counts the modifier, so without this
 		// the result reads as a full success.
 		Result->SetArrayField(TEXT("ignoredProperties"), IgnoredProperties);
+	}
+
+	if (bCapturedAnyList && bListsChanged)
+	{
+		// Replaying this action with the classes that were there. The modifier
+		// and trigger objects are rebuilt from their class defaults, so this
+		// restores WHICH ones were on the mapping, not how they were tuned.
+		RollbackPayload->SetStringField(TEXT("imcPath"), IMC->GetPathName());
+		RollbackPayload->SetNumberField(TEXT("mappingIndex"), MappingIndex);
+		MCPSetRollback(Result, TEXT("set_mapping_modifiers"), RollbackPayload);
+		Result->SetBoolField(TEXT("rollbackLossy"), PreviousConfiguredObjects > 0);
+		if (PreviousConfiguredObjects > 0)
+		{
+			Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+				TEXT("The %d modifier/trigger class(es) that were on this mapping are restored, each rebuilt at its "
+					 "CLASS DEFAULTS. Any property that had been tuned on them - a DeadZone threshold, a Hold time - "
+					 "is not carried, because the record holds classes rather than per-object property values. Read "
+					 "them with gameplay(read_imc) first if the tuning matters."),
+				PreviousConfiguredObjects));
+		}
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), bCapturedAnyList
+			? TEXT("The lists this call rebuilt hold exactly the same classes with exactly the same property values "
+				   "they held before, so nothing changed and there is nothing to undo.")
+			: TEXT("Neither 'modifiers' nor 'triggers' was passed, so neither list was replaced and there is nothing "
+				   "to undo."));
 	}
 	return MCPResult(Result);
 }
@@ -676,21 +787,81 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveImcMapping(const TSharedPtr<FJso
 	int32 Idx = ImcEdit_Internal::ResolveMappingIndex(IMC, Params, ResolveError);
 	if (Idx == INDEX_NONE)
 	{
+		// Idempotent replay: a rollback that runs after the mapping is already
+		// gone must not fail the flow, because "no such mapping" is the state
+		// the caller asked for. Only the "nothing matched a selector" case is a
+		// no-op; an out-of-range mappingIndex or a missing selector is still a
+		// bad call and still errors.
+		FString ActionPath, KeyName;
+		const bool bNamedPair =
+			!Params->HasField(TEXT("mappingIndex"))
+			&& ((Params->TryGetStringField(TEXT("inputActionPath"), ActionPath) && !ActionPath.IsEmpty())
+				|| (Params->TryGetStringField(TEXT("key"), KeyName) && !KeyName.IsEmpty()));
+		if (bNamedPair)
+		{
+			auto Noop = MCPSuccess();
+			Noop->SetStringField(TEXT("imcPath"), IMC->GetPathName());
+			if (!ActionPath.IsEmpty()) Noop->SetStringField(TEXT("inputActionPath"), ActionPath);
+			if (!KeyName.IsEmpty()) Noop->SetStringField(TEXT("key"), KeyName);
+			Noop->SetBoolField(TEXT("alreadyDeleted"), true);
+			Noop->SetBoolField(TEXT("updated"), false);
+			Noop->SetNumberField(TEXT("count"), IMC->GetMappings().Num());
+			Noop->SetBoolField(TEXT("rollbackPossible"), false);
+			Noop->SetStringField(TEXT("rollbackNote"),
+				TEXT("No mapping matched, so nothing was removed and there is nothing to restore."));
+			return MCPResult(Noop);
+		}
 		return MCPError(ResolveError);
 	}
 
 	TArray<FEnhancedActionKeyMapping>& Mappings = const_cast<TArray<FEnhancedActionKeyMapping>&>(IMC->GetMappings());
 	const FEnhancedActionKeyMapping Removed = Mappings[Idx];
+	// Read before the removal: what add_imc_mapping cannot put back.
+	const int32 RemovedModifiers = Removed.Modifiers.Num();
+	const int32 RemovedTriggers = Removed.Triggers.Num();
 	Mappings.RemoveAt(Idx);
 
 	ImcEdit_Internal::SaveImc(IMC);
 
 	auto Result = MCPSuccess();
+	MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("imcPath"), IMC->GetPathName());
 	Result->SetNumberField(TEXT("mappingIndex"), Idx);
+	Result->SetBoolField(TEXT("alreadyDeleted"), false);
 	Result->SetStringField(TEXT("removedInputAction"), Removed.Action ? Removed.Action->GetPathName() : TEXT("None"));
 	Result->SetStringField(TEXT("removedKey"), Removed.Key.GetFName().ToString());
+	Result->SetNumberField(TEXT("removedModifiers"), RemovedModifiers);
+	Result->SetNumberField(TEXT("removedTriggers"), RemovedTriggers);
 	Result->SetNumberField(TEXT("count"), Mappings.Num());
+
+	if (Removed.Action)
+	{
+		// Re-mapping the same (action, key) pair is the inverse. The mapping is
+		// APPENDED, so its index changes, and add_imc_mapping creates a bare
+		// mapping - anything hanging off this one does not come back.
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("imcPath"), IMC->GetPathName());
+		Payload->SetStringField(TEXT("inputActionPath"), Removed.Action->GetPathName());
+		Payload->SetStringField(TEXT("key"), Removed.Key.GetFName().ToString());
+		MCPSetRollback(Result, TEXT("add_imc_mapping"), Payload);
+		const bool bLossy = RemovedModifiers > 0 || RemovedTriggers > 0 || Idx != Mappings.Num();
+		Result->SetBoolField(TEXT("rollbackLossy"), bLossy);
+		if (bLossy)
+		{
+			Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+				TEXT("The action and key come back, but the mapping is re-added at the END of the list (index %d, not "
+					 "%d), and the %d modifier(s) and %d trigger(s) it carried are NOT restored - add_imc_mapping "
+					 "creates a bare mapping. Re-apply them with gameplay(set_mapping_modifiers)."),
+				Mappings.Num(), Idx, RemovedModifiers, RemovedTriggers));
+		}
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("The removed mapping had no InputAction on it, and gameplay(add_imc_mapping) requires one, so there "
+				 "is no call that puts an action-less mapping back."));
+	}
 	return MCPResult(Result);
 }
 
@@ -725,6 +896,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetImcMappingKey(const TSharedPtr<FJso
 
 	TArray<FEnhancedActionKeyMapping>& Mappings = const_cast<TArray<FEnhancedActionKeyMapping>&>(IMC->GetMappings());
 	const FKey PrevKey = Mappings[Idx].Key;
+	const bool bChanged = PrevKey != NewKey;
 	Mappings[Idx].Key = NewKey;
 
 	ImcEdit_Internal::SaveImc(IMC);
@@ -734,6 +906,27 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetImcMappingKey(const TSharedPtr<FJso
 	Result->SetNumberField(TEXT("mappingIndex"), Idx);
 	Result->SetStringField(TEXT("previousKey"), PrevKey.GetFName().ToString());
 	Result->SetStringField(TEXT("newKey"), NewKey.GetFName().ToString());
+	Result->SetBoolField(TEXT("unchanged"), !bChanged);
+	if (bChanged) MCPSetUpdated(Result); else Result->SetBoolField(TEXT("updated"), false);
+
+	if (bChanged)
+	{
+		// Writing the previous key back. Addressed by mappingIndex, which this
+		// call did not move, rather than by the key - which is the thing that
+		// changed and would no longer select the same mapping.
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("imcPath"), IMC->GetPathName());
+		Payload->SetNumberField(TEXT("mappingIndex"), Idx);
+		Payload->SetStringField(TEXT("newKey"), PrevKey.GetFName().ToString());
+		MCPSetRollback(Result, TEXT("set_imc_mapping_key"), Payload);
+		Result->SetBoolField(TEXT("rollbackLossy"), false);
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("The mapping already used this key, so nothing changed and there is nothing to undo."));
+	}
 	return MCPResult(Result);
 }
 
@@ -768,6 +961,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetImcMappingAction(const TSharedPtr<F
 
 	TArray<FEnhancedActionKeyMapping>& Mappings = const_cast<TArray<FEnhancedActionKeyMapping>&>(IMC->GetMappings());
 	const UInputAction* PrevAction = Mappings[Idx].Action;
+	const bool bChanged = PrevAction != NewAction;
 	Mappings[Idx].Action = NewAction;
 
 	ImcEdit_Internal::SaveImc(IMC);
@@ -777,6 +971,29 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetImcMappingAction(const TSharedPtr<F
 	Result->SetNumberField(TEXT("mappingIndex"), Idx);
 	Result->SetStringField(TEXT("previousInputAction"), PrevAction ? PrevAction->GetPathName() : TEXT("None"));
 	Result->SetStringField(TEXT("newInputAction"), NewAction->GetPathName());
+	Result->SetBoolField(TEXT("unchanged"), !bChanged);
+	if (bChanged) MCPSetUpdated(Result); else Result->SetBoolField(TEXT("updated"), false);
+
+	if (bChanged && PrevAction)
+	{
+		// Writing the previous action back, addressed by the index this call did
+		// not move. Only emitted when there WAS a previous action: the inverse
+		// requires a loadable newInputActionPath, and "None" is not one.
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("imcPath"), IMC->GetPathName());
+		Payload->SetNumberField(TEXT("mappingIndex"), Idx);
+		Payload->SetStringField(TEXT("newInputActionPath"), PrevAction->GetPathName());
+		MCPSetRollback(Result, TEXT("set_imc_mapping_action"), Payload);
+		Result->SetBoolField(TEXT("rollbackLossy"), false);
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), bChanged
+			? TEXT("The mapping had no InputAction before this call, and set_imc_mapping_action requires a loadable "
+				   "newInputActionPath, so there is no call that puts it back to none.")
+			: TEXT("The mapping already used this InputAction, so nothing changed and there is nothing to undo."));
+	}
 	return MCPResult(Result);
 }
 

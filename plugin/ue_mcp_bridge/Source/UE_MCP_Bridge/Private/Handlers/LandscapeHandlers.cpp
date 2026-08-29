@@ -1059,9 +1059,17 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::AddLandscapeLayerInfo(const TSharedPt
 		if (ExistingLayer.LayerInfoObj && ExistingLayer.GetLayerName().ToString() == LayerName)
 		{
 			auto Result = MCPSuccess();
+			MCPSetExisted(Result);
 			Result->SetStringField(TEXT("layerName"), LayerName);
 			Result->SetStringField(TEXT("path"), ExistingLayer.LayerInfoObj->GetPathName());
 			Result->SetStringField(TEXT("note"), TEXT("Layer already exists on this landscape"));
+			// Nothing was registered, so nothing has to be un-registered. Saying
+			// so keeps a replayed flow step from carrying a record that would
+			// delete a layer this call did not create.
+			Result->SetBoolField(TEXT("rollbackPossible"), false);
+			Result->SetStringField(TEXT("rollbackNote"),
+				TEXT("The layer was already registered on this landscape, so nothing changed and there is nothing to "
+					 "undo."));
 			return MCPResult(Result);
 		}
 	}
@@ -1074,6 +1082,9 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::AddLandscapeLayerInfo(const TSharedPt
 
 	// Check if the asset already exists
 	ULandscapeLayerInfoObject* LayerInfoObj = LoadObject<ULandscapeLayerInfoObject>(nullptr, *(PackageFullPath + TEXT(".") + AssetName));
+	// Whether the LayerInfo ASSET is created here matters to the rollback: the
+	// inverse un-registers the layer but leaves the asset on disk.
+	const bool bCreatedLayerInfoAsset = (LayerInfoObj == nullptr);
 	if (!LayerInfoObj)
 	{
 		UPackage* Package = CreatePackage(*PackageFullPath);
@@ -1113,10 +1124,45 @@ PRAGMA_ENABLE_DEPRECATION_WARNINGS
 	TargetLandscape->MarkPackageDirty();
 
 	auto Result = MCPSuccess();
+	MCPSetCreated(Result);
 	Result->SetStringField(TEXT("layerName"), LayerName);
 	Result->SetStringField(TEXT("path"), LayerInfoObj->GetPathName());
 	Result->SetStringField(TEXT("landscapeName"), TargetLandscape->GetName());
 	Result->SetNumberField(TEXT("layerIndex"), LayerIndex);
+	Result->SetBoolField(TEXT("layerInfoAssetCreated"), bCreatedLayerInfoAsset);
+
+	// The inverse un-registers the layer from the landscape. remove_layer
+	// addresses an ALandscape, and the actor scanned above can be a streaming
+	// proxy, so the record names the parent landscape actor rather than whatever
+	// proxy happened to be found first.
+	ALandscape* ParentLandscape = TargetLandscape->GetLandscapeActor();
+	if (ParentLandscape)
+	{
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("actorPath"), ParentLandscape->GetPathName());
+		Payload->SetStringField(TEXT("layerName"), LayerName);
+		MCPSetRollback(Result, TEXT("remove_landscape_layer"), Payload);
+		// Removing the registration is exact for a layer that was just added and
+		// has no weights painted yet. What it does not do is delete the
+		// ULandscapeLayerInfoObject asset, which this call may have created.
+		Result->SetBoolField(TEXT("rollbackLossy"), bCreatedLayerInfoAsset);
+		if (bCreatedLayerInfoAsset)
+		{
+			Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+				TEXT("The layer is un-registered from the landscape, but the '%s' asset this call created stays on "
+					 "disk - landscape(remove_layer) deliberately leaves it so the layer can be re-registered. Delete "
+					 "it with asset(delete) as well if the rollback has to leave no trace."),
+				*LayerInfoObj->GetPathName()));
+		}
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+			TEXT("'%s' has no parent ALandscape actor, and landscape(remove_layer) resolves an ALandscape, so no "
+				 "inverse can address this registration."),
+			*TargetLandscape->GetName()));
+	}
 
 	return MCPResult(Result);
 }
@@ -2111,6 +2157,18 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::RefreshPhysicalMaterialCollision(cons
 		Note = TEXT("Collision and physical-material data were rebuilt in memory and matched packages may now be dirty. No packages were saved. Unloaded proxies were not changed.");
 	}
 	Result->SetStringField(TEXT("note"), Note);
+	// No inverse. Collision and physical-material data are DERIVED from the
+	// landscape's weightmaps and heights, which this call does not touch - it
+	// recomputes the output of a build step whose input is unchanged, and the
+	// data it replaced was the stale result of the same computation. Nothing
+	// restores a previous physical-material build, and the height-collision
+	// verification above is what proves the terrain itself came through
+	// untouched.
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("This rebuilds derived collision and physical-material data from weightmaps this call never writes. "
+			 "There is no call that restores the previous build, and none is needed: rebuilding again from the same "
+			 "landscape produces the same result. No packages were saved."));
 	return MCPResult(Result);
 #endif // UE_MCP_HAS_5_8_API
 }

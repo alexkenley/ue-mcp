@@ -193,6 +193,70 @@ namespace
 		// Smoothstep so a brush edge does not leave a visible ring.
 		return 1.0 - (T * T * (3.0 - 2.0 * T));
 	}
+
+	/**
+	 * The rollback record for the two BRUSH writes, sculpt and paint_layer.
+	 *
+	 * Every REGION write goes through MCPLscWriteHeights / MCPLscWriteWeights,
+	 * which emit their own record; the two brush handlers cannot, because they
+	 * are defined above those helpers and compute their footprint from a centre
+	 * and a radius rather than from a resolved FMCPLscRegion. So the emission
+	 * lives here, once, rather than open-coded twice at the call sites - a
+	 * second copy is how one of them quietly stops emitting.
+	 *
+	 * The payload is deliberately identical in shape to what those helpers
+	 * build: quad-space region, raw height space, the previous data base64'd,
+	 * and the edit layer by name. The same cap applies, because a record
+	 * carrying part of a rectangle is worse than none.
+	 */
+	void MCPLscBrushRollback(
+		TSharedPtr<FJsonObject> Result,
+		const TSharedPtr<FJsonObject>& Params,
+		const FString& InverseMethod,
+		const FString& ActorPath,
+		int32 X1, int32 Y1, int32 X2, int32 Y2,
+		const FString& EditLayerName,
+		const FString& LayerName,
+		const TCHAR* DataField,
+		const FString& EncodedPrevious,
+		int64 DefaultCap)
+	{
+		const int64 Count = (int64)(X2 - X1 + 1) * (int64)(Y2 - Y1 + 1);
+		const int64 RollbackCap = (int64)FMath::Clamp(
+			OptionalInt(Params, TEXT("rollbackMaxVertices"), (int32)DefaultCap), 0, 16000000);
+		if (Count > RollbackCap)
+		{
+			Result->SetBoolField(TEXT("rollbackOmitted"), true);
+			Result->SetStringField(TEXT("rollbackOmittedReason"), FString::Printf(
+				TEXT("The brush covered %lld vertices, above the %lld-vertex rollback cap, so the previous data is NOT ")
+				TEXT("carried and this edit cannot be undone through the bridge. Use a smaller 'radius', or raise ")
+				TEXT("'rollbackMaxVertices'."),
+				Count, RollbackCap));
+			return;
+		}
+
+		TSharedPtr<FJsonObject> Region = MakeShared<FJsonObject>();
+		Region->SetNumberField(TEXT("minX"), X1);
+		Region->SetNumberField(TEXT("minY"), Y1);
+		Region->SetNumberField(TEXT("maxX"), X2);
+		Region->SetNumberField(TEXT("maxY"), Y2);
+
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("actorPath"), ActorPath);
+		Payload->SetObjectField(TEXT("region"), Region);
+		Payload->SetStringField(TEXT("space"), TEXT("quad"));
+		Payload->SetStringField(DataField, EncodedPrevious);
+		Payload->SetStringField(TEXT("editLayer"), EditLayerName);
+		if (!LayerName.IsEmpty()) Payload->SetStringField(TEXT("layerName"), LayerName);
+		// Heights are written back as the raw uint16 they were read as; the
+		// weight writer has no equivalent parameter and needs none.
+		if (FCString::Strcmp(DataField, TEXT("heightsBase64")) == 0)
+		{
+			Payload->SetStringField(TEXT("heightSpace"), TEXT("raw"));
+		}
+		MCPSetRollback(Result, InverseMethod, Payload);
+		Result->SetBoolField(TEXT("rollbackOmitted"), false);
+	}
 }
 
 // landscape(sculpt): raise, lower or flatten a circular brush footprint.
@@ -293,6 +357,12 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::Sculpt(const TSharedPtr<FJsonObject>&
 	// Resolve the mode once instead of comparing strings per vertex.
 	const int32 SculptMode = Mode == TEXT("raise") ? 0 : (Mode == TEXT("lower") ? 1 : 2);
 
+	// The heights as they stand, kept whole so the rollback record can carry
+	// them. The loop below edits Heights in place, so a copy taken afterwards
+	// would be the post-write state.
+	const TArray<uint16> Previous = Heights;
+
+	int32 Changed = 0;
 	int32 Touched = 0;
 	for (int32 Y = Y1; Y <= Y2; ++Y)
 	{
@@ -312,6 +382,7 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::Sculpt(const TSharedPtr<FJsonObject>&
 			else                      Next = FMath::Lerp(Current, FlattenTarget, Weight);
 
 			Heights[Index] = (uint16)FMath::Clamp(FMath::RoundToInt(Next), 0, 65535);
+			if (Heights[Index] != Previous[Index]) ++Changed;
 			++Touched;
 		}
 	}
@@ -327,7 +398,6 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::Sculpt(const TSharedPtr<FJsonObject>&
 	Landscape->PostEditChange();
 
 	auto Result = MCPSuccess();
-	MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("landscape"), Landscape->GetActorLabel());
 	Result->SetStringField(TEXT("actorLabel"), Landscape->GetActorLabel());
 	Result->SetStringField(TEXT("actorPath"), Landscape->GetPathName());
@@ -335,11 +405,37 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::Sculpt(const TSharedPtr<FJsonObject>&
 	Result->SetNumberField(TEXT("radius"), Radius);
 	Result->SetNumberField(TEXT("amount"), Amount);
 	Result->SetNumberField(TEXT("verticesTouched"), Touched);
+	Result->SetNumberField(TEXT("verticesChanged"), Changed);
 	Result->SetStringField(TEXT("editLayer"), EditLayerName);
 	Result->SetNumberField(TEXT("rectX1"), X1);
 	Result->SetNumberField(TEXT("rectY1"), Y1);
 	Result->SetNumberField(TEXT("rectX2"), X2);
 	Result->SetNumberField(TEXT("rectY2"), Y2);
+	// A brush that rounded to the same height everywhere it touched moved no
+	// ground, and a replayed flatten over already-flat terrain is exactly that.
+	// Reporting it as an update would make a rerun look like it sculpted.
+	if (Changed > 0)
+	{
+		MCPSetUpdated(Result);
+		Result->SetBoolField(TEXT("unchanged"), false);
+		// Same record the region writers emit: the exact previous heights over
+		// the exact rectangle, replayed through set_landscape_height_region.
+		MCPLscBrushRollback(
+			Result, Params, TEXT("set_landscape_height_region"), Landscape->GetPathName(),
+			X1, Y1, X2, Y2, EditLayerName, FString(), TEXT("heightsBase64"),
+			FBase64::Encode(reinterpret_cast<const uint8*>(Previous.GetData()),
+				(uint32)(Previous.Num() * sizeof(uint16))),
+			/*DefaultCap*/ 262144);
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("updated"), false);
+		Result->SetBoolField(TEXT("unchanged"), true);
+		Result->SetBoolField(TEXT("rollbackOmitted"), false);
+		Result->SetStringField(TEXT("unchangedNote"),
+			TEXT("Every vertex the brush covered already held the height this call would have written, so no rollback "
+				 "record is needed."));
+	}
 	Result->SetStringField(TEXT("note"), TEXT("The level is left dirty and unsaved; save it when ready."));
 	return MCPResult(Result);
 }
@@ -438,6 +534,11 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::PaintLayer(const TSharedPtr<FJsonObje
 	const double RadiusQuadsY = FMath::Abs(Radius / Scale.Y);
 	const double TargetWeight = Strength * 255.0;
 
+	// The weights as they stand, kept whole for the rollback record: the loop
+	// below edits Weights in place.
+	const TArray<uint8> Previous = Weights;
+
+	int32 Changed = 0;
 	int32 Touched = 0;
 	for (int32 Y = Y1; Y <= Y2; ++Y)
 	{
@@ -451,6 +552,7 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::PaintLayer(const TSharedPtr<FJsonObje
 			const int32 Index = (Y - Y1) * Width + (X - X1);
 			const double Blended = FMath::Lerp((double)Weights[Index], TargetWeight, Weight);
 			Weights[Index] = (uint8)FMath::Clamp(FMath::RoundToInt(Blended), 0, 255);
+			if (Weights[Index] != Previous[Index]) ++Changed;
 			++Touched;
 		}
 	}
@@ -470,7 +572,6 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::PaintLayer(const TSharedPtr<FJsonObje
 	Landscape->PostEditChange();
 
 	auto Result = MCPSuccess();
-	MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("landscape"), Landscape->GetActorLabel());
 	Result->SetStringField(TEXT("actorLabel"), Landscape->GetActorLabel());
 	Result->SetStringField(TEXT("actorPath"), Landscape->GetPathName());
@@ -478,7 +579,29 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::PaintLayer(const TSharedPtr<FJsonObje
 	Result->SetNumberField(TEXT("strength"), Strength);
 	Result->SetNumberField(TEXT("radius"), Radius);
 	Result->SetNumberField(TEXT("verticesTouched"), Touched);
+	Result->SetNumberField(TEXT("verticesChanged"), Changed);
 	Result->SetStringField(TEXT("editLayer"), EditLayerName);
+	if (Changed > 0)
+	{
+		MCPSetUpdated(Result);
+		Result->SetBoolField(TEXT("unchanged"), false);
+		// Same record set_landscape_layer_weight_region emits, carrying the
+		// exact previous weights over the exact rectangle.
+		MCPLscBrushRollback(
+			Result, Params, TEXT("set_landscape_layer_weight_region"), Landscape->GetPathName(),
+			X1, Y1, X2, Y2, EditLayerName, LayerName, TEXT("weightsBase64"),
+			FBase64::Encode(Previous.GetData(), (uint32)Previous.Num()),
+			/*DefaultCap*/ 524288);
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("updated"), false);
+		Result->SetBoolField(TEXT("unchanged"), true);
+		Result->SetBoolField(TEXT("rollbackOmitted"), false);
+		Result->SetStringField(TEXT("unchangedNote"),
+			TEXT("Every vertex the brush covered already held the weight this call would have written, so no rollback "
+				 "record is needed."));
+	}
 	Result->SetStringField(TEXT("note"), TEXT("Weights are written as given; the engine no longer renormalises other layers for you, so set them explicitly if they must sum to 1. The level is left dirty and unsaved."));
 	return MCPResult(Result);
 }
@@ -3040,7 +3163,11 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::RemoveLayer(const TSharedPtr<FJsonObj
 		Result->SetBoolField(TEXT("removed"), false);
 		Result->SetBoolField(TEXT("alreadyAbsent"), true);
 		Result->SetBoolField(TEXT("updated"), false);
+		Result->SetBoolField(TEXT("unchanged"), true);
 		Result->SetBoolField(TEXT("rollbackOmitted"), false);
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("Nothing was removed, so there is nothing to restore."));
 		Result->SetStringField(TEXT("note"), FString::Printf(
 			TEXT("No layer named '%s' is registered on this landscape, so nothing was removed. Registered layers: [%s]."),
 			*LayerName, Known.Num() > 0 ? *FString::Join(Known, TEXT(", ")) : TEXT("none")));
@@ -3060,9 +3187,20 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::RemoveLayer(const TSharedPtr<FJsonObj
 	MCPSetUpdated(Result);
 	Result->SetBoolField(TEXT("removed"), true);
 	Result->SetBoolField(TEXT("alreadyAbsent"), false);
+	Result->SetBoolField(TEXT("unchanged"), false);
 	Result->SetArrayField(TEXT("layersAfter"), MCPStringListToJson(After));
 	if (LayerInfo) Result->SetStringField(TEXT("layerInfoPath"), LayerInfo->GetPathName());
+	// Both fields, because they answer different questions and the honest
+	// answers differ. rollbackOmitted says the previous DATA was not carried;
+	// rollbackPossible says no call can restore it even if it had been, since
+	// landscape(add_layer_info) re-registers the layer EMPTY. A record naming
+	// that action would look like an undo and silently discard every painted
+	// weight the layer held.
 	Result->SetBoolField(TEXT("rollbackOmitted"), true);
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("landscape(add_layer_info) re-registers the layer with no weights on it, so it is not an inverse of this "
+			 "call and is deliberately not emitted as one. See rollbackOmittedReason."));
 	Result->SetStringField(TEXT("rollbackOmittedReason"),
 		TEXT("Removing a layer destroys its weightmap across every component of the landscape, and those weights were not read back first - a whole-landscape capture would be tens of megabytes. This is NOT undoable through the bridge. Export the weights with landscape(get_layer_weight_region) first if they matter. The ULandscapeLayerInfoObject asset itself is left on disk, so re-registering it with landscape(add_layer_info) brings the layer back empty."));
 	Result->SetStringField(TEXT("note"),

@@ -121,6 +121,9 @@ private:
 	// Runtime GAS control (operates on a live actor's AbilitySystemComponent,
 	// PIE by default). Implemented in GasHandlers_Runtime.cpp.
 	static TSharedPtr<FJsonValue> ApplyEffect(const TSharedPtr<FJsonObject>& Params);
+	// The inverse of ApplyEffect: takes an active GameplayEffect back off the
+	// ASC by the handle that call returned, or by effect class.
+	static TSharedPtr<FJsonValue> RemoveEffect(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetAttribute(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> GetAttribute(const TSharedPtr<FJsonObject>& Params);
 	// InitAbilityActorInfo + optionally GetOrCreateAttributeSubobject on a live

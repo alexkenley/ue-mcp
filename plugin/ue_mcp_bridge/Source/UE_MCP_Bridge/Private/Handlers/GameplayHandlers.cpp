@@ -4,6 +4,7 @@
 #include "HandlerPagination.h"
 #include "HandlerJsonProperty.h"
 #include "HandlerAssetCreate.h"
+#include "JsonSerializer.h"
 #include "EditorScriptingUtilities/Public/EditorAssetLibrary.h"
 #include "Modules/ModuleManager.h"
 #include "StateTree.h"
@@ -385,16 +386,75 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetSmartObjectSlot(const TSharedPtr<FJ
 	}
 	SA.Asset->Modify();
 	void* SlotAddr = Helper.GetRawPtr(SlotIdx);
+
+	// The slot's current values for exactly the fields this call is about to
+	// overwrite, read before the write and in the JSON shape this same action
+	// takes back. FMCPJsonSerializer::SerializeValue is the read half of the
+	// MCPJsonProperty::SetJsonOnProperty that ApplySlotFieldsFromJson uses, so
+	// the round trip is the pair rather than two hand-written encodings.
+	TSharedPtr<FJsonObject> RollbackPayload = MakeShared<FJsonObject>();
+	int32 CapturedFields = 0;
+	{
+		auto CapturePrevious = [&](const TCHAR* ParamName, const TCHAR* PropName)
+		{
+			FProperty* P = SA.SlotStruct->Struct->FindPropertyByName(FName(PropName));
+			if (!P) return;
+			TSharedPtr<FJsonValue> Previous =
+				FMCPJsonSerializer::SerializeValue(P->ContainerPtrToValuePtr<void>(SlotAddr), P);
+			if (!Previous.IsValid()) return;
+			RollbackPayload->SetField(ParamName, Previous);
+			++CapturedFields;
+		};
+		// The SAME type-checked accessors ApplySlotFieldsFromJson writes
+		// through. Probing with HasField instead would capture - and emit a
+		// record for - a field the writer skipped because its JSON was the
+		// wrong type, e.g. offset given as a string.
+		const TSharedPtr<FJsonObject>* ObjProbe = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* ArrProbe = nullptr;
+		FString StrProbe;
+		if (Params->TryGetObjectField(TEXT("offset"), ObjProbe))   CapturePrevious(TEXT("offset"),   TEXT("Offset"));
+		if (Params->TryGetObjectField(TEXT("rotation"), ObjProbe)) CapturePrevious(TEXT("rotation"), TEXT("Rotation"));
+		if (Params->TryGetArrayField(TEXT("tags"), ArrProbe))      CapturePrevious(TEXT("tags"),     TEXT("RuntimeTags"));
+		if (Params->TryGetStringField(TEXT("name"), StrProbe))     CapturePrevious(TEXT("name"),     TEXT("Name"));
+	}
+
+	// The whole slot as text, before and after. Exact, and it covers every
+	// field the writer touches without a second per-field comparison.
+	FString SlotTextBefore;
+	SA.SlotStruct->ExportTextItem_Direct(SlotTextBefore, SlotAddr, nullptr, nullptr, PPF_None);
+
 	const FString ApplyErr = ApplySlotFieldsFromJson(SA.SlotStruct, SlotAddr, Params);
 	if (!ApplyErr.IsEmpty()) return MCPError(ApplyErr);
+
+	FString SlotTextAfter;
+	SA.SlotStruct->ExportTextItem_Direct(SlotTextAfter, SlotAddr, nullptr, nullptr, PPF_None);
+	const bool bSlotChanged = SlotTextAfter != SlotTextBefore;
 	SA.Asset->PostEditChange();
 	SA.Asset->MarkPackageDirty();
 	UEditorAssetLibrary::SaveAsset(SA.Asset->GetPathName());
 
 	auto Result = MCPSuccess();
-	MCPSetUpdated(Result);
+	if (bSlotChanged) MCPSetUpdated(Result); else Result->SetBoolField(TEXT("updated"), false);
+	Result->SetBoolField(TEXT("unchanged"), !bSlotChanged);
+	Result->SetNumberField(TEXT("fieldsWritten"), CapturedFields);
 	Result->SetStringField(TEXT("assetPath"), SA.Asset->GetPathName());
 	Result->SetNumberField(TEXT("slotIndex"), SlotIdx);
+	if (CapturedFields > 0 && bSlotChanged)
+	{
+		RollbackPayload->SetStringField(TEXT("assetPath"), SA.Asset->GetPathName());
+		RollbackPayload->SetNumberField(TEXT("slotIndex"), SlotIdx);
+		MCPSetRollback(Result, TEXT("set_smart_object_slot"), RollbackPayload);
+		Result->SetBoolField(TEXT("rollbackLossy"), false);
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), CapturedFields == 0
+			? TEXT("None of offset, rotation, tags or name was passed in a form this action writes, so nothing on the "
+				   "slot was written and there is nothing to undo.")
+			: TEXT("The slot already held the values this call wrote, so nothing changed and there is nothing to "
+				   "undo."));
+	}
 	return MCPResult(Result);
 }
 
@@ -416,6 +476,43 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveSmartObjectSlot(const TSharedPtr
 		Noop->SetBoolField(TEXT("alreadyDeleted"), true);
 		return MCPResult(Noop);
 	}
+	// Everything about the slot, read before it goes. The exported text is for
+	// the human reading the response; the per-field JSON below is the only part
+	// gameplay(add_smart_object_slot) can actually take back.
+	void* DoomedSlot = Helper.GetRawPtr(SlotIdx);
+	FString RemovedSlotText;
+	SA.SlotStruct->ExportTextItem_Direct(RemovedSlotText, DoomedSlot, nullptr, nullptr, PPF_None);
+
+	// Re-adding APPENDS, so the index only survives when the slot being removed
+	// is the last one. Anywhere else, restoring would shift every later slot and
+	// hand the caller a differently indexed slot than it had.
+	const bool bWasLastSlot = (SlotIdx == Helper.Num() - 1);
+	TSharedPtr<FJsonObject> RollbackPayload = MakeShared<FJsonObject>();
+	int32 RemovedBehaviorCount = 0;
+	if (bWasLastSlot)
+	{
+		const TCHAR* const Fields[][2] = {
+			{ TEXT("offset"),   TEXT("Offset") },
+			{ TEXT("rotation"), TEXT("Rotation") },
+			{ TEXT("tags"),     TEXT("RuntimeTags") },
+			{ TEXT("name"),     TEXT("Name") },
+		};
+		for (const auto& Field : Fields)
+		{
+			FProperty* P = SA.SlotStruct->Struct->FindPropertyByName(FName(Field[1]));
+			if (!P) continue;
+			TSharedPtr<FJsonValue> Previous =
+				FMCPJsonSerializer::SerializeValue(P->ContainerPtrToValuePtr<void>(DoomedSlot), P);
+			if (Previous.IsValid()) RollbackPayload->SetField(Field[0], Previous);
+		}
+		if (FArrayProperty* BDArr = CastField<FArrayProperty>(
+			SA.SlotStruct->Struct->FindPropertyByName(FName(TEXT("BehaviorDefinitions")))))
+		{
+			FScriptArrayHelper BDHelper(BDArr, BDArr->ContainerPtrToValuePtr<void>(DoomedSlot));
+			RemovedBehaviorCount = BDHelper.Num();
+		}
+	}
+
 	SA.Asset->Modify();
 	Helper.RemoveValues(SlotIdx, 1);
 	SA.Asset->PostEditChange();
@@ -423,10 +520,46 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveSmartObjectSlot(const TSharedPtr
 	UEditorAssetLibrary::SaveAsset(SA.Asset->GetPathName());
 
 	auto Result = MCPSuccess();
+	MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("assetPath"), SA.Asset->GetPathName());
 	Result->SetNumberField(TEXT("slotIndex"), SlotIdx);
 	Result->SetBoolField(TEXT("deleted"), true);
+	Result->SetBoolField(TEXT("alreadyDeleted"), false);
 	Result->SetNumberField(TEXT("slotCount"), Helper.Num());
+	Result->SetStringField(TEXT("removedSlot"), RemovedSlotText);
+	Result->SetBoolField(TEXT("wasLastSlot"), bWasLastSlot);
+
+	if (bWasLastSlot)
+	{
+		// Appending puts the slot back at the index it had, with the fields
+		// add_smart_object_slot accepts. Its BehaviorDefinitions do not come
+		// back, because that action has no parameter for them.
+		RollbackPayload->SetStringField(TEXT("assetPath"), SA.Asset->GetPathName());
+		MCPSetRollback(Result, TEXT("add_smart_object_slot"), RollbackPayload);
+		Result->SetBoolField(TEXT("rollbackLossy"), RemovedBehaviorCount > 0);
+		if (RemovedBehaviorCount > 0)
+		{
+			Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+				TEXT("The slot comes back at the same index with its offset, rotation, tags and name, but the %d "
+					 "BehaviorDefinition(s) it carried do NOT: gameplay(add_smart_object_slot) has no parameter for "
+					 "them. Re-add them with gameplay(add_smart_object_slot_behavior); 'removedSlot' names what was "
+					 "there."),
+				RemovedBehaviorCount));
+		}
+	}
+	else
+	{
+		// No inverse for a slot in the middle. Re-adding APPENDS, so restoring
+		// would hand back a slot at a different index while every later slot
+		// stays shifted - a caller addressing slots by index would then edit the
+		// wrong one, which is worse than reporting that nothing can undo this.
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("This slot was not the last one, so removing it shifted every later slotIndex down by one. "
+				 "gameplay(add_smart_object_slot) appends, which would put the slot back at the END rather than "
+				 "where it was, leaving every index wrong; no inverse is emitted rather than one that silently "
+				 "renumbers the slots. The removed slot is reported in full as 'removedSlot' for manual recovery."));
+	}
 	return MCPResult(Result);
 }
 
@@ -540,6 +673,16 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectSlotBehavior(const TShar
 	Result->SetNumberField(TEXT("slotIndex"), SlotIdx);
 	Result->SetNumberField(TEXT("behaviorIndex"), NewBDIdx);
 	Result->SetStringField(TEXT("behavior"), BehaviorAsset->GetClass()->GetPathName());
+	// No inverse. Nothing in this surface removes an entry from a slot's
+	// BehaviorDefinitions: the array is reachable only through this call, which
+	// appends. gameplay(remove_smart_object_slot) would delete the whole slot,
+	// which undoes far more than adding one behaviour to it.
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+		TEXT("No action removes an entry from a SmartObject slot's BehaviorDefinitions, so adding one has no inverse "
+			 "call. Removing the slot would undo more than this did. The entry added here is at behaviorIndex %d of "
+			 "slot %d if it has to be cleared by hand."),
+		NewBDIdx, SlotIdx));
 	return MCPResult(Result);
 }
 
@@ -1332,6 +1475,17 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RebuildNavmesh(const TSharedPtr<FJsonO
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("status"), TEXT("rebuild_triggered"));
 
+	// No inverse. The navmesh is DERIVED data: this recomputes it from the
+	// level's geometry and nav bounds, which is a build step rather than an
+	// authored change, and the thing it replaces was the stale output of the
+	// same computation. Nothing restores a previous navmesh, and nothing would
+	// want to - editing the level and rebuilding again is the only way the
+	// result changes.
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"),
+		TEXT("Rebuilding navigation recomputes derived data from the level. There is no call that restores the "
+			 "previous navmesh, and none is needed: the result is decided by the level, so a rebuild on an unchanged "
+			 "level produces the same navmesh again."));
 	return MCPResult(Result);
 }
 
@@ -1553,6 +1707,14 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddBlackboardKey(const TSharedPtr<FJso
 			MCPSetExisted(Existed);
 			Existed->SetStringField(TEXT("blackboardPath"), BlackboardPath);
 			Existed->SetStringField(TEXT("keyName"), KeyName);
+			// Nothing was declared, so no record: an inverse here would remove a
+			// key this call did not create. That is the whole reason a replayed
+			// add has to be told apart from a first one.
+			Existed->SetBoolField(TEXT("unchanged"), true);
+			Existed->SetBoolField(TEXT("rollbackPossible"), false);
+			Existed->SetStringField(TEXT("rollbackNote"),
+				TEXT("A key of this name was already on the Blackboard, so nothing was added. No inverse is emitted, "
+					 "because removing it would delete a key this call did not create."));
 			return MCPResult(Existed);
 		}
 	}
@@ -1680,11 +1842,16 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddBlackboardKey(const TSharedPtr<FJso
 		Result->SetStringField(TEXT("baseClass"), AsCls->BaseClass ? AsCls->BaseClass->GetPathName() : TEXT("Object"));
 	}
 	Result->SetNumberField(TEXT("totalKeys"), BlackboardAsset->Keys.Num());
-	// #469: rollback via remove_blackboard_key.
+	// #469: rollback via remove_blackboard_key. Exact: the key did not exist
+	// before this call - the loop above returned early if it did - so removing
+	// it by name restores the Blackboard to what it was. That action is
+	// idempotent on a name it cannot find, so a replayed rollback is safe.
+	Result->SetBoolField(TEXT("unchanged"), false);
 	TSharedPtr<FJsonObject> RollPayload = MakeShared<FJsonObject>();
 	RollPayload->SetStringField(TEXT("blackboardPath"), BlackboardPath);
 	RollPayload->SetStringField(TEXT("keyName"), KeyName);
 	MCPSetRollback(Result, TEXT("remove_blackboard_key"), RollPayload);
+	Result->SetBoolField(TEXT("rollbackLossy"), false);
 
 	return MCPResult(Result);
 }
@@ -1781,12 +1948,54 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveBlackboardKey(const TSharedPtr<F
 	const FName KeyFName(*KeyName);
 	int32 RemovedIdx = INDEX_NONE;
 	FString RemovedType;
+	// What add_blackboard_key needs to put this key back: its keyType in the
+	// short spelling that action takes, and the base class or enum an Object,
+	// Class or Enum key carries. Read here, before the entry is destroyed.
+	FString RollbackKeyType;
+	FString RollbackBaseClass;
 	for (int32 i = 0; i < BB->Keys.Num(); ++i)
 	{
 		if (BB->Keys[i].EntryName == KeyFName)
 		{
 			RemovedIdx = i;
-			RemovedType = BB->Keys[i].KeyType ? BB->Keys[i].KeyType->GetClass()->GetName() : TEXT("Unknown");
+			UBlackboardKeyType* KeyType = BB->Keys[i].KeyType;
+			RemovedType = KeyType ? KeyType->GetClass()->GetName() : TEXT("Unknown");
+			if (KeyType)
+			{
+				// "BlackboardKeyType_Bool" is how the class is named; "Bool" is
+				// what add_blackboard_key's keyType parameter takes. The list is
+				// exactly what that action accepts, checked rather than derived:
+				// UBlackboardKeyType_NativeEnum derives straight from
+				// UBlackboardKeyType and would otherwise strip to "NativeEnum",
+				// and so would any project-defined subclass, producing a record
+				// the adder rejects at replay time.
+				static const TCHAR* const AdderKeyTypes[] = {
+					TEXT("Bool"), TEXT("Int"), TEXT("Float"), TEXT("String"), TEXT("Name"),
+					TEXT("Object"), TEXT("Class"), TEXT("Enum"), TEXT("Vector"), TEXT("Rotator"),
+				};
+				FString ShortType = RemovedType;
+				ShortType.RemoveFromStart(TEXT("BlackboardKeyType_"));
+				for (const TCHAR* Supported : AdderKeyTypes)
+				{
+					if (ShortType.Equals(Supported, ESearchCase::CaseSensitive))
+					{
+						RollbackKeyType = ShortType;
+						break;
+					}
+				}
+				if (UBlackboardKeyType_Object* AsObj = Cast<UBlackboardKeyType_Object>(KeyType))
+				{
+					if (AsObj->BaseClass) RollbackBaseClass = AsObj->BaseClass->GetPathName();
+				}
+				else if (UBlackboardKeyType_Class* AsCls = Cast<UBlackboardKeyType_Class>(KeyType))
+				{
+					if (AsCls->BaseClass) RollbackBaseClass = AsCls->BaseClass->GetPathName();
+				}
+				else if (UBlackboardKeyType_Enum* AsEnum = Cast<UBlackboardKeyType_Enum>(KeyType))
+				{
+					if (AsEnum->EnumType) RollbackBaseClass = AsEnum->EnumType->GetPathName();
+				}
+			}
 			break;
 		}
 	}
@@ -1794,8 +2003,14 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveBlackboardKey(const TSharedPtr<F
 	{
 		auto Noop = MCPSuccess();
 		Noop->SetBoolField(TEXT("alreadyDeleted"), true);
+		Noop->SetBoolField(TEXT("updated"), false);
 		Noop->SetStringField(TEXT("blackboardPath"), BlackboardPath);
 		Noop->SetStringField(TEXT("keyName"), KeyName);
+		Noop->SetNumberField(TEXT("remainingKeys"), BB->Keys.Num());
+		Noop->SetBoolField(TEXT("rollbackPossible"), false);
+		Noop->SetStringField(TEXT("rollbackNote"),
+			TEXT("No key of that name is on this Blackboard, so nothing was removed and there is nothing to put "
+				 "back."));
 		return MCPResult(Noop);
 	}
 	BB->Modify();
@@ -1808,7 +2023,51 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveBlackboardKey(const TSharedPtr<F
 	MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("blackboardPath"), BlackboardPath);
 	Result->SetStringField(TEXT("keyName"), KeyName);
+	Result->SetStringField(TEXT("removedKeyType"), RemovedType);
+	Result->SetNumberField(TEXT("removedIndex"), RemovedIdx);
 	Result->SetNumberField(TEXT("remainingKeys"), BB->Keys.Num());
+
+	if (!RollbackKeyType.IsEmpty())
+	{
+		// The inverse re-declares the key with the same name and type.
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("blackboardPath"), BlackboardPath);
+		Payload->SetStringField(TEXT("keyName"), KeyName);
+		Payload->SetStringField(TEXT("keyType"), RollbackKeyType);
+		// add_blackboard_key reads the base class and the enum from the same
+		// 'baseClass' parameter, which is why one field covers both.
+		if (!RollbackBaseClass.IsEmpty()) Payload->SetStringField(TEXT("baseClass"), RollbackBaseClass);
+		MCPSetRollback(Result, TEXT("add_blackboard_key"), Payload);
+		// Keys are appended, and UpdateKeyIDs renumbers on every edit, so a
+		// restored key lands at the END of the list with a new key ID.
+		// Always lossy: add_blackboard_key declares a name and a type and
+		// nothing else, so the entry's instance-sync flag and its editor-only
+		// description and category are not carried whatever the index does.
+		Result->SetBoolField(TEXT("rollbackLossy"), true);
+		Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+			TEXT("The key comes back with the same name and type%s. gameplay(add_blackboard_key) takes no other "
+				 "parameters, so the entry's bInstanceSynced flag and its editor-only description and category are "
+				 "NOT restored.%s"),
+			RollbackBaseClass.IsEmpty() ? TEXT("") : TEXT(", and its base class or enum"),
+			RemovedIdx == BB->Keys.Num()
+				? TEXT("")
+				: *FString::Printf(
+					TEXT(" It is also appended at index %d rather than the %d it held, because add_blackboard_key "
+						 "appends and UpdateKeyIDs renumbers. Behaviour Tree nodes bind by key NAME, so they still "
+						 "resolve; anything reading key IDs directly does not."),
+					BB->Keys.Num(), RemovedIdx)));
+	}
+	else
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+			TEXT("The removed key's type was '%s', which gameplay(add_blackboard_key) cannot re-declare: it accepts "
+				 "Bool, Int, Float, String, Name, Object, Class, Enum, Vector and Rotator, and anything else - a "
+				 "NativeEnum key, a project-defined UBlackboardKeyType subclass, or an entry with no KeyType object "
+				 "at all - has no spelling in that action. No inverse is emitted rather than one that would be "
+				 "refused at replay time."),
+			*RemovedType));
+	}
 	return MCPResult(Result);
 }
 
