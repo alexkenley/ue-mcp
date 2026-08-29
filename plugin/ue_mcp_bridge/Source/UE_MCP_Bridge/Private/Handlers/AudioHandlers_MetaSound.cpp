@@ -608,25 +608,77 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundBuild(const TSharedPtr<FJsonObje
 	return MCPResult(Res);
 }
 
+// ── metasound_get_graph ───────────────────────────────────────────────────
+//
+// SUPERSEDED for graph contents, and kept because removing a shipped action is
+// a surface break. It predates the read half of this category and reports only
+// the state of the in-editor builder SESSION: whether one is open on this
+// asset, how many audio outputs create_metasound wired into it, and whether it
+// was created as a one-shot.
+//
+// The graph itself - nodes, pins, connections, variables, defaults and
+// problems - is read by the seven actions in AudioHandlers_MetaSoundRead.cpp:
+// metasound_read_document, metasound_list_connections, metasound_list_variables,
+// metasound_search_nodes, metasound_inspect_node, metasound_list_node_pins and
+// metasound_validate. Those also say whether they read the live builder or the
+// saved asset, so the one fact this action still puts plainly is whether THIS
+// editor run holds an authoring session on the asset.
 TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundGetGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
+	// A path naming nothing used to come back success: true with the
+	// assetExists field simply absent, so "here is the state of your MetaSound"
+	// and "there is no such asset" were the same answer. Both failure shapes
+	// are errors now, and both name the path.
+	UObject* Asset = MCPLoadAssetObject(AssetPath);
+	if (!Asset)
+	{
+		return MCPAssetNotFoundError(AssetPath, TEXT("MetaSound"));
+	}
+
+	UMetaSoundSource* Source = Cast<UMetaSoundSource>(Asset);
+	if (!Source)
+	{
+		return MCPError(FString::Printf(
+			TEXT("'%s' is a %s, not a MetaSoundSource, so it can have no builder session. ")
+			TEXT("audio(metasound_read_document) reads any MetaSound document, a MetaSoundPatch included."),
+			*AssetPath, *Asset->GetClass()->GetName()));
+	}
+
+	// The session map is keyed by the path create_metasound was given, which is
+	// not always the form the caller passes back. Try the resolved object path
+	// as well before concluding no session is open.
+	FMSSession* S = FindSession(AssetPath);
+	if (!S) S = FindSession(Source->GetPathName());
+
 	auto Res = MCPSuccess();
 	Res->SetStringField(TEXT("path"), AssetPath);
-	FMSSession* S = FindSession(AssetPath);
+	Res->SetStringField(TEXT("assetPath"), Source->GetPathName());
+	Res->SetStringField(TEXT("assetClass"), Source->GetClass()->GetName());
+	Res->SetBoolField(TEXT("assetExists"), true);
 	Res->SetBoolField(TEXT("hasActiveBuilder"), S != nullptr);
 	if (S)
 	{
 		Res->SetNumberField(TEXT("audioOutputs"), S->AudioOuts.Num());
 		Res->SetBoolField(TEXT("oneShot"), S->bOneShot);
 	}
-	if (UMetaSoundSource* Source = Cast<UMetaSoundSource>(UEditorAssetLibrary::LoadAsset(AssetPath)))
-	{
-		Res->SetBoolField(TEXT("assetExists"), true);
-	}
-	Res->SetStringField(TEXT("note"), TEXT("Node/edge enumeration follows in a later pass; author via the builder session."));
+
+	Res->SetStringField(TEXT("supersededBy"), TEXT("metasound_read_document"));
+	Res->SetStringField(TEXT("note"), S
+		? TEXT("Builder-session state only. An authoring session from this editor run is open on this ")
+		  TEXT("asset, so its unbuilt edits are what audio(metasound_read_document) reports under ")
+		  TEXT("source: \"builder\"; audio(metasound_build) writes them to the asset. For nodes, pins, ")
+		  TEXT("connections, variables, defaults and problems call metasound_read_document, ")
+		  TEXT("metasound_list_connections, metasound_inspect_node, metasound_list_node_pins, ")
+		  TEXT("metasound_search_nodes, metasound_list_variables or metasound_validate.")
+		: TEXT("Builder-session state only. No authoring session from this editor run is open on this ")
+		  TEXT("asset, so audio(metasound_read_document) will read the saved asset and report ")
+		  TEXT("source: \"asset\". For nodes, pins, connections, variables, defaults and problems call ")
+		  TEXT("metasound_read_document, metasound_list_connections, metasound_inspect_node, ")
+		  TEXT("metasound_list_node_pins, metasound_search_nodes, metasound_list_variables or ")
+		  TEXT("metasound_validate."));
 	return MCPResult(Res);
 }
 

@@ -23,6 +23,28 @@
  * tier is for. Catching the omissions is still most of the value, because the
  * common failure is not a wrong rollback, it is no rollback at all.
  *
+ * ## Two things it gets right that it used to get wrong
+ *
+ * **It follows one level of file-local helper call.** A handler that funnels
+ * its write through a shared helper emits its markers from inside that helper,
+ * and a scanner that only reads the handler's own braces reports it as having
+ * neither. The landscape sculpt handlers are the clean case: seven height and
+ * weight writers all go through MCPLscWriteHeights / MCPLscWriteWeights, which
+ * is where MCPSetRollback and the idempotency markers actually fire. Splitting
+ * the emission back out to the call sites to satisfy a scanner would be exactly
+ * the duplication whose ninth copy quietly stops emitting a rollback, so the
+ * scanner is what improves. ONE level only, and no recursion: that covers the
+ * real cases and keeps the reading predictable. Every credit granted this way
+ * is reported in `idempotentVia` / `rollbackVia`, so a number can always be
+ * traced back to the line that produced it.
+ *
+ * **It keys handlers on the class-qualified name.** Matching on the bare method
+ * name means two classes with the same method name collide and the audit reads
+ * the wrong body. FStateTreeHandlers::ListNodeTypes hit exactly that against
+ * FBlueprintHandlers::ListNodeTypes. The registering class is taken from the
+ * enclosing RegisterHandlers definition, or from the explicit qualification
+ * when the registration writes `&FFoo::Bar`.
+ *
  * Run: node scripts/audit-handler-conventions.mjs [--json]
  * Gated by tests/unit/handler-conventions.test.ts.
  */
@@ -54,14 +76,103 @@ const ROLLBACK_MARKERS = [
   "MCPSetRollback", "MCPSetDeleteAssetRollback", "SetObjectField(TEXT(\"rollback\")",
 ];
 
-/** Read every `Registry.RegisterHandler(TEXT("x"), &Fn)` in the tree. */
+/**
+ * Words that take a parenthesised head and a brace body without being a
+ * function definition. Without these the definition scan below reads every
+ * `if (...) {` as a function named `if`.
+ */
+const NOT_A_FUNCTION_NAME = new Set([
+  "if", "for", "while", "switch", "catch", "do", "else", "return", "sizeof",
+  "alignof", "decltype", "noexcept", "constexpr", "static_cast", "const_cast",
+  "dynamic_cast", "reinterpret_cast", "new", "delete", "throw", "case",
+]);
+
+/**
+ * What may sit between the start of a line and the name of a function being
+ * DEFINED: a return type, optionally class-qualified, and nothing else. An
+ * empty prefix is allowed for a definition whose return type is on the line
+ * above. Anything carrying `(`, `=`, `.` or `->` is a call, not a definition.
+ */
+const DEFINITION_PREFIX = /^[ \t]*(?:[A-Za-z_][\w:<>,\s*&]*)?$/;
+
+/* ── Source scanning ─────────────────────────────────────────────── */
+
+/**
+ * Index of the character closing the bracket opened at `open`, skipping
+ * comments and string/char literals so a brace inside TEXT("{") cannot end a
+ * body early. Returns -1 when the file runs out first.
+ */
+function matchBracket(text, open) {
+  const opener = text[open];
+  const closer = opener === "(" ? ")" : "}";
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    const c = text[i];
+    if (c === "/" && text[i + 1] === "/") {
+      const nl = text.indexOf("\n", i);
+      if (nl < 0) return -1;
+      i = nl;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      const close = text.indexOf("*/", i + 2);
+      if (close < 0) return -1;
+      i = close + 1;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      for (i++; i < text.length; i++) {
+        if (text[i] === "\\") { i++; continue; }
+        if (text[i] === c) break;
+      }
+      continue;
+    }
+    if (c === opener) depth++;
+    else if (c === closer) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Every function DEFINITION that starts at column 0 of a line, with the class
+ * it belongs to. Definitions in this tree are written at column 0 and calls are
+ * indented, which is what separates `void FFoo::Bar(...)` from a call to it.
+ */
+function memberDefinitions(text) {
+  const re = /^[A-Za-z_][^\n;{}()]*?\b(F\w+)::(\w+)\s*\(/gm;
+  const out = [];
+  for (const m of text.matchAll(re)) {
+    out.push({ index: m.index, className: m[1], method: m[2] });
+  }
+  return out;
+}
+
+/** Read every `Registry.RegisterHandler(TEXT("x"), &Fn)` in the tree.
+ *
+ *  The registering class comes from the enclosing definition, so two classes
+ *  that both define `ListNodeTypes` stay apart. An explicitly qualified
+ *  `&FFoo::Bar` names its own class and is taken at its word. */
 export function readRegistrations() {
-  const re = /Registry\.RegisterHandler(?:WithTimeout)?\(\s*TEXT\("([^"]+)"\)\s*,\s*&(\w+)/g;
+  const re = /Registry\.RegisterHandler(?:WithTimeout)?\(\s*TEXT\("([^"]+)"\)\s*,\s*&(?:(F\w+)::)?(\w+)/g;
   const out = new Map();
   for (const entry of readdirSync(HANDLERS_DIR)) {
     if (!entry.endsWith(".cpp")) continue;
     const body = readFileSync(join(HANDLERS_DIR, entry), "utf8");
-    for (const m of body.matchAll(re)) out.set(m[1], { method: m[2], registeredIn: entry });
+    const defs = memberDefinitions(body);
+    for (const m of body.matchAll(re)) {
+      let className = m[2] ?? null;
+      if (!className) {
+        // The last definition opened before this line is the one we are inside.
+        for (const def of defs) {
+          if (def.index > m.index) break;
+          className = def.className;
+        }
+      }
+      out.set(m[1], { method: m[3], className, registeredIn: entry });
+    }
   }
   return out;
 }
@@ -69,25 +180,36 @@ export function readRegistrations() {
 /**
  * The body of one handler function, found by brace matching from its
  * definition. Handlers are split across many files, so every file is searched.
+ *
+ * `className` is required to disambiguate two classes sharing a method name.
+ * When no definition carries that class the search widens to any class and the
+ * row says so through `classFallback`, because a body found under the wrong
+ * class is still more auditable than no body at all - and the flag makes the
+ * ambiguity countable rather than silent.
  */
-export function findHandlerBody(methodName, sources) {
-  const signature = new RegExp(
+export function findHandlerBody(className, methodName, sources) {
+  const qualified = className
+    ? new RegExp(`TSharedPtr<FJsonValue>\\s+${className}::${methodName}\\s*\\([^)]*\\)\\s*\\{`)
+    : null;
+  const anyClass = new RegExp(
     `TSharedPtr<FJsonValue>\\s+F\\w+::${methodName}\\s*\\([^)]*\\)\\s*\\{`,
   );
-  for (const [file, text] of sources) {
-    const m = signature.exec(text);
-    if (!m) continue;
-    let depth = 0;
-    const start = m.index + m[0].length - 1;
-    for (let i = start; i < text.length; i++) {
-      const c = text[i];
-      if (c === "{") depth++;
-      else if (c === "}") {
-        depth--;
-        if (depth === 0) return { file, body: text.slice(start, i + 1) };
-      }
+
+  for (const pattern of [qualified, anyClass]) {
+    if (!pattern) continue;
+    for (const [file, text] of sources) {
+      const m = pattern.exec(text);
+      if (!m) continue;
+      const start = m.index + m[0].length - 1;
+      const end = matchBracket(text, start);
+      return {
+        file,
+        start,
+        end: end < 0 ? text.length : end + 1,
+        body: text.slice(start, end < 0 ? text.length : end + 1),
+        classFallback: pattern === anyClass,
+      };
     }
-    return { file, body: text.slice(start) };
   }
   return null;
 }
@@ -102,7 +224,96 @@ export function readSources() {
   return out;
 }
 
+/**
+ * Every function defined in one translation unit, by name, as [start, end)
+ * ranges. Overloads and same-named statics are all kept: a call site cannot be
+ * resolved to one of them from text alone, so the marker check below accepts
+ * any of them and names which one it read.
+ */
+function fileFunctionRanges(text) {
+  const out = new Map();
+  const re = /([A-Za-z_]\w*)\s*\(/g;
+  for (const m of text.matchAll(re)) {
+    const name = m[1];
+    if (NOT_A_FUNCTION_NAME.has(name)) continue;
+
+    // A preprocessor line can carry a braced body that is not a function.
+    const lineStart = text.lastIndexOf("\n", m.index) + 1;
+    if (text[lineStart] === "#") continue;
+
+    // Everything before the name on its own line has to look like a return
+    // type (or nothing at all, for a definition whose return type is on the
+    // line above). That rejects `X.Foo(`, `Bar(Baz(` and `if (Cond(` before
+    // any bracket matching happens, which is most of the work.
+    if (!DEFINITION_PREFIX.test(text.slice(lineStart, m.index))) continue;
+
+    const open = m.index + m[0].length - 1;
+    const closeParen = matchBracket(text, open);
+    if (closeParen < 0) continue;
+
+    // Only a `{` (possibly after `const` / `noexcept`) makes this a definition.
+    const tail = /^\s*(?:const\s*)?(?:noexcept\s*)?\{/.exec(text.slice(closeParen + 1, closeParen + 32));
+    if (!tail) continue;
+
+    const braceOpen = closeParen + tail[0].length;
+    const braceClose = matchBracket(text, braceOpen);
+    if (braceClose < 0) continue;
+
+    if (!out.has(name)) out.set(name, []);
+    out.get(name).push({ start: braceOpen, end: braceClose + 1 });
+  }
+  return out;
+}
+
+const rangeCache = new Map();
+function functionRangesFor(file, text) {
+  if (!rangeCache.has(file)) rangeCache.set(file, fileFunctionRanges(text));
+  return rangeCache.get(file);
+}
+
 const has = (body, markers) => markers.some((marker) => body.includes(marker));
+
+/** Names this body calls as free or static functions, deduped, in call order.
+ *
+ *  `Obj->Foo(...)` and `Obj.Foo(...)` are dropped: those call a method on some
+ *  other object, and crediting them would follow any engine method whose name
+ *  happens to collide with a function defined in this file. That is not
+ *  hypothetical - `PrimComp->SetCollisionEnabled(...)` collides with
+ *  FPhysicsHandlers::SetCollisionEnabled in the same translation unit. */
+function calledNames(body) {
+  const out = [];
+  const seen = new Set();
+  for (const m of body.matchAll(/([A-Za-z_]\w*)\s*\(/g)) {
+    const name = m[1];
+    if (NOT_A_FUNCTION_NAME.has(name) || seen.has(name)) continue;
+    const before = body.slice(Math.max(0, m.index - 2), m.index);
+    if (before.endsWith(".") || before.endsWith("->")) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+/**
+ * ONE level of indirection: the first function defined in the same translation
+ * unit that this handler calls and that emits the marker itself. Deliberately
+ * not recursive - a helper that calls a helper that emits a rollback is a
+ * chain this audit does not claim to read, and pretending otherwise would make
+ * the number harder to trust rather than easier.
+ */
+function markerViaLocalHelper(found, text, markers) {
+  const ranges = functionRangesFor(found.file, text);
+  for (const name of calledNames(found.body)) {
+    const defs = ranges.get(name);
+    if (!defs) continue;
+    for (const def of defs) {
+      // The handler's own body is not indirection.
+      if (def.start >= found.start && def.end <= found.end) continue;
+      if (has(text.slice(def.start, def.end), markers)) return name;
+    }
+  }
+  return null;
+}
 
 /**
  * Audit every registered handler.
@@ -116,18 +327,30 @@ export function auditHandlers(classify) {
   const sources = readSources();
   const rows = [];
 
-  for (const [action, { method, registeredIn }] of registrations) {
-    const found = findHandlerBody(method, sources);
-    const cls = classify(action);
+  for (const [action, { method, className, registeredIn }] of registrations) {
+    const found = findHandlerBody(className, method, sources);
+    const text = found ? sources.get(found.file) : null;
+
+    const idempotentDirect = found ? has(found.body, IDEMPOTENCY_MARKERS) : false;
+    const rollbackDirect = found ? has(found.body, ROLLBACK_MARKERS) : false;
+    const idempotentVia = found && !idempotentDirect
+      ? markerViaLocalHelper(found, text, IDEMPOTENCY_MARKERS) : null;
+    const rollbackVia = found && !rollbackDirect
+      ? markerViaLocalHelper(found, text, ROLLBACK_MARKERS) : null;
+
     rows.push({
       action,
       method,
+      className,
       registeredIn,
       file: found?.file ?? null,
       bodyFound: Boolean(found),
-      class: cls,
-      idempotent: found ? has(found.body, IDEMPOTENCY_MARKERS) : false,
-      rollback: found ? has(found.body, ROLLBACK_MARKERS) : false,
+      classFallback: found?.classFallback ?? false,
+      class: classify(action),
+      idempotent: idempotentDirect || Boolean(idempotentVia),
+      rollback: rollbackDirect || Boolean(rollbackVia),
+      idempotentVia,
+      rollbackVia,
     });
   }
   rows.sort((a, b) => a.action.localeCompare(b.action));
@@ -144,15 +367,20 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "
   const mutations = rows.filter((r) => r.class !== "read");
   const noRollback = mutations.filter((r) => !r.rollback);
   const noIdempotency = mutations.filter((r) => !r.idempotent);
+  const viaHelperIdem = mutations.filter((r) => r.idempotentVia);
+  const viaHelperRollback = mutations.filter((r) => r.rollbackVia);
+  const fallbackClass = rows.filter((r) => r.classFallback);
 
   if (process.argv.includes("--json")) {
     console.log(JSON.stringify({ rows, mutations: mutations.length }, null, 2));
   } else {
     console.log(`handlers registered      : ${rows.length}`);
     console.log(`bodies not found         : ${rows.filter((r) => !r.bodyFound).length}`);
+    console.log(`bodies via class fallback: ${fallbackClass.length}`);
     console.log(`classified as mutations  : ${mutations.length}`);
     console.log(`mutations w/o rollback   : ${noRollback.length}`);
     console.log(`mutations w/o idempotency: ${noIdempotency.length}`);
+    console.log(`credited via a helper    : ${viaHelperRollback.length} rollback, ${viaHelperIdem.length} idempotency`);
     console.log(`\nno rollback:\n  ${noRollback.map((r) => r.action).join("\n  ")}`);
   }
 }

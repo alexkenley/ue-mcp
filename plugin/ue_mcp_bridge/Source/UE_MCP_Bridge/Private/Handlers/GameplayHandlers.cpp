@@ -2098,22 +2098,29 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ConfigureAiPerceptionSense(const TShar
 	}
 
 	FScriptArrayHelper Helper(SensesProp, SensesProp->ContainerPtrToValuePtr<void>(PercTemplate));
+
+	// Find the sense config this call is about. An existing one and a freshly
+	// constructed one are then driven through the SAME settings pass below.
+	//
+	// The existing-config branch used to return existed: true right here, before
+	// the settings pass ran at all, so the ordinary flow - add a sense, then tune
+	// it - wrote nothing and reported success. Idempotency means the call says
+	// what it did, not that the second call does nothing.
+	UObject* Cfg = nullptr;
+	int32 ConfigIndex = INDEX_NONE;
 	for (int32 i = 0; i < Helper.Num(); ++i)
 	{
 		UObject* Existing = ElemProp->GetObjectPropertyValue(Helper.GetRawPtr(i));
 		if (Existing && Existing->GetClass() == SenseCfgClass)
 		{
-			auto Ex = MCPSuccess();
-			MCPSetExisted(Ex);
-			Ex->SetStringField(TEXT("blueprintPath"), BPPath);
-			Ex->SetStringField(TEXT("component"), ResolvedComp);
-			Ex->SetStringField(TEXT("senseType"), SenseType);
-			Ex->SetStringField(TEXT("senseConfig"), SenseCfgClass->GetName());
-			return MCPResult(Ex);
+			Cfg = Existing;
+			ConfigIndex = i;
+			break;
 		}
 	}
+	const bool bExisted = (Cfg != nullptr);
 
-	// Validate every setting BEFORE anything is constructed or appended.
+	// Validate every setting BEFORE anything is constructed, appended or written.
 	//
 	// This loop used to run after the config was in the array and did
 	// `if (!P) continue;`, so a misspelled key returned success having done
@@ -2124,7 +2131,8 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ConfigureAiPerceptionSense(const TShar
 	// Validating first also matters for the failure path. Applying mid-loop
 	// left a half-configured config appended to the array with the Blueprint
 	// uncompiled, which AddPerceptionComponent already avoids for its own
-	// `senses` array for exactly this reason.
+	// `senses` array for exactly this reason. The update path below needs the
+	// same guarantee, and gets it from the same check plus a per-key snapshot.
 	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
 	const bool bHasSettings =
 		Params->TryGetObjectField(TEXT("settings"), PropsObj) && PropsObj && (*PropsObj).IsValid();
@@ -2146,7 +2154,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ConfigureAiPerceptionSense(const TShar
 			}
 			Valid.Sort();
 			return MCPError(FString::Printf(
-				TEXT("%s has no propert%s named %s. Valid properties on %s: %s."),
+				TEXT("%s has no propert%s named %s. Valid properties on %s: %s. Nothing was changed."),
 				*SenseCfgClass->GetName(),
 				UnknownKeys.Num() == 1 ? TEXT("y") : TEXT("ies"),
 				*FString::Join(UnknownKeys, TEXT(", ")),
@@ -2155,12 +2163,43 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ConfigureAiPerceptionSense(const TShar
 		}
 	}
 
-	UObject* Cfg = NewObject<UObject>(PercTemplate, SenseCfgClass, NAME_None, RF_Transactional);
-	const int32 NewIdx = Helper.AddValue();
-	ElemProp->SetObjectPropertyValue(Helper.GetRawPtr(NewIdx), Cfg);
+	if (!bExisted)
+	{
+		Cfg = NewObject<UObject>(PercTemplate, SenseCfgClass, NAME_None, RF_Transactional);
+		ConfigIndex = Helper.AddValue();
+		ElemProp->SetObjectPropertyValue(Helper.GetRawPtr(ConfigIndex), Cfg);
+	}
 
 	// Optional per-sense tuning (e.g. { "SightRadius": 1500 }).
+	//
+	// Each write is snapshotted first, so a value that will not convert halfway
+	// through leaves the component exactly as it was found rather than half
+	// applied: the create path drops the whole appended element, the update path
+	// puts back the values it had already written.
+	struct FSenseSettingWrite
+	{
+		FProperty* Property = nullptr;
+		FString PreviousText;
+	};
+	TArray<FSenseSettingWrite> Written;
 	TArray<FString> AppliedProps;
+	TArray<FString> ChangedProps;
+	TArray<FString> AlreadyAtValueProps;
+
+	auto UndoWrites = [&]()
+	{
+		if (!bExisted)
+		{
+			Helper.RemoveValues(ConfigIndex, 1);
+			return;
+		}
+		for (int32 i = Written.Num() - 1; i >= 0; --i)
+		{
+			FProperty* P = Written[i].Property;
+			P->ImportText_Direct(*Written[i].PreviousText, P->ContainerPtrToValuePtr<void>(Cfg), Cfg, PPF_None);
+		}
+	};
+
 	if (bHasSettings)
 	{
 		for (const auto& KV : (*PropsObj)->Values)
@@ -2170,42 +2209,120 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ConfigureAiPerceptionSense(const TShar
 			// guard stays because a null deref would be worse than a message.
 			if (!P)
 			{
-				Helper.RemoveValues(NewIdx, 1);
+				UndoWrites();
 				return MCPError(FString::Printf(
 					TEXT("Property '%s' vanished between validation and apply on %s."),
 					*FString(*KV.Key), *SenseCfgClass->GetName()));
 			}
+
+			void* ValueAddr = P->ContainerPtrToValuePtr<void>(Cfg);
+			FString BeforeText;
+			P->ExportText_Direct(BeforeText, ValueAddr, ValueAddr, Cfg, PPF_None);
+
 			FString PErr;
-			if (!MCPJsonProperty::SetJsonOnProperty(P, P->ContainerPtrToValuePtr<void>(Cfg), KV.Value, PErr))
+			if (!MCPJsonProperty::SetJsonOnProperty(P, ValueAddr, KV.Value, PErr))
 			{
-				// A value that will not convert is a failed call, not a skipped
-				// key. Undo the append so the template is left as it was found.
-				Helper.RemoveValues(NewIdx, 1);
+				// A value that will not convert is a failed call, not a skipped key.
+				UndoWrites();
 				return MCPError(FString::Printf(
-					TEXT("Could not set '%s' on %s: %s. The sense was not added."),
-					*FString(*KV.Key), *SenseCfgClass->GetName(), *PErr));
+					TEXT("Could not set '%s' on %s: %s. %s"),
+					*FString(*KV.Key), *SenseCfgClass->GetName(), *PErr,
+					bExisted
+						? TEXT("The sense was left exactly as it was found; no setting was applied.")
+						: TEXT("The sense was not added.")));
 			}
+			Written.Add(FSenseSettingWrite{ P, BeforeText });
 			AppliedProps.Add(FString(*KV.Key));
+
+			FString AfterText;
+			P->ExportText_Direct(AfterText, ValueAddr, ValueAddr, Cfg, PPF_None);
+			if (AfterText == BeforeText) AlreadyAtValueProps.Add(FString(*KV.Key));
+			else ChangedProps.Add(FString(*KV.Key));
 		}
 	}
 
-	FKismetEditorUtilities::CompileBlueprint(BP);
-	SaveAssetPackage(BP);
+	// Compile and save only when something actually moved. A call that found the
+	// sense already configured exactly as asked has no reason to dirty the asset.
+	const bool bChanged = (!bExisted || ChangedProps.Num() > 0);
+	if (bChanged)
+	{
+		FKismetEditorUtilities::CompileBlueprint(BP);
+		SaveAssetPackage(BP);
+	}
 
+	// Three outcomes, reported apart: created, existed and updated, existed and
+	// unchanged. Collapsing the last two is what made the old result dishonest.
 	auto Result = MCPSuccess();
-	MCPSetCreated(Result);
+	if (bExisted) MCPSetExisted(Result); else MCPSetCreated(Result);
+	if (bExisted && ChangedProps.Num() > 0) MCPSetUpdated(Result);
+	else Result->SetBoolField(TEXT("updated"), false);
+	Result->SetBoolField(TEXT("changed"), bChanged);
 	Result->SetStringField(TEXT("blueprintPath"), BPPath);
 	Result->SetStringField(TEXT("component"), ResolvedComp);
 	Result->SetStringField(TEXT("senseType"), SenseType);
 	Result->SetStringField(TEXT("senseConfig"), Cfg->GetClass()->GetName());
+	Result->SetNumberField(TEXT("index"), ConfigIndex);
+
+	auto ToJsonArray = [](const TArray<FString>& In)
+	{
+		TArray<TSharedPtr<FJsonValue>> Out;
+		for (const FString& S : In) Out.Add(MakeShared<FJsonValueString>(S));
+		return Out;
+	};
 	if (AppliedProps.Num() > 0)
 	{
-		TArray<TSharedPtr<FJsonValue>> A;
-		for (const FString& S : AppliedProps) A.Add(MakeShared<FJsonValueString>(S));
-		Result->SetArrayField(TEXT("appliedProperties"), A);
+		Result->SetArrayField(TEXT("appliedProperties"), ToJsonArray(AppliedProps));
+		Result->SetArrayField(TEXT("changedProperties"), ToJsonArray(ChangedProps));
+		Result->SetArrayField(TEXT("unchangedProperties"), ToJsonArray(AlreadyAtValueProps));
 	}
 
-	// Rollback: removing the sense again isn't a first-class action; report intent.
+	if (!bExisted)
+	{
+		Result->SetStringField(TEXT("note"), FString::Printf(
+			TEXT("%s was added to '%s' and %d setting(s) were written."),
+			*SenseCfgClass->GetName(), *ResolvedComp, AppliedProps.Num()));
+	}
+	else if (ChangedProps.Num() > 0)
+	{
+		Result->SetStringField(TEXT("note"), FString::Printf(
+			TEXT("%s was already on '%s'; %d of %d requested setting(s) changed its value."),
+			*SenseCfgClass->GetName(), *ResolvedComp, ChangedProps.Num(), AppliedProps.Num()));
+	}
+	else if (bHasSettings)
+	{
+		Result->SetStringField(TEXT("note"), FString::Printf(
+			TEXT("%s was already on '%s' and every requested setting already held that value, ")
+			TEXT("so the asset was not touched. gameplay(read_perception) reports the current values."),
+			*SenseCfgClass->GetName(), *ResolvedComp));
+	}
+	else
+	{
+		Result->SetStringField(TEXT("note"), FString::Printf(
+			TEXT("%s was already on '%s' and no settings were supplied, so nothing was written. ")
+			TEXT("Pass 'settings' to tune it."),
+			*SenseCfgClass->GetName(), *ResolvedComp));
+	}
+
+	// The inverse of adding a sense is removing it, and remove_sense is a real
+	// action now. It is only the inverse when THIS call added the config: undoing
+	// a tuning pass by destroying a config the caller already had is not an undo.
+	if (!bExisted)
+	{
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("blueprintPath"), BPPath);
+		Payload->SetStringField(TEXT("senseType"), SenseType);
+		Payload->SetStringField(TEXT("componentName"), ResolvedComp);
+		MCPSetRollback(Result, TEXT("remove_sense"), Payload);
+	}
+	else if (ChangedProps.Num() > 0)
+	{
+		Result->SetBoolField(TEXT("rollbackUnavailable"), true);
+		Result->SetStringField(TEXT("rollbackUnavailableReason"), TEXT(
+			"This call tuned a sense config that already existed. Removing it would destroy a config "
+			"the caller did not create, and the previous values are not carried here. Read them with "
+			"gameplay(read_perception) before tuning, and write them back with configure_sense."));
+	}
+
 	return MCPResult(Result);
 }
 
