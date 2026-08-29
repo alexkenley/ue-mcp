@@ -128,6 +128,15 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   // steps are.
   "flow.plan": "read",
 
+  // ── Read the engine tree and the project's own sources ──────────────
+  // These answer questions about C++ before any is written. They touch the
+  // engine install and the project's Source/ read-only, and the index they
+  // build is a cache under the user directory, not editor state. `verify` and
+  // `lint` are not in the verb lexicon because nothing else on the surface
+  // uses them.
+  "project.verify_symbols": "read",
+  "project.lint_cpp_header": "read",
+
   // ── Arbitrary payload decides the effect ────────────────────────────
   "epic.call_tool": "unknown",
   "editor.execute_python": "mutate",

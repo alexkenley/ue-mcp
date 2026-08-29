@@ -59,6 +59,7 @@ CODE_OF_CONDUCT.md
 debug.log
 deploy-bridge.js
 .gitmodules
+.sf
 
 ## OS
 .DS_Store
@@ -191,3 +192,6 @@ bench/
 
 # Agent scratch space, never committed.
 .scratch/
+
+# Engine symbol index cache for the live tier (rebuilt on demand).
+.engine-index-cache/

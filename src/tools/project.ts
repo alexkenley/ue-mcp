@@ -8,6 +8,14 @@ import { selectEngine } from "../engine-root.js";
 import { buildProject, startEditor, isBridgeReachable } from "../editor-control.js";
 import { resolveConfigPath, findIniFiles, parseIni, buildTagTree } from "../config-parser.js";
 import { parseHeader, collectFiles, findSourceRoots, resolveModuleDir } from "../cpp-parser.js";
+import { loadEngineIndex, type EngineIndex } from "../engine-index.js";
+import {
+  verifySymbols,
+  suggestBuildDeps,
+  findExampleUsage,
+  lintHeader,
+  findBuildCs,
+} from "../cpp-correctness.js";
 import { readDeployedBridgeApiVersion } from "../plugin/bridge-api.js";
 import { CLIENT_PROTOCOL_VERSION, describeProtocolMismatch } from "../bridge.js";
 import { searchTools, type ToolSearchHit } from "../tool-search.js";
@@ -30,6 +38,42 @@ function requireEngineRoot(ctx: ToolContext): string {
   const engineRoot = selectEngine(ctx.project.engineLookup(), "engineRoot").engineRoot;
   if (!engineRoot) throw new Error("Could not resolve engine install path");
   return engineRoot;
+}
+
+/**
+ * The engine symbol index for this project's engine.
+ *
+ * Cached on disk per engine, so the first call on a machine pays a scan of
+ * roughly 31,000 headers and every call after it is a file read. The scan is
+ * slow only because of first-touch I/O, so the actions that use this declare a
+ * long timeout rather than pretending it is instant.
+ */
+function requireEngineIndex(ctx: ToolContext, refresh = false): {
+  index: EngineIndex;
+  source: string;
+  cacheFile: string | null;
+  buildMs?: number;
+} {
+  const engineRoot = requireEngineRoot(ctx);
+  const loaded = loadEngineIndex(engineRoot, { refresh });
+  return {
+    index: loaded.index,
+    source: loaded.source,
+    cacheFile: loaded.cacheFile,
+    buildMs: loaded.buildMs,
+  };
+}
+
+/** Read a names[] parameter that also accepts a single string. */
+function nameList(value: unknown, field: string): string[] {
+  const list = typeof value === "string"
+    ? value.split(",").map((v) => v.trim()).filter(Boolean)
+    : Array.isArray(value)
+      ? value.filter((v): v is string => typeof v === "string" && v.trim() !== "")
+      : [];
+  if (list.length === 0) throw new Error(`Missing '${field}'. Pass an array of symbol names, or a comma-separated string.`);
+  if (list.length > 200) throw new Error(`'${field}' is capped at 200 names per call (got ${list.length}).`);
+  return list;
 }
 
 /**
@@ -891,6 +935,124 @@ export const projectTool: ToolDef = categoryTool(
         return { module: path.basename(moduleDir), path: found, bytes: content.length, content };
       },
     },
+    build_engine_index: {
+      description:
+        "Build or refresh the engine symbol index that verify_symbols, lint_cpp_header and "
+        + "suggest_build_deps read. Scans roughly 31,000 headers across Runtime, Editor, Developer "
+        + "and the includable half of Engine/Plugins, and records for each symbol the header that "
+        + "declares it, the module that owns it, its signature and any UE_DEPRECATED. The result is "
+        + "cached per engine under the user directory and shared by every project on that engine, so "
+        + "this is a one-time cost per engine install: expect several minutes cold (first touch of "
+        + "each file goes through the virus scanner on Windows) and a few seconds warm. The other "
+        + "actions build it on demand, so this is only needed to refresh after an engine upgrade or "
+        + "to pay the cost deliberately. Params: refresh? (rebuild even when a valid cache exists)",
+      timeoutMs: 1_800_000,
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        const { index, source, cacheFile, buildMs } = requireEngineIndex(ctx, p.refresh === true);
+        return {
+          engineRoot: index.engineRoot,
+          engineVersion: index.engineVersion,
+          source,
+          cacheFile,
+          buildMs,
+          builtAt: index.builtAt,
+          trees: index.trees,
+          headerCount: index.headerCount,
+          symbolCount: index.symbolCount,
+          uniqueNames: Object.keys(index.symbols).length,
+        };
+      },
+    },
+    verify_symbols: {
+      description:
+        "Check that engine symbols exist BEFORE writing C++ that uses them, and get back what you "
+        + "need to write it: the header to #include, the owning module for Build.cs, the exact "
+        + "declaration, the base class, and any UE_DEPRECATED with its version and message. Accepts "
+        + "a qualified 'UGameplayStatics::GetPlayerPawn' as well as a bare type name, and covers "
+        + "plugin modules (GameplayAbilities, Niagara, PCG, EnhancedInput) as well as the engine. A "
+        + "name that does not resolve comes back with close spellings; a member miss on a class that "
+        + "does exist says so, which separates a misspelled method from a misspelled class. The "
+        + "aggregate includes[] and modules[] are the whole edit you need to make. Builds the index "
+        + "on first use, which can take several minutes on a cold filesystem. "
+        + "Params: names (string[] or comma-separated string, max 200)",
+      timeoutMs: 1_800_000,
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        const names = nameList(p.names, "names");
+        const { index, source } = requireEngineIndex(ctx);
+        return { indexSource: source, ...verifySymbols(index, names) };
+      },
+    },
+    suggest_build_deps: {
+      description:
+        "Given the engine symbols a module uses, report which modules its Build.cs has to depend on "
+        + "and which of those it does not list yet, plus the AddRange line to paste. Core and "
+        + "CoreUObject are omitted because every module already has them. buildCsPath defaults to "
+        + "the Build.cs owning modulePath, or the project's first module. Pair with "
+        + "add_module_dependency, which performs the edit. "
+        + "Params: names (string[] or comma-separated string), buildCsPath? (absolute), modulePath? "
+        + "(a file or directory whose owning Build.cs to use)",
+      timeoutMs: 1_800_000,
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        const names = nameList(p.names, "names");
+        const { index } = requireEngineIndex(ctx);
+        let buildCs = (p.buildCsPath as string | undefined) ?? null;
+        if (!buildCs && typeof p.modulePath === "string") {
+          const start = fs.existsSync(p.modulePath) && fs.statSync(p.modulePath).isDirectory()
+            ? p.modulePath
+            : path.dirname(p.modulePath);
+          buildCs = findBuildCs(start);
+        }
+        return suggestBuildDeps(index, names, buildCs);
+      },
+    },
+    find_example_usage: {
+      description:
+        "Find real call sites for an engine symbol in the engine's own .cpp files, which answers "
+        + "'how is this actually used' with code that compiles. Better than a signature for anything "
+        + "with a non-obvious calling convention. Searches sources rather than headers on purpose: a "
+        + "header gives the declaration, which verify_symbols already returns. "
+        + "Params: symbol (bare or Class::Member), limit? (default 10), trees? (Runtime|Editor|Developer, default Runtime)",
+      timeoutMs: 600_000,
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        const symbol = (p.symbol as string | undefined)?.trim();
+        if (!symbol) throw new Error("Missing 'symbol'");
+        const engineRoot = requireEngineRoot(ctx);
+        const trees = typeof p.trees === "string" ? [p.trees] : (p.trees as string[] | undefined);
+        const sites = findExampleUsage(engineRoot, symbol, { limit: (p.limit as number) ?? 10, trees });
+        return { symbol, siteCount: sites.length, sites };
+      },
+    },
+    lint_cpp_header: {
+      description:
+        "Check a header you just wrote against the engine it has to build against, and report what "
+        + "the compiler would before the compiler runs. Covers the structural mistakes that produce "
+        + "baffling Unreal build errors (a reflected type with no .generated.h include, a .generated.h "
+        + "that is not last, a UCLASS or USTRUCT with no GENERATED_BODY, no #pragma once) and the "
+        + "engine-facing ones (a symbol that does not exist, one used without its include, one whose "
+        + "module is missing from Build.cs, one the engine deprecated). A forward declaration counts "
+        + "as satisfying an include, since in a header it usually is. Run this after write_cpp_file "
+        + "and before build_project. "
+        + "Params: path (absolute, or relative to the project Source/), buildCsPath? (defaults to the owning module's)",
+      timeoutMs: 1_800_000,
+      handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
+        ctx.project.ensureLoaded();
+        const raw = p.path as string;
+        if (!raw) throw new Error("Missing 'path'");
+        const resolved = path.isAbsolute(raw)
+          ? raw
+          : path.join(ctx.project.projectDir ?? "", "Source", raw);
+        if (!fs.existsSync(resolved)) throw new Error(`Header not found: ${resolved}`);
+        const { index, source } = requireEngineIndex(ctx);
+        const result = lintHeader(index, resolved, { buildCsPath: p.buildCsPath as string | undefined });
+        return {
+          indexSource: source,
+          ...result,
+          ok: result.findings.filter((f) => f.severity === "error").length === 0,
+          errorCount: result.findings.filter((f) => f.severity === "error").length,
+          warningCount: result.findings.filter((f) => f.severity === "warning").length,
+        };
+      },
+    },
     add_module_dependency: {
       description:
         "Add a module to a target module's Build.cs dependency array. Params: moduleName (the Build.cs to edit - must exist in the project), dependency (module name to add, e.g. 'UMG'), access? ('public'|'private', default 'private'). Creates the corresponding AddRange block if missing. Rebuild required afterward.",
@@ -1062,7 +1224,12 @@ export const projectTool: ToolDef = categoryTool(
     configuration: z.string().optional().describe("Build configuration: Development, Debug, Shipping"),
     platform: z.string().optional().describe("Target platform: Win64, Linux, Mac"),
     clean: z.boolean().optional().describe("Clean build"),
-    symbol: z.string().optional().describe("Symbol name for find_engine_symbol"),
+    symbol: z.string().optional().describe("Symbol name for find_engine_symbol / find_example_usage"),
+    names: z.union([z.string(), z.array(z.string())]).optional().describe("verify_symbols / suggest_build_deps: engine symbol names, as an array or a comma-separated string (max 200)"),
+    refresh: z.boolean().optional().describe("build_engine_index: rebuild even when a valid cache exists"),
+    buildCsPath: z.string().optional().describe("suggest_build_deps / lint_cpp_header: absolute path to a .Build.cs (defaults to the one owning the target)"),
+    modulePath: z.string().optional().describe("suggest_build_deps: a file or directory whose owning Build.cs to read"),
+    trees: z.union([z.string(), z.array(z.string())]).optional().describe("find_example_usage: engine trees to search (default Runtime)"),
     maxResults: z.number().optional().describe("Cap on find_engine_symbol / search_engine_cpp hits (default 100 / 500)"),
     tree: z.string().optional().describe("For search_engine_cpp: Runtime|Editor|Developer|Plugins|all (default Runtime)"),
     subdirectory: z.string().optional().describe("For search_engine_cpp: subdirectory within the chosen tree"),
