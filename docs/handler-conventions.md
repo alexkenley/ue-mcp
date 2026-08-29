@@ -117,6 +117,13 @@ The TS bridge lifts the `rollback` field onto `TaskResult.rollback`. When `rollb
 - **Only emit a rollback record when the handler actually mutated state.** An `existed: true` result means nothing was changed, so there's nothing to undo - do NOT emit a record.
 - **The inverse must be another registered handler.** Don't invent bespoke inverse handlers unless necessary; for creates, it's almost always the paired `delete_X`. For modifies, it's the same handler called with the previous value (self-inverse).
 - **Modifies capture the previous value _before_ mutation.** The rollback payload restores exactly that value.
+- **A record on a `success: false` body is reported, not replayed.** A handler that partly applied a mutation before giving up may attach an inverse for the part that landed, and a few do. flowkit collects an inverse only from a step that succeeded, so the flow runner never invokes that one: it arrives on `steps[i].unappliedRollback` and in the step's error text instead, for a caller to run. Build the record the same way regardless; just do not expect the runner to fire it. See [docs/flows.md](flows.md).
+
+### Idempotency, and why a re-run must not fail
+
+A mutation asked for twice REPORTS the second time rather than failing it. `success: true` with the marker that says nothing changed - `alreadyRunning`, `alreadyStopped`, `alreadyExists`, `alreadyRemoved`, `existed` - and no rollback record, because nothing was mutated to undo.
+
+This is not cosmetic. A `success: false` body fails the flow step that ran it and stops the whole run, and flowkit's step schema has no `continue_on_error`, so there is no per-step escape. An action that reports "already in the state you asked for" as a failure aborts every flow that makes sure of something before doing work, on the common path where it was already sure. `MCPError` is for a call that could not do what it was asked; being asked for a state the editor is already in is not that.
 
 ## Helpers
 

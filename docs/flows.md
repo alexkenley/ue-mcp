@@ -287,6 +287,33 @@ flows:
 
 If step 3 fails: the `delete_actor` inverses for B and A run, leaving the level as it was. Handlers without an inverse (`execute_command`, `shell`, some deletes) simply don't contribute records; their steps are left as-is when rollback runs.
 
+### What counts as a failed step
+
+A step fails when the call throws AND when the handler answers `{ success: false }` in its body. The bridge resolves a refusal like any other reply, so the verdict is read off the answer: a destructive action that reported its own failure stops the run, fires `on_failure`, and arms `rollback_on_failure`, instead of being walked past as a pass.
+
+Handlers that are idempotent report a re-run rather than failing it - `alreadyRunning`, `alreadyStopped`, `alreadyExists`, `alreadyRemoved` alongside `success: true` - so a flow that makes sure the editor is up, or stops it before a build, walks on when it already was. See [docs/handler-conventions.md](handler-conventions.md).
+
+### The failing step's own inverse
+
+`rollback_on_failure` unwinds the steps **before** the failure. The failing step's own inverse is **reported, not replayed**.
+
+A few handlers attach a rollback record to a `success: false` body on purpose, because the mutation partly applied: `asset(rename)` on a World that moved some external actor packages before the rename gave up, the hygiene fixer's already-applied moves, the lightmap UV builder's changed settings, the mesh fracturer's written pieces. The runner collects an inverse only from a step that succeeded, so nothing downstream would ever invoke that record.
+
+Rather than discard it, the run hands it back:
+
+```
+steps[i].unappliedRollback = {
+  record: { taskName, payload },        # the record the handler emitted
+  step: '{ task: "ue-mcp.bridge", options: { method: ..., ... } }',
+  replayed: false,
+  note: ...
+}
+```
+
+The same call is appended to that step's `error.message` and printed under the step in the summary. Run it as its own flow step, or call the bridge method named in `record.payload.method` with the rest of the payload. Every other step's inverse is unaffected and still runs automatically.
+
+A **nested** flow behaves the same way, and reports it in one place rather than two: a nested step is summarised to its step count, so the child's step results never reach the parent's `steps` array, and the undo call arrives in the nested step's `error.message`. That is the reason it is written into the message and not only into a field.
+
 Conventions for handlers - natural keys, the `onConflict: skip|update|error` option, and rollback record shape - live in [docs/handler-conventions.md](handler-conventions.md).
 
 ## Git Snapshot Safety Net
