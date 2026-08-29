@@ -48,6 +48,12 @@ void FMCPEngineStatusHooks::Install()
 		// this window" bookkeeping. The call is a null check when nothing is
 		// modal.
 		FDialogHandlers::ApplyPolicyToActiveModal();
+
+		// The modal-safe queue is only emptied by the modal-loop tick below,
+		// which never fires while no dialog is up. This is the tick that does
+		// fire then, so it is where a finished entry is dropped. On an idle
+		// bridge the queue is empty and the call is a single load.
+		FMCPGameThreadExecutor::SweepModalSafeQueue();
 	});
 
 	GModalLoopHandle = FSlateApplication::Get().GetOnModalLoopTickEvent().AddLambda([](float)

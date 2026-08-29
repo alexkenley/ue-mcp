@@ -938,6 +938,17 @@ inline T* LoadBlueprintCDO(const FString& BlueprintPath, TSharedPtr<FJsonValue>&
 }
 
 // ── Parameter extraction ─────────────────────────────────────────────────────
+//
+// Every helper below treats an unset Params the same way it treats an empty
+// one: a required key is missing, an optional key falls back to its default.
+//
+// From the socket an unset pointer cannot arrive, because ProcessMessage
+// substitutes a fresh FJsonObject on every path. This header is public and
+// shipped, though, and its neighbours here - ResolveWorldFromParams,
+// MCPResolveActor, ReadPageRequest - all test validity first. A caller that
+// reads those and concludes the file guards, then hands an unset pointer to a
+// nested dispatch or a test, was one line from a null dereference on the game
+// thread. One rule for the whole header is the thing that stops that.
 
 /** Extract a required string parameter.  Returns error JSON on failure, nullptr on success. */
 inline TSharedPtr<FJsonValue> RequireString(
@@ -945,7 +956,7 @@ inline TSharedPtr<FJsonValue> RequireString(
 	const TCHAR* Key,
 	FString& OutValue)
 {
-	if (Params->TryGetStringField(Key, OutValue) && !OutValue.IsEmpty())
+	if (Params.IsValid() && Params->TryGetStringField(Key, OutValue) && !OutValue.IsEmpty())
 		return nullptr;
 	return MCPError(FString::Printf(TEXT("Missing required parameter '%s'"), Key));
 }
@@ -957,10 +968,13 @@ inline TSharedPtr<FJsonValue> RequireStringAlt(
 	const TCHAR* Key2,
 	FString& OutValue)
 {
-	if (Params->TryGetStringField(Key1, OutValue) && !OutValue.IsEmpty())
-		return nullptr;
-	if (Params->TryGetStringField(Key2, OutValue) && !OutValue.IsEmpty())
-		return nullptr;
+	if (Params.IsValid())
+	{
+		if (Params->TryGetStringField(Key1, OutValue) && !OutValue.IsEmpty())
+			return nullptr;
+		if (Params->TryGetStringField(Key2, OutValue) && !OutValue.IsEmpty())
+			return nullptr;
+	}
 	return MCPError(FString::Printf(TEXT("Missing required parameter '%s' (or '%s')"), Key1, Key2));
 }
 
@@ -971,7 +985,7 @@ inline FString OptionalString(
 	const FString& DefaultValue = TEXT(""))
 {
 	FString Value;
-	return Params->TryGetStringField(Key, Value) ? Value : DefaultValue;
+	return (Params.IsValid() && Params->TryGetStringField(Key, Value)) ? Value : DefaultValue;
 }
 
 /** Extract an optional int32, returning DefaultValue if absent. */
@@ -981,7 +995,7 @@ inline int32 OptionalInt(
 	int32 DefaultValue = 0)
 {
 	int32 Value;
-	return Params->TryGetNumberField(Key, Value) ? Value : DefaultValue;
+	return (Params.IsValid() && Params->TryGetNumberField(Key, Value)) ? Value : DefaultValue;
 }
 
 /** Extract an optional double, returning DefaultValue if absent. */
@@ -991,7 +1005,7 @@ inline double OptionalNumber(
 	double DefaultValue = 0.0)
 {
 	double Value;
-	return Params->TryGetNumberField(Key, Value) ? Value : DefaultValue;
+	return (Params.IsValid() && Params->TryGetNumberField(Key, Value)) ? Value : DefaultValue;
 }
 
 /** Extract an optional bool, returning DefaultValue if absent. */
@@ -1001,7 +1015,7 @@ inline bool OptionalBool(
 	bool DefaultValue = false)
 {
 	bool Value;
-	return Params->TryGetBoolField(Key, Value) ? Value : DefaultValue;
+	return (Params.IsValid() && Params->TryGetBoolField(Key, Value)) ? Value : DefaultValue;
 }
 
 /**
@@ -1168,7 +1182,7 @@ inline FVector OptionalVec3(
 	const FVector& DefaultValue = FVector::ZeroVector)
 {
 	const TSharedPtr<FJsonObject>* Obj = nullptr;
-	if (!Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid()) return DefaultValue;
+	if (!Params.IsValid() || !Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid()) return DefaultValue;
 	FVector Out = DefaultValue;
 	ReadVec3Fields(*Obj, Out);
 	return Out;
@@ -1181,7 +1195,7 @@ inline TSharedPtr<FJsonValue> RequireVec3(
 	FVector& Out)
 {
 	const TSharedPtr<FJsonObject>* Obj = nullptr;
-	if (!Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid())
+	if (!Params.IsValid() || !Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid())
 		return MCPError(FString::Printf(TEXT("Missing required vector parameter '%s' ({x,y,z})"), Key));
 	Out = FVector::ZeroVector;
 	if (!ReadVec3Fields(*Obj, Out))
@@ -1195,7 +1209,7 @@ inline FRotator OptionalRotator(
 	const FRotator& DefaultValue = FRotator::ZeroRotator)
 {
 	const TSharedPtr<FJsonObject>* Obj = nullptr;
-	if (!Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid()) return DefaultValue;
+	if (!Params.IsValid() || !Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid()) return DefaultValue;
 	FRotator Out = DefaultValue;
 	ReadRotatorFields(*Obj, Out);
 	return Out;
@@ -1207,7 +1221,7 @@ inline TSharedPtr<FJsonValue> RequireRotator(
 	FRotator& Out)
 {
 	const TSharedPtr<FJsonObject>* Obj = nullptr;
-	if (!Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid())
+	if (!Params.IsValid() || !Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid())
 		return MCPError(FString::Printf(TEXT("Missing required rotator parameter '%s' ({pitch,yaw,roll})"), Key));
 	Out = FRotator::ZeroRotator;
 	if (!ReadRotatorFields(*Obj, Out))
@@ -1221,7 +1235,7 @@ inline FLinearColor OptionalLinearColor(
 	const FLinearColor& DefaultValue = FLinearColor::White)
 {
 	const TSharedPtr<FJsonObject>* Obj = nullptr;
-	if (!Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid()) return DefaultValue;
+	if (!Params.IsValid() || !Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid()) return DefaultValue;
 	FLinearColor Out = DefaultValue;
 	ReadLinearColorFields(*Obj, Out);
 	return Out;
@@ -1264,7 +1278,7 @@ inline FTransform OptionalTransform(
 	const TCHAR* Key)
 {
 	const TSharedPtr<FJsonObject>* Obj = nullptr;
-	if (!Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid()) return FTransform::Identity;
+	if (!Params.IsValid() || !Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid()) return FTransform::Identity;
 	FVector  Loc   = FVector::ZeroVector;
 	FRotator Rot   = FRotator::ZeroRotator;
 	FVector  Scale = FVector::OneVector;
@@ -2007,22 +2021,42 @@ inline void MCPNoteSaveOutcome(
 
 /** RAII: root a UObject on construction, unroot on scope exit. Prevents the
  *  AddToRoot/RemoveFromRoot pairs from leaking when an early return (validation
- *  error, import failure) sneaks into the middle of the pair. */
+ *  error, import failure) sneaks into the middle of the pair.
+ *
+ *  Clears only what it set. The root set is a single flag, not a reference
+ *  count: UObjectBaseUtility::AddToRoot is SetRootSet() and RemoveFromRoot is
+ *  ClearRootSet(), each one atomic set or clear of
+ *  EInternalObjectFlags::RootSet. So a scope that unconditionally cleared on
+ *  exit would unroot an object some other party had rooted for its own
+ *  reasons, and two nested scopes over the same object would leave it
+ *  collectable the moment the INNER one exited while the outer one still
+ *  believed it was protected. Recording whether this scope was the one that
+ *  set the flag makes both cases correct: the inner scope is a no-op and the
+ *  outer keeps its guarantee, and an object rooted elsewhere is left alone.
+ *
+ *  What it does not promise: if another party clears the flag during the
+ *  scope, the object is unrooted from that moment. A single flag cannot
+ *  express two owners, and no version of this class ever could. */
 class FGCRootScope
 {
 public:
 	explicit FGCRootScope(UObject* InObject) : Object(InObject)
 	{
-		if (Object) Object->AddToRoot();
+		if (Object && !Object->IsRooted())
+		{
+			Object->AddToRoot();
+			bRootedHere = true;
+		}
 	}
 	~FGCRootScope()
 	{
-		if (Object && Object->IsRooted()) Object->RemoveFromRoot();
+		if (bRootedHere && Object && Object->IsRooted()) Object->RemoveFromRoot();
 	}
 	FGCRootScope(const FGCRootScope&) = delete;
 	FGCRootScope& operator=(const FGCRootScope&) = delete;
 private:
 	UObject* Object = nullptr;
+	bool bRootedHere = false;
 };
 
 // ── Reflection helpers ───────────────────────────────────────────────────────
@@ -2151,17 +2185,27 @@ namespace MCPWidgetGuidMap
 		int32 Pruned = 0;
 		/** Widgets moved out of the tree because nothing reached them. */
 		int32 Evicted = 0;
-		/** Variables the compiler will look for that still own no GUID. A
-		 *  non-empty list means the next compile of this asset ensures. */
-		TArray<FName> StillMissing;
+		/** Entries whose stored GUID was not a valid GUID and was replaced. */
+		int32 Repaired = 0;
+		/** Variables whose map entry the compiler will refuse, after the sync
+		 *  has done everything it can. A non-empty list means the next compile
+		 *  of this asset ensures. */
+		TArray<FName> Unusable;
+		/** What is actually wrong, one clause per defect, for the message. */
+		TArray<FString> Defects;
 
-		bool IsClean() const { return StillMissing.Num() == 0; }
+		bool IsClean() const { return Unusable.Num() == 0; }
 
-		FString MissingList() const
+		FString DefectList() const
+		{
+			return Defects.Num() ? FString::Join(Defects, TEXT("; ")) : FString(TEXT("(none)"));
+		}
+
+		FString UnusableList() const
 		{
 			TArray<FString> Names;
-			Names.Reserve(StillMissing.Num());
-			for (const FName& Name : StillMissing)
+			Names.Reserve(Unusable.Num());
+			for (const FName& Name : Unusable)
 			{
 				Names.Add(Name.ToString());
 			}
@@ -2278,12 +2322,50 @@ namespace MCPWidgetGuidMap
 			}
 			Report.Pruned = Stale.Num();
 
-			for (const FName& Name : Required)
+			// What the compiler actually checks, and which half of it the fill
+			// above cannot cover.
+			//
+			// FWidgetBlueprintCompilerContext::ValidateAndFixUpVariableGuids
+			// raises ensureAlways on three conditions:
+			//   1. a source widget or animation with no entry;
+			//   2. an entry whose stored GUID is not valid;
+			//   3. two entries carrying the same GUID.
+			//
+			// Condition 1 cannot survive the fill loop above, which adds a
+			// fresh GUID for every required name and prunes nothing from that
+			// set, so re-testing it here would be a guard that can never fire.
+			// The two the fill loop says nothing about are the ones worth
+			// checking, because both arrive with the asset rather than with
+			// the mutation:
+			//
+			// Condition 2 is repairable. An invalid GUID references nothing, so
+			// replacing it breaks nothing; the engine replaces it too, after
+			// ensuring.
+			//
+			// Condition 3 is not. The GUID is how external assets refer to a
+			// variable across a rename, so reassigning one of a colliding pair
+			// silently breaks whichever references chose that one. The engine
+			// does not repair it either - its own message tells the user to
+			// delete and recreate one of the two variables - so this is the
+			// state in which the map cannot be made to match what the compiler
+			// checks, and it is what stops the compile.
+			TMap<FGuid, FName> GuidOwners;
+			for (auto& Entry : WidgetBP->WidgetVariableNameToGuidMap)
 			{
-				if (!Name.IsNone() && !WidgetBP->WidgetVariableNameToGuidMap.Contains(Name))
+				if (!Entry.Value.IsValid())
 				{
-					Report.StillMissing.Add(Name);
+					Entry.Value = FGuid::NewGuid();
+					++Report.Repaired;
 				}
+				if (const FName* Owner = GuidOwners.Find(Entry.Value))
+				{
+					Report.Unusable.Add(Entry.Key);
+					Report.Defects.Add(FString::Printf(
+						TEXT("'%s' carries the same variable GUID as '%s'"),
+						*Entry.Key.ToString(), *Owner->ToString()));
+					continue;
+				}
+				GuidOwners.Add(Entry.Value, Entry.Key);
 			}
 		}
 		return Report;
@@ -2374,10 +2456,13 @@ namespace MCPWidgetGuidMap
 	/**
 	 * Sync, compile, sync again.
 	 *
-	 * When the map cannot be made to match what the compiler checks, the
-	 * compile does NOT run and bCompiled stays false. The ensure inside the
-	 * compiler is the thing this exists to prevent, and a handler that compiled
-	 * anyway would be reporting success on an asset it had just broken.
+	 * When the map cannot be made to match what the compiler checks - which in
+	 * practice means two variables carrying one GUID, the one defect neither
+	 * the sync nor the engine can repair without picking which set of external
+	 * references to break - the compile does NOT run and bCompiled stays false.
+	 * The ensure inside the compiler is the thing this exists to prevent, and a
+	 * handler that compiled anyway would be reporting success on an asset it
+	 * had just broken.
 	 */
 	template <typename TWidgetBP>
 	FSyncReport CompileChecked(TWidgetBP* WidgetBP)
@@ -2393,7 +2478,9 @@ namespace MCPWidgetGuidMap
 		const FSyncReport After = Sync(WidgetBP);
 		Report.Added += After.Added;
 		Report.Pruned += After.Pruned;
-		Report.StillMissing = After.StillMissing;
+		Report.Repaired += After.Repaired;
+		Report.Unusable = After.Unusable;
+		Report.Defects = After.Defects;
 		Report.bCompiled = true;
 		return Report;
 	}
@@ -2402,19 +2489,19 @@ namespace MCPWidgetGuidMap
 	inline TSharedPtr<FJsonValue> BlockedError(const FString& AssetPath, const FSyncReport& Report)
 	{
 		return MCPError(FString::Printf(
-			TEXT("Refusing to compile '%s': the widget variable GUID entry for %s could not be written. ")
-			TEXT("The UMG editor rebuilds its designer view from WidgetVariableNameToGuidMap and reports ")
-			TEXT("a failure for any widget missing from it, so nothing was compiled or saved. Reload the ")
-			TEXT("bridge with editor(reload_bridge) and retry; if it repeats, the asset needs opening in ")
-			TEXT("the UMG editor."),
-			*AssetPath, *Report.MissingList()));
+			TEXT("Refusing to compile '%s': %s. Two widget variables cannot share a GUID - the UMG ")
+			TEXT("compiler reports it and external assets that reference either one by GUID resolve to ")
+			TEXT("whichever it reaches first, so the bridge will not reassign one behind your back. ")
+			TEXT("Nothing was compiled or saved. Open the asset in the UMG editor and delete and ")
+			TEXT("recreate one of %s."),
+			*AssetPath, *Report.DefectList(), *Report.UnusableList()));
 	}
 }
 
 /** Stamp GUID bookkeeping onto a widget mutation result, and withdraw the
- *  success claim when a widget the compiler generates a variable for was left
- *  without an entry. Silence there is what turns into an editor ensure the
- *  next time anything compiles the asset. */
+ *  success claim when a variable the compiler generates was left with a map
+ *  entry the compiler will refuse. Silence there is what turns into an editor
+ *  ensure the next time anything compiles the asset. */
 inline void MCPSetWidgetGuidOutcome(
 	const TSharedPtr<FJsonObject>& Result,
 	const MCPWidgetGuidMap::FSyncReport& Report,
@@ -2440,21 +2527,26 @@ inline void MCPSetWidgetGuidOutcome(
 	{
 		Result->SetNumberField(TEXT("evictedWidgets"), Report.Evicted);
 	}
+	if (Report.Repaired > 0)
+	{
+		Result->SetNumberField(TEXT("repairedGuidEntries"), Report.Repaired);
+	}
 	if (Report.IsClean())
 	{
 		return;
 	}
 
 	TArray<TSharedPtr<FJsonValue>> Missing;
-	for (const FName& Name : Report.StillMissing)
+	for (const FName& Name : Report.Unusable)
 	{
 		Missing.Add(MakeShared<FJsonValueString>(Name.ToString()));
 	}
-	Result->SetArrayField(TEXT("widgetsMissingGuid"), Missing);
+	Result->SetArrayField(TEXT("widgetsWithUnusableGuid"), Missing);
 	Result->SetBoolField(TEXT("success"), false);
 	Result->SetStringField(TEXT("error"), FString::Printf(
-		TEXT("'%s' was changed, but %s ended up without a widget variable GUID. The UMG editor rebuilds ")
-		TEXT("its designer view from WidgetVariableNameToGuidMap and reports a failure for any widget ")
-		TEXT("missing from it, so this asset reports one until that widget is renamed or removed."),
-		*AssetPath, *Report.MissingList()));
+		TEXT("'%s' was changed, but its widget variable GUID bookkeeping is not in a state the UMG ")
+		TEXT("compiler accepts: %s. The bridge does not reassign a shared GUID on its own, because ")
+		TEXT("external assets reference these variables by GUID across renames. This asset reports the ")
+		TEXT("failure on every compile until one of %s is deleted and recreated in the UMG editor."),
+		*AssetPath, *Report.DefectList(), *Report.UnusableList()));
 }
