@@ -27,13 +27,15 @@ class UActorComponent;
 // answers a one-level question, and an interface declared on a GRANDPARENT
 // reads as absent. UClass::ImplementsInterface exists because the real answer
 // needs the class's super chain and, for each interface found there, that
-// interface's own super chain, so that is the authority add_blueprint_interface
-// and remove_blueprint_interface ask.
+// interface's own super chain.
 //
-// ImplementsInterface returns a bool, and those handlers also have to NAME the
-// class the contract came from, while list_blueprint_interfaces has to
-// enumerate the whole set. The walk below is the single definition of that
-// reach, and the three handlers read it rather than each rolling their own.
+// ImplementsInterface returns a bool, and add_blueprint_interface and
+// remove_blueprint_interface also have to NAME the class the contract came
+// from, while list_blueprint_interfaces has to enumerate the whole set. The
+// walk below is the single definition of that reach and answers all three
+// questions, so the three handlers read it rather than each rolling their own,
+// and none of them asks ImplementsInterface separately - the derivation on the
+// walk shows why a second ask could only ever agree.
 
 /** Every interface StartClass implements, each paired with the nearest ancestor
  *  class that brings it in. Nearest wins, so the pair names the class a caller
@@ -42,7 +44,26 @@ class UActorComponent;
  *  The reach is the one UClass::ImplementsInterface has (Class.cpp:6265-6284 in
  *  the 5.7 source tree): outer loop over the super chain of the class, inner
  *  test `InterfaceClass->IsChildOf(SomeInterface)` against each entry of that
- *  class's own Interfaces array, and UInterface itself rejected up front. */
+ *  class's own Interfaces array, and UInterface itself rejected up front.
+ *
+ *  That equality is what lets a caller use this walk INSTEAD of asking
+ *  ImplementsInterface and then asking here for a name. ImplementsInterface
+ *  answers true for an interface I exactly when some class C on the super chain
+ *  has an entry E with E.Class->IsChildOf(I), which is to say I sits on
+ *  E.Class's own super chain; and this walk records every class on that same
+ *  chain, from E.Class up to but excluding UInterface, which is the same point
+ *  ImplementsInterface stops at because it refuses UInterface as a query
+ *  outright. Neither reaches UObject: it is above UInterface here, and it fails
+ *  the CLASS_Interface test there. The `Seen` break does not narrow the set it
+ *  produces, only the work: it fires when a nearer provider already walked this
+ *  same chain past this point, and that walk ran to UInterface.
+ *
+ *  Every recorded pair carries a non-null provider. `Current` is the loop
+ *  variable of a walk that starts at StartClass and ends when it becomes null,
+ *  so it is never null inside the body. A caller therefore has two states, not
+ *  three: not implemented, or implemented with the declaring class named.
+ *  "Implemented but the declaring class is unknown" cannot arise, and code that
+ *  branched on it was branching on nothing. */
 inline void GatherImplementedInterfaces(UClass* StartClass, TArray<TPair<UClass*, UClass*>>& OutInterfaceAndProvider)
 {
 	TSet<UClass*> Seen;
@@ -76,7 +97,11 @@ inline void GatherImplementedInterfaces(UClass* StartClass, TArray<TPair<UClass*
 
 /** The nearest ancestor of StartClass (StartClass itself included) that brings
  *  InterfaceClass in, or nullptr. Built on the gather above so the name a
- *  handler reports and the set another handler lists are read off one walk. */
+ *  handler reports and the set another handler lists are read off one walk.
+ *
+ *  A non-null answer is also the answer StartClass->ImplementsInterface(
+ *  InterfaceClass) gives, per the derivation above, so callers that need both
+ *  the yes/no and the name ask this once rather than asking twice. */
 inline UClass* FindInterfaceProvider(UClass* StartClass, const UClass* InterfaceClass)
 {
 	if (!StartClass || !InterfaceClass) return nullptr;

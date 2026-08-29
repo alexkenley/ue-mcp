@@ -23,11 +23,17 @@
 #include "K2Node_Event.h"
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionTerminator.h"
+#include "K2Node_FunctionResult.h"
 #include "K2Node_Tunnel.h"
 #include "K2Node_EditablePinBase.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_MacroInstance.h"
 #include "K2Node_Composite.h"
+#include "K2Node_AddComponent.h"
+#include "K2Node_Timeline.h"
+// K2Node_AddComponent.h only forward-declares UActorComponent, and the delete
+// path below names one to report which template it left registered.
+#include "Components/ActorComponent.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "K2Node_DynamicCast.h"
@@ -1315,6 +1321,26 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObje
 	const bool bIsComposite = NodeToDelete->IsA<UK2Node_Composite>();
 	const bool bIsMacroInstance = NodeToDelete->IsA<UK2Node_MacroInstance>();
 	const bool bIsEventNode = NodeToDelete->IsA<UK2Node_Event>();
+	const bool bIsAddComponent = NodeToDelete->IsA<UK2Node_AddComponent>();
+	const bool bIsTimeline = NodeToDelete->IsA<UK2Node_Timeline>();
+
+	// Read off the node while it still exists, because the rollback note built
+	// after the removal names both and nothing down there can reach the node
+	// again. Each has a stand-in for the case where there is nothing to name,
+	// so neither ever prints an empty pair of quotes.
+	FString BoundGraphName;
+	if (const UK2Node_Composite* AsComposite = Cast<UK2Node_Composite>(NodeToDelete))
+	{
+		if (AsComposite->BoundGraph) BoundGraphName = AsComposite->BoundGraph->GetName();
+	}
+	FString AddComponentTemplateName(TEXT("(none)"));
+	if (const UK2Node_AddComponent* AsAddComponent = Cast<UK2Node_AddComponent>(NodeToDelete))
+	{
+		if (const UActorComponent* Template = AsAddComponent->GetTemplateFromNode())
+		{
+			AddComponentTemplateName = Template->GetName();
+		}
+	}
 	for (const UEdGraphPin* Pin : NodeToDelete->Pins)
 	{
 		if (Pin) DeletedLinkCount += Pin->LinkedTo.Num();
@@ -1327,19 +1353,95 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObje
 		FEdGraphUtilities::ExportNodesToText(NodeSet, DeletedT3D);
 	}
 
-	// FBlueprintEditorUtils::RemoveNode, not UEdGraph::RemoveNode. The graph
-	// method drops the node out of the Nodes array and breaks its links and
-	// stops there (EdGraph.cpp:260-279) - it never calls DestroyNode, which is
-	// where a node releases what it OWNS. For a collapsed graph that is the
-	// entire subgraph: UK2Node_Composite::DestroyNode hands BoundGraph to
-	// FBlueprintEditorUtils::RemoveGraph (K2Node_Composite.cpp:73-83), and
-	// without that call the bound graph outlived the node that owned it and
-	// stayed in the parent graph's SubGraphs with nothing pointing at it. The
-	// editor's own node deletion goes through this function
-	// (BlueprintEditorUtils.cpp:2751-2790), which breaks the links through the
-	// schema and clears breakpoints and pin watches on the way. bDontRecompile
-	// is true because the compile immediately below is this handler's own.
-	FBlueprintEditorUtils::RemoveNode(Blueprint, NodeToDelete, /*bDontRecompile*/ true);
+	// Two removal paths, and the question that picks between them is what the
+	// node's DestroyNode override does that the T3D just captured cannot carry
+	// back. Engine bodies below were read in a 5.7.4 source tree; every
+	// declaration they rest on is present unchanged in the 5.8 headers this
+	// plugin builds against.
+	//
+	// FBlueprintEditorUtils::RemoveNode is the editor's own node deletion
+	// (BlueprintEditorUtils.cpp:2751-2790). It clears breakpoints and pin
+	// watches, breaks the links through the schema, and then calls
+	// DestroyNode. UEdGraph::RemoveNode (EdGraph.cpp:260-279) drops the node
+	// out of the Nodes array and breaks its links and stops. The two are not
+	// far apart, because UEdGraphNode::DestroyNode's base implementation IS
+	// ParentGraph->RemoveNode(this) (EdGraphNode.cpp:554-561): the whole
+	// difference is the derived override.
+	//
+	// Most overrides only release what the node OWNS or unpick references to
+	// it, and the delete is wrong without them. UK2Node_Composite::DestroyNode
+	// hands BoundGraph to FBlueprintEditorUtils::RemoveGraph
+	// (K2Node_Composite.cpp:73-84); skip it and the collapsed graph outlives
+	// the node that owned it and stays in the parent graph's SubGraphs with
+	// nothing pointing at it. The AnimGraph state, conduit, transition,
+	// state-machine and blend-space nodes do the same for their bound graphs,
+	// UK2Node_ActorBoundEvent unbinds the level delegate it registered, and
+	// UK2Node_Tunnel clears its twin's back-pointer. None of that costs the
+	// rollback the subgraph: every one of those graphs is created with the
+	// NODE as its outer - CreateNewGraph(this, ...) in AnimStateNode.cpp:134,
+	// AnimStateConduitNode.cpp:73, AnimStateTransitionNode.cpp:675 and 698,
+	// AnimGraphNode_StateMachineBase.cpp:147 and
+	// AnimGraphNode_BlendSpaceGraphBase.cpp:223, 265 and 437 - so it is an
+	// inner, the export already carried it, and the paste rebuilds it.
+	//
+	// Exactly two overrides do something else. They unregister a Blueprint
+	// LEVEL archetype that is outered to the generated class rather than to
+	// the node, so it is not an inner and the T3D above never carried it:
+	//
+	//   UK2Node_AddComponent::DestroyNode does
+	//   BlueprintObj->ComponentTemplates.Remove(Template)
+	//   (K2Node_AddComponent.cpp:304-322). PrepareForCopying writes only
+	//   TemplateBlueprint (:324-327), so the export carries the template's
+	//   NAME and nothing else. On the way back MakeNewComponentTemplate
+	//   (:560-611) resolves that name through Blueprint->FindTemplateByName,
+	//   which reads the very array the removal emptied, and its
+	//   TemplateBlueprint fallback resolves to the same Blueprint and fails
+	//   the same way. Worse, the compile below only preserves what is in that
+	//   array: FKismetCompilerContext::SaveSubObjectsFromCleanAndSanitizeClass
+	//   seeds its keep-list from Blueprint->ComponentTemplates and
+	//   Blueprint->Timelines (KismetCompiler.cpp:755-758), so an unregistered
+	//   template is sanitized away before any rollback can run. Deleting a
+	//   configured Add Component node down this path and replaying the
+	//   rollback yields a node with a blank default template.
+	//
+	//   UK2Node_Timeline::DestroyNode calls RemoveTimeline and then renames
+	//   the template into the transient package (K2Node_Timeline.cpp:204-218).
+	//   RemoveTimeline drops it from Blueprint->Timelines and calls
+	//   MarkAsGarbage on it (BlueprintEditorUtils.cpp:7977-7990). PostPasteNode
+	//   recovers the curve tracks only by finding a live UTimelineTemplate with
+	//   a matching TimelineGuid through TObjectIterator (:220-238), and a
+	//   garbage-marked object survives that search only until the next
+	//   collection.
+	//
+	// So those two keep the plain graph removal, which is what this handler
+	// did for every class before the composite fix and which leaves the
+	// archetype registered for the rollback to find. Two costs, both stated
+	// rather than hidden: the template stays in the Blueprint after the delete,
+	// which the rollback note below says outright, and a breakpoint or pin
+	// watch on the node is not cleared, because that cleanup lives in
+	// FBlueprintEditorUtils::RemoveNode alongside the DestroyNode call this
+	// branch is avoiding. A stale breakpoint keeps the removed node alive and
+	// displays nowhere; losing a configured component template is worse.
+	// Neither class owns a subgraph -
+	// UK2Node_Composite is the only override of UEdGraphNode::GetSubGraphs in
+	// BlueprintGraph (K2Node_Composite.h:50) - so the orphaned-subgraph bug
+	// cannot reach them.
+	//
+	// bDontRecompile is true because the compile immediately below is this
+	// handler's own. It is not a promise that nothing recompiles: a composite
+	// reaches RemoveGraph with EGraphRemoveFlags::Recompile, and that calls
+	// MarkBlueprintAsStructurallyModified on its own way out
+	// (BlueprintEditorUtils.cpp:2575-2578).
+	const bool bDestroyUnregistersArchetype = bIsAddComponent || bIsTimeline;
+	if (bDestroyUnregistersArchetype)
+	{
+		NodeToDelete->BreakAllNodeLinks();
+		TargetGraph->RemoveNode(NodeToDelete);
+	}
+	else
+	{
+		FBlueprintEditorUtils::RemoveNode(Blueprint, NodeToDelete, /*bDontRecompile*/ true);
+	}
 
 	FKismetEditorUtilities::CompileBlueprint(Blueprint);
 	SaveAssetPackage(Blueprint);
@@ -1351,9 +1453,9 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObje
 	Result->SetBoolField(TEXT("deleted"), true);
 
 	// The inverse is import_nodes_t3d fed the node's own exported text. It puts
-	// an equivalent node back in the same graph, but the removal above broke
-	// every wire through the schema and the paste mints a fresh GUID, so this is
-	// lossy in two named ways rather than a clean undo.
+	// an equivalent node back in the same graph, but either removal path above
+	// severed every wire and the paste mints a fresh GUID, so this is lossy in
+	// at least two named ways rather than a clean undo.
 	if (!DeletedT3D.IsEmpty())
 	{
 		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
@@ -1367,17 +1469,53 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObje
 		// and each clause is a behaviour that was read out of the engine rather
 		// than inferred from the node's name.
 		FString Note = FString::Printf(TEXT(
-			"import_nodes_t3d pastes the node back with its properties intact, but the %d pin link(s) this delete "
-			"broke do NOT come back and have to be re-made with connect_pins. The pasted node also gets a new "
-			"nodeId, so '%s' will not address it afterwards."),
+			"import_nodes_t3d pastes the node back carrying the properties the export captured, but the %d pin "
+			"link(s) this delete broke do NOT come back and have to be re-made with connect_pins, and the pasted "
+			"node gets a new nodeId, so '%s' will not address it afterwards."),
 			DeletedLinkCount, *NodeId);
 		if (bIsComposite)
 		{
 			Note += TEXT(
-				" The collapsed graph comes back with the node. A composite's BoundGraph is created with the node "
-				"itself as its outer (UK2Node_Composite::PostPlacedNewNode), so the export carries the subgraph and "
-				"its contents inline rather than a reference to them, and UK2Node_Composite::PostPasteNode rewires "
-				"the entry and exit tunnels of the graph the paste rebuilt.");
+				" The collapsed graph comes back with the node, under a DIFFERENT NAME. A composite's BoundGraph is "
+				"created with the node itself as its outer (UK2Node_Composite::PostPlacedNewNode), so the export "
+				"carries the subgraph and its contents inline rather than a reference to them, and "
+				"UK2Node_Composite::PostPasteNode rewires the entry and exit tunnels of the graph the paste rebuilt. "
+				"That same PostPasteNode ends by calling RenameBoundGraphCloseToName, which starts its counter at 2 "
+				"and always formats '<name>_<n>' without ever trying the bare name.");
+			Note += BoundGraphName.IsEmpty()
+				? FString(TEXT(
+					" So the restored subgraph is addressed by a suffixed name, not the one it had. Read it back with "
+					"list_graphs before addressing it by graphName."))
+				: FString::Printf(TEXT(
+					" So the subgraph named '%s' comes back as '%s_2', or the next free index if that is taken. "
+					"Address it by that name afterwards, not by the old one."),
+					*BoundGraphName, *BoundGraphName);
+		}
+		if (bIsAddComponent)
+		{
+			Note += FString::Printf(TEXT(
+				" This node's component template survives the delete on purpose. The template is outered to the "
+				"generated class rather than to the node, so it is not carried by the exported text, and "
+				"UK2Node_AddComponent::PostPasteNode resolves it by NAME through Blueprint->FindTemplateByName. The "
+				"delete therefore leaves '%s' registered in the Blueprint's ComponentTemplates so the paste can copy "
+				"its properties onto the new template it mints. The cost is an orphan either way: until you roll "
+				"back, the Blueprint holds a component template no node references, and after a rollback that "
+				"original stays alongside the copy the paste created."),
+				*AddComponentTemplateName);
+		}
+		if (bIsTimeline)
+		{
+			Note += TEXT(
+				" This node's timeline template survives the delete on purpose, for the same reason: the template is "
+				"outered to the generated class, the exported text carries only the node's TimelineGuid, and "
+				"UK2Node_Timeline::PostPasteNode recovers the curve tracks by finding a live UTimelineTemplate with "
+				"that guid. Destroying the node would have dropped the template from Blueprint->Timelines and marked "
+				"it garbage, which makes the curve tracks unrecoverable at the next garbage collection - and the "
+				"compile this delete runs can be the thing that triggers it. What the paste does NOT restore is the "
+				"timeline's NAME: PostPasteNode assigns FindUniqueTimelineName unconditionally, and that returns "
+				"'Timeline' or 'Timeline_<n>' regardless of what the timeline was called, so the timeline variable "
+				"comes back renamed and anything referring to it by the old name has to be repointed. The original "
+				"template also stays in the Blueprint alongside the copy the paste duplicates from.");
 		}
 		if (bIsMacroInstance)
 		{
@@ -1887,10 +2025,12 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJson
 	// match reality.
 	//
 	// That flag does NOT filter entry and return nodes, which an older comment
-	// here claimed. UEdGraphNode's base implementation returns true and only
-	// UK2Node_Tunnel overrides it; UK2Node_FunctionEntry and
-	// UK2Node_FunctionResult descend from UK2Node_FunctionTerminator and
-	// UK2Node_Event from UK2Node_EditablePinBase, so all three export happily.
+	// here claimed. UEdGraphNode's base implementation returns true and
+	// UK2Node_Tunnel is the only override in BlueprintGraph - and it returns
+	// true as well (K2Node_Tunnel.cpp:151-154), so it filters nothing either.
+	// UK2Node_FunctionEntry and UK2Node_FunctionResult descend from
+	// UK2Node_FunctionTerminator and UK2Node_Event from
+	// UK2Node_EditablePinBase, so all of them export happily.
 	// That is fine for an export, which is a read. It is the import that has to
 	// be careful, and the reason differs by class rather than being one rule:
 	// a second UK2Node_FunctionEntry in one function graph is a compile error
@@ -1904,21 +2044,69 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJson
 	// another is present - but a pasted one re-syncs its pins to the entry node
 	// and to the primary result node (PostPasteNode, K2Node_FunctionResult.cpp:
 	// 269-279), so it does not necessarily arrive with the pins it left with.
-	// All three are named in `singularNodes` so a caller round-tripping the
-	// text into a graph that already has them can decide what to strip first.
+	// Each one carries its own `reason` in `singularNodes`, because "strip them
+	// first" is right for an entry node and wrong for a result node.
+	//
+	// The tunnel test is on the EXACT class, not IsA. UK2Node_Composite and
+	// UK2Node_MacroInstance both derive from UK2Node_Tunnel
+	// (K2Node_Composite.h:26, K2Node_MacroInstance.h:36), so an IsA test listed
+	// every collapsed graph and every macro instance as singular and warned that
+	// pasting one back stops the Blueprint compiling. Neither is true: a
+	// composite carries its bound graph inline as an inner and round-trips, and
+	// a macro instance holds a reference to a definition the export never
+	// touched. What IS singular is the entry or exit tunnel of a tunnel graph,
+	// which is a bare UK2Node_Tunnel, and the engine draws that distinction the
+	// same way - UK2Node_Composite::PostPasteNode tests
+	// Node->GetClass() == UK2Node_Tunnel::StaticClass() with the comment
+	// "Intentional that we check for exact class here!"
+	// (K2Node_Composite.cpp:116-121).
 	TSet<UObject*> NodeSet;
 	int32 SkippedCount = 0;
 	TArray<TSharedPtr<FJsonValue>> SingularNodes;
 	for (UEdGraphNode* Node : SelectedNodes)
 	{
-		if (Node && Node->CanDuplicateNode()
-			&& (Node->IsA<UK2Node_FunctionTerminator>()
-				|| Node->IsA<UK2Node_Tunnel>()
-				|| Node->IsA<UK2Node_Event>()))
+		const bool bIsBareTunnel = Node && Node->GetClass() == UK2Node_Tunnel::StaticClass();
+		const TCHAR* SingularReason = nullptr;
+		if (Node && Node->CanDuplicateNode())
+		{
+			if (Node->IsA<UK2Node_FunctionEntry>())
+			{
+				SingularReason = TEXT(
+					"A function graph holds one entry node. A second one is the compile error the compiler raises by "
+					"name, 'Expected only one function entry node in graph' (KismetCompiler.cpp:2224-2232). Strip this "
+					"before importing into a graph that already has an entry node.");
+			}
+			else if (Node->IsA<UK2Node_Event>())
+			{
+				SingularReason = TEXT(
+					"An event produces a function context named after the event, and a second one for the same event "
+					"is the DuplicateFunctionName compile error (KismetCompiler.cpp:2265-2275). The paste side does "
+					"try to save you: UK2Node_Event::CanPasteHere refuses and the schema substitutes a Custom Event, "
+					"which overrides nothing. Strip this if the target graph already has the event.");
+			}
+			else if (Node->IsA<UK2Node_FunctionResult>())
+			{
+				SingularReason = TEXT(
+					"NOT a compile error. A function graph supports several result nodes, which is why "
+					"UK2Node_FunctionResult::CanUserDeleteNode releases a locked one while another is present. What "
+					"it does not survive intact is the paste: PostPasteNode re-syncs its pins to the entry node and "
+					"to the primary result node (K2Node_FunctionResult.cpp:269-279), so it can arrive with different "
+					"pins than it left with. Import it, then check its pins.");
+			}
+			else if (bIsBareTunnel)
+			{
+				SingularReason = TEXT(
+					"A bare UK2Node_Tunnel is the entry or exit gateway of a tunnel graph, and a graph has one of "
+					"each. Pasting a second leaves two nodes claiming the same gateway. Strip this unless you are "
+					"importing into an empty tunnel graph.");
+			}
+		}
+		if (SingularReason)
 		{
 			TSharedPtr<FJsonObject> Singular = MakeShared<FJsonObject>();
 			Singular->SetStringField(TEXT("nodeId"), Node->NodeGuid.ToString());
 			Singular->SetStringField(TEXT("class"), Node->GetClass()->GetName());
+			Singular->SetStringField(TEXT("reason"), SingularReason);
 			SingularNodes.Add(MakeShared<FJsonValueObject>(Singular));
 		}
 		if (Node && Node->CanDuplicateNode())
@@ -1934,7 +2122,14 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJson
 
 	if (NodeSet.Num() == 0)
 	{
-		return MCPError(TEXT("No nodes are duplicatable (entry/return nodes cannot be exported)"));
+		// Not "entry/return nodes cannot be exported", which this said before and
+		// which the comment above disproves: those report CanDuplicateNode true
+		// and export happily. The classes that answer false are elsewhere, mostly
+		// in AnimGraph.
+		return MCPError(TEXT(
+			"No selected node reports CanDuplicateNode true, so FEdGraphUtilities::ExportNodesToText would write "
+			"nothing. Check the class of the nodes you selected: the AnimGraph singletons (output pose, state "
+			"result, transition result, state machine entry) answer false."));
 	}
 
 	FString ExportedText;
@@ -1950,10 +2145,14 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJson
 	if (SingularNodes.Num() > 0)
 	{
 		Result->SetStringField(TEXT("warning"), FString::Printf(TEXT(
-			"%d exported node(s) are singular: a function entry, a function return, a tunnel or an event. A graph "
-			"holds one of each signature, so importing this text into a graph that already has them adds duplicates "
-			"and the Blueprint stops compiling. They are listed in singularNodes; import into an empty graph, or "
-			"strip them from the t3d first."),
+			"%d exported node(s) do not simply paste back into a graph that already has their counterpart, and the "
+			"reason differs by node rather than being one rule. Each is listed in singularNodes with its own reason: "
+			"a second function ENTRY node and a second EVENT node for the same event are compile errors the Kismet "
+			"compiler raises by name, while a second function RESULT node is legal - a function graph supports "
+			"several - but arrives with its pins re-synced to the entry and primary result nodes rather than the "
+			"pins it left with. A bare tunnel is the gateway of a tunnel graph and a graph has one of each. Read the "
+			"per-node reason before deciding what to strip; collapsed graphs and macro instances are NOT in this "
+			"list and round-trip as they are."),
 			SingularNodes.Num()));
 	}
 	return MCPResult(Result);
@@ -2025,16 +2224,39 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ImportNodesT3D(const TSharedPtr<FJson
 	}
 
 	// Fresh GUIDs so the pasted nodes don't collide with the originals when
-	// pasting back into the same graph (e.g. round-trip duplicate).
+	// pasting back into the same graph (e.g. round-trip duplicate). That is the
+	// ONLY per-node step left here, and it is the only one the editor's own
+	// paste does either (FBlueprintEditor::PasteNodesHere, BlueprintEditor.cpp:
+	// 7733-7734).
+	//
+	// This loop used to call PostPasteNode() and ReconstructNode() as well.
+	// FEdGraphUtilities::ImportNodesFromText has already called
+	// PostProcessPastedNodes, which fixes the pin cross-links and then calls
+	// Node->PostPasteNode(), Node->ReconstructNode() and SetFlags(RF_Transactional)
+	// on every spawned node (EdGraphUtilities.cpp:232-248, called from :491). So
+	// the pass here added nothing - the engine's ReconstructNode is on every
+	// UEdGraphNode where this one was only on UK2Node - and PostPasteNode is not
+	// idempotent, which made the second call actively destructive:
+	//
+	//   UK2Node_Composite::PostPasteNode ends with
+	//   RenameBoundGraphCloseToName(BoundGraph->GetName()), and that function
+	//   starts its counter at 2 and always formats '<name>_<n>' without ever
+	//   trying the bare name (K2Node_Composite.cpp:155 and 258-281). Run twice,
+	//   a collapsed graph named MyGraph arrived as MyGraph_2_2 and every later
+	//   call addressing it by graphName missed.
+	//
+	//   UK2Node_AddComponent::PostPasteNode calls MakeNewComponentTemplate,
+	//   which mints a template and registers it (K2Node_AddComponent.cpp:329-335
+	//   and 560-611); the second call minted a second one and left the first
+	//   registered and unreferenced. UK2Node_Timeline::PostPasteNode does the
+	//   same for a timeline template (K2Node_Timeline.cpp:220-265).
+	//
+	// Engine bodies read in a 5.7.4 source tree; the declarations they rest on
+	// are present unchanged in the 5.8 headers this plugin builds against.
 	TArray<TSharedPtr<FJsonValue>> NodeIds;
 	for (UEdGraphNode* Node : PastedNodes)
 	{
 		Node->CreateNewGuid();
-		Node->PostPasteNode();
-		if (UK2Node* K2 = Cast<UK2Node>(Node))
-		{
-			K2->ReconstructNode();
-		}
 		NodeIds.Add(MakeShared<FJsonValueString>(Node->NodeGuid.ToString()));
 	}
 

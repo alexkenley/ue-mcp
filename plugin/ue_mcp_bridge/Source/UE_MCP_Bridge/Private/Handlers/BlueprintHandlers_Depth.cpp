@@ -467,10 +467,10 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListBlueprintInterfaces(const TShared
 	// declared on a GRANDPARENT out of a list whose whole job is to say what is
 	// in force. It also walks each interface's own super chain, so a Blueprint
 	// under a class implementing IUserObjectListEntry lists IUserListEntry too.
-	// add_blueprint_interface and remove_blueprint_interface decide with
-	// UClass::ImplementsInterface; GatherImplementedInterfaces is written to
-	// the reach that function has, so the set listed here and the answer those
-	// two give are read off the same relation.
+	// add_blueprint_interface and remove_blueprint_interface decide on this
+	// same walk, which is written to the reach UClass::ImplementsInterface has,
+	// so the set listed here and the answer those two give are not merely
+	// consistent - they are the same relation read once.
 	if (UClass* ParentClass = Blueprint->ParentClass.Get())
 	{
 		TArray<TPair<UClass*, UClass*>> Inherited;
@@ -484,9 +484,10 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListBlueprintInterfaces(const TShared
 			Entry->SetBoolField(TEXT("removable"), false);
 			// Which ancestor declares it, which is not always the direct parent.
 			// The gather only ever pairs an interface with the class it read it
-			// off, so this is never a guess; when there is no class to name the
-			// field is left out rather than filled with the parent.
-			if (Pair.Value) Entry->SetStringField(TEXT("inheritedFrom"), Pair.Value->GetPathName());
+			// off, and that class is the loop variable of a walk that starts at
+			// a non-null class and stops when it becomes null, so Pair.Value is
+			// never null and this field is never a guess and never absent.
+			Entry->SetStringField(TEXT("inheritedFrom"), Pair.Value->GetPathName());
 			Interfaces.Add(MakeShared<FJsonValueObject>(Entry));
 		}
 	}
@@ -541,28 +542,20 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RemoveBlueprintInterface(const TShare
 	{
 		// Distinguish "already gone" from "belongs to an ancestor", because the
 		// second is never going away and a caller retrying will never succeed.
-		// ImplementsInterface rather than a scan of ParentClass->Interfaces:
+		// FindInterfaceProvider rather than a scan of ParentClass->Interfaces:
 		// that array is per-class, so a scan sees one level and an interface
 		// declared on a GRANDPARENT would be reported as already removed when
-		// it is still in force. FindInterfaceProvider names the class that
-		// actually declares it, which is the class the caller has to edit.
-		// add_blueprint_interface asks the same two helpers.
+		// it is still in force. The walk has the reach UClass::ImplementsInterface
+		// has and additionally names the class that declares it, which is the
+		// class the caller has to edit, so it is asked once and its answer
+		// decides both. add_blueprint_interface asks it the same way.
 		if (UClass* ParentClass = Blueprint->ParentClass.Get())
 		{
-			if (ParentClass->ImplementsInterface(InterfaceClass))
+			if (UClass* Provider = FindInterfaceProvider(ParentClass, InterfaceClass))
 			{
-				// When the provider walk comes back empty the declaring class is
-				// simply not known here, and the parent is NOT a stand-in for it:
-				// naming the parent would be the wrong-class refusal this branch
-				// exists to avoid. The refusal says what it knows instead.
-				UClass* Provider = FindInterfaceProvider(ParentClass, InterfaceClass);
-				return MCPError(Provider
-					? FString::Printf(
-						TEXT("'%s' is inherited: it is declared on ancestor class '%s' and reached through parent '%s', not implemented on this Blueprint, so it cannot be removed here. Reparent the Blueprint, or edit the class that declares it."),
-						*InterfaceClass->GetName(), *Provider->GetPathName(), *ParentClass->GetPathName())
-					: FString::Printf(
-						TEXT("'%s' is inherited through parent '%s', not implemented on this Blueprint, so it cannot be removed here. Which ancestor class declares it could not be determined, so this message does not name one - list_interfaces reports inheritedFrom for every interface it can attribute. Reparent the Blueprint, or edit the class that declares it."),
-						*InterfaceClass->GetName(), *ParentClass->GetPathName()));
+				return MCPError(FString::Printf(
+					TEXT("'%s' is inherited: it is declared on ancestor class '%s' and reached through parent '%s', not implemented on this Blueprint, so it cannot be removed here. Reparent the Blueprint, or edit the class that declares it."),
+					*InterfaceClass->GetName(), *Provider->GetPathName(), *ParentClass->GetPathName()));
 			}
 		}
 		auto Noop = MCPSuccess();

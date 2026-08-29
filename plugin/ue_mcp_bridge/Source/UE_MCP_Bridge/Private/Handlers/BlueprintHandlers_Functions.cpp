@@ -80,45 +80,40 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddBlueprintInterface(const TSharedPt
 	// write with no meaning, and its rollback would then remove an entry the
 	// caller never needed.
 	//
-	// ImplementsInterface, not a scan of ParentClass->Interfaces. That array is
-	// per-class, so scanning it answers only one level and an interface from a
-	// GRANDPARENT reads as absent - which would send this call on to
+	// FindInterfaceProvider, not a scan of ParentClass->Interfaces. That array
+	// is per-class, so scanning it answers only one level and an interface from
+	// a GRANDPARENT reads as absent - which would send this call on to
 	// ImplementNewInterface and have the refusal message below tell the caller
-	// in as many words that inheritance is not what happened. FindInterfaceProvider
-	// then names the class it actually came from, which for a grandparent is not
-	// the parent. remove_blueprint_interface and list_blueprint_interfaces ask
-	// the same two helpers, so all three halves read one walk.
+	// in as many words that inheritance is not what happened.
+	//
+	// The walk IS the test, rather than UClass::ImplementsInterface being asked
+	// first and the walk asked again for a name. The two have provably the same
+	// reach (see the derivation on GatherImplementedInterfaces in
+	// BlueprintHandlers_Internal.h), so asking both would mean a second branch
+	// for the case where they disagree, and that case does not exist: the walk
+	// pairs every interface it records with the non-null class it read it off,
+	// so a non-null answer here is exactly ImplementsInterface returning true
+	// AND the declaring class being known. remove_blueprint_interface asks the
+	// same question the same way, and list_blueprint_interfaces enumerates the
+	// same walk, so all three halves read one relation.
 	if (UClass* ParentClass = Blueprint->ParentClass.Get())
 	{
-		if (ParentClass->ImplementsInterface(InterfaceClass))
+		if (UClass* Provider = FindInterfaceProvider(ParentClass, InterfaceClass))
 		{
-			// A provider of nullptr means the declaring class is not known here.
-			// The parent is not substituted for it: this branch exists so the
-			// caller is told the truth about where the contract comes from, and
-			// naming the wrong class is the failure it is meant to prevent.
-			UClass* Provider = FindInterfaceProvider(ParentClass, InterfaceClass);
 			auto Existed = MCPSuccess();
 			MCPSetExisted(Existed);
 			Existed->SetBoolField(TEXT("alreadyImplemented"), true);
 			Existed->SetStringField(TEXT("source"), TEXT("inherited"));
 			Existed->SetStringField(TEXT("blueprintPath"), BlueprintPath);
 			Existed->SetStringField(TEXT("interfacePath"), InterfacePathStr);
-			if (Provider) Existed->SetStringField(TEXT("inheritedFrom"), Provider->GetPathName());
+			Existed->SetStringField(TEXT("inheritedFrom"), Provider->GetPathName());
 			Existed->SetStringField(TEXT("parentClass"), ParentClass->GetPathName());
-			Existed->SetStringField(TEXT("reason"), Provider
-				? FString::Printf(TEXT(
-					"'%s' already implements '%s', declared on ancestor class '%s' and reached through parent '%s', so "
-					"nothing was added. The contract is in force and its functions can be overridden with "
-					"override_function. Implementing it again on the child would write a redundant entry that "
-					"remove_blueprint_interface refuses to remove."),
-					*BlueprintPath, *InterfaceClass->GetName(), *Provider->GetPathName(), *ParentClass->GetPathName())
-				: FString::Printf(TEXT(
-					"'%s' already implements '%s' through parent '%s', so nothing was added. Which ancestor class "
-					"declares it could not be determined, so inheritedFrom is absent rather than guessed. The "
-					"contract is in force and its functions can be overridden with override_function. Implementing "
-					"it again on the child would write a redundant entry that remove_blueprint_interface refuses to "
-					"remove."),
-					*BlueprintPath, *InterfaceClass->GetName(), *ParentClass->GetPathName()));
+			Existed->SetStringField(TEXT("reason"), FString::Printf(TEXT(
+				"'%s' already implements '%s', declared on ancestor class '%s' and reached through parent '%s', so "
+				"nothing was added. The contract is in force and its functions can be overridden with "
+				"override_function. Implementing it again on the child would write a redundant entry that "
+				"remove_blueprint_interface refuses to remove."),
+				*BlueprintPath, *InterfaceClass->GetName(), *Provider->GetPathName(), *ParentClass->GetPathName()));
 			Existed->SetBoolField(TEXT("rollbackPossible"), false);
 			Existed->SetStringField(TEXT("rollbackNote"),
 				TEXT("Nothing was added, so there is nothing to undo."));
@@ -142,7 +137,8 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddBlueprintInterface(const TSharedPt
 			"function or graph whose name collides with one of the interface's functions - rename it "
 			"(list_blueprint_graphs reports every graph) and call again. Already implemented, on this Blueprint or "
 			"inherited from anywhere in its parent chain, is reported as existed above and is not this error. The "
-			"inherited half is answered by UClass::ImplementsInterface, so a grandparent counts. Note that the engine "
+			"inherited half is answered by a walk of the whole parent chain with the reach UClass::ImplementsInterface "
+			"has, so a grandparent counts. Note that the engine "
 			"bails out part-way, so any interface function graph it had already created before refusing is still "
 			"there and can be removed with delete_function."),
 			*InterfacePathStr, *BlueprintPath));

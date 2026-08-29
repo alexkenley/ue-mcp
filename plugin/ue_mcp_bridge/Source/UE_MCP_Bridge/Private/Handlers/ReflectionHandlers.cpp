@@ -737,10 +737,12 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateGameplayTag(const TSharedPtr<F
 	// tolerant of spacing, so `Tag = "Ability.Fire"` does not contain
 	// `Tag="Ability.Fire"` and the duplicate line comes straight back.
 	//
-	// So the scan is per line: lines the ini parser would not read as a
-	// declaration are skipped (see the marker note below in the loop, which
-	// says which markers those are and why), and the rest are compared with
-	// EVERY whitespace character
+	// So the scan is per line, and each line is first reduced to what the ini
+	// parser would actually read: its comment tail is cut off (StripLineComment
+	// below), and a line that is nothing but a comment is then empty and is
+	// skipped along with the other markers the parser ignores (see the marker
+	// note inside the loop). What survives is compared with EVERY whitespace
+	// character
 	// removed, tabs included. FString::RemoveSpacesInline is not that: it is
 	// documented and implemented as removing the SPACE CHARACTER ONLY, so a
 	// tab-aligned `Tag<TAB>=<TAB>"Ability.Fire"` survived it and the duplicate
@@ -753,11 +755,14 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateGameplayTag(const TSharedPtr<F
 	// Case is handled explicitly on every comparison below rather than left to
 	// the defaults, because the defaults disagree with each other:
 	// FString::Contains defaults to ESearchCase::IgnoreCase and FString::Equals
-	// defaults to ESearchCase::CaseSensitive (UnrealString.h.inl:1162, 1177,
-	// 1191 and 1271). IgnoreCase is what this handler wants throughout, since a
-	// gameplay tag compares as an FName and FName is case-insensitive, and an
-	// ini section name is looked up on an FString map key whose operator== is
-	// Stricmp.
+	// defaults to ESearchCase::CaseSensitive. Those line numbers are
+	// UnrealString.h.inl:1162, 1177, 1191 and 1271 in the 5.8 tree this plugin
+	// builds against, and the file moves between versions - the same four
+	// declarations sit further down in 5.7.4, where Equals is at 1318 - so read
+	// them by name, not by number. IgnoreCase is what this handler wants
+	// throughout, since a gameplay tag compares as an FName and FName is
+	// case-insensitive, and an ini section name is looked up on an FString map
+	// key whose operator== is Stricmp.
 	auto StripWhitespace = [](const FString& In)
 	{
 		FString Out;
@@ -771,6 +776,62 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateGameplayTag(const TSharedPtr<F
 	const FString TagKey = FString::Printf(TEXT("Tag=\"%s\""), *Tag);
 	const FString CompactTagKey = StripWhitespace(TagKey);
 
+	// `//` is a comment marker in an Unreal ini. This scan used to skip only ';'
+	// and '#', so a hand-edited `// +GameplayTagList=(Tag="Ability.Fire",...)`
+	// was invisible to the engine and yet matched the tag key here, and the
+	// handler reported the tag already declared and wrote nothing - leaving it
+	// undeclared, which is the exact failure the commented-out-line note above
+	// says this scan exists to prevent.
+	//
+	// FConfigFile reads every line through FParse::LineExtended with
+	// ELineExtendedFlags::SwallowDoubleSlashComments set
+	// (ConfigCacheIni.cpp:1847-1851). That flag makes LineExtended set bIgnore
+	// on an unquoted `//` (Parse.cpp:1244-1250) and then drop every remaining
+	// character of the line rather than appending it (:1286-1297), so the ini
+	// parser sees the line already truncated at the `//`.
+	//
+	// Truncating here rather than skipping the line is what makes both halves
+	// right: a line that is only a comment becomes empty and is skipped, and a
+	// real declaration carrying a trailing `// note` keeps its declaration.
+	// Section headers get the same treatment for the same reason, and they have
+	// to, because the parser tests the brackets AFTER LineExtended has already
+	// removed the comment: `[Section] // note` IS a section header to Unreal.
+	//
+	// Quote state is tracked because it has to be. DevComment="see http://x"
+	// carries a `//` inside quotes that is not a comment, and LineExtended
+	// toggles bIsQuoted on every `"` and steps over a backslash-escaped `\"` or
+	// `\\` inside a quoted run (:1280-1284) rather than letting it toggle.
+	//
+	// Read in a 5.7.4 source tree. For 5.8, which is what this plugin builds
+	// against, the enumerator survives verbatim -
+	// FParse::ELineExtendedFlags::SwallowDoubleSlashComments (Parse.h:95-112) -
+	// and Epic's own 5.8 Config/Mac/DataDrivenPlatformInfo.ini:58 carries a
+	// bare `// Reenable ...` line inside a section. The implementing body is a
+	// 5.7.4 read; it is not shipped with the launcher install.
+	auto StripLineComment = [](const FString& In)
+	{
+		bool bInQuote = false;
+		for (int32 i = 0; i < In.Len(); ++i)
+		{
+			if (bInQuote && In[i] == TEXT('\\') && i + 1 < In.Len()
+				&& (In[i + 1] == TEXT('"') || In[i + 1] == TEXT('\\')))
+			{
+				++i;
+				continue;
+			}
+			if (In[i] == TEXT('"'))
+			{
+				bInQuote = !bInQuote;
+				continue;
+			}
+			if (!bInQuote && In[i] == TEXT('/') && i + 1 < In.Len() && In[i + 1] == TEXT('/'))
+			{
+				return In.Left(i);
+			}
+		}
+		return In;
+	};
+
 	// The section header is recognised the way FConfigFile's own parser
 	// recognises one, which is deliberately NOT the whitespace-stripped
 	// comparison the tag scan uses. ProcessInputFileContents strips TRAILING
@@ -782,9 +843,14 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateGameplayTag(const TSharedPtr<F
 	// accepted that second form and spliced the entry into a section the engine
 	// never reads under the name this handler means. Leading whitespace is not
 	// tolerated for the same reason: the parser tests the raw first character.
-	auto IsSectionHeader = [&SectionName](const FString& RawLine)
+	// A trailing `// note` is tolerated, and has to be, because the parser tests
+	// the brackets on a line LineExtended has already truncated at the comment.
+	// The caller passes a line StripLineComment has already cut, which is what
+	// the parameter name records, so `[Name] // note` arrives as `[Name] ` and
+	// the TrimEnd below finishes the job.
+	auto IsSectionHeader = [&SectionName](const FString& CommentStrippedLine)
 	{
-		FString Line = RawLine;
+		FString Line = CommentStrippedLine;
 		Line.TrimEndInline();
 		if (Line.Len() < 2 || Line[0] != TEXT('[') || Line[Line.Len() - 1] != TEXT(']')) return false;
 		return Line.Mid(1, Line.Len() - 2).Equals(SectionName, ESearchCase::IgnoreCase);
@@ -827,13 +893,15 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateGameplayTag(const TSharedPtr<F
 				bAtEnd = true;
 			}
 
-			const FString Line = FileContent.Mid(Cursor, LineEnd - Cursor);
+			// Comment tail off first, exactly as FParse::LineExtended does it,
+			// so everything below sees the line the ini parser would see.
+			const FString Line = StripLineComment(FileContent.Mid(Cursor, LineEnd - Cursor));
 			const FString Trimmed = Line.TrimStartAndEnd();
-			// ';' is the comment marker the ini parser honours: it skips a line
-			// whose first character is ';' (ConfigCacheIni.cpp:1946). '#' is not
-			// a comment marker there - `#Foo=Bar` parses as a key literally
-			// named "#Foo" - which is why a '#'-prefixed GameplayTagList line
-			// declares nothing and is skipped here too.
+			// ';' is the other comment marker the ini parser honours: it skips a
+			// line whose first character is ';' (ConfigCacheIni.cpp:1944-1946).
+			// '#' is not a comment marker there - `#Foo=Bar` parses as a key
+			// literally named "#Foo" - which is why a '#'-prefixed
+			// GameplayTagList line declares nothing and is skipped here too.
 			if (!Trimmed.IsEmpty() && !Trimmed.StartsWith(TEXT(";")) && !Trimmed.StartsWith(TEXT("#")))
 			{
 				if (StripWhitespace(Trimmed).Contains(CompactTagKey, ESearchCase::IgnoreCase))
