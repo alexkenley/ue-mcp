@@ -107,6 +107,7 @@ void FNiagaraHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("create_niagara_module_from_hlsl"), &CreateModuleFromHlsl);
 	// #185: Create an empty scratch-pad-style module
 	Registry.RegisterHandler(TEXT("create_scratch_module"), &CreateScratchModule);
+	Registry.RegisterHandler(TEXT("compile_niagara_system"), &CompileSystem);
 }
 
 TSharedPtr<FJsonValue> FNiagaraHandlers::ListNiagaraSystems(const TSharedPtr<FJsonObject>& Params)

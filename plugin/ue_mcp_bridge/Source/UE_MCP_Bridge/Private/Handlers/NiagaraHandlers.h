@@ -65,4 +65,10 @@ private:
 	static TSharedPtr<FJsonValue> CreateModuleFromHlsl(const TSharedPtr<FJsonObject>& Params);
 	// #185: Create an empty scratch-pad-style Niagara module
 	static TSharedPtr<FJsonValue> CreateScratchModule(const TSharedPtr<FJsonObject>& Params);
+
+	// Force a real compile and report it per script, in
+	// NiagaraHandlers_Compile.cpp. The only way to prove a graph edit produced
+	// a script the translator accepts: get_niagara_compiled_hlsl returns
+	// success without compiling anything on a CPU-sim emitter.
+	static TSharedPtr<FJsonValue> CompileSystem(const TSharedPtr<FJsonObject>& Params);
 };
