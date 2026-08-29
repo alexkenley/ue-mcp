@@ -6,6 +6,17 @@ using UnrealBuildTool;
 // EditorHandlers_ViewportControl.cpp, NiagaraHandlers_Advanced.cpp,
 // AudioHandlers_MetaSoundRead.cpp, AssetHandlers_UV.cpp,
 // AnimationHandlers_Skeleton.cpp.
+//
+// And the backlog wave: NiagaraHandlers_Compile.cpp,
+// GameplayHandlers_Mass.cpp, AssetHandlers_GeometryScript.cpp,
+// AssetHandlers_Hygiene.cpp, AnimationHandlers_Depth.cpp,
+// AudioHandlers_Depth.cpp, BlueprintHandlers_Depth.cpp,
+// BlueprintHandlers_UserTypes.cpp, StateTreeHandlers_Depth.cpp,
+// FoliageHandlers_Depth.cpp, EditorHandlers_Profiling.cpp,
+// MaterialHandlers_RVT.cpp, GasHandlers_Abilities.cpp,
+// GasHandlers_Snapshot.cpp, ReflectionHandlers_Schema.cpp,
+// ProjectHandlers_Plugins.cpp, WidgetHandlers_Animation.cpp,
+// WidgetHandlers_CommonUI.cpp.
 
 public class UE_MCP_Bridge : ModuleRules
 {
