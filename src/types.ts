@@ -6,6 +6,7 @@ import { McpError, ErrorCode } from "./errors.js";
 import { MAX_BRIDGE_TIMEOUT_MS } from "./bridge-timeouts.js";
 import { nearestActions } from "./action-schema.js";
 import { normalizePathParams, attachPathRepairs } from "./path-params.js";
+import { takeFieldSelection, projectResult, attachFieldReport } from "./field-select.js";
 
 /**
  * Elicit a deterministic, user-mediated form response via the MCP client.
@@ -324,6 +325,24 @@ export interface CategoryOptions {
  * It is a routing instruction, never a handler parameter: the dispatcher reads
  * it and strips it, so it cannot reach a bridge method as an argument.
  */
+export const SELECT_PARAM = z
+  .union([z.string(), z.array(z.string())])
+  .optional()
+  // Kept short deliberately: this is repeated in every one of the 24 tool
+  // schemas the client loads at startup, so the full account of the semantics
+  // lives in project(describe_action) rather than 24 times in the manifest.
+  .describe(
+    "Keep only these result fields (dotted paths; arrays are traversed, so "
+    + "'components.name' keeps every component's name). Unmatched paths are reported.",
+  );
+
+export const OMIT_PARAM = z
+  .union([z.string(), z.array(z.string())])
+  .optional()
+  .describe(
+    "Drop these result fields (dotted paths, same traversal as select). Runs after select.",
+  );
+
 export const TIMEOUT_PARAM = z
   .number()
   .int()
@@ -365,6 +384,8 @@ export function categoryTool(
       // compiling shaders finished in the editor after the client had already
       // reported a failure. A retry then applied the mutation twice.
       timeoutMs: TIMEOUT_PARAM,
+      select: SELECT_PARAM,
+      omit: OMIT_PARAM,
       ...extraSchema,
     },
     actions,
@@ -397,18 +418,28 @@ export function categoryTool(
       // Routing, not an argument. Pulled out before normalizeParams so no
       // mapParams can forward it into a bridge call as a parameter (#989).
       const { timeoutMs: requestedTimeout, rest: withoutTimeout } = takeTimeout(params);
+      // Also routing, and also stripped here so no mapParams can forward it
+      // into a bridge call as a parameter.
+      const { selection, rest: withoutSelection } = takeFieldSelection(withoutTimeout);
       // Backslash repair runs before the category's own folding, so a category
       // that reads a path in `normalizeParams` sees the repaired one. The
       // repairs are reported on the result rather than applied silently.
-      const { params: repaired, repairs } = normalizePathParams(withoutTimeout);
+      const { params: repaired, repairs } = normalizePathParams(withoutSelection);
       const normalized = options?.normalizeParams ? options.normalizeParams(repaired) : repaired;
+
+      // The warnings are attached AFTER the projection, so a select that did
+      // not name them cannot filter out the account of what was repaired.
+      const finish = (raw: unknown): unknown => {
+        const projection = projectResult(raw, selection);
+        return attachPathRepairs(attachFieldReport(projection.result, projection), repairs);
+      };
+
       if (spec.handler) {
         // The budget travels on the context, not in the parameters: a custom
         // handler that forwards its params to the bridge must not turn it into
         // a bridge argument (#989).
-        return attachPathRepairs(
+        return finish(
           await spec.handler(requestedTimeout === undefined ? ctx : { ...ctx, callTimeoutMs: requestedTimeout }, normalized),
-          repairs,
         );
       }
       if (spec.bridge) {
@@ -416,10 +447,7 @@ export function categoryTool(
         // The caller's budget wins over the action's authored one: an action
         // that declares 120s is stating a floor it needs, not a ceiling the
         // caller may not raise.
-        return attachPathRepairs(
-          await ctx.bridge.call(spec.bridge, mapped, requestedTimeout ?? spec.timeoutMs),
-          repairs,
-        );
+        return finish(await ctx.bridge.call(spec.bridge, mapped, requestedTimeout ?? spec.timeoutMs));
       }
       throw new McpError(ErrorCode.NO_HANDLER, `Action '${action}' has no handler or bridge method`);
     },

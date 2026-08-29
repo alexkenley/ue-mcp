@@ -100,6 +100,7 @@ const SESSION_INDEPENDENT: Record<string, string> = {
   "bridge-timeouts.ts": "The call budget table and its resolution; the same answer for every editor.",
   "asset-path.ts": "Pure Unreal path handling.",
   "path-params.ts": "Pure separator repair over a parameter bag; the same rule in every editor.",
+  "field-select.ts": "Pure projection over whatever result it is handed; no editor to scope it to.",
   "auth.ts": "GitHub identity for feedback authorship: per user, not per project.",
   "auth-cli.ts": "Runs that per-user device flow.",
   "login-cli.ts": "Registry login, per user.",

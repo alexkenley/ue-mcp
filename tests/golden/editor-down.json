@@ -1371,6 +1371,20 @@
             "description": "set_pose_search_database_settings: PCA components for PCAKDTree mode",
             "type": "number"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "onConflict": {
             "description": "Conflict policy. Existing asset actions use skip|error|overwrite; Control Rig begin/bake use skip|error and never overwrite.",
             "type": "string"
@@ -2010,6 +2024,20 @@
           "segmentIndex": {
             "description": "set_montage_sequence: replace only this segment index within the slot (#626). remove_montage_segment: segment to remove. add_montage_section: segment to anchor the section to (#826)",
             "type": "number"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "sequenceLength": {
             "type": "number"
@@ -3034,6 +3062,20 @@
             "description": "Existing row key for rename_datatable_row (#535)",
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "onConflict": {
             "description": "Asset-creation conflict policy: skip (default) | error | overwrite. bulk_upsert_data_assets uses update (default) | skip | error. mesh_boolean uses error (default) | replace",
             "type": "string"
@@ -3235,6 +3277,20 @@
             "description": "get_mesh_geometry / measure_mesh_geometry: restrict to one render section; omit for every section",
             "minimum": 0,
             "type": "integer"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "sessionId": {
             "description": "lock / unlock / unlock_all: owning session id (defaults to this server process)",
@@ -3816,6 +3872,20 @@
             "description": "list: pagination offset (default 0) (#730)",
             "type": "number"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "onConflict": {
             "description": "skip|replace|rename when the asset name exists",
             "type": "string"
@@ -3880,6 +3950,20 @@
           "root": {
             "description": "cue_author: explicit root nodeId",
             "type": "string"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "sendLevel": {
             "type": "number"
@@ -4355,6 +4439,20 @@
           "oldName": {
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "onConflict": {
             "description": "add_variable: skip (default) or error when the variable already exists",
             "type": "string"
@@ -4451,6 +4549,20 @@
           "save": {
             "description": "compile_all: persist on success (default true)",
             "type": "boolean"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "source": {
             "description": "override_function: advisory hint for where the overridable function comes from (#688)",
@@ -4630,6 +4742,20 @@
             "description": "create: new ChooserTable asset name",
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "onConflict": {
             "description": "create: conflict policy skip (default) | error | overwrite",
             "type": "string"
@@ -4649,6 +4775,20 @@
           "pathFilter": {
             "description": "list_object_references: substring filter on the referenced object path (#754)",
             "type": "string"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "table": {
             "description": "ChooserTable asset path, e.g. /Game/Path/CT_Locomotion",
@@ -4703,6 +4843,34 @@
           "inputJson": {
             "description": "Epic tool arguments as a raw JSON string (alternative to input)",
             "type": "string"
+          },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "timeoutMs": {
             "description": "How long to wait for this call, in milliseconds. Omitted, the wait is 30s, or longer for the actions the editor itself allows longer. Raise it for a large batch or an editor busy compiling shaders. A timeout never means the call did not happen: read the state back before retrying.",
@@ -4761,6 +4929,34 @@
             "description": "Epic tool arguments as a raw JSON string (alternative to input)",
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
+          },
           "timeoutMs": {
             "description": "How long to wait for this call, in milliseconds. Omitted, the wait is 30s, or longer for the actions the editor itself allows longer. Raise it for a large batch or an editor busy compiling shaders. A timeout never means the call did not happen: read the state back before retrying.",
             "exclusiveMinimum": 0,
@@ -4790,6 +4986,34 @@
               "go_home"
             ],
             "type": "string"
+          },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "stepIndex": {
             "description": "Step index to execute. Omit for step list.",
@@ -5433,6 +5657,20 @@
           "objectPath": {
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "outerPath": {
             "description": "find_object: only objects somewhere under this outer, e.g. one level or world (#802)",
             "type": "string"
@@ -5596,6 +5834,20 @@
           "sectionIndex": {
             "description": "set_sequence_keyframes: target section index (default 0) (#548)",
             "type": "number"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "sequenceAction": {
             "enum": [
@@ -5771,6 +6023,34 @@
             "description": "list_toolsets: case-sensitive substring filter on the qualified toolset name",
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
+          },
           "timeoutMs": {
             "description": "How long to wait for this call, in milliseconds. Omitted, the wait is 30s, or longer for the actions the editor itself allows longer. Raise it for a large batch or an editor busy compiling shaders. A timeout never means the call did not happen: read the state back before retrying.",
             "exclusiveMinimum": 0,
@@ -5821,6 +6101,34 @@
             "description": "import_file: destination content path, e.g. /Game/Fab/Imported",
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
+          },
           "source": {
             "description": "import_file: absolute path to the source file on disk",
             "type": "string"
@@ -5869,6 +6177,20 @@
             "description": "What tool/action should have handled this natively (e.g. 'blueprint(action=set_variable_default)').",
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "pythonWorkaround": {
             "description": "The execute_python code that was used as a workaround.",
             "type": "string"
@@ -5876,6 +6198,20 @@
           "repo": {
             "description": "Override the tracker, as \"owner/name\". Leave it off: submit picks the right repo from the plugin registry on its own. Only ue-mcp core and repos owned by registered plugins are accepted; anything else is ignored and the report files against core.",
             "type": "string"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "summary": {
             "description": "What the user was trying to accomplish and why the native tool couldn't handle it.",
@@ -6027,6 +6363,20 @@
           "name": {
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "packagePath": {
             "type": "string"
           },
@@ -6047,6 +6397,20 @@
           "save": {
             "description": "batch_set_settings_where: save each changed FoliageType package (default true)",
             "type": "boolean"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "settings": {
             "additionalProperties": {},
@@ -6447,6 +6811,20 @@
             "$ref": "#/properties/location",
             "description": "SmartObject slot offset"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "onConflict": {
             "description": "create_state_tree: skip (default) or error when the asset already exists",
             "type": "string"
@@ -6542,6 +6920,20 @@
           "schema": {
             "description": "create_state_tree: StateTree schema class path (#653)",
             "type": "string"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "senseType": {
             "type": "string"
@@ -6760,6 +7152,20 @@
           "name": {
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "operation": {
             "type": "string"
           },
@@ -6772,6 +7178,20 @@
           "registerOwnerSets": {
             "description": "get/set_live_attribute_value: register the actor's own attribute set subobjects on its ASC when it has none, the way BeginPlay would. Default true; false makes the call a strict read of what is already registered (#956)",
             "type": "boolean"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "setByCaller": {
             "additionalProperties": {
@@ -6976,6 +7396,20 @@
           "numSubsections": {
             "type": "number"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "onConflict": {
             "type": "string"
           },
@@ -6997,6 +7431,20 @@
           },
           "scale": {
             "$ref": "#/properties/location"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "strength": {
             "type": "number"
@@ -7956,6 +8404,20 @@
           "offset": {
             "$ref": "#/properties/location"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "onConflict": {
             "description": "spawn_skeletal_mesh_actor: label conflict policy (skip|error)",
             "type": "string"
@@ -8103,6 +8565,20 @@
             "description": "nudge_component: uniform relative-scale multiplier (>0)",
             "exclusiveMinimum": 0,
             "type": "number"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "settings": {
             "additionalProperties": {},
@@ -8671,6 +9147,20 @@
             },
             "type": "array"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "onConflict": {
             "description": "create_simple: skip (default) | error",
             "type": "string"
@@ -8742,6 +9232,20 @@
             },
             "description": "build_material: per-texture EMaterialSamplerType override, e.g. {normal: 'VirtualNormal'}. Omit to let the texture decide (#946)",
             "type": "object"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "shadingModel": {
             "type": "string"
@@ -8860,6 +9364,20 @@
           "netUpdateFrequency": {
             "type": "number"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "onlyRelevantToOwner": {
             "type": "boolean"
           },
@@ -8881,6 +9399,20 @@
           "replicationType": {
             "description": "set_property_replicated: None | Replicated | RepNotify (#768)",
             "type": "string"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "timeoutMs": {
             "description": "How long to wait for this call, in milliseconds. Omitted, the wait is 30s, or longer for the actions the editor itself allows longer. Raise it for a large batch or an editor busy compiling shaders. A timeout never means the call did not happen: read the state back before retrying.",
@@ -9096,6 +9628,20 @@
           "name": {
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "onConflict": {
             "description": "skip|error when asset exists",
             "type": "string"
@@ -9157,6 +9703,20 @@
               "roll"
             ],
             "type": "object"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "stackContext": {
             "description": "ParticleSpawn|ParticleUpdate|EmitterSpawn|EmitterUpdate|all (default all)",
@@ -9339,6 +9899,20 @@
             },
             "type": "array"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "packagePath": {
             "type": "string"
           },
@@ -9352,6 +9926,20 @@
           "replace": {
             "description": "set_static_mesh_spawner_meshes: overwrite existing MeshEntries (default true). import_graph: wipe existing user nodes first (default false).",
             "type": "boolean"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "settings": {
             "additionalProperties": {},
@@ -9433,6 +10021,34 @@
           "name": {
             "description": "Plugin npm package name (describe action)",
             "type": "string"
+          },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "timeoutMs": {
             "description": "How long to wait for this call, in milliseconds. Omitted, the wait is 30s, or longer for the actions the editor itself allows longer. Raise it for a large batch or an editor busy compiling shaders. A timeout never means the call did not happen: read the state back before retrying.",
@@ -9649,6 +10265,20 @@
             "description": "describe_action: the action to describe, as 'tool.action' or a bare action name",
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "parentClass": {
             "description": "For create_cpp_class: parent UClass. Short native names ('Actor') or /Script/<Module>.<Class> paths work. Default UObject.",
             "type": "string"
@@ -9680,6 +10310,20 @@
           "section": {
             "description": "For set_config: INI section",
             "type": "string"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "sourcePath": {
             "description": "For read_cpp_source: path to .cpp (relative to Source/ or absolute).",
@@ -9834,6 +10478,20 @@
             "description": "Enum asset name (create_enum)",
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "onConflict": {
             "description": "Asset-creation conflict policy: skip (default) | error | overwrite",
             "type": "string"
@@ -9844,6 +10502,20 @@
           },
           "parentFilter": {
             "type": "string"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "slotName": {
             "description": "inspect_save_game: logical save slot name without a path",
@@ -9991,6 +10663,20 @@
             "description": "GUID of an evaluator or global task node (for remove/set_*_property operations)",
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "operand": {
             "description": "Expression operand for conditions: And or Or",
             "type": "string"
@@ -10030,6 +10716,20 @@
           "propertyName": {
             "description": "Property name for set_state_property / set_task_instance_property / set_evaluator_instance_property / set_global_task_instance_property",
             "type": "string"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "selectionBehavior": {
             "description": "Selection behavior: TryEnterState, TrySelectChildrenInOrder, TrySelectChildrenAtRandom, etc.",
@@ -10295,6 +10995,20 @@
           "newParentWidgetName": {
             "type": "string"
           },
+          "omit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Drop these result fields (dotted paths, same traversal as select). Runs after select."
+          },
           "packagePath": {
             "description": "create actions: destination folder, used with name (#798)",
             "type": "string"
@@ -10338,6 +11052,20 @@
           },
           "recursive": {
             "type": "boolean"
+          },
+          "select": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Keep only these result fields (dotted paths; arrays are traversed, so 'components.name' keeps every component's name). Unmatched paths are reported."
           },
           "sourceAssetPath": {
             "description": "extract_subtree: WidgetBlueprint the subtree is read from",
