@@ -1010,7 +1010,11 @@ export const projectTool: ToolDef = categoryTool(
         "Find real call sites for an engine symbol in the engine's own .cpp files, which answers "
         + "'how is this actually used' with code that compiles. Better than a signature for anything "
         + "with a non-obvious calling convention. Searches sources rather than headers on purpose: a "
-        + "header gives the declaration, which verify_symbols already returns. "
+        + "header gives the declaration, which verify_symbols already returns. An engine installed "
+        + "from the Epic launcher ships headers WITHOUT .cpp sources, so on those there are no engine "
+        + "call sites to find; the result says so via engineSourcesAvailable and falls back to inline "
+        + "code in headers and to this project's own Source tree, rather than returning an empty list "
+        + "that reads as 'nothing uses this'. "
         + "Params: symbol (bare or Class::Member), limit? (default 10), trees? (Runtime|Editor|Developer, default Runtime)",
       timeoutMs: 600_000,
       handler: async (ctx: ToolContext, p: Record<string, unknown>) => {
@@ -1018,8 +1022,11 @@ export const projectTool: ToolDef = categoryTool(
         if (!symbol) throw new Error("Missing 'symbol'");
         const engineRoot = requireEngineRoot(ctx);
         const trees = typeof p.trees === "string" ? [p.trees] : (p.trees as string[] | undefined);
-        const sites = findExampleUsage(engineRoot, symbol, { limit: (p.limit as number) ?? 10, trees });
-        return { symbol, siteCount: sites.length, sites };
+        return findExampleUsage(engineRoot, symbol, {
+          limit: (p.limit as number) ?? 10,
+          trees,
+          projectDir: ctx.project.projectDir,
+        });
       },
     },
     lint_cpp_header: {

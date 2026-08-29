@@ -254,29 +254,57 @@ export interface UsageSite {
   file: string;
   line: number;
   text: string;
+  /** `source` is a .cpp, `header` is a .h, `project` is the user's own code. */
+  kind: "source" | "header" | "project";
+}
+
+export interface UsageResult {
+  symbol: string;
+  siteCount: number;
+  sites: UsageSite[];
+  /**
+   * Whether the engine tree actually contains .cpp files.
+   *
+   * An engine installed from the Epic launcher ships headers and no sources
+   * at all, which is the common case. Without this flag an empty result reads
+   * as "nothing uses this symbol" rather than "this install cannot answer
+   * that", and those call for opposite next steps.
+   */
+  engineSourcesAvailable: boolean;
+  note?: string;
 }
 
 /**
- * Real call sites for a symbol, from the engine's own .cpp files.
+ * Real call sites for a symbol, to answer "how is this actually used" with
+ * code that compiles. Better than a signature for anything with a non-obvious
+ * calling convention.
  *
- * Answers "how is this actually used" with code that compiles, which is a
- * better guide than a signature for anything with a non-obvious calling
- * convention. Scans .cpp rather than .h deliberately: a header shows the
- * declaration, which the caller already has.
+ * Prefers .cpp files, because a header shows the declaration the caller
+ * already has. But a launcher-installed engine contains no .cpp at all, so on
+ * those this falls back to headers, where Unreal keeps a great deal of inline
+ * code, and to the project's own sources, which are often the better example
+ * anyway. The result says which happened.
  */
 export function findExampleUsage(
   engineRoot: string,
   symbol: string,
-  options: { limit?: number; trees?: string[] } = {},
-): UsageSite[] {
+  options: { limit?: number; trees?: string[]; projectDir?: string | null } = {},
+): UsageResult {
   const limit = options.limit ?? 10;
   const trees = options.trees ?? ["Runtime"];
-  const out: UsageSite[] = [];
   const needle = symbol.includes("::") ? symbol.split("::").pop()! : symbol;
-  const re = new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[(<:.]`);
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // A use is a call, a template argument, a scope, or a member access. A bare
+  // mention in a type position is a declaration more often than an example.
+  const use = new RegExp(`\\b${escaped}\\s*[(<:.]`);
+  // The line that declares the thing is not an example of using it.
+  const declaration = new RegExp(`^\\s*(?:class|struct|enum|virtual|static|template|UFUNCTION|UPROPERTY)\\b`);
 
-  const walk = (dir: string): void => {
-    if (out.length >= limit) return;
+  const sites: UsageSite[] = [];
+  let sawCpp = false;
+
+  const scan = (dir: string, kind: UsageSite["kind"], root: string): void => {
+    if (sites.length >= limit) return;
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -284,14 +312,21 @@ export function findExampleUsage(
       return;
     }
     for (const entry of entries) {
-      if (out.length >= limit) return;
+      if (sites.length >= limit) return;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name === "Intermediate" || entry.name === "ThirdParty") continue;
-        walk(full);
+        if (entry.name === "Intermediate" || entry.name === "ThirdParty" || entry.name === "Binaries") continue;
+        scan(full, kind, root);
         continue;
       }
-      if (!entry.name.endsWith(".cpp")) continue;
+      const isCpp = entry.name.endsWith(".cpp");
+      const isHeader = entry.name.endsWith(".h");
+      if (!isCpp && !isHeader) continue;
+      if (isCpp) sawCpp = true;
+      // Headers are the fallback, so they are only read once it is clear the
+      // tree has no sources to prefer.
+      if (isHeader && kind === "source") continue;
+
       let source: string;
       try {
         source = fs.readFileSync(full, "utf-8");
@@ -300,22 +335,43 @@ export function findExampleUsage(
       }
       if (!source.includes(needle)) continue;
       const lines = source.split(/\r?\n/);
-      for (let i = 0; i < lines.length && out.length < limit; i++) {
-        if (!re.test(lines[i])) continue;
+      for (let i = 0; i < lines.length && sites.length < limit; i++) {
         const text = lines[i].trim();
-        // A declaration or a comment is not an example of use.
+        if (!use.test(text)) continue;
         if (text.startsWith("//") || text.startsWith("*") || text.startsWith("#")) continue;
-        out.push({
-          file: path.relative(engineRoot, full).replace(/\\/g, "/"),
+        if (declaration.test(text)) continue;
+        sites.push({
+          file: path.relative(root, full).replace(/\\/g, "/"),
           line: i + 1,
           text: text.slice(0, 240),
+          kind: isCpp ? kind : "header",
         });
       }
     }
   };
 
-  for (const tree of trees) walk(path.join(engineRoot, "Engine", "Source", tree));
-  return out;
+  // Pass one: sources only, which is what an example should be.
+  for (const tree of trees) scan(path.join(engineRoot, "Engine", "Source", tree), "source", engineRoot);
+
+  const engineSourcesAvailable = sawCpp;
+  let note: string | undefined;
+
+  if (!engineSourcesAvailable) {
+    note =
+      "This engine install ships headers without .cpp sources, which is normal for a launcher "
+      + "install, so no engine call sites exist to find. Results below come from inline code in "
+      + "headers and from this project's own sources. A source build of the engine would answer "
+      + "this fully.";
+    // Pass two: headers, where Unreal keeps a lot of inline implementation.
+    for (const tree of trees) scan(path.join(engineRoot, "Engine", "Source", tree), "header", engineRoot);
+  }
+
+  // The project's own code is often the better example regardless.
+  if (options.projectDir && sites.length < limit) {
+    scan(path.join(options.projectDir, "Source"), "project", options.projectDir);
+  }
+
+  return { symbol, siteCount: sites.length, sites, engineSourcesAvailable, note };
 }
 
 /* ── header lint ───────────────────────────────────────────────────── */
