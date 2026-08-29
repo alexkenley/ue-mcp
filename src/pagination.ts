@@ -173,6 +173,15 @@ export function readPage(result: unknown): PageInfo | undefined {
  * One line telling the caller how to read the rest, written for the agent that
  * has to act on it rather than for a log. Returns an empty string when there is
  * nothing left to say, so it can be concatenated unconditionally.
+ *
+ * NOTHING IN src/ CALLS THIS, and nothing calls readPage above it either. The
+ * "Showing rows X-Y, for the next page: cursor=..." line is not emitted
+ * anywhere: callers read `nextCursor`, `hasMore` and `cursorNote` straight off
+ * the raw result the bridge returned, which is already in every paged response.
+ * Both functions are kept as the one place that decodes that shape, with their
+ * own unit tests, for a caller that wants the decoded form rather than the raw
+ * fields. Read this as the answer to "why do I not see this line": it is not
+ * dead by accident and it is not wired by accident.
  */
 export function pageHint(tool: string, action: string, page: PageInfo | undefined): string {
   if (!page) return "";

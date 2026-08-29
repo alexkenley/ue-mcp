@@ -161,8 +161,26 @@ describe("collapsing env warnings", () => {
       UE_MCP_CONTEXT_STRATEGY: "lean",
       UE_MCP_FEEDBACK_MODE: "defer",
       UE_MCP_DIALOG_MODE: "auto",
+      UE_MCP_TEST_ENGINE_ROOT: "D:/UE_5.6",
     });
-    expect(lines).toHaveLength(8);
+    expect(lines).toHaveLength(9);
+  });
+
+  // D7: engine-root.ts makes this candidate #1, ahead of UE_BUILD_TOOL_PATH,
+  // editor.buildToolPath, UE_EDITOR_PATH and editor.path. It was the one
+  // engine variable missing from this list, so a 5.6 project and a 5.8 project
+  // were both launched and built against one engine while the startup output
+  // named only the variables that lost to it.
+  it("name the engine root variable that outranks every per-project engine setting", () => {
+    const lines = collapsingEnvWarnings(["Alpha", "Beta"], {
+      UE_MCP_TEST_ENGINE_ROOT: "D:/UE_5.6",
+      UE_EDITOR_PATH: "D:/UE_5.8/UnrealEditor.exe",
+    });
+    expect(lines).toHaveLength(2);
+    // Reported first, because it decides first.
+    expect(lines[0]).toContain("UE_MCP_TEST_ENGINE_ROOT=D:/UE_5.6");
+    expect(lines[0]).toContain("ahead of every other engine setting");
+    expect(lines[0]).toContain("Alpha, Beta");
   });
 
   it("say nothing about variables nobody set", () => {

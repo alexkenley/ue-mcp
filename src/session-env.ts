@@ -25,6 +25,17 @@ export interface CollapsingEnvVar {
 }
 
 const COLLAPSING: CollapsingEnvVar[] = [
+  // First, because it decides first. engine-root.ts makes this candidate #1,
+  // ahead of UE_BUILD_TOOL_PATH, editor.buildToolPath, UE_EDITOR_PATH and
+  // editor.path, so a value left over from an earlier build session launches
+  // and builds a 5.6 project and a 5.8 project against one engine. Leaving it
+  // out of this list meant the startup output named every variable that did
+  // not decide and stayed silent about the one that did.
+  {
+    variable: "UE_MCP_TEST_ENGINE_ROOT",
+    configKey: "editor.path / editor.buildToolPath",
+    decides: "the engine tree every session launches and builds against, ahead of every other engine setting",
+  },
   { variable: "UE_MCP_PORT", configKey: "bridge.port", decides: "the bridge port every session connects on" },
   { variable: "UE_MCP_HOST", configKey: "bridge.host", decides: "the host every session's bridge is reached on" },
   { variable: "UE_EDITOR_PATH", configKey: "editor.path", decides: "the editor binary every session launches" },
