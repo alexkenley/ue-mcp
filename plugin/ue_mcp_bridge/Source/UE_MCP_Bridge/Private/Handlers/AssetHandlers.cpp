@@ -1,6 +1,7 @@
 #include "AssetHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "HandlerJsonProperty.h"
 #include "HandlerPropertyText.h"
 #include "HandlerAssetCreate.h"
@@ -361,8 +362,21 @@ TSharedPtr<FJsonValue> FAssetHandlers::SearchAssetsFTS(const TSharedPtr<FJsonObj
 {
 	FString Query;
 	if (auto Err = RequireString(Params, TEXT("query"), Query)) return Err;
-	const int32 MaxResults = OptionalInt(Params, TEXT("maxResults"), 50);
 	const FString ClassFilter = OptionalString(Params, TEXT("classFilter"), TEXT(""));
+
+	// T3: paged. `maxResults` used to cut the ranked list and say nothing about
+	// what it had cut, so a caller reading the top 50 could not tell a project
+	// with 50 matches from one with 5000. The server now scores every match and
+	// hands out pages of them, and `maxResults` is mapped onto `limit` on the
+	// TypeScript side so the old spelling still sizes a page.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("search_assets_fts|query=%s|classFilter=%s"), *Query, *ClassFilter),
+			/*DefaultLimit*/ 50, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
 
 	TArray<FString> QueryToks;
 	TokenizeLower(Query, QueryToks);
@@ -398,27 +412,37 @@ TSharedPtr<FJsonValue> FAssetHandlers::SearchAssetsFTS(const TSharedPtr<FJsonObj
 		if (S > 0) Hits.Add({ S, &Data });
 	}
 
-	Hits.Sort([](const FHit& A, const FHit& B) { return A.Score > B.Score; });
-	const int32 Kept = FMath::Min(Hits.Num(), MaxResults);
-
-	TArray<TSharedPtr<FJsonValue>> Arr;
-	Arr.Reserve(Kept);
-	for (int32 i = 0; i < Kept; ++i)
+	// Score alone is not an order: TArray::Sort is not stable and equal scores
+	// would come back in a different sequence between two calls, which is
+	// exactly what a page anchor cannot survive. Ties break on the object path,
+	// so the ranked list is one fixed sequence for a given query.
+	Hits.Sort([](const FHit& A, const FHit& B)
 	{
-		const FAssetData& D = *Hits[i].Data;
+		if (A.Score != B.Score) return A.Score > B.Score;
+		return A.Data->GetObjectPathString() < B.Data->GetObjectPathString();
+	});
+
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(Hits.Num());
+	for (const FHit& Hit : Hits)
+	{
+		const FAssetData& D = *Hit.Data;
 		TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
 		R->SetStringField(TEXT("path"), D.PackageName.ToString());
 		R->SetStringField(TEXT("name"), D.AssetName.ToString());
 		R->SetStringField(TEXT("class"), D.AssetClassPath.GetAssetName().ToString());
-		R->SetNumberField(TEXT("score"), Hits[i].Score);
-		Arr.Add(MakeShared<FJsonValueObject>(R));
+		R->SetNumberField(TEXT("score"), Hit.Score);
+		// The OBJECT path is the anchor, not the package name reported as
+		// 'path': one package can hold more than one asset, and a page boundary
+		// has to name exactly one row.
+		Rows.Add({ D.GetObjectPathString(), MakeShared<FJsonValueObject>(R) });
 	}
 
 	TSharedPtr<FJsonObject> Result = MCPSuccess();
 	Result->SetStringField(TEXT("query"), Query);
 	Result->SetNumberField(TEXT("totalMatched"), Hits.Num());
-	Result->SetNumberField(TEXT("resultCount"), Arr.Num());
-	Result->SetArrayField(TEXT("results"), Arr);
+	MCPPagination::EmitPage(Page, Rows, TEXT("results"), Result);
+	Result->SetNumberField(TEXT("resultCount"), Result->GetIntegerField(TEXT("count")));
 	return MCPResult(Result);
 }
 
@@ -448,22 +472,37 @@ TSharedPtr<FJsonValue> FAssetHandlers::ListAssets(const TSharedPtr<FJsonObject>&
 {
 	const FString Directory = OptionalString(Params, TEXT("directory"), TEXT("/Game"));
 	const bool bRecursive = OptionalBool(Params, TEXT("recursive"), true);
-	// #766/#790: the old default of 2000 built a single response large enough
-	// to drop the bridge on a big folder ("Bridge connection lost" at roughly
-	// 700 assets). Page instead: a smaller default, a real offset, and enough
-	// counters that a caller can walk the whole set deterministically rather
-	// than guessing whether it got everything.
-	const int32 MaxResults = FMath::Clamp(OptionalInt(Params, TEXT("maxResults"), 500), 1, 5000);
-	const int32 Offset = FMath::Max(0, OptionalInt(Params, TEXT("offset"), 0));
 	const FString ClassFilter = OptionalString(Params, TEXT("classFilter"));
+
+	// #766/#790 established that one response for a big folder drops the
+	// bridge, and answered it with a raw row offset. T3 replaces that offset
+	// with the shared cursor: an offset re-read a moved collection at a row
+	// number and could not tell that it had, while a cursor names the row it
+	// resumes after and reports when that row moved or vanished.
+	if (Params.IsValid() && Params->HasField(TEXT("offset")))
+	{
+		return MCPError(TEXT(
+			"'offset' is no longer how list_assets pages, because a row number cannot tell you the "
+			"folder changed underneath it. Pass the 'nextCursor' this action returned as 'cursor', "
+			"and size the page with 'limit' (1 to 5000, default 500). Omit both for the first page."));
+	}
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_assets|directory=%s|recursive=%d|classFilter=%s"),
+				*Directory, bRecursive ? 1 : 0, *ClassFilter),
+			/*DefaultLimit*/ 500, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
 
 	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 	TArray<FAssetData> Found;
 	Registry.GetAssetsByPath(FName(*Directory), Found, bRecursive);
 
 	// AssetRegistry order is not a stable contract, so paging over it could
-	// overlap or skip entries between calls. Sort so offset/limit paging is
-	// genuinely deterministic, which is what the action advertises.
+	// overlap or skip entries between calls. Sort so the enumeration is one
+	// fixed sequence, which is what a page anchor resumes into.
 	// TArray::Sort is not stable, so tie on AssetName too: multi-asset packages
 	// would otherwise order arbitrarily and paging could still overlap or skip.
 	Found.Sort([](const FAssetData& A, const FAssetData& B)
@@ -472,8 +511,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::ListAssets(const TSharedPtr<FJsonObject>&
 		return A.AssetName.LexicalLess(B.AssetName);
 	});
 
-	TArray<TSharedPtr<FJsonValue>> Out;
-	int32 TotalMatched = 0;
+	TArray<MCPPagination::FPageRow> Rows;
 	for (const FAssetData& Data : Found)
 	{
 		const FString ClassName = Data.AssetClassPath.GetAssetName().ToString();
@@ -481,37 +519,25 @@ TSharedPtr<FJsonValue> FAssetHandlers::ListAssets(const TSharedPtr<FJsonObject>&
 		{
 			continue;
 		}
-		// Count every match before slicing, so totalMatched is the real size of
-		// the result set and not just what fitted in this page.
-		const int32 MatchIndex = TotalMatched++;
-		if (MatchIndex < Offset) continue;
-		if (Out.Num() >= MaxResults) continue;
 
 		TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
 		Item->SetStringField(TEXT("path"), Data.PackageName.ToString());
 		Item->SetStringField(TEXT("name"), Data.AssetName.ToString());
 		Item->SetStringField(TEXT("className"), ClassName);
-		Out.Add(MakeShared<FJsonValueObject>(Item));
+		// The OBJECT path is the anchor, not the package name reported as
+		// 'path': a package holding two assets would otherwise give two rows
+		// the same identity and a resume could not tell them apart.
+		Rows.Add({ Data.GetObjectPathString(), MakeShared<FJsonValueObject>(Item) });
 	}
-
-	const int32 NextOffset = Offset + Out.Num();
-	const bool bHasMore = NextOffset < TotalMatched;
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("directory"), Directory);
 	Result->SetBoolField(TEXT("recursive"), bRecursive);
-	Result->SetNumberField(TEXT("assetCount"), Out.Num());
-	Result->SetNumberField(TEXT("totalMatched"), TotalMatched);
-	Result->SetNumberField(TEXT("offset"), Offset);
-	Result->SetBoolField(TEXT("hasMore"), bHasMore);
-	if (bHasMore)
-	{
-		Result->SetNumberField(TEXT("nextOffset"), NextOffset);
-		Result->SetStringField(TEXT("note"), FString::Printf(
-			TEXT("Showing %d of %d matches. Re-run with offset=%d for the next page."),
-			Out.Num(), TotalMatched, NextOffset));
-	}
-	Result->SetArrayField(TEXT("assets"), Out);
+	// Every match is enumerated before the page is cut, so totalMatched is the
+	// real size of the result set rather than what fitted in this page.
+	Result->SetNumberField(TEXT("totalMatched"), Rows.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("assets"), Result);
+	Result->SetNumberField(TEXT("assetCount"), Result->GetIntegerField(TEXT("count")));
 	return MCPResult(Result);
 }
 
@@ -524,8 +550,21 @@ TSharedPtr<FJsonValue> FAssetHandlers::SearchAssets(const TSharedPtr<FJsonObject
 	{
 		Directory = TEXT("/Game/");
 	}
-	int32 MaxResults = OptionalInt(Params, TEXT("maxResults"), 50);
 	bool bSearchAll = OptionalBool(Params, TEXT("searchAll"));
+
+	// T3: paged. This used to stop at `maxResults` matches and report only how
+	// many it had returned, so a caller searching a large root read the first
+	// 50 hits as though they were the whole answer. `maxResults` is mapped onto
+	// `limit` on the TypeScript side, so the old spelling still sizes a page.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("search_assets|query=%s|directory=%s|searchAll=%d"),
+				*Query, *Directory, bSearchAll ? 1 : 0),
+			/*DefaultLimit*/ 50, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
 
 	// Unified path: always use IAssetRegistry::GetAssets (with PackagePaths) so
 	// substring matches hit AssetName + ObjectPath consistently. The previous
@@ -548,11 +587,10 @@ TSharedPtr<FJsonValue> FAssetHandlers::SearchAssets(const TSharedPtr<FJsonObject
 	TArray<FAssetData> AllAssets;
 	AssetRegistry.GetAssets(Filter, AllAssets);
 
-	TArray<TSharedPtr<FJsonValue>> ResultsArray;
+	TArray<MCPPagination::FPageRow> Rows;
 	FString QueryLower = Query.ToLower();
 	for (const FAssetData& AssetData : AllAssets)
 	{
-		if (ResultsArray.Num() >= MaxResults) break;
 		FString AssetPath = AssetData.GetObjectPathString();
 		FString AssetName = AssetData.AssetName.ToString();
 		if (!Query.IsEmpty())
@@ -574,14 +612,25 @@ TSharedPtr<FJsonValue> FAssetHandlers::SearchAssets(const TSharedPtr<FJsonObject
 		Item->SetStringField(TEXT("path"), AssetData.PackageName.ToString());
 		Item->SetStringField(TEXT("name"), AssetName);
 		Item->SetStringField(TEXT("className"), AssetData.AssetClassPath.GetAssetName().ToString());
-		ResultsArray.Add(MakeShared<FJsonValueObject>(Item));
+		// The object path is the anchor: it names one asset even when a package
+		// holds several, and 'path' above reports the package for compatibility.
+		Rows.Add({ AssetPath, MakeShared<FJsonValueObject>(Item) });
 	}
+
+	// The asset registry does not promise an enumeration order, so the matches
+	// are sorted before paging. Without it the same page can come back in a
+	// different order between two calls and the anchor would report a change
+	// that is only the registry reshuffling. Sorted on the rows rather than on
+	// the registry results, so the object path each comparison reads is the one
+	// already built above.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("query"), Query);
 	Result->SetStringField(TEXT("searchScope"), bSearchAll ? (bHasDirectory ? Directory : TEXT("all")) : Directory);
-	Result->SetNumberField(TEXT("resultCount"), ResultsArray.Num());
-	Result->SetArrayField(TEXT("results"), ResultsArray);
+	MCPPagination::EmitPage(Page, Rows, TEXT("results"), Result);
+	Result->SetNumberField(TEXT("resultCount"), Result->GetIntegerField(TEXT("count")));
 
 	return MCPResult(Result);
 }
@@ -2551,7 +2600,19 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAllDirty(const TSharedPtr<FJsonObject
 TSharedPtr<FJsonValue> FAssetHandlers::ListTextures(const TSharedPtr<FJsonObject>& Params)
 {
 	FString Directory = OptionalString(Params, TEXT("directory"), TEXT("/Game/"));
-	int32 MaxResults = OptionalInt(Params, TEXT("maxResults"), 50);
+
+	// T3: paged. This stopped at 50 textures and reported a count of 50, so a
+	// project with 4000 of them looked identical to one with 50. `maxResults`
+	// is mapped onto `limit` on the TypeScript side, so the old spelling still
+	// sizes a page.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_textures|directory=%s"), *Directory),
+			/*DefaultLimit*/ 50, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
 
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
@@ -2559,22 +2620,29 @@ TSharedPtr<FJsonValue> FAssetHandlers::ListTextures(const TSharedPtr<FJsonObject
 	TArray<FAssetData> AssetDataList;
 	AssetRegistry.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("Texture2D")), AssetDataList, true);
 
-	TArray<TSharedPtr<FJsonValue>> TexturesArray;
+	TArray<MCPPagination::FPageRow> Rows;
 	for (const FAssetData& AssetData : AssetDataList)
 	{
-		if (TexturesArray.Num() >= MaxResults) break;
 		FString AssetPath = AssetData.GetObjectPathString();
 		if (!AssetPath.StartsWith(Directory)) continue;
 
 		TSharedPtr<FJsonObject> TexObj = MakeShared<FJsonObject>();
 		TexObj->SetStringField(TEXT("name"), AssetData.AssetName.ToString());
 		TexObj->SetStringField(TEXT("path"), AssetPath);
-		TexturesArray.Add(MakeShared<FJsonValueObject>(TexObj));
+		// The object path is the anchor: unique across the project and the same
+		// string on the next enumeration.
+		Rows.Add({ AssetPath, MakeShared<FJsonValueObject>(TexObj) });
 	}
 
+	// The asset registry does not promise an enumeration order, so the list is
+	// sorted before paging. A cursor over an unordered enumeration is not
+	// resumable: the anchor would move every call.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
+
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("textures"), TexturesArray);
-	Result->SetNumberField(TEXT("count"), TexturesArray.Num());
+	Result->SetStringField(TEXT("directory"), Directory);
+	MCPPagination::EmitPage(Page, Rows, TEXT("textures"), Result);
 	return MCPResult(Result);
 }
 TSharedPtr<FJsonValue> FAssetHandlers::ReloadPackage(const TSharedPtr<FJsonObject>& Params)

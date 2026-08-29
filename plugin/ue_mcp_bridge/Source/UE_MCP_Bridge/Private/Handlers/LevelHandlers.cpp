@@ -1,6 +1,7 @@
 #include "LevelHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "VolumeHelpers_Internal.h"
 #include "EditorScriptingUtilities/Public/EditorLevelLibrary.h"
 #include "ScopedTransaction.h"
@@ -257,10 +258,6 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetOutliner(const TSharedPtr<FJsonObject>
 	const bool bExactClass = OptionalBool(Params, TEXT("exactClass"), false);
 	const FString FolderPathFilter = OptionalString(Params, TEXT("folderPath"));
 	const FString FolderPathPrefixFilter = OptionalString(Params, TEXT("folderPathPrefix"));
-	// Default 50 keeps us snappy on World Partition projects whose levels
-	// contain hundreds of streaming-proxy / HLOD actors. Callers who need the
-	// full list can pass a larger limit explicitly.
-	int32 Limit = OptionalInt(Params, TEXT("limit"), 50);
 	bool bIncludeStreaming = OptionalBool(Params, TEXT("includeStreaming"), false);
 
 	// #717: optional tri-state filter on editor-only visibility. When present,
@@ -270,7 +267,26 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetOutliner(const TSharedPtr<FJsonObject>
 	bool bEditorHiddenFilterValue = false;
 	const bool bHasEditorHiddenFilter = Params->TryGetBoolField(TEXT("editorHidden"), bEditorHiddenFilterValue);
 
-	TArray<TSharedPtr<FJsonValue>> ActorsArray;
+	// T3: paged. The default of 50 kept this snappy on World Partition levels
+	// and told nobody it had cut anything, so an agent reading a 900-actor map
+	// acted on the first 50 as if they were the level. The default stays 50;
+	// what changes is that the rest is now reachable and the response says it
+	// is there.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(
+				TEXT("get_world_outliner|world=%s|classFilter=%s|exactClass=%d|nameFilter=%s|folderPath=%s|folderPathPrefix=%s|editorHidden=%d|includeStreaming=%d"),
+				*WorldScope, *ClassFilter, bExactClass ? 1 : 0, *NameFilter,
+				*FolderPathFilter, *FolderPathPrefixFilter,
+				bHasEditorHiddenFilter ? (bEditorHiddenFilterValue ? 1 : 0) : -1,
+				bIncludeStreaming ? 1 : 0),
+			/*DefaultLimit*/ 50, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
+
+	TArray<MCPPagination::FPageRow> Rows;
 	int32 TotalCount = 0;
 	int32 StreamingSkipped = 0;
 	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
@@ -335,7 +351,6 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetOutliner(const TSharedPtr<FJsonObject>
 		{
 			continue;
 		}
-		if (ActorsArray.Num() >= Limit) break;
 
 		TSharedPtr<FJsonObject> ActorObj = MakeShared<FJsonObject>();
 		ActorObj->SetStringField(TEXT("name"), ActorName);
@@ -375,15 +390,26 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetOutliner(const TSharedPtr<FJsonObject>
 		}
 		ActorObj->SetArrayField(TEXT("components"), ComponentsArray);
 
-		ActorsArray.Add(MakeShared<FJsonValueObject>(ActorObj));
+		// The actor PATH is the anchor, not the label or the internal name: two
+		// actors in a level can carry the same label, and a page boundary has to
+		// name exactly one of them.
+		Rows.Add({ Actor->GetPathName(), MakeShared<FJsonValueObject>(ActorObj) });
 	}
+
+	// TActorIterator walks the level's actor arrays, whose order is not a
+	// contract and which a spawn or a delete reshuffles, so the rows are sorted
+	// before paging. Without it the same page can come back in a different
+	// order between two calls and the anchor would report a change that is only
+	// the iteration reshuffling.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("worldName"), World->GetName());
 	Result->SetNumberField(TEXT("totalActors"), TotalCount);
-	Result->SetNumberField(TEXT("returnedActors"), ActorsArray.Num());
 	Result->SetNumberField(TEXT("streamingSkipped"), StreamingSkipped);
-	Result->SetArrayField(TEXT("actors"), ActorsArray);
+	MCPPagination::EmitPage(Page, Rows, TEXT("actors"), Result);
+	Result->SetNumberField(TEXT("returnedActors"), Result->GetIntegerField(TEXT("count")));
 
 	return MCPResult(Result);
 }
@@ -1037,14 +1063,29 @@ TSharedPtr<FJsonValue> FLevelHandlers::ListLevels(const TSharedPtr<FJsonObject>&
 {
 	REQUIRE_EDITOR_WORLD(World);
 
-	TArray<TSharedPtr<FJsonValue>> LevelsArray;
+	// T3: paged. A streaming-heavy map carries hundreds of sublevels, and this
+	// answered all of them at once.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params, TEXT("list_levels"), /*DefaultLimit*/ 200, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
+
+	// Deliberately NOT sorted. The persistent level first and then the world's
+	// own streaming-level array is an authored order that carries meaning, and
+	// it is stable between two calls because it is a stored array rather than a
+	// hash traversal.
+	TArray<MCPPagination::FPageRow> Rows;
 
 	// Add persistent level
 	TSharedPtr<FJsonObject> PersistentObj = MakeShared<FJsonObject>();
 	PersistentObj->SetStringField(TEXT("name"), World->GetName());
 	PersistentObj->SetStringField(TEXT("type"), TEXT("persistent"));
 	PersistentObj->SetBoolField(TEXT("isLoaded"), true);
-	LevelsArray.Add(MakeShared<FJsonValueObject>(PersistentObj));
+	// The anchor is the level's package name, prefixed by its kind so the
+	// persistent level cannot collide with a sublevel of the same name.
+	Rows.Add({ FString::Printf(TEXT("persistent:%s"), *World->GetName()), MakeShared<FJsonValueObject>(PersistentObj) });
 
 	// Add streaming levels
 	const TArray<ULevelStreaming*>& StreamingLevels = World->GetStreamingLevels();
@@ -1052,17 +1093,17 @@ TSharedPtr<FJsonValue> FLevelHandlers::ListLevels(const TSharedPtr<FJsonObject>&
 	{
 		if (!StreamingLevel) continue;
 
+		const FString PackageName = StreamingLevel->GetWorldAssetPackageFName().ToString();
 		TSharedPtr<FJsonObject> LevelObj = MakeShared<FJsonObject>();
-		LevelObj->SetStringField(TEXT("name"), StreamingLevel->GetWorldAssetPackageFName().ToString());
+		LevelObj->SetStringField(TEXT("name"), PackageName);
 		LevelObj->SetStringField(TEXT("type"), TEXT("streaming"));
 		LevelObj->SetBoolField(TEXT("isLoaded"), StreamingLevel->IsLevelLoaded());
 		LevelObj->SetBoolField(TEXT("isVisible"), StreamingLevel->IsLevelVisible());
-		LevelsArray.Add(MakeShared<FJsonValueObject>(LevelObj));
+		Rows.Add({ FString::Printf(TEXT("streaming:%s"), *PackageName), MakeShared<FJsonValueObject>(LevelObj) });
 	}
 
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("levels"), LevelsArray);
-	Result->SetNumberField(TEXT("count"), LevelsArray.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("levels"), Result);
 
 	return MCPResult(Result);
 }
@@ -4044,13 +4085,32 @@ TSharedPtr<FJsonValue> FLevelHandlers::ListActorTags(const TSharedPtr<FJsonObjec
 	if (!A) return ActorErr;
 	ActorLabel = A->GetActorLabel();
 
+	// T3: paged. Tag lists are usually short, but a data-driven actor can carry
+	// hundreds, and the category pages uniformly rather than making the caller
+	// remember which list actions accept a cursor.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_actor_tags|actor=%s"), *A->GetPathName()),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
+
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("actorLabel"), ActorLabel);
 	Result->SetStringField(TEXT("actorPath"), A->GetPathName());
-	TArray<TSharedPtr<FJsonValue>> Out;
-	for (const FName& T : A->Tags) Out.Add(MakeShared<FJsonValueString>(T.ToString()));
-	Result->SetArrayField(TEXT("tags"), Out);
-	Result->SetNumberField(TEXT("count"), Out.Num());
+	// Deliberately NOT sorted: AActor::Tags is an authored array and its order
+	// is what the caller sees in the details panel. The tag itself is the
+	// anchor, which is why the emitted order can stay as authored.
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(A->Tags.Num());
+	for (const FName& T : A->Tags)
+	{
+		const FString Tag = T.ToString();
+		Rows.Add({ Tag, MakeShared<FJsonValueString>(Tag) });
+	}
+	MCPPagination::EmitPage(Page, Rows, TEXT("tags"), Result);
 	return MCPResult(Result);
 }
 

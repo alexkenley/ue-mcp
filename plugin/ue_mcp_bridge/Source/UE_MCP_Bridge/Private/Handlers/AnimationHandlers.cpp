@@ -1,6 +1,7 @@
 #include "AnimationHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "HandlerAssetCreate.h"
 #include "HandlerJsonProperty.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -233,6 +234,19 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListAnimAssets(const TSharedPtr<FJson
 	auto Result = MCPSuccess();
 
 	bool bRecursive = OptionalBool(Params, TEXT("recursive"), true);
+	const FString Directory = OptionalString(Params, TEXT("directory"));
+
+	// T3: paged. Four class queries concatenated is the largest read on this
+	// category, and it had no cap at all: a project with a few thousand
+	// sequences answered every one of them in a single response.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_anim_assets|directory=%s|recursive=%d"), *Directory, bRecursive ? 1 : 0),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
 
 	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 
@@ -243,7 +257,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListAnimAssets(const TSharedPtr<FJson
 	ClassPaths.Add(FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("AnimBlueprint")));
 	ClassPaths.Add(FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("BlendSpace")));
 
-	TArray<TSharedPtr<FJsonValue>> AssetsArray;
+	TArray<MCPPagination::FPageRow> Rows;
 
 	for (const FTopLevelAssetPath& ClassPath : ClassPaths)
 	{
@@ -252,17 +266,32 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListAnimAssets(const TSharedPtr<FJson
 
 		for (const FAssetData& AssetData : AssetDataList)
 		{
+			const FString ObjectPath = AssetData.GetObjectPathString();
+			// `directory` has been advertised on this action all along and was
+			// never read, so a caller scoping to one folder got the whole
+			// project back and no sign that the scope had been dropped.
+			if (!Directory.IsEmpty() && !ObjectPath.StartsWith(Directory)) continue;
+
 			TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
 			AssetObj->SetStringField(TEXT("name"), AssetData.AssetName.ToString());
-			AssetObj->SetStringField(TEXT("path"), AssetData.GetObjectPathString());
+			AssetObj->SetStringField(TEXT("path"), ObjectPath);
 			AssetObj->SetStringField(TEXT("class"), AssetData.AssetClassPath.GetAssetName().ToString());
 			AssetObj->SetStringField(TEXT("packagePath"), AssetData.PackagePath.ToString());
-			AssetsArray.Add(MakeShared<FJsonValueObject>(AssetObj));
+			// The object path is the anchor: unique across the project, and the
+			// one string that names this asset on a second enumeration.
+			Rows.Add({ ObjectPath, MakeShared<FJsonValueObject>(AssetObj) });
 		}
 	}
 
-	Result->SetArrayField(TEXT("assets"), AssetsArray);
-	Result->SetNumberField(TEXT("count"), AssetsArray.Num());
+	// Four separate registry queries concatenated, none of which promises an
+	// order, so the whole set is sorted before paging. Without it the same page
+	// can come back in a different order between two calls and the anchor would
+	// report a change that is only the registry reshuffling.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
+
+	if (!Directory.IsEmpty()) Result->SetStringField(TEXT("directory"), Directory);
+	MCPPagination::EmitPage(Page, Rows, TEXT("assets"), Result);
 
 	return MCPResult(Result);
 }
@@ -272,24 +301,51 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListSkeletalMeshes(const TSharedPtr<F
 	auto Result = MCPSuccess();
 
 	bool bRecursive = OptionalBool(Params, TEXT("recursive"), true);
+	const FString Directory = OptionalString(Params, TEXT("directory"));
+
+	// T3: paged. This is the action every animation workflow starts with, so
+	// the uncapped list was answered on a project with a full character library
+	// as one response holding every mesh in it.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_skeletal_meshes|directory=%s|recursive=%d"), *Directory, bRecursive ? 1 : 0),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
 
 	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 
 	TArray<FAssetData> AssetDataList;
 	AssetRegistry.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("SkeletalMesh")), AssetDataList, bRecursive);
 
-	TArray<TSharedPtr<FJsonValue>> AssetsArray;
+	TArray<MCPPagination::FPageRow> Rows;
 	for (const FAssetData& AssetData : AssetDataList)
 	{
+		const FString ObjectPath = AssetData.GetObjectPathString();
+		// `directory` has been advertised on this action all along and was
+		// never read, so a caller scoping to one folder got the whole project
+		// back and no sign that the scope had been dropped.
+		if (!Directory.IsEmpty() && !ObjectPath.StartsWith(Directory)) continue;
+
 		TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
 		AssetObj->SetStringField(TEXT("name"), AssetData.AssetName.ToString());
-		AssetObj->SetStringField(TEXT("path"), AssetData.GetObjectPathString());
+		AssetObj->SetStringField(TEXT("path"), ObjectPath);
 		AssetObj->SetStringField(TEXT("packagePath"), AssetData.PackagePath.ToString());
-		AssetsArray.Add(MakeShared<FJsonValueObject>(AssetObj));
+		// The object path is the anchor: unique, and the same string on a
+		// second enumeration.
+		Rows.Add({ ObjectPath, MakeShared<FJsonValueObject>(AssetObj) });
 	}
 
-	Result->SetArrayField(TEXT("assets"), AssetsArray);
-	Result->SetNumberField(TEXT("count"), AssetsArray.Num());
+	// The asset registry does not promise an enumeration order, so the rows are
+	// sorted before paging. A cursor over an unordered enumeration is not
+	// resumable: its anchor would land somewhere different every call.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
+
+	if (!Directory.IsEmpty()) Result->SetStringField(TEXT("directory"), Directory);
+	MCPPagination::EmitPage(Page, Rows, TEXT("assets"), Result);
 
 	return MCPResult(Result);
 }

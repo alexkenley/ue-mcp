@@ -6,6 +6,7 @@
 #include "LevelHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "HandlerJsonProperty.h"
 #include "JsonSerializer.h"
 #include "VolumeHelpers_Internal.h"
@@ -40,7 +41,18 @@ TSharedPtr<FJsonValue> FLevelHandlers::ListVolumes(const TSharedPtr<FJsonObject>
 
 	FString VolumeType = OptionalString(Params, TEXT("volumeType"));
 
-	TArray<TSharedPtr<FJsonValue>> VolumesArray;
+	// T3: paged, so a level whose blocking and audio volumes run to the
+	// thousands is walkable rather than a single response.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_volumes|volumeType=%s"), *VolumeType),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
+
+	TArray<MCPPagination::FPageRow> Rows;
 	for (TActorIterator<AVolume> ActorIt(World); ActorIt; ++ActorIt)
 	{
 		AVolume* Volume = *ActorIt;
@@ -65,12 +77,19 @@ TSharedPtr<FJsonValue> FLevelHandlers::ListVolumes(const TSharedPtr<FJsonObject>
 		LocObj->SetNumberField(TEXT("z"), Location.Z);
 		VolumeObj->SetObjectField(TEXT("location"), LocObj);
 
-		VolumesArray.Add(MakeShared<FJsonValueObject>(VolumeObj));
+		// The actor path is the anchor: two volumes can share a label, and a
+		// page boundary has to name exactly one of them.
+		Rows.Add({ Volume->GetPathName(), MakeShared<FJsonValueObject>(VolumeObj) });
 	}
 
+	// TActorIterator walks the level's actor arrays, whose order is not a
+	// contract and which a spawn or a delete reshuffles, so the rows are sorted
+	// before paging. A cursor over an unordered enumeration is not resumable.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
+
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("volumes"), VolumesArray);
-	Result->SetNumberField(TEXT("count"), VolumesArray.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("volumes"), Result);
 
 	return MCPResult(Result);
 }

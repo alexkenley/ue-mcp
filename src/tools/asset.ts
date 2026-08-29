@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { categoryTool, bp, type ToolDef } from "../types.js";
+import { PAGINATION_SCHEMA, paged } from "../pagination.js";
 import { Vec3, Rotator } from "../schemas.js";
 import { SESSION_ID } from "../locking.js";
 import { McpError, ErrorCode } from "../errors.js";
@@ -170,35 +171,66 @@ export const assetTool: ToolDef = categoryTool(
   "Asset management: list, search, read, CRUD, import meshes/textures, datatables, stringtables.",
   {
     list: bp(
-      "List assets via the AssetRegistry (sees /Game and every mounted plugin root). Paginated: returns totalMatched, offset, hasMore and nextOffset so a large folder can be walked deterministically instead of dropping the bridge on one oversized response (#790). Params: directory? (default /Game), classFilter?, recursive? (default true), maxResults? (default 500, max 5000), offset? (default 0)",
+      paged("List assets via the AssetRegistry (sees /Game and every mounted plugin root). Cursor-paginated, so a large folder is walked deterministically instead of dropping the bridge on one oversized response (#790): every page carries totalMatched, hasMore and a nextCursor to pass back. The row offset this used to page with is refused, because a row number cannot report that the folder changed underneath it. maxResults is a deprecated spelling of limit and sizes the page when limit is omitted. Params: directory? (default /Game), classFilter?, recursive? (default true), maxResults?"),
       "list_assets",
-      (p) => ({ directory: p.directory, classFilter: p.classFilter ?? p.typeFilter, recursive: p.recursive, maxResults: p.maxResults, offset: p.offset }),
+      // `offset` is still forwarded so the handler can refuse it by name. Drop
+      // it here and the MCP layer strips it instead, and a caller paging with
+      // the old parameter would silently read page one over and over.
+      (p) => ({ directory: p.directory, classFilter: p.classFilter ?? p.typeFilter, recursive: p.recursive, cursor: p.cursor, limit: p.limit ?? p.maxResults, offset: p.offset }),
     ),
     search: {
-      description: "Search by name/class/path. Params: query, directory?, maxResults?, searchAll?",
+      description: paged("Search by name/class/path. maxResults is a deprecated spelling of limit and sizes the page when limit is omitted. With extra content roots configured and no directory, this searches each root and pages ONE ROOT AT A TIME, so a cursor has to be passed back together with the directory it came from. Params: query, directory?, maxResults?, searchAll?"),
       handler: async (ctx, p) => {
-        const { action: _, ...rest } = p;
+        const { action: _, maxResults, ...rest } = p;
+        // One page size, whichever spelling the caller used. The bridge reads
+        // `limit` only, so `maxResults` is resolved here rather than in C++.
+        const limit = (p.limit as number | undefined) ?? (maxResults as number | undefined);
+        const call = { ...rest, ...(limit !== undefined ? { limit } : {}) };
         const roots = ctx.project.config.contentRoots;
         // If no directory specified and contentRoots configured, search each root and merge
         if (!p.directory && roots && roots.length > 0) {
-          const maxResults = (p.maxResults as number) ?? 50;
+          if (typeof p.cursor === "string" && p.cursor !== "") {
+            throw new McpError(
+              ErrorCode.INVALID_PARAMS,
+              `A cursor names one content root, and this call searches ${roots.length} of them (${roots.join(", ")}). `
+              + "Pass 'directory' set to the root the cursor came from, alongside the cursor, to continue that root. "
+              + "Each root's own nextCursor is reported per root on the first page.",
+            );
+          }
+          const cap = limit ?? 50;
           const allResults: Array<Record<string, unknown>> = [];
+          const perRoot: Array<Record<string, unknown>> = [];
           for (const root of roots) {
-            const res = await ctx.bridge.call("search_assets", { ...rest, directory: root }) as Record<string, unknown>;
+            const res = await ctx.bridge.call("search_assets", { ...call, directory: root }) as Record<string, unknown>;
             if (res.results && Array.isArray(res.results)) {
               allResults.push(...(res.results as Array<Record<string, unknown>>));
             }
-            if (allResults.length >= maxResults) break;
+            // Per root, because one cursor cannot address several of them. A
+            // root left unsearched because the cap was already reached says so,
+            // rather than reading as a root with nothing in it.
+            perRoot.push({
+              directory: root,
+              count: res.count ?? 0,
+              total: res.total,
+              hasMore: res.hasMore === true,
+              nextCursor: res.nextCursor,
+            });
+            if (allResults.length >= cap) break;
           }
+          const searched = perRoot.length;
           return {
             query: p.query ?? "",
             searchScope: roots,
-            resultCount: Math.min(allResults.length, maxResults),
-            results: allResults.slice(0, maxResults),
+            roots: perRoot,
+            rootsSearched: searched,
+            rootsUnsearched: roots.length - searched,
+            resultCount: Math.min(allResults.length, cap),
+            results: allResults.slice(0, cap),
+            hasMore: allResults.length > cap || perRoot.some((r) => r.hasMore === true) || searched < roots.length,
             success: true,
           };
         }
-        return ctx.bridge.call("search_assets", rest);
+        return ctx.bridge.call("search_assets", call);
       },
     },
     read:           bp("Read asset via reflection. Params: assetPath", "read_asset", (p) => ({ path: p.assetPath })),
@@ -259,7 +291,7 @@ export const assetTool: ToolDef = categoryTool(
     get_curvetable_keys:  bp("Read keys from one CurveTable row. Params: assetPath, rowName", "get_curvetable_keys", (p) => ({ assetPath: p.assetPath, rowName: p.rowName })),
     set_curvetable_keys:  bp("Replace keys on one CurveTable row. Params: assetPath, rowName, keys:[{time,value,interpMode?,arriveTangent?,leaveTangent?}]", "set_curvetable_keys", (p) => ({ assetPath: p.assetPath, rowName: p.rowName, keys: p.keys })),
     add_curvetable_key:   bp("Add or update one key on a CurveTable row. Params: assetPath, rowName, time, value, interpMode?, keyTimeTolerance?", "add_curvetable_key", (p) => ({ assetPath: p.assetPath, rowName: p.rowName, time: p.time, value: p.value, interpMode: p.interpMode, keyTimeTolerance: p.keyTimeTolerance })),
-    list_textures:        bp("List textures. Params: directory?, recursive?", "list_textures"),
+    list_textures:        bp(paged("List textures. maxResults is a deprecated spelling of limit and sizes the page when limit is omitted. Params: directory?, recursive?, maxResults?"), "list_textures", (p) => ({ directory: p.directory, recursive: p.recursive, cursor: p.cursor, limit: p.limit ?? p.maxResults })),
     get_texture_info:     bp("Get texture details. Params: assetPath", "get_texture_info"),
     set_texture_settings: bp("Set texture settings. Params: assetPath, settings (object with compressionSettings?, lodGroup?, sRGB?, neverStream?). Keys may also be passed at the top level.", "set_texture_settings", (p) => ({
       assetPath: p.assetPath,
@@ -307,7 +339,7 @@ export const assetTool: ToolDef = categoryTool(
     health_check:         bp("Diagnose stuck-unloadable asset. Returns onDisk/inRegistry/isLoaded/canLoad/isStuck flags so an agent can detect the half-shutdown state where load returns null but the file exists (#279). Params: assetPath", "asset_health_check"),
     force_reload:         bp("Aggressive reload from disk: closes open editors, reloads the package (rebuilding a Blueprint's class and CDO so container properties come back fresh, not just scalars), and reports objectReplaced. Refuses a dirty package unless discardUnsaved=true, and fails loudly when the editor would not release the old object rather than serving stale values (#279/#820). Params: assetPath, discardUnsaved? (default false)", "force_reload_asset", (p) => ({ assetPath: p.assetPath ?? p.path, discardUnsaved: p.discardUnsaved })),
     export:               bp("Export asset to disk file (Texture2D → PNG, StaticMesh → FBX, etc.). Params: assetPath, outputPath", "export_asset"),
-    search_fts:           bp("Ranked asset search (token-scored over name/class/path). Params: query, maxResults?, classFilter?", "search_assets_fts", (p) => ({ query: p.query, maxResults: p.maxResults, classFilter: p.classFilter })),
+    search_fts:           bp(paged("Ranked asset search (token-scored over name/class/path). Every match is scored and the ranked list is paged, so the top page is a page rather than the whole answer. maxResults is a deprecated spelling of limit and sizes the page when limit is omitted. Params: query, maxResults?, classFilter?"), "search_assets_fts", (p) => ({ query: p.query, classFilter: p.classFilter, cursor: p.cursor, limit: p.limit ?? p.maxResults })),
     reindex_fts:          bp("Rebuild the SQLite FTS5 asset index. Params: directory?", "reindex_assets_fts", (p) => ({ directory: p.directory })),
     get_referencers:      bp("Reverse dependency lookup (what references this). Params: packages[] OR packagePath (#150). Returns {referencersByPackage, totalReferencers}.", "get_asset_referencers", (p) => ({ packages: p.packages, packagePath: p.packagePath })),
     get_dependencies:     bp("Forward dependency lookup (what packages this asset references). Params: packages[] OR packagePath, hard? (default true), soft? (default true) (#588). Returns {dependenciesByPackage, totalDependencies}.", "get_asset_dependencies", (p) => ({ packages: p.packages, packagePath: p.packagePath, hard: p.hard, soft: p.soft })),
@@ -660,7 +692,6 @@ export const assetTool: ToolDef = categoryTool(
     countBy: z.array(z.string()).optional().describe("bulk_read_properties: dot paths to build value histograms for (max 8 paths, 64 values each)"),
     sampleLimit: z.number().optional().describe("bulk_read_properties: sample asset names per group (default 5, max 25)"),
     countOnly: z.boolean().optional().describe("bulk_read_properties: return aggregates without rows"),
-    limit: z.number().optional().describe("bulk_read_properties: rows per page (default 200, max 2000)"),
     startIndex: z.number().optional().describe("bulk_read_properties: first row index for paging"),
     maxAssets: z.number().optional().describe("bulk_read_properties: refuse to load more than this many candidates (default 2000, max 20000). audit_hygiene / bulk_fix_hygiene: how many assets the sweep walks before it reports scanTruncated (default 20000, max 200000)"),
     renames: z.array(z.record(z.unknown())).optional().describe("Array of rename descriptors for bulk_rename - each {sourcePath, destinationPath} or {assetPath, newName}"),
@@ -739,7 +770,17 @@ export const assetTool: ToolDef = categoryTool(
     reconcile: z.boolean().optional().describe("diagnose_registry: force synchronous rescan (evicts pending-kill ghosts)"),
     bHasNavigationData: z.boolean().optional().describe("Toggle nav data generation for set_mesh_nav"),
     clearNavCollision: z.boolean().optional().describe("Remove NavCollision from mesh for set_mesh_nav"),
-    offset: z.number().optional().describe("list: index of the first match to return, for paging large folders (#790)"),
+    // Still declared, and still forwarded by `list`, so the handler can refuse
+    // it by name. Undeclare it and the MCP layer strips it instead, and a
+    // caller paging with the old parameter reads page one every time and is
+    // told nothing.
+    offset: z.number().optional().describe("list: REFUSED. The row offset (#790) was replaced by cursor paging, because a row number cannot report that the folder changed underneath it. Use cursor + limit."),
+    // The shared cursor and limit, declared once for every paged action in this
+    // category: list, search, search_fts, list_textures, and bulk_read_properties
+    // for its own rows-per-page. Undeclared keys are stripped, so an action that
+    // documents `cursor` without this would return an unpaged first page and
+    // call it a success.
+    ...PAGINATION_SCHEMA,
     force: z.boolean().optional().describe("delete / delete_batch: take the force-delete path, which destroys an asset even when other packages reference it and auto-closes any open asset editors (#278). Defaults to false, which checks the Asset Registry for referencers first and refuses when it finds any (#976). delete_folder: also delete assets contained in the folder. save: write even if the package is not marked dirty (#768)."),
     otherPath: z.string().optional().describe("diff: the asset to compare assetPath against"),
     // lock / unlock / unlock_all all default this to the server process's own

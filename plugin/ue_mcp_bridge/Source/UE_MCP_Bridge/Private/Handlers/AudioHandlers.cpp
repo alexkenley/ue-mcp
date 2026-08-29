@@ -1,6 +1,7 @@
 #include "AudioHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "HandlerAssetCreate.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/ARFilter.h"
@@ -178,10 +179,26 @@ TSharedPtr<FJsonValue> FAudioHandlers::ListSoundAssets(const TSharedPtr<FJsonObj
 	// directory, filter recursively via a single FARFilter query, and paginate.
 	const FString Directory = OptionalString(Params, TEXT("directory"), TEXT("/Game"));
 	const bool bRecursive = OptionalBool(Params, TEXT("recursive"), true);
-	int32 MaxResults = OptionalInt(Params, TEXT("maxResults"), 1000);
-	if (MaxResults <= 0) MaxResults = 1000;
-	int32 Offset = OptionalInt(Params, TEXT("offset"), 0);
-	if (Offset < 0) Offset = 0;
+
+	// T3: the row offset #730 introduced is replaced by the shared cursor. An
+	// offset re-read a moved library at a row number and could not tell that it
+	// had moved; a cursor names the row it resumes after and says so when that
+	// row shifted or was deleted.
+	if (Params.IsValid() && Params->HasField(TEXT("offset")))
+	{
+		return MCPError(TEXT(
+			"'offset' is no longer how list_sound_assets pages, because a row number cannot tell you "
+			"the library changed underneath it. Pass the 'nextCursor' this action returned as 'cursor', "
+			"and size the page with 'limit' (1 to 5000, default 1000). Omit both for the first page."));
+	}
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_sound_assets|directory=%s|recursive=%d"), *Directory, bRecursive ? 1 : 0),
+			/*DefaultLimit*/ 1000, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
 
 	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 
@@ -196,37 +213,31 @@ TSharedPtr<FJsonValue> FAudioHandlers::ListSoundAssets(const TSharedPtr<FJsonObj
 	TArray<FAssetData> AssetDataList;
 	AssetRegistry.GetAssets(Filter, AssetDataList);
 
-	// Stable ordering so pagination is deterministic across calls.
+	// Stable ordering so paging is deterministic across calls: the asset
+	// registry does not promise an enumeration order, and a cursor over an
+	// unordered enumeration cannot find its anchor again.
 	AssetDataList.Sort([](const FAssetData& A, const FAssetData& B)
 	{
 		return A.GetObjectPathString() < B.GetObjectPathString();
 	});
 
-	const int32 Total = AssetDataList.Num();
-	TArray<TSharedPtr<FJsonValue>> AssetsArray;
-	for (int32 Index = Offset; Index < Total && AssetsArray.Num() < MaxResults; ++Index)
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(AssetDataList.Num());
+	for (const FAssetData& AssetData : AssetDataList)
 	{
-		const FAssetData& AssetData = AssetDataList[Index];
+		const FString ObjectPath = AssetData.GetObjectPathString();
 		TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
 		AssetObj->SetStringField(TEXT("name"), AssetData.AssetName.ToString());
-		AssetObj->SetStringField(TEXT("path"), AssetData.GetObjectPathString());
+		AssetObj->SetStringField(TEXT("path"), ObjectPath);
 		AssetObj->SetStringField(TEXT("class"), AssetData.AssetClassPath.GetAssetName().ToString());
 		AssetObj->SetStringField(TEXT("packagePath"), AssetData.PackagePath.ToString());
-		AssetsArray.Add(MakeShared<FJsonValueObject>(AssetObj));
+		// The object path is the anchor: unique across the project, and the
+		// same string the next enumeration produces for that sound.
+		Rows.Add({ ObjectPath, MakeShared<FJsonValueObject>(AssetObj) });
 	}
 
-	const int32 NextOffset = Offset + AssetsArray.Num();
-	Result->SetArrayField(TEXT("assets"), AssetsArray);
-	Result->SetNumberField(TEXT("count"), AssetsArray.Num());
-	Result->SetNumberField(TEXT("total"), Total);
-	Result->SetNumberField(TEXT("offset"), Offset);
-	Result->SetNumberField(TEXT("maxResults"), MaxResults);
-	Result->SetBoolField(TEXT("hasMore"), NextOffset < Total);
-	if (NextOffset < Total)
-	{
-		Result->SetNumberField(TEXT("nextOffset"), NextOffset);
-	}
 	Result->SetStringField(TEXT("directory"), Directory);
+	MCPPagination::EmitPage(Page, Rows, TEXT("assets"), Result);
 
 	return MCPResult(Result);
 }

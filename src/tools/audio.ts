@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { categoryTool, bp, type ToolDef } from "../types.js";
 import { Vec3 } from "../schemas.js";
+import { PAGINATION_SCHEMA, paged } from "../pagination.js";
 
 /**
  * Element schemas for the declarative graph-authoring arrays (#936).
@@ -84,7 +85,7 @@ export const audioTool: ToolDef = categoryTool(
   "Audio: sound assets, playback, MetaSound + SoundCue graph authoring, submixes/effects, sound classes/mixes, attenuation, concurrency, spatialization.",
   {
     // ── Assets + playback ──────────────────────────────────────────────
-    list:              bp("List sound assets (SoundWave, SoundCue, MetaSoundSource) under a directory, paginated. Params: directory? (default /Game), recursive? (default true), maxResults? (default 1000), offset? (default 0). Returns assets, count, total, offset, hasMore, nextOffset (#730).", "list_sound_assets", (p) => ({ directory: p.directory, recursive: p.recursive, maxResults: p.maxResults, offset: p.offset })),
+    list:              bp(paged("List sound assets (SoundWave, SoundCue, MetaSoundSource) under a directory, cursor-paginated (#730). Every page carries count, total, hasMore and a nextCursor to pass back. The row offset this used to page with is refused, because a row number cannot report that the library changed underneath it. maxResults is a deprecated spelling of limit and sizes the page when limit is omitted. Params: directory? (default /Game), recursive? (default true), maxResults?"), "list_sound_assets", (p) => ({ directory: p.directory, recursive: p.recursive, cursor: p.cursor, limit: p.limit ?? p.maxResults, offset: p.offset })),
     extract_pcm:       bp("Decode a USoundWave's imported audio to in-memory PCM (no intermediate file, no reliance on the original source path) for semantic sound search / analysis. Returns sampleRate, numChannels, numFrames, durationSeconds, and 16-bit PCM samples base64-encoded (interleaved). Params: soundPath (required), maxSeconds? (cap the decoded window; default full asset), downmixMono? (default false) (#729).", "extract_sound_wave_pcm", (p) => ({ soundPath: p.soundPath ?? p.assetPath, maxSeconds: p.maxSeconds, downmixMono: p.downmixMono })),
     import_audio:      bp("Import a WAV/OGG/FLAC file as a USoundWave. Returns durationSeconds, numChannels, looping. Params: filePath, name?, packagePath? (default /Game/Audio), looping?, replaceExisting? (default true)", "import_audio", (p) => ({ filePath: p.filePath, name: p.name, packagePath: p.packagePath, looping: p.looping, replaceExisting: p.replaceExisting })),
     play_at_location:  bp("Play a sound in the editor world. Params: soundPath, location, volumeMultiplier?, pitchMultiplier?", "play_sound_at_location"),
@@ -151,7 +152,6 @@ export const audioTool: ToolDef = categoryTool(
   undefined,
   {
     query: z.string().optional().describe("metasound_search_nodes: substring over node name, class name, namespace or variant"),
-    limit: z.number().optional().describe("metasound_search_nodes: cap on nodes returned (default 100)"),
     pageId: z.string().optional().describe("MetaSound reads: which graph page, for assets that declare more than one"),
     includeNodes: z.boolean().optional().describe("metasound_read_document: include the node list (default true)"),
     includeConnections: z.boolean().optional().describe("metasound_read_document: include the edge list (default true)"),
@@ -159,8 +159,17 @@ export const audioTool: ToolDef = categoryTool(
     classType: z.string().optional().describe("metasound_search_nodes: External | Input | Output | Variable | ..."),
     // shared / assets
     directory: z.string().optional(), recursive: z.boolean().optional(),
-    maxResults: z.number().optional().describe("list: page size (default 1000) (#730)"),
-    offset: z.number().optional().describe("list: pagination offset (default 0) (#730)"),
+    maxResults: z.number().optional().describe("list: deprecated spelling of limit; sizes the page when limit is omitted (default 1000) (#730)"),
+    // Still declared, and still forwarded by `list`, so the handler can refuse
+    // it by name. Undeclare it and the MCP layer strips it instead, and a
+    // caller paging with the old parameter reads page one every time and is
+    // told nothing.
+    offset: z.number().optional().describe("list: REFUSED. The row offset (#730) was replaced by cursor paging, because a row number cannot report that the library changed underneath it. Use cursor + limit."),
+    // The shared cursor and limit, declared once for every paged action in this
+    // category: list, and metasound_search_nodes for its own cap. Undeclared
+    // keys are stripped, so an action that documents `cursor` without this
+    // would return an unpaged first page and call it a success.
+    ...PAGINATION_SCHEMA,
     maxSeconds: z.number().optional().describe("extract_pcm: cap decoded window in seconds (#729)"),
     downmixMono: z.boolean().optional().describe("extract_pcm: average channels to mono (#729)"),
     soundPath: z.string().optional(),

@@ -9,6 +9,7 @@
 #include "AnimationHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "Editor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -334,16 +335,37 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListBones(const TSharedPtr<FJsonObjec
 	const FReferenceSkeleton& Ref = SK->GetSkeletalMeshAsset()->GetRefSkeleton();
 	const int32 NumBones = Ref.GetNum();
 
-	TArray<TSharedPtr<FJsonValue>> Bones;
+	// T3: paged. A production skeleton runs to several hundred bones once
+	// twist, cloth and facial joints are in, and the whole hierarchy arrived in
+	// one response with no way to ask for part of it.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_bones|actor=%s|component=%s"), *Actor->GetPathName(), *SK->GetName()),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
+
+	// Deliberately NOT sorted. Reference-skeleton index order is a contract of
+	// the asset: parents precede children, so the emitted sequence is the
+	// hierarchy itself, and alphabetising it would destroy the one thing that
+	// makes a bone list readable.
+	TArray<MCPPagination::FPageRow> Bones;
+	Bones.Reserve(NumBones);
 	for (int32 i = 0; i < NumBones; ++i)
 	{
+		const FString BoneName = Ref.GetBoneName(i).ToString();
 		TSharedPtr<FJsonObject> B = MakeShared<FJsonObject>();
-		B->SetStringField(TEXT("name"), Ref.GetBoneName(i).ToString());
+		B->SetStringField(TEXT("name"), BoneName);
 		B->SetNumberField(TEXT("index"), i);
 		const int32 ParentIdx = Ref.GetParentIndex(i);
 		B->SetNumberField(TEXT("parentIndex"), ParentIdx);
 		if (ParentIdx != INDEX_NONE) B->SetStringField(TEXT("parentName"), Ref.GetBoneName(ParentIdx).ToString());
-		Bones.Add(MakeShared<FJsonValueObject>(B));
+		// The bone NAME is the anchor, not its index: a skeleton edited between
+		// two pages renumbers every bone after the change, and an index would
+		// then resume at a different joint while claiming to be exact.
+		Bones.Add({ BoneName, MakeShared<FJsonValueObject>(B) });
 	}
 
 	auto Result = MCPSuccess();
@@ -354,7 +376,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListBones(const TSharedPtr<FJsonObjec
 	Result->SetStringField(TEXT("worldName"), World ? World->GetName() : TEXT(""));
 	AddSkeletalComponentMetadata(Result, SK);
 	Result->SetNumberField(TEXT("boneCount"), NumBones);
-	Result->SetArrayField(TEXT("bones"), Bones);
+	MCPPagination::EmitPage(Page, Bones, TEXT("bones"), Result);
 	return MCPResult(Result);
 }
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { categoryTool, bp, type ToolDef } from "../types.js";
 import { Vec3, Quat } from "../schemas.js";
+import { PAGINATION_SCHEMA, paged } from "../pagination.js";
 
 // Keep the Control Rig operation schema self-contained so adding it does not
 // redirect JSON-schema references used by older animation actions.
@@ -291,7 +292,7 @@ export const animationTool: ToolDef = categoryTool(
     read_blendspace:      bp("Read blendspace. Params: assetPath", "read_blendspace", (p) => ({ assetPath: p.assetPath })),
     add_blend_sample:     bp("Append a sample to a BlendSpace. Params: assetPath, animation (AnimSequence path), position {x,y} (or flat x,y) (#248)", "add_blend_sample", (p) => ({ assetPath: p.assetPath, animation: p.animation, position: p.position, x: p.x, y: p.y })),
     set_blend_sample:     bp("Move an existing BlendSpace sample or swap its animation. Params: assetPath, sampleIndex, position? {x,y} (or flat x,y), animation? (#272)", "set_blend_sample", (p) => ({ assetPath: p.assetPath, sampleIndex: p.sampleIndex, position: p.position, x: p.x, y: p.y, animation: p.animation })),
-    list:                 bp("List anim assets. Params: directory?, recursive?", "list_anim_assets"),
+    list:                 bp(paged("List anim assets (AnimSequence, AnimMontage, AnimBlueprint, BlendSpace). directory scopes the read to one folder and is now honoured; it was advertised and ignored, so a scoped call used to get the whole project back. Params: directory?, recursive?"), "list_anim_assets"),
     create_montage:       bp("Create montage. Params: animSequencePath, name?, packagePath?", "create_anim_montage"),
     author_montages_batch: bp("Batch-author montages in one call: idempotent create, slot name, blend/rate/length properties, sections and notifies, then save. Every item reports success plus the failing stage (validate|create|slot|properties|sections|notifies|save) and error, so one bad item does not hide the rest. Newly created montages come back as a delete_asset_batch rollback. Each montage still holds the single segment create_montage builds. Params: items[] (each: name, animSequencePath, packagePath?, onConflict?, slotName?, trackIndex?, rateScale?, blendIn?, blendOut?, sequenceLength?, sections? [{sectionName, startTime?, linkedSection?}], notifies? [{notifyName, triggerTime, notifyClass?, properties?}])", "author_montages_batch", (p) => ({ items: p.items })),
     create_anim_blueprint: bp("Create AnimBP. Params: skeletonPath, name?, packagePath?, parentClass?", "create_anim_blueprint"),
@@ -302,7 +303,7 @@ export const animationTool: ToolDef = categoryTool(
     remove_notify:        bp("Remove notify(s) by name and/or class. Pass at least one of notifyName/notifyClass; both filters AND. Idempotent: alreadyDeleted=true if no match. Params: assetPath, notifyName?, notifyClass? (#471)", "remove_anim_notify", (p) => ({ assetPath: p.assetPath, notifyName: p.notifyName, notifyClass: p.notifyClass })),
     get_skeleton_info:    bp("Read skeleton. Params: assetPath", "get_skeleton_info"),
     list_sockets:         bp("List sockets. Params: assetPath", "list_animation_sockets"),
-    list_skeletal_meshes: bp("List skeletal meshes. Params: directory?, recursive?", "list_skeletal_meshes"),
+    list_skeletal_meshes: bp(paged("List skeletal meshes. directory scopes the read to one folder and is now honoured; it was advertised and ignored, so a scoped call used to get the whole project back. Params: directory?, recursive?"), "list_skeletal_meshes"),
     get_physics_asset:    bp("Read physics asset. Params: assetPath", "get_physics_asset_info"),
     create_sequence:      bp("Create blank AnimSequence. Params: name, skeletonPath, packagePath?, numFrames?, frameRate?", "create_sequence"),
     set_bone_keyframes:   bp("Set bone transform keyframes. Params: assetPath, boneName, keyframes", "set_bone_keyframes"),
@@ -396,7 +397,7 @@ export const animationTool: ToolDef = categoryTool(
     bake_root_motion_from_bone: bp("Bake delta translation from a source bone (e.g. pelvis) onto the root bone across the whole sequence; compensates the source bone so world-space position is unchanged. Params: assetPath, sourceBone, rootBone? (default 'root'), axes? (default ['x','y']), interpolation? ('linear'|'per_frame', default 'linear')", "bake_root_motion_from_bone"),
     // #419/#420 - live-actor skeletal operations (moved from level for proper domain alignment)
     get_bone_transform: bp("Read a bone or socket transform on a live actor's SkeletalMeshComponent. Wraps GetBoneTransform / GetSocketTransform. Params: actorLabel OR actorPath, boneName (or socket name), componentName? (default: CharacterMesh0 / Mesh / first SK component), world? (auto|pie|game|editor, default auto), space? (world|component|local, default world). Returns location, rotation, scale (#420)", "get_bone_transform", (p) => ({ actorLabel: p.actorLabel, actorPath: p.actorPath, boneName: p.boneName, componentName: p.componentName, world: p.world, space: p.space })),
-    list_bones: bp("List bones in a live actor's SkeletalMeshComponent ref skeleton (name, index, parent). Params: actorLabel OR actorPath, componentName?, world? (auto|pie|game|editor, default auto) (#420)", "list_bones", (p) => ({ actorLabel: p.actorLabel, actorPath: p.actorPath, componentName: p.componentName, world: p.world })),
+    list_bones: bp(paged("List bones in a live actor's SkeletalMeshComponent ref skeleton (name, index, parent), in reference-skeleton order so parents precede children. Params: actorLabel OR actorPath, componentName?, world? (auto|pie|game|editor, default auto) (#420)"), "list_bones", (p) => ({ actorLabel: p.actorLabel, actorPath: p.actorPath, componentName: p.componentName, world: p.world, cursor: p.cursor, limit: p.limit })),
     rebind_leader_pose: bp("Re-bind every secondary SkeletalMeshComponent on an actor to a body component (default CharacterMesh0 / Mesh). One-call fix for the 'character explodes after rotating the actor' failure mode. Params: actorLabel OR actorPath, bodyComponent? (#419)", "rebind_leader_pose", (p) => ({ actorLabel: p.actorLabel, actorPath: p.actorPath, bodyComponent: p.bodyComponent })),
     // #922/#923/#926 - evaluated pose reads. Everything above this line reads
     // either raw local-space tracks or the reference pose; these evaluate.
@@ -521,7 +522,12 @@ export const animationTool: ToolDef = categoryTool(
     includePins: z.boolean().optional().describe("read_control_rig_graph: include each node's pins (default true) (#774)"),
     includeDefaults: z.boolean().optional().describe("read_control_rig_graph: include pin default values (default true) (#774)"),
     includeLinks: z.boolean().optional().describe("read_control_rig_graph: include pin-to-pin links (default true) (#774)"),
-    limit: z.number().optional().describe("read_control_rig_graph: max nodes reported per graph (default 200) (#774)"),
+    // The shared cursor and limit, declared once for every paged action in this
+    // category: list, list_skeletal_meshes, list_bones, and read_control_rig_graph
+    // for its own per-graph node cap (default 200) (#774). Undeclared keys are
+    // stripped, so an action that documents `cursor` without this would return
+    // an unpaged first page and call it a success.
+    ...PAGINATION_SCHEMA,
     // Curve params (#79 / #24)
     curveName: z.string().optional().describe("Curve name for add_curve"),
     curveType: z.string().optional().describe("Curve type (default: float)"),
