@@ -101,7 +101,12 @@ export const gasTool: ToolDef = categoryTool(
     registerOwnerSets: z.boolean().optional().describe("get/set_live_attribute_value: register the actor's own attribute set subobjects on its ASC when it has none, the way BeginPlay would. Default true; false makes the call a strict read of what is already registered (#956)"),
 
     // -- Input binding (bind_ability_input / clear_ability_input / send_ability_input)
-    inputEvent: z.enum(["pressed", "released", "confirm", "cancel"]).optional().describe("send_ability_input: which input event to deliver. pressed/released address an inputId; confirm/cancel reach targeting actors and take none"),
+    // Deliberately a string, not z.enum. The MCP SDK validates arguments
+    // BEFORE the tool callback runs, so a strict enum makes a typo fail at the
+    // transport with a schema error, and the handler's own message, which names
+    // all four valid values, never reaches the caller. The handler validates it
+    // and says what is valid, which is the answer a caller can act on.
+    inputEvent: z.string().optional().describe("send_ability_input: which input event to deliver: pressed | released | confirm | cancel. pressed/released address an inputId; confirm/cancel reach targeting actors and take none"),
 
     // -- Gameplay cues (add_effect_cue / remove_effect_cue / validate_cue_coverage)
     cueTag: z.string().optional().describe("add_effect_cue / remove_effect_cue: the GameplayCue tag. It has to be registered, and it has to sit under the GameplayCue root to be routed at all"),

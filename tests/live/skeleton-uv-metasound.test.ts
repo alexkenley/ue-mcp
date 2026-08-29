@@ -555,16 +555,28 @@ describe("MetaSound introspection", () => {
   }, 300_000);
 
   it("distinguishes a path that names no MetaSound from one that does", async () => {
-    // metasound_get_graph predates the read surface and does not go through
-    // MSReadResolve, so it answers without touching the document. It also
-    // returns success for a path naming nothing, which is why the assertion is
-    // on assetExists rather than on the success flag: what a caller needs from
-    // this answer is whether the asset is there at all.
-    const missing = resultJson<{ success?: boolean; assetExists?: boolean; hasActiveBuilder?: boolean }>(
-      await call("audio", { action: "metasound_get_graph", assetPath: "/Game/MCPNoSuchMetaSound" }),
-    );
-    expect(missing.assetExists).not.toBe(true);
-    expect(missing.hasActiveBuilder).toBe(false);
+    // This case described the OLD behaviour, where metasound_get_graph
+    // answered success for a path naming nothing and the only usable signal
+    // was an assetExists flag. That was the bug. The handler now refuses, and
+    // the refusal is worth asserting in detail: an error that says only "not
+    // found" leaves a caller unable to tell a typo from an unsaved asset, so
+    // it reports both halves of the lookup it actually tried.
+    const missing = resultJson<{
+      success?: boolean;
+      error?: string;
+      packageExistsOnDisk?: boolean;
+      registryMatched?: boolean;
+      reason?: string;
+    }>(await call("audio", { action: "metasound_get_graph", assetPath: "/Game/MCPNoSuchMetaSound" }));
+
+    expect(missing.success).toBe(false);
+    expect(missing.reason).toBe("missing");
+    expect(missing.packageExistsOnDisk).toBe(false);
+    expect(missing.registryMatched).toBe(false);
+    // The message names the path and both spellings it resolved, so the caller
+    // can see whether the object-name half was the problem.
+    expect(missing.error).toContain("/Game/MCPNoSuchMetaSound");
+    expect(missing.error).toContain("Asset Registry");
   }, 300_000);
 
   it.skip(
