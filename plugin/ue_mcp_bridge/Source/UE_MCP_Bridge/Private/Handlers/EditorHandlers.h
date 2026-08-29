@@ -139,6 +139,26 @@ private:
 	static TSharedPtr<FJsonValue> SetViewportCamera(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> Undo(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> Redo(const TSharedPtr<FJsonObject>& Params);
+
+	// Viewport control, in EditorHandlers_ViewportControl.cpp. FEditorViewportClient
+	// fields are not UPROPERTYs, so set_property cannot reach them. This is what
+	// makes a screenshot comparable between runs.
+	static TSharedPtr<FJsonValue> GetViewportState(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SetViewMode(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SetViewportExposure(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SetViewportView(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SetGameView(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RedrawViewport(const TSharedPtr<FJsonObject>& Params);
+
+	// General-purpose transaction and undo-stack control. The existing undo/redo
+	// are bare calls returning a bool; material's begin/end pair has no cancel,
+	// so an aborted flow could only ever commit.
+	static TSharedPtr<FJsonValue> BeginEditorTransaction(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> EndEditorTransaction(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> CancelEditorTransaction(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> GetUndoState(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> UndoRedoSteps(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> GetTransactionHistory(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ReloadHandlers(const TSharedPtr<FJsonObject>& Params);
 	// #378: flush dirty packages and report per-package success/failure
 	static TSharedPtr<FJsonValue> SaveDirty(const TSharedPtr<FJsonObject>& Params);

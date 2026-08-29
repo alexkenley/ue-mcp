@@ -242,6 +242,18 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("set_viewport_camera"), &SetViewportCamera);
 	Registry.RegisterHandler(TEXT("undo"), &Undo);
 	Registry.RegisterHandler(TEXT("redo"), &Redo);
+	Registry.RegisterHandler(TEXT("get_viewport_state"), &GetViewportState);
+	Registry.RegisterHandler(TEXT("set_view_mode"), &SetViewMode);
+	Registry.RegisterHandler(TEXT("set_viewport_exposure"), &SetViewportExposure);
+	Registry.RegisterHandler(TEXT("set_viewport_view"), &SetViewportView);
+	Registry.RegisterHandler(TEXT("set_game_view"), &SetGameView);
+	Registry.RegisterHandler(TEXT("redraw_viewport"), &RedrawViewport);
+	Registry.RegisterHandler(TEXT("begin_editor_transaction"), &BeginEditorTransaction);
+	Registry.RegisterHandler(TEXT("end_editor_transaction"), &EndEditorTransaction);
+	Registry.RegisterHandler(TEXT("cancel_editor_transaction"), &CancelEditorTransaction);
+	Registry.RegisterHandler(TEXT("get_undo_state"), &GetUndoState);
+	Registry.RegisterHandler(TEXT("undo_redo_steps"), &UndoRedoSteps);
+	Registry.RegisterHandler(TEXT("get_transaction_history"), &GetTransactionHistory);
 	Registry.RegisterHandler(TEXT("reload_handlers"), &ReloadHandlers);
 	// save_asset is owned by FAssetHandlers (#768: adds force, file size, mtime).
 	// Registering it here too meant the winner was decided by registration

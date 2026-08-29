@@ -45,9 +45,22 @@ import { classifyActionClass } from "../../src/action-class.js";
  * what this file exists to stop.
  */
 const BASELINE = {
-  mutationsWithoutRollback: 359,
-  mutationsWithoutIdempotency: 146,
-  orphanedHandlers: 28,
+  // +2 over the original 359, and +3 over the original 146, for a reason worth
+  // stating: wiring an ORPHAN surfaces its pre-existing debt. Three handlers
+  // that already violated these conventions were unreachable from TS, so they
+  // were not counted as mutations at all. Surfacing a capability is the right
+  // move and it should not be discouraged by a number going up, but the debt
+  // was always there:
+  //
+  //   set_runtime_visibility                     no idempotency marker
+  //   restore_runtime_visibility                 neither
+  //   set_skeletal_mesh_optimize_for_instancing  neither
+  //
+  // These belong to the deferred convention pass over all 359, not to the
+  // ticket that surfaced them.
+  mutationsWithoutRollback: 361,
+  mutationsWithoutIdempotency: 149,
+  orphanedHandlers: 22,
 };
 
 /**
@@ -80,21 +93,46 @@ const KNOWN_ORPHANS: Record<string, string> = {
   add_ismc_instances: "as above.",
   list_sockets: "asset(list_sockets) reaches it under a different bridge name.",
 
-  // HOLE: shipped capability with no way to call it. Wire these up.
-  add_force: "HOLE: physics impulse variant with no action.",
-  add_material_function_expression: "HOLE: material function graph authoring is unreachable.",
-  connect_material_function_expressions: "HOLE: as above.",
-  list_material_function_expressions: "HOLE: as above.",
-  ensure_mass_entity_config: "HOLE: Mass Entity config authoring is unreachable.",
-  read_mass_entity_config: "HOLE: as above.",
-  place_skeletal_actor: "HOLE: superseded by level(spawn_skeletal_mesh_actor)? verify before deleting.",
-  populate_blendspace_1d: "HOLE: blendspace sample authoring is unreachable.",
-  remove_animation_notify: "HOLE: notifies can be added but not removed. Incomplete CRUD.",
-  read_skeletal_mesh_build_settings: "HOLE: registered, never surfaced.",
-  set_skeletal_mesh_optimize_for_instancing: "HOLE: registered, never surfaced.",
-  restore_runtime_visibility: "HOLE: paired with set_runtime_visibility, neither is surfaced.",
-  set_runtime_visibility: "HOLE: as above.",
-  add_curve: "HOLE: reached only under animation(add_curve)? verify the bridge name.",
+  // Alias registrations: a SECOND RegisterHandler line pointing at the same
+  // C++ function a shipped action already calls. Reachable, not missing. These
+  // were first annotated as holes; reading each function pointer showed
+  // otherwise, which is why "unreferenced by name" is not the same question as
+  // "unreachable".
+  add_material_function_expression:
+    "Alias of AddMaterialFunctionExpression; material(add_function_expression) calls it as add_expression_in_function.",
+  connect_material_function_expressions:
+    "Alias of ConnectMaterialFunctionExpressions; material(connect_function_expressions) calls it as connect_expressions_in_function.",
+  list_material_function_expressions:
+    "Alias of ListMaterialFunctionExpressions; material(list_function_expressions) calls it as list_expressions_in_function.",
+  populate_blendspace_1d:
+    "Alias of PopulateBlendspace, which already branches on UBlendSpace1D; animation(populate_blendspace) calls it.",
+  remove_animation_notify:
+    "Alias of RemoveAnimNotify; animation(remove_notify) calls it as remove_anim_notify. CRUD is complete.",
+  add_force:
+    "Alias of AddImpulse; gameplay(add_impulse) with mode='force' calls it.",
+  place_skeletal_actor:
+    "Alias of SpawnSkeletalMeshActor; level(spawn_skeletal_mesh_actor) calls it.",
+  add_curve:
+    "Alias of AddCurve; animation(add_curve) calls it under the identical name.",
+};
+
+/**
+ * Mutations with no meaningful inverse.
+ *
+ * Not every change can be undone by another call, and pretending otherwise
+ * would mean emitting a rollback that does not roll anything back. Each entry
+ * states why, and the list is short on purpose: "there is no inverse" is a
+ * strong claim and almost always wrong.
+ */
+const NO_INVERSE: Record<string, string> = {
+  cancel_editor_transaction:
+    "Discarding a transaction IS the undo. There is nothing to un-cancel: the "
+    + "objects were already restored and the transaction no longer exists.",
+  report_noise_event:
+    "Injects a one-shot stimulus into the running world. An AI either heard it "
+    + "or did not; there is no call that un-hears it. For the same reason it "
+    + "carries no idempotency marker: reporting the same noise twice is two "
+    + "events, not a repeated state change.",
 };
 
 /** bridge method -> the TS tool+action that reaches it. */
@@ -139,8 +177,19 @@ describe("handler conventions", () => {
     ).toBeLessThanOrEqual(6);
   });
 
+  it("only claims a mutation has no inverse when that is true", () => {
+    // An entry here that DOES emit a rollback is a stale claim, and a stale
+    // exemption is how a convention quietly stops applying.
+    const stale = Object.keys(NO_INVERSE).filter(
+      (action) => rows.find((r) => r.action === action)?.rollback,
+    );
+    expect(stale, `These now emit a rollback and should leave NO_INVERSE: ${stale.join(", ")}`).toEqual([]);
+  });
+
   it("does not add a mutation without a rollback", () => {
-    const without = mutations.filter((r) => !r.rollback).map((r) => r.action);
+    const without = mutations
+      .filter((r) => !r.rollback && !(r.action in NO_INVERSE))
+      .map((r) => r.action);
     expect(
       without.length,
       `Mutations with no rollback: ${without.length}, baseline ${BASELINE.mutationsWithoutRollback}.\n`
@@ -151,7 +200,9 @@ describe("handler conventions", () => {
   });
 
   it("does not add a mutation without an idempotency marker", () => {
-    const without = mutations.filter((r) => !r.idempotent).map((r) => r.action);
+    const without = mutations
+      .filter((r) => !r.idempotent && !(r.action in NO_INVERSE))
+      .map((r) => r.action);
     expect(
       without.length,
       `Mutations with no idempotency marker: ${without.length}, baseline `

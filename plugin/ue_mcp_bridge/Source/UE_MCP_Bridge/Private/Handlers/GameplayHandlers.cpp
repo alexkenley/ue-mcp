@@ -133,6 +133,17 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("add_eqs_test"), &AddEqsTest);
 	Registry.RegisterHandler(TEXT("remove_eqs_test"), &RemoveEqsTest);
 	Registry.RegisterHandler(TEXT("remove_eqs_option"), &RemoveEqsOption);
+	Registry.RegisterHandler(TEXT("get_bt_runtime"), &GetBtRuntime);
+	Registry.RegisterHandler(TEXT("get_live_blackboard"), &GetLiveBlackboard);
+	Registry.RegisterHandler(TEXT("set_live_blackboard"), &SetLiveBlackboard);
+	Registry.RegisterHandler(TEXT("run_behavior_tree"), &RunBehaviorTree);
+	Registry.RegisterHandler(TEXT("stop_behavior_tree"), &StopBehaviorTree);
+	Registry.RegisterHandler(TEXT("list_ai_agents"), &ListAiAgents);
+	Registry.RegisterHandler(TEXT("read_perception"), &ReadPerception);
+	Registry.RegisterHandler(TEXT("remove_sense"), &RemoveSense);
+	Registry.RegisterHandler(TEXT("get_perceived_actors"), &GetPerceivedActors);
+	Registry.RegisterHandler(TEXT("check_perception"), &CheckPerception);
+	Registry.RegisterHandler(TEXT("report_noise_event"), &ReportNoiseEvent);
 	Registry.RegisterHandler(TEXT("reorder_eqs_tests"), &ReorderEqsTests);
 	Registry.RegisterHandler(TEXT("run_eqs_query"), &RunEqsQuery);
 	Registry.RegisterHandler(TEXT("create_state_tree"), &CreateStateTree);
@@ -2086,24 +2097,79 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ConfigureAiPerceptionSense(const TShar
 		}
 	}
 
+	// Validate every setting BEFORE anything is constructed or appended.
+	//
+	// This loop used to run after the config was in the array and did
+	// `if (!P) continue;`, so a misspelled key returned success having done
+	// nothing, and a key whose value would not convert vanished the same way.
+	// Both are the worst failure this bridge has: an ordinary success for a
+	// change that never happened.
+	//
+	// Validating first also matters for the failure path. Applying mid-loop
+	// left a half-configured config appended to the array with the Blueprint
+	// uncompiled, which AddPerceptionComponent already avoids for its own
+	// `senses` array for exactly this reason.
+	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
+	const bool bHasSettings =
+		Params->TryGetObjectField(TEXT("settings"), PropsObj) && PropsObj && (*PropsObj).IsValid();
+
+	if (bHasSettings)
+	{
+		TArray<FString> UnknownKeys;
+		for (const auto& KV : (*PropsObj)->Values)
+		{
+			if (!SenseCfgClass->FindPropertyByName(FName(*KV.Key))) UnknownKeys.Add(FString(*KV.Key));
+		}
+		if (UnknownKeys.Num() > 0)
+		{
+			// Name what is valid, so one error is enough to fix the call.
+			TArray<FString> Valid;
+			for (TFieldIterator<FProperty> It(SenseCfgClass); It; ++It)
+			{
+				Valid.Add(It->GetName());
+			}
+			Valid.Sort();
+			return MCPError(FString::Printf(
+				TEXT("%s has no propert%s named %s. Valid properties on %s: %s."),
+				*SenseCfgClass->GetName(),
+				UnknownKeys.Num() == 1 ? TEXT("y") : TEXT("ies"),
+				*FString::Join(UnknownKeys, TEXT(", ")),
+				*SenseCfgClass->GetName(),
+				*FString::Join(Valid, TEXT(", "))));
+		}
+	}
+
 	UObject* Cfg = NewObject<UObject>(PercTemplate, SenseCfgClass, NAME_None, RF_Transactional);
 	const int32 NewIdx = Helper.AddValue();
 	ElemProp->SetObjectPropertyValue(Helper.GetRawPtr(NewIdx), Cfg);
 
 	// Optional per-sense tuning (e.g. { "SightRadius": 1500 }).
 	TArray<FString> AppliedProps;
-	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
-	if (Params->TryGetObjectField(TEXT("settings"), PropsObj) && PropsObj && (*PropsObj).IsValid())
+	if (bHasSettings)
 	{
 		for (const auto& KV : (*PropsObj)->Values)
 		{
 			FProperty* P = Cfg->GetClass()->FindPropertyByName(FName(*KV.Key));
-			if (!P) continue;
-			FString PErr;
-			if (MCPJsonProperty::SetJsonOnProperty(P, P->ContainerPtrToValuePtr<void>(Cfg), KV.Value, PErr))
+			// Existence was proved above, so a miss here is impossible; the
+			// guard stays because a null deref would be worse than a message.
+			if (!P)
 			{
-				AppliedProps.Add(FString(*KV.Key));
+				Helper.RemoveValues(NewIdx, 1);
+				return MCPError(FString::Printf(
+					TEXT("Property '%s' vanished between validation and apply on %s."),
+					*FString(*KV.Key), *SenseCfgClass->GetName()));
 			}
+			FString PErr;
+			if (!MCPJsonProperty::SetJsonOnProperty(P, P->ContainerPtrToValuePtr<void>(Cfg), KV.Value, PErr))
+			{
+				// A value that will not convert is a failed call, not a skipped
+				// key. Undo the append so the template is left as it was found.
+				Helper.RemoveValues(NewIdx, 1);
+				return MCPError(FString::Printf(
+					TEXT("Could not set '%s' on %s: %s. The sense was not added."),
+					*FString(*KV.Key), *SenseCfgClass->GetName(), *PErr));
+			}
+			AppliedProps.Add(FString(*KV.Key));
 		}
 	}
 

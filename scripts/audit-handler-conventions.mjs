@@ -38,10 +38,15 @@ export const HANDLERS_DIR = join(
 /** Markers that say a handler reports whether it actually changed anything. */
 const IDEMPOTENCY_MARKERS = [
   "MCPSetCreated", "MCPSetExisted", "MCPSetUpdated",
-  // Hand-rolled equivalents that predate the helpers, all of which answer the
-  // same question in the result body.
+  // Hand-rolled equivalents, all of which answer the same question in the
+  // result body: did this call actually change anything? Collected from what
+  // handlers really emit rather than from what the helpers offer, because a
+  // marker list narrower than the codebase reports false violations.
   "alreadyDeleted", "alreadyRevoked", "alreadyRemoved", "alreadyDetached",
-  "alreadyExists", "unchanged", "noChange", "wasAlready", "skipped",
+  "alreadyExists", "alreadyRunning", "alreadyStopped", "alreadyPaused",
+  "alreadySet", "alreadyOpen", "unchanged", "noChange", "wasAlready",
+  "skipped", "nested", "wasActive",
+  "SetBoolField(TEXT(\"changed\")",
 ];
 
 /** Markers that say a handler emits the call that undoes it. */

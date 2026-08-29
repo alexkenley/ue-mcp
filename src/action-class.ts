@@ -137,6 +137,24 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   "project.verify_symbols": "read",
   "project.lint_cpp_header": "read",
 
+  // ── Viewport, transactions and AI runtime ───────────────────────────
+  // Repaints the viewport. Nothing about the editor, the project on disk or
+  // the process changes; it is the visual equivalent of a read.
+  "editor.redraw_viewport": "read",
+  // Pure reads whose verb is not in the lexicon.
+  "editor.get_undo_state": "read",
+  "asset.read_skeletal_mesh_build_settings": "read",
+  // Discards an open transaction, restoring what it touched. That is a change
+  // to editor state, so it is gated like one even though its purpose is undo.
+  "editor.cancel_transaction": "mutate",
+  // Asks whether A perceives B. Reads the perception component and nothing
+  // more; the verb is simply not in the lexicon.
+  "gameplay.check_perception": "read",
+  // Injects a stimulus into the running world, which AI then reacts to.
+  "gameplay.report_noise_event": "mutate",
+  // Creates the config asset when it is absent, so it can create.
+  "gameplay.ensure_mass_entity_config": "mutate",
+
   // ── GAS granting and diagnosis ──────────────────────────────────────
   // grant/revoke change a live actor's AbilitySystemComponent, so they are
   // mutations even though neither verb is in the lexicon.

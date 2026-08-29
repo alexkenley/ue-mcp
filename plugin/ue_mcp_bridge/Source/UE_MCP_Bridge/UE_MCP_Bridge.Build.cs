@@ -1,7 +1,9 @@
 using UnrealBuildTool;
 
-// GameplayHandlers_EQS.cpp added: UBT caches the module file list and will not
-// pick up a new source file until this file changes.
+// New source files (UBT caches the module file list and will not pick one up
+// until this file changes): GameplayHandlers_EQS.cpp,
+// GameplayHandlers_BTRuntime.cpp, GameplayHandlers_Perception.cpp,
+// EditorHandlers_ViewportControl.cpp.
 
 public class UE_MCP_Bridge : ModuleRules
 {
