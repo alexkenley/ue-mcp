@@ -13,6 +13,7 @@
 
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "HandlerFunctionCall.h"
 #include "HandlerJsonProperty.h"
 #include "HandlerPropertyText.h"
@@ -1189,7 +1190,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::FindLiveObjects(const TSharedPtr<FJsonOb
 	const FString OuterPath = OptionalString(Params, TEXT("outerPath"));
 	const bool bIncludeDefaults = OptionalBool(Params, TEXT("includeDefaults"), false);
 	const bool bExactClass = OptionalBool(Params, TEXT("exactClass"), false);
-	const int32 Limit = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 50), 1, 1000);
 
 	// An exact path is a lookup, not a search: report whether it resolves
 	// rather than failing the call, because "is this instance still there" is
@@ -1248,8 +1248,24 @@ TSharedPtr<FJsonValue> FEditorHandlers::FindLiveObjects(const TSharedPtr<FJsonOb
 		}
 	}
 
-	TArray<TSharedPtr<FJsonValue>> Matches;
-	int32 TotalMatches = 0;
+	// T3: paged. This used to collect `limit` matches and set `truncated`,
+	// which told a caller there were more without giving it any way to read
+	// them. Read the whole match set and page it instead. The request is read
+	// here rather than at the top of the handler because the objectPath branch
+	// above is a single-object lookup, not a collection.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(
+				TEXT("find_object|className=%s|nameContains=%s|outerPath=%s|world=%s|includeDefaults=%d|exactClass=%d"),
+				*ClassSpec, *NameContains, *OuterPath, *WorldScope,
+				bIncludeDefaults ? 1 : 0, bExactClass ? 1 : 0),
+			/*DefaultLimit*/ 50, /*MaxLimit*/ 1000, Page))
+	{
+		return Err;
+	}
+
+	TArray<MCPPagination::FPageRow> Rows;
 	auto Consider = [&](UObject* Obj)
 	{
 		if (!IsValid(Obj)) return;
@@ -1266,11 +1282,10 @@ TSharedPtr<FJsonValue> FEditorHandlers::FindLiveObjects(const TSharedPtr<FJsonOb
 		}
 		if (bScopeToWorld && Obj->GetTypedOuter<UWorld>() != ScopeWorld) return;
 
-		++TotalMatches;
-		if (Matches.Num() < Limit)
-		{
-			Matches.Add(MakeShared<FJsonValueObject>(DescribeLiveObject(Obj)));
-		}
+		// The object's full path is the page anchor: it is the one string that
+		// names this instance across two separate enumerations, and it is what
+		// the caller passes back as objectPath to inspect the row further.
+		Rows.Add({ Obj->GetPathName(), MakeShared<FJsonValueObject>(DescribeLiveObject(Obj)) });
 	};
 
 	if (FilterClass)
@@ -1287,11 +1302,17 @@ TSharedPtr<FJsonValue> FEditorHandlers::FindLiveObjects(const TSharedPtr<FJsonOb
 		for (TObjectIterator<UObject> It; It; ++It) Consider(*It);
 	}
 
+	// GetObjectsOfClass and TObjectIterator both walk the object hash, whose
+	// order is not a contract and moves as objects are created and destroyed,
+	// so the rows are sorted by path before paging. A cursor over an unordered
+	// enumeration is not resumable.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
+
+	const int32 TotalMatches = Rows.Num();
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("matches"), Matches);
-	Result->SetNumberField(TEXT("count"), Matches.Num());
 	Result->SetNumberField(TEXT("totalMatches"), TotalMatches);
-	Result->SetBoolField(TEXT("truncated"), TotalMatches > Matches.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("matches"), Result);
 	if (FilterClass)
 	{
 		Result->SetStringField(TEXT("resolvedClass"), FilterClass->GetPathName());

@@ -2080,6 +2080,30 @@ inline void MCPGetDirectSubobjects(const UObjectBase* Outer, TArray<UObject*>& O
 #endif
 }
 
+/** Every object under an outer, descending through nested subobjects, skipping
+ *  anything already garbage. The twin of MCPGetDirectSubobjects for the callers
+ *  that need the whole tree - a Control Rig's RigVM models, for instance, hang
+ *  off collapsed nodes and the function library rather than off the blueprint
+ *  directly, so a direct-only walk finds none of them.
+ *
+ *  Both spellings live here and nowhere else. This module is a unity build, so
+ *  a file-local copy in a second .cpp is a C2084 redefinition the moment the
+ *  adaptive-unity working set puts the two files in one blob. */
+inline void MCPGetNestedSubobjects(const UObjectBase* Outer, TArray<UObject*>& OutObjects)
+{
+	if (!Outer)
+	{
+		return;
+	}
+#if UE_MCP_HAS_5_8_API
+	GetObjectsWithOuter(Outer, OutObjects, EGetObjectsFlags::IncludeNestedObjects,
+		RF_NoFlags, EInternalObjectFlags::Garbage);
+#else
+	GetObjectsWithOuter(Outer, OutObjects, /*bIncludeNestedObjects*/ true,
+		RF_NoFlags, EInternalObjectFlags::Garbage);
+#endif
+}
+
 // ── Widget variable GUID metadata (#728, #799) ───────────────────────────────
 //
 // A UWidgetBlueprint keeps WidgetVariableNameToGuidMap so external references

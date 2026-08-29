@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { categoryTool, bp, type ActionSpec, type ToolDef } from "../types.js";
 import { Vec3, Rotator } from "../schemas.js";
+import { PAGINATION_SCHEMA, paged } from "../pagination.js";
 
 /**
  * set_module_input takes a string on the bridge, so scalars are stringified
@@ -70,7 +71,7 @@ export const niagaraTool: ToolDef = categoryTool(
   "niagara",
   "Niagara VFX: systems, emitters, spawning, parameters, and graph authoring.",
   {
-    list:           bp("List Niagara assets. Params: directory?, recursive?", "list_niagara_systems"),
+    list:           bp(paged("List Niagara assets: every NiagaraSystem and NiagaraEmitter as one row tagged with its `type`, sorted by object path within each type, plus systemCount/emitterCount for the whole listing. Params: directory?, recursive?"), "list_niagara_systems"),
     get_info:       bp("Inspect system. Params: assetPath", "get_niagara_info"),
     list_dynamic_inputs:   bp("Report the authored override map per module: which inputs carry a plain value, which are wired to a dynamic-input script, and which hold an inline HLSL expression, with nested dynamic inputs one level down under nestedOverrides. This is a graph walk, so no property read produces it. Pair with list_module_inputs, which shows the inputs that have no override at all. Params: systemPath, emitterName?, emitterIndex?, stackContext? (ParticleSpawn|ParticleUpdate|EmitterSpawn|EmitterUpdate|all), moduleName?", "list_niagara_dynamic_inputs", (p) => ({ systemPath: p.systemPath, emitterName: p.emitterName, emitterIndex: p.emitterIndex, stackContext: p.stackContext, moduleName: p.moduleName })),
     set_dynamic_input:     bp("Wire a dynamic-input NiagaraScript into a module input's override pin, creating the pin if needed and replacing whatever was there. A dynamic input is a graph node, not a property, so set_property cannot do this. Returns dynamicInputName, which is the module name to pass to set_module_input when setting the dynamic input's OWN inputs. Errors list the module's real input names and the modules present. Params: systemPath, stackContext, moduleName, inputName, dynamicInputScript, emitterName?, emitterIndex?", "set_niagara_dynamic_input", (p) => ({ systemPath: p.systemPath, stackContext: p.stackContext, moduleName: p.moduleName, inputName: p.inputName, dynamicInputScript: p.dynamicInputScript, emitterName: p.emitterName, emitterIndex: p.emitterIndex })),
@@ -95,7 +96,7 @@ export const niagaraTool: ToolDef = categoryTool(
     remove_emitter: bp("Remove an emitter from a system (CRUD delete). Params: systemPath, emitterName? or emitterIndex?", "remove_emitter_from_system", (p) => ({ systemPath: p.systemPath, emitterName: p.emitterName, emitterIndex: p.emitterIndex })),
     list_emitters:  bp("List emitters in system. Params: systemPath", "list_emitters_in_system"),
     set_emitter_property: bp("Set emitter property. Params: systemPath, emitterName?, propertyName, value", "set_emitter_property"),
-    list_modules:   bp("List Niagara modules. Params: directory?", "list_niagara_modules"),
+    list_modules:   bp(paged("List Niagara module scripts, sorted by object path. pathFilter narrows the whole set rather than only the first page, which is what it always claimed to do. Params: directory?, pathFilter?"), "list_niagara_modules"),
     get_emitter_info: bp("Inspect emitter. Params: assetPath", "get_emitter_info"),
     list_renderers:   bp("List renderers on an emitter. Params: systemPath, emitterName?, emitterIndex?", "list_emitter_renderers"),
     add_renderer:     bp("Add renderer (sprite/mesh/ribbon or full class). Params: systemPath, rendererType, emitterName?, emitterIndex?", "add_emitter_renderer"),
@@ -186,5 +187,10 @@ export const niagaraTool: ToolDef = categoryTool(
     inputs: z.array(z.record(z.unknown())).optional().describe("For create_module_from_hlsl: [{name, type}]"),
     outputs: z.array(z.record(z.unknown())).optional().describe("For create_module_from_hlsl: [{name, type}]"),
     ops: z.array(z.record(z.unknown())).optional().describe("For batch: [{action, params}]"),
+    pathFilter: z.string().optional().describe("list_modules: case-sensitive substring of the module script object path, applied to the whole set before paging"),
+    // cursor + limit for the paged list actions. Declared once: the MCP layer
+    // strips a key the category never declares, so a paged action whose
+    // category omits these silently returns page one forever.
+    ...PAGINATION_SCHEMA,
   },
 );

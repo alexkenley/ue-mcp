@@ -1,6 +1,7 @@
 #include "WidgetHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "HandlerAssetCreate.h"
 #include <type_traits>
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -398,24 +399,39 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ListWidgetBlueprints(const TSharedPtr<FJ
 {
 	bool bRecursive = OptionalBool(Params, TEXT("recursive"), true);
 
+	// T3: paged.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_widget_blueprints|recursive=%d"), bRecursive ? 1 : 0),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 
 	TArray<FAssetData> AssetDataList;
 	AssetRegistry.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/UMGEditor"), TEXT("WidgetBlueprint")), AssetDataList, bRecursive);
 
-	TArray<TSharedPtr<FJsonValue>> AssetsArray;
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(AssetDataList.Num());
 	for (const FAssetData& AssetData : AssetDataList)
 	{
 		TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
 		AssetObj->SetStringField(TEXT("name"), AssetData.AssetName.ToString());
 		AssetObj->SetStringField(TEXT("path"), AssetData.GetObjectPathString());
 		AssetObj->SetStringField(TEXT("packagePath"), AssetData.PackagePath.ToString());
-		AssetsArray.Add(MakeShared<FJsonValueObject>(AssetObj));
+		// The asset's object path is the page anchor: two folders can each hold
+		// a WBP_HUD, and a page boundary has to name exactly one of them.
+		Rows.Add({ AssetData.GetObjectPathString(), MakeShared<FJsonValueObject>(AssetObj) });
 	}
+	// The registry returns assets in scan order, which is not a contract.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
 
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("assets"), AssetsArray);
-	Result->SetNumberField(TEXT("count"), AssetsArray.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("assets"), Result);
 
 	return MCPResult(Result);
 }
@@ -1433,7 +1449,20 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ListWidgetClasses(const TSharedPtr<FJson
 	const FString ModuleFilter = OptionalString(Params, TEXT("module"));
 	const bool bIncludeAbstract = OptionalBool(Params, TEXT("includeAbstract"), false);
 	const bool bIncludeBlueprint = OptionalBool(Params, TEXT("includeBlueprint"), false);
-	const int32 Limit = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 300), 1, 5000);
+
+	// T3: paged. Every loaded UWidget subclass is enumerated here, which on a
+	// project with UMG, CommonUI and its own widget module runs to four figures.
+	// It used to stop at `limit` rows and set `truncated`, which told a caller
+	// there were more without giving it any way to read them.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_widget_classes|filter=%s|module=%s|includeAbstract=%d|includeBlueprint=%d"),
+				*Filter, *ModuleFilter, bIncludeAbstract ? 1 : 0, bIncludeBlueprint ? 1 : 0),
+			/*DefaultLimit*/ 300, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
 
 	// The slot a panel gives its children is the one thing a name does not tell
 	// you, and it is what the next call has to write. Kept from the old curated
@@ -1459,7 +1488,6 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ListWidgetClasses(const TSharedPtr<FJson
 
 	struct FRow { UClass* Class = nullptr; FString Module; };
 	TArray<FRow> Rows;
-	int32 Matched = 0;
 	int32 TotalWidgetClasses = 0;
 
 	for (TObjectIterator<UClass> It; It; ++It)
@@ -1483,18 +1511,22 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ListWidgetClasses(const TSharedPtr<FJson
 		if (!ModuleFilter.IsEmpty() && !Module.Contains(ModuleFilter, ESearchCase::IgnoreCase)) continue;
 		if (!Filter.IsEmpty() && !Candidate->GetName().Contains(Filter, ESearchCase::IgnoreCase)) continue;
 
-		++Matched;
-		if (Rows.Num() >= Limit) continue;
 		Rows.Add({ Candidate, MoveTemp(Module) });
 	}
 
+	// TObjectIterator walks the object hash, whose order is not a contract, so
+	// the rows are sorted before paging. The class PATH is the last tiebreak:
+	// two modules can each define a Button, and without it those two swap
+	// places between calls and no anchor can resume into the sequence.
 	Rows.Sort([](const FRow& A, const FRow& B)
 	{
 		if (A.Module != B.Module) return A.Module < B.Module;
-		return A.Class->GetName() < B.Class->GetName();
+		if (A.Class->GetName() != B.Class->GetName()) return A.Class->GetName() < B.Class->GetName();
+		return A.Class->GetPathName() < B.Class->GetPathName();
 	});
 
-	TArray<TSharedPtr<FJsonValue>> ClassesArray;
+	TArray<MCPPagination::FPageRow> PageRows;
+	PageRows.Reserve(Rows.Num());
 	TSet<FString> ModulesSeen;
 	for (const FRow& Row : Rows)
 	{
@@ -1524,19 +1556,20 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ListWidgetClasses(const TSharedPtr<FJson
 			if (!Hint.IsEmpty()) Obj->SetStringField(TEXT("slotProperties"), Hint);
 		}
 
-		ClassesArray.Add(MakeShared<FJsonValueObject>(Obj));
+		// The class PATH is the page anchor, not the short name.
+		PageRows.Add({ Row.Class->GetPathName(), MakeShared<FJsonValueObject>(Obj) });
 	}
 
+	// Every module the WHOLE listing covers, not just this page's, because it
+	// is what a caller narrows the next query with.
 	TArray<FString> ModuleList = ModulesSeen.Array();
 	ModuleList.Sort();
 
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("classes"), ClassesArray);
-	Result->SetNumberField(TEXT("count"), ClassesArray.Num());
-	Result->SetNumberField(TEXT("matched"), Matched);
+	Result->SetNumberField(TEXT("matched"), PageRows.Num());
 	Result->SetNumberField(TEXT("totalLoadedWidgetClasses"), TotalWidgetClasses);
-	Result->SetBoolField(TEXT("truncated"), Matched > ClassesArray.Num());
 	Result->SetArrayField(TEXT("modules"), MCPStringListToJson(ModuleList));
+	MCPPagination::EmitPage(Page, PageRows, TEXT("classes"), Result);
 	Result->SetStringField(TEXT("note"), TEXT(
 		"Loaded classes only. A Widget Blueprint class nothing has opened this session is absent from "
 		"this list; find those with widget(list). A class from a disabled plugin does not exist at all "
@@ -2216,7 +2249,18 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ListRuntimeWidgets(const TSharedPtr<FJso
 	const FString NamePrefix  = OptionalString(Params, TEXT("namePrefix"), TEXT(""));
 	const bool bInViewportOnly = OptionalBool(Params, TEXT("viewportOnly"), false);
 
-	TArray<TSharedPtr<FJsonValue>> WidgetsArr;
+	// T3: paged.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_runtime_widgets|classFilter=%s|namePrefix=%s|viewportOnly=%d"),
+				*ClassFilter, *NamePrefix, bInViewportOnly ? 1 : 0),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
+	TArray<MCPPagination::FPageRow> Rows;
 	for (TObjectIterator<UUserWidget> It; It; ++It)
 	{
 		UUserWidget* Widget = *It;
@@ -2243,13 +2287,20 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ListRuntimeWidgets(const TSharedPtr<FJso
 			Obj->SetStringField(TEXT("rootWidgetName"), Widget->WidgetTree->RootWidget->GetName());
 			Obj->SetStringField(TEXT("rootWidgetClass"), Widget->WidgetTree->RootWidget->GetClass()->GetName());
 		}
-		WidgetsArr.Add(MakeShared<FJsonValueObject>(Obj));
+		// The widget instance's OBJECT PATH is the page anchor. Two PIE widgets
+		// can share a display name, and only the path names one of them.
+		Rows.Add({ Widget->GetPathName(), MakeShared<FJsonValueObject>(Obj) });
 	}
+
+	// TObjectIterator walks the object hash, whose order is not a contract and
+	// which moves as widgets are constructed and torn down during play, so the
+	// rows are sorted by path before paging.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("world"), World->GetName());
-	Result->SetArrayField(TEXT("widgets"), WidgetsArr);
-	Result->SetNumberField(TEXT("count"), WidgetsArr.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("widgets"), Result);
 	return MCPResult(Result);
 }
 

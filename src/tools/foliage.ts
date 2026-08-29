@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { categoryTool, bp, type ToolDef } from "../types.js";
 import { Vec3, Rotator } from "../schemas.js";
+import { CURSOR_PARAM, paged } from "../pagination.js";
 
 export const foliageTool: ToolDef = categoryTool(
   "foliage",
   "Foliage instances, types, procedural spawners, sampling and settings. Every FoliageType tunable (Density, Radius, ScaleX/Y/Z, AlignToNormal, GroundSlopeAngle, CullDistance, CastShadow) is a plain property: use set_settings, batch_set_settings_where or asset(set_property), not a typed action. Grass on landscape layers is authored elsewhere and deliberately has no action here: material(add_expression, expressionType=\"LandscapeGrassOutput\") adds the slot node, material(list_expressions) reads it back, asset(create_asset_by_class, className=\"LandscapeGrassType\") makes the grass type, and asset(set_property) fills its GrassVarieties.",
   {
-    list_types:    bp("List foliage types in level. Params: none", "list_foliage_types"),
+    list_types:    bp(paged("List foliage types in the level, one row per type per InstancedFoliageActor (foliageActorPath says which), sorted by that pair."), "list_foliage_types"),
     get_settings:  bp("Read foliage type settings. Params: foliageTypeName", "get_foliage_type_settings"),
     sample:        bp("Query instances in region. Params: center, radius, foliageType?", "sample_foliage"),
     create_type:   bp("Create foliage type from mesh. Params: meshPath, name?, packagePath?", "create_foliage_type"),
@@ -86,7 +87,9 @@ export const foliageTool: ToolDef = categoryTool(
     matchTolerance: z.number().optional().describe("remove_instances: how close an instance has to be to a transforms[] location to count as a match, in centimetres (default 1)."),
     actorPath: z.string().optional().describe("Object path of an InstancedFoliageActor (remove_instances) or of a ProceduralFoliageVolume (simulate_procedural / clear_procedural)."),
     actorLabel: z.string().optional().describe("Editor label of a ProceduralFoliageVolume, or of any actor carrying a ProceduralFoliageComponent."),
-    limit: z.number().optional().describe("get_instances: maximum instances to return (default 200, max 20000)."),
+    limit: z.number().optional().describe("get_instances: maximum instances to return (default 200, max 20000). list_types: rows on this page (default 200, max 2000)."),
+    // list_types resumes on a cursor. `limit` is already declared above.
+    cursor: CURSOR_PARAM,
     startIndex: z.number().optional().describe("get_instances: skip this many matching instances before returning any."),
     includeTransforms: z.boolean().optional().describe("get_instances: return each instance's location, rotation and scale (default true). false returns indices only."),
     force: z.boolean().optional().describe("remove_type_from_level: accept that removing the type destroys its instances, whose transforms are not recoverable."),

@@ -1,6 +1,7 @@
 #include "NiagaraHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 
 #include "UObject/StrongObjectPtr.h"
 #include "HandlerJsonProperty.h"
@@ -112,66 +113,93 @@ void FNiagaraHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 
 TSharedPtr<FJsonValue> FNiagaraHandlers::ListNiagaraSystems(const TSharedPtr<FJsonObject>& Params)
 {
+	// T3: paged. Systems and emitters are both rows of one `assets` collection,
+	// each already tagged with its `type`, so one cursor pages one list.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params, TEXT("list_niagara_systems"), /*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
-	TArray<FAssetData> Assets;
-	AR.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/Niagara"), TEXT("NiagaraSystem")), Assets, true);
 
-	TArray<TSharedPtr<FJsonValue>> AssetArray;
-	for (const FAssetData& Asset : Assets)
+	// The registry returns assets in scan order, which is not a contract, so
+	// each group is sorted by object path before the two are concatenated.
+	const auto Collect = [&AR](const TCHAR* ClassName, const TCHAR* Type)
 	{
-		TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
-		AssetObj->SetStringField(TEXT("name"), Asset.AssetName.ToString());
-		AssetObj->SetStringField(TEXT("path"), Asset.GetObjectPathString());
-		AssetObj->SetStringField(TEXT("type"), TEXT("System"));
-		AssetArray.Add(MakeShared<FJsonValueObject>(AssetObj));
-	}
+		TArray<FAssetData> Assets;
+		AR.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/Niagara"), ClassName), Assets, true);
 
-	// Also include emitter assets (#67)
-	TArray<FAssetData> EmitterAssets;
-	AR.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/Niagara"), TEXT("NiagaraEmitter")), EmitterAssets, true);
-	for (const FAssetData& Asset : EmitterAssets)
-	{
-		TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
-		AssetObj->SetStringField(TEXT("name"), Asset.AssetName.ToString());
-		AssetObj->SetStringField(TEXT("path"), Asset.GetObjectPathString());
-		AssetObj->SetStringField(TEXT("type"), TEXT("Emitter"));
-		AssetArray.Add(MakeShared<FJsonValueObject>(AssetObj));
-	}
+		TArray<MCPPagination::FPageRow> Out;
+		Out.Reserve(Assets.Num());
+		for (const FAssetData& Asset : Assets)
+		{
+			TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
+			AssetObj->SetStringField(TEXT("name"), Asset.AssetName.ToString());
+			AssetObj->SetStringField(TEXT("path"), Asset.GetObjectPathString());
+			AssetObj->SetStringField(TEXT("type"), Type);
+			// The asset's object path is the page anchor.
+			Out.Add({ Asset.GetObjectPathString(), MakeShared<FJsonValueObject>(AssetObj) });
+		}
+		Out.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+			{ return A.Id < B.Id; });
+		return Out;
+	};
+
+	TArray<MCPPagination::FPageRow> Rows = Collect(TEXT("NiagaraSystem"), TEXT("System"));
+	const int32 SystemCount = Rows.Num();
+	// Emitter assets too (#67).
+	Rows.Append(Collect(TEXT("NiagaraEmitter"), TEXT("Emitter")));
 
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("assets"), AssetArray);
-	Result->SetNumberField(TEXT("count"), AssetArray.Num());
+	Result->SetNumberField(TEXT("systemCount"), SystemCount);
+	Result->SetNumberField(TEXT("emitterCount"), Rows.Num() - SystemCount);
+	MCPPagination::EmitPage(Page, Rows, TEXT("assets"), Result);
 	return MCPResult(Result);
 }
 
 TSharedPtr<FJsonValue> FNiagaraHandlers::ListNiagaraModules(const TSharedPtr<FJsonObject>& Params)
 {
-	// Default 200 keeps response small; engine ships ~200 NiagaraScripts. Use
-	// pathFilter to narrow results, or pass a higher limit for full sweep.
-	const int32 Limit = OptionalInt(Params, TEXT("limit"), 200);
 	const FString PathFilter = OptionalString(Params, TEXT("pathFilter"));
+
+	// T3: paged. The engine ships around 200 NiagaraScripts and a project with
+	// a VFX library adds more. The old form stopped the walk at `limit` BEFORE
+	// applying pathFilter, so a filter that matched nothing in the first 200
+	// assets reported an empty module list for modules that plainly exist.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_niagara_modules|pathFilter=%s"), *PathFilter),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
 
 	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
 	TArray<FAssetData> Assets;
 	AR.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/Niagara"), TEXT("NiagaraScript")), Assets, true);
 
-	TArray<TSharedPtr<FJsonValue>> AssetArray;
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(Assets.Num());
 	for (const FAssetData& Asset : Assets)
 	{
-		if (AssetArray.Num() >= Limit) break;
 		const FString PathStr = Asset.GetObjectPathString();
 		if (!PathFilter.IsEmpty() && !PathStr.Contains(PathFilter)) continue;
 
 		TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
 		AssetObj->SetStringField(TEXT("name"), Asset.AssetName.ToString());
 		AssetObj->SetStringField(TEXT("path"), PathStr);
-		AssetArray.Add(MakeShared<FJsonValueObject>(AssetObj));
+		// The asset's object path is the page anchor.
+		Rows.Add({ PathStr, MakeShared<FJsonValueObject>(AssetObj) });
 	}
+	// The registry returns assets in scan order, which is not a contract.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
 
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("modules"), AssetArray);
-	Result->SetNumberField(TEXT("count"), AssetArray.Num());
 	Result->SetNumberField(TEXT("totalAvailable"), Assets.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("modules"), Result);
 	return MCPResult(Result);
 }
 

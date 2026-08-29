@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { categoryTool, bp, type ToolDef } from "../types.js";
 import { Vec3 } from "../schemas.js";
+import { PAGINATION_SCHEMA, paged } from "../pagination.js";
 
 export const pcgTool: ToolDef = categoryTool(
   "pcg",
   "Procedural Content Generation: graphs, nodes, connections, execution, volumes.",
   {
-    list_graphs:          bp("List PCG graphs. Params: directory?, recursive?", "list_pcg_graphs"),
+    list_graphs:          bp(paged("List PCG graphs, sorted by object path. Params: directory?, recursive?"), "list_pcg_graphs"),
     read_graph:           bp("Read graph structure. Params: assetPath", "read_pcg_graph"),
     read_node_settings:   bp("Read node settings. Params: assetPath, nodeName", "read_pcg_node_settings"),
     get_components:       bp("List PCG components in level. Params: none", "get_pcg_components"),
@@ -45,5 +46,9 @@ export const pcgTool: ToolDef = categoryTool(
     nodes: z.array(z.record(z.unknown())).optional().describe("import_graph: [{name, class, posX?, posY?, settings?}]"),
     connections: z.array(z.record(z.unknown())).optional().describe("import_graph: [{from, fromPin?, to, toPin?}]"),
     includeSettings: z.boolean().optional().describe("export_graph: include per-node editable settings in the response (default true)"),
+    // cursor + limit for the paged list actions. Declared once: the MCP layer
+    // strips a key the category never declares, so a paged action whose
+    // category omits these silently returns page one forever.
+    ...PAGINATION_SCHEMA,
   },
 );

@@ -26,6 +26,7 @@
 #include "ProjectHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 
 #include "Interfaces/IPluginManager.h"
 #include "Interfaces/IProjectManager.h"
@@ -210,16 +211,29 @@ TSharedPtr<FJsonValue> FProjectHandlers::ListAvailablePlugins(const TSharedPtr<F
 	const FString Filter = OptionalString(Params, TEXT("filter"));
 	const FString Category = OptionalString(Params, TEXT("pluginCategory"));
 	const bool bEnabledOnly = OptionalBool(Params, TEXT("enabledOnly"), false);
-	const int32 Limit = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 200), 1, 2000);
+
+	// T3: paged. This used to stop adding rows at `limit` while still counting
+	// the matches, so a caller was told there were 900 and handed 200 with no
+	// way to ask for the rest.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_available_plugins|filter=%s|pluginCategory=%s|enabledOnly=%d"),
+				*Filter, *Category, bEnabledOnly ? 1 : 0),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
 
 	TArray<TSharedRef<IPlugin>> All = IPluginManager::Get().GetDiscoveredPlugins();
+	// GetDiscoveredPlugins returns them in discovery order, which is not a
+	// contract, so they are sorted by name before paging, as they always were.
 	All.Sort([](const TSharedRef<IPlugin>& A, const TSharedRef<IPlugin>& B)
 	{
 		return A->GetName() < B->GetName();
 	});
 
-	TArray<TSharedPtr<FJsonValue>> Rows;
-	int32 Matched = 0;
+	TArray<MCPPagination::FPageRow> Rows;
 	for (const TSharedRef<IPlugin>& Plugin : All)
 	{
 		if (bEnabledOnly && !Plugin->IsEnabled()) continue;
@@ -234,17 +248,15 @@ TSharedPtr<FJsonValue> FProjectHandlers::ListAvailablePlugins(const TSharedPtr<F
 		{
 			continue;
 		}
-		++Matched;
-		if (Rows.Num() >= Limit) continue;
-		Rows.Add(MakeShared<FJsonValueObject>(PPlug_Describe(Plugin)));
+		// The plugin NAME is the page anchor: it is what enable_plugin and
+		// disable_plugin address, and it is unique across discovered plugins.
+		Rows.Add({ Plugin->GetName(), MakeShared<FJsonValueObject>(PPlug_Describe(Plugin)) });
 	}
 
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("plugins"), Rows);
-	Result->SetNumberField(TEXT("count"), Rows.Num());
-	Result->SetNumberField(TEXT("matched"), Matched);
+	Result->SetNumberField(TEXT("matched"), Rows.Num());
 	Result->SetNumberField(TEXT("totalDiscovered"), All.Num());
-	Result->SetBoolField(TEXT("truncated"), Matched > Rows.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("plugins"), Result);
 	Result->SetStringField(TEXT("note"), TEXT(
 		"`enabled` is what this editor session started with. `projectReference` is what the .uproject "
 		"says right now, so after project(enable_plugin) the two disagree until the editor restarts."));

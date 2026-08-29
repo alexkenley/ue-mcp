@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { categoryTool, bp, type ToolDef } from "../types.js";
 import { Color } from "../schemas.js";
+import { PAGINATION_SCHEMA, paged } from "../pagination.js";
 
 export const materialTool: ToolDef = categoryTool(
   "material",
@@ -35,9 +36,9 @@ export const materialTool: ToolDef = categoryTool(
     add_expression:    bp("Add expression node. Params: materialPath, expressionType, name?, parameterName?, group?, sortPriority?, defaultValue? (scalar number or {r,g,b,a} for vector params), value? (number for Constant, {r,g,b} for Constant3Vector, {x,y} for Constant2Vector), channels? ({r,g,b,a} bools for ComponentMask), positionX?, positionY? (#318)", "add_material_expression"),
     connect_expressions: bp("Wire two expressions. Params: materialPath, sourceExpression, sourceOutput?, targetExpression, targetInput?", "connect_material_expressions"),
     connect_to_property: bp("Wire expression to material output. Params: materialPath, expressionName, outputName?, property", "connect_to_material_property"),
-    list_expressions:  bp("List expression nodes. Params: materialPath", "list_material_expressions"),
+    list_expressions:  bp(paged("List expression nodes, in the material's own stored order, which is what nodeId indexes into. Params: materialPath"), "list_material_expressions"),
     delete_expression: bp("Remove expression. Params: materialPath, expressionName", "delete_material_expression"),
-    list_expression_types: bp("List available expression types. Params: none", "list_expression_types"),
+    list_expression_types: bp(paged("List available expression types, in the curated order they are grouped in."), "list_expression_types"),
     recompile:         bp("Recompile material. Pass recompileChildren=true to cascade to every MaterialInstanceConstant whose parent chain reaches this material (#421). Params: materialPath, recompileChildren?", "recompile_material", (p) => ({ materialPath: p.materialPath, recompileChildren: p.recompileChildren })),
     duplicate:         bp("Duplicate material asset. Params: sourcePath, destinationPath", "duplicate_material"),
     validate:          bp("Validate material graph - find orphans, broken refs. Params: assetPath", "validate_material", (p) => ({ assetPath: p.assetPath ?? p.materialPath })),
@@ -140,5 +141,9 @@ export const materialTool: ToolDef = categoryTool(
     clearExisting: z.boolean().optional().describe("build_material: delete every existing expression before building (#946)"),
     assignToMesh: z.string().optional().describe("build_material: StaticMesh or SkeletalMesh asset to put the finished material on (#946)"),
     meshSlots: z.array(z.union([z.string(), z.number()])).optional().describe("build_material: mesh material slot names or indices to assign; default every slot (#946)"),
+    // cursor + limit for the paged list actions. Declared once: the MCP layer
+    // strips a key the category never declares, so a paged action whose
+    // category omits these silently returns page one forever.
+    ...PAGINATION_SCHEMA,
   },
 );

@@ -1,6 +1,7 @@
 #include "ProjectHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -288,24 +289,36 @@ TSharedPtr<FJsonValue> FProjectHandlers::CreateCppClass(const TSharedPtr<FJsonOb
 // ─── list_project_modules ────────────────────────────────────────────
 // Enumerates the current project's native modules (name, host type,
 // source path). Feed moduleName from here into create_cpp_class.
-TSharedPtr<FJsonValue> FProjectHandlers::ListProjectModules(const TSharedPtr<FJsonObject>& /*Params*/)
+TSharedPtr<FJsonValue> FProjectHandlers::ListProjectModules(const TSharedPtr<FJsonObject>& Params)
 {
+	// T3: paged.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params, TEXT("list_project_modules"), /*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	FGameProjectGenerationModule& GPM = FGameProjectGenerationModule::Get();
 	const TArray<FModuleContextInfo>& Modules = GPM.GetCurrentProjectModules();
 
-	TArray<TSharedPtr<FJsonValue>> Arr;
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(Modules.Num());
 	for (const FModuleContextInfo& M : Modules)
 	{
 		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
 		Obj->SetStringField(TEXT("name"), M.ModuleName);
 		Obj->SetStringField(TEXT("hostType"), HostTypeToString(M.ModuleType));
 		Obj->SetStringField(TEXT("sourcePath"), M.ModuleSourcePath);
-		Arr.Add(MakeShared<FJsonValueObject>(Obj));
+		// The module name is the page anchor: unique within a project, and
+		// unchanged while the module is declared.
+		Rows.Add({ M.ModuleName, MakeShared<FJsonValueObject>(Obj) });
 	}
+	// The .uproject's declaration order carries meaning (the primary game
+	// module is first), so the rows are deliberately NOT sorted.
 
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("modules"), Arr);
-	Result->SetNumberField(TEXT("count"), Arr.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("modules"), Result);
 	return MCPResult(Result);
 }
 

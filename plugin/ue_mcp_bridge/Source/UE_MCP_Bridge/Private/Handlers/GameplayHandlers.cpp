@@ -1,6 +1,7 @@
 #include "GameplayHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "HandlerJsonProperty.h"
 #include "HandlerAssetCreate.h"
 #include "EditorScriptingUtilities/Public/EditorAssetLibrary.h"
@@ -618,36 +619,67 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetGameFrameworkInfo(const TSharedPtr<
 
 TSharedPtr<FJsonValue> FGameplayHandlers::ListInputAssets(const TSharedPtr<FJsonObject>& Params)
 {
+	// T3: paged. Two asset classes come back here, so ONE cursor pages ONE
+	// collection: every row, each tagged with its `kind`, under `assets`. The
+	// two familiar arrays are still emitted and hold this page's rows of that
+	// kind, so an existing reader keeps working while the paging fields
+	// (count, total, hasMore, nextCursor) describe the whole listing.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params, TEXT("list_input_assets"), /*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	auto Result = MCPSuccess();
 
 	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
 
-	// List InputAction assets
-	TArray<FAssetData> InputActions;
-	AR.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/EnhancedInput"), TEXT("InputAction")), InputActions, true);
-
-	TArray<TSharedPtr<FJsonValue>> InputActionArray;
-	for (const FAssetData& Asset : InputActions)
+	// The registry returns assets in whatever order it scanned them, which is
+	// not a contract, so each group is sorted by object path before paging.
+	const auto Collect = [&AR](const TCHAR* ClassName, const TCHAR* Kind)
 	{
-		TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
-		AssetObj->SetStringField(TEXT("name"), Asset.AssetName.ToString());
-		AssetObj->SetStringField(TEXT("path"), Asset.GetObjectPathString());
-		InputActionArray.Add(MakeShared<FJsonValueObject>(AssetObj));
+		TArray<FAssetData> Assets;
+		AR.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/EnhancedInput"), ClassName), Assets, true);
+
+		TArray<MCPPagination::FPageRow> Out;
+		Out.Reserve(Assets.Num());
+		for (const FAssetData& Asset : Assets)
+		{
+			TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
+			AssetObj->SetStringField(TEXT("name"), Asset.AssetName.ToString());
+			AssetObj->SetStringField(TEXT("path"), Asset.GetObjectPathString());
+			AssetObj->SetStringField(TEXT("kind"), Kind);
+			// The asset's object path is the page anchor: unique, and stable
+			// across two scans of the registry.
+			Out.Add({ Asset.GetObjectPathString(), MakeShared<FJsonValueObject>(AssetObj) });
+		}
+		Out.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+			{ return A.Id < B.Id; });
+		return Out;
+	};
+
+	TArray<MCPPagination::FPageRow> Rows = Collect(TEXT("InputAction"), TEXT("inputAction"));
+	const int32 ActionCount = Rows.Num();
+	Rows.Append(Collect(TEXT("InputMappingContext"), TEXT("inputMappingContext")));
+
+	Result->SetNumberField(TEXT("inputActionCount"), ActionCount);
+	Result->SetNumberField(TEXT("inputMappingContextCount"), Rows.Num() - ActionCount);
+	MCPPagination::EmitPage(Page, Rows, TEXT("assets"), Result);
+
+	// This page's rows, regrouped the way this action always reported them.
+	TArray<TSharedPtr<FJsonValue>> InputActionArray;
+	TArray<TSharedPtr<FJsonValue>> MappingContextArray;
+	for (const TSharedPtr<FJsonValue>& Row : Result->GetArrayField(TEXT("assets")))
+	{
+		const TSharedPtr<FJsonObject>* Obj = nullptr;
+		if (!Row.IsValid() || !Row->TryGetObject(Obj) || !Obj || !Obj->IsValid()) continue;
+		FString Kind;
+		(*Obj)->TryGetStringField(TEXT("kind"), Kind);
+		if (Kind == TEXT("inputAction")) InputActionArray.Add(Row);
+		else MappingContextArray.Add(Row);
 	}
 	Result->SetArrayField(TEXT("inputActions"), InputActionArray);
-
-	// List InputMappingContext assets
-	TArray<FAssetData> MappingContexts;
-	AR.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/EnhancedInput"), TEXT("InputMappingContext")), MappingContexts, true);
-
-	TArray<TSharedPtr<FJsonValue>> MappingContextArray;
-	for (const FAssetData& Asset : MappingContexts)
-	{
-		TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
-		AssetObj->SetStringField(TEXT("name"), Asset.AssetName.ToString());
-		AssetObj->SetStringField(TEXT("path"), Asset.GetObjectPathString());
-		MappingContextArray.Add(MakeShared<FJsonValueObject>(AssetObj));
-	}
 	Result->SetArrayField(TEXT("inputMappingContexts"), MappingContextArray);
 
 	return MCPResult(Result);
@@ -655,22 +687,36 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListInputAssets(const TSharedPtr<FJson
 
 TSharedPtr<FJsonValue> FGameplayHandlers::ListBehaviorTrees(const TSharedPtr<FJsonObject>& Params)
 {
+	// T3: paged.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params, TEXT("list_behavior_trees"), /*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	auto Result = MCPSuccess();
 
 	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
 	TArray<FAssetData> Assets;
 	AR.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/AIModule"), TEXT("BehaviorTree")), Assets, true);
 
-	TArray<TSharedPtr<FJsonValue>> AssetArray;
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(Assets.Num());
 	for (const FAssetData& Asset : Assets)
 	{
 		TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
 		AssetObj->SetStringField(TEXT("name"), Asset.AssetName.ToString());
 		AssetObj->SetStringField(TEXT("path"), Asset.GetObjectPathString());
-		AssetArray.Add(MakeShared<FJsonValueObject>(AssetObj));
+		// The asset's object path is the page anchor. Two folders can each hold
+		// a BT_Enemy, and a page boundary has to name exactly one of them.
+		Rows.Add({ Asset.GetObjectPathString(), MakeShared<FJsonValueObject>(AssetObj) });
 	}
-	Result->SetArrayField(TEXT("behaviorTrees"), AssetArray);
+	// The registry returns assets in scan order, which is not a contract.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
 
+	MCPPagination::EmitPage(Page, Rows, TEXT("behaviorTrees"), Result);
 	return MCPResult(Result);
 }
 
@@ -697,22 +743,35 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListEqsQueries(const TSharedPtr<FJsonO
 
 TSharedPtr<FJsonValue> FGameplayHandlers::ListStateTrees(const TSharedPtr<FJsonObject>& Params)
 {
+	// T3: paged.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params, TEXT("list_state_trees"), /*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	auto Result = MCPSuccess();
 
 	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
 	TArray<FAssetData> Assets;
 	AR.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/StateTreeModule"), TEXT("StateTree")), Assets, true);
 
-	TArray<TSharedPtr<FJsonValue>> AssetArray;
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(Assets.Num());
 	for (const FAssetData& Asset : Assets)
 	{
 		TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
 		AssetObj->SetStringField(TEXT("name"), Asset.AssetName.ToString());
 		AssetObj->SetStringField(TEXT("path"), Asset.GetObjectPathString());
-		AssetArray.Add(MakeShared<FJsonValueObject>(AssetObj));
+		// The asset's object path is the page anchor.
+		Rows.Add({ Asset.GetObjectPathString(), MakeShared<FJsonValueObject>(AssetObj) });
 	}
-	Result->SetArrayField(TEXT("stateTrees"), AssetArray);
+	// The registry returns assets in scan order, which is not a contract.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
 
+	MCPPagination::EmitPage(Page, Rows, TEXT("stateTrees"), Result);
 	return MCPResult(Result);
 }
 
@@ -1808,18 +1867,43 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListBTNodeClasses(const TSharedPtr<FJs
 {
 	const FString KindFilter = OptionalString(Params, TEXT("kind"), TEXT("")).ToLower();
 	const bool bAll = KindFilter.IsEmpty();
+	if (!bAll
+		&& KindFilter != TEXT("composite") && KindFilter != TEXT("task")
+		&& KindFilter != TEXT("decorator") && KindFilter != TEXT("service"))
+	{
+		// An unrecognised kind used to fall through every test and return four
+		// counts with no arrays at all, which reads as an empty node palette.
+		return MCPError(FString::Printf(
+			TEXT("'kind' must be one of composite, task, decorator, service, got '%s'. Omit it for every kind."),
+			*KindFilter));
+	}
 
-	auto PushClass = [](TArray<TSharedPtr<FJsonValue>>& Out, UClass* C, const TCHAR* Kind)
+	// T3: paged. Four class groups come back here, so ONE cursor pages ONE
+	// collection: every row, each tagged with its `kind`, under `classes`. The
+	// four familiar arrays are still emitted and hold this page's rows of that
+	// kind, while the counts stay counts of the WHOLE listing.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_bt_node_classes|kind=%s"), *KindFilter),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
+	auto PushClass = [](TArray<MCPPagination::FPageRow>& Out, UClass* C, const TCHAR* Kind)
 	{
 		if (!C || C->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)) return;
 		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
 		Obj->SetStringField(TEXT("name"), C->GetName());
 		Obj->SetStringField(TEXT("path"), C->GetPathName());
 		Obj->SetStringField(TEXT("kind"), Kind);
-		Out.Add(MakeShared<FJsonValueObject>(Obj));
+		// The class PATH is the page anchor, not the short name: two modules can
+		// each declare a BTTask_MoveTo, and a page boundary has to name one.
+		Out.Add({ C->GetPathName(), MakeShared<FJsonValueObject>(Obj) });
 	};
 
-	TArray<TSharedPtr<FJsonValue>> Composites, Tasks, Decorators, Services;
+	TArray<MCPPagination::FPageRow> Composites, Tasks, Decorators, Services;
 	for (TObjectIterator<UClass> It; It; ++It)
 	{
 		UClass* C = *It;
@@ -1829,15 +1913,47 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListBTNodeClasses(const TSharedPtr<FJs
 		else if (C->IsChildOf(UBTService::StaticClass())) PushClass(Services, C, TEXT("service"));
 	}
 
+	// TObjectIterator walks the object hash, whose order is not a contract, so
+	// each group is sorted by class path and the groups are then concatenated
+	// in a fixed order. Without both, the same page comes back reshuffled and
+	// a cursor cannot resume into it.
+	const auto ByPath = [](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; };
+	Composites.Sort(ByPath);
+	Tasks.Sort(ByPath);
+	Decorators.Sort(ByPath);
+	Services.Sort(ByPath);
+
 	auto Result = MCPSuccess();
-	if (bAll || KindFilter == TEXT("composite")) Result->SetArrayField(TEXT("composites"), Composites);
-	if (bAll || KindFilter == TEXT("task")) Result->SetArrayField(TEXT("tasks"), Tasks);
-	if (bAll || KindFilter == TEXT("decorator")) Result->SetArrayField(TEXT("decorators"), Decorators);
-	if (bAll || KindFilter == TEXT("service")) Result->SetArrayField(TEXT("services"), Services);
 	Result->SetNumberField(TEXT("compositeCount"), Composites.Num());
 	Result->SetNumberField(TEXT("taskCount"), Tasks.Num());
 	Result->SetNumberField(TEXT("decoratorCount"), Decorators.Num());
 	Result->SetNumberField(TEXT("serviceCount"), Services.Num());
+
+	TArray<MCPPagination::FPageRow> Rows;
+	if (bAll || KindFilter == TEXT("composite")) Rows.Append(Composites);
+	if (bAll || KindFilter == TEXT("task")) Rows.Append(Tasks);
+	if (bAll || KindFilter == TEXT("decorator")) Rows.Append(Decorators);
+	if (bAll || KindFilter == TEXT("service")) Rows.Append(Services);
+	MCPPagination::EmitPage(Page, Rows, TEXT("classes"), Result);
+
+	// This page's rows, regrouped the way this action always reported them.
+	TArray<TSharedPtr<FJsonValue>> PageComposites, PageTasks, PageDecorators, PageServices;
+	for (const TSharedPtr<FJsonValue>& Row : Result->GetArrayField(TEXT("classes")))
+	{
+		const TSharedPtr<FJsonObject>* Obj = nullptr;
+		if (!Row.IsValid() || !Row->TryGetObject(Obj) || !Obj || !Obj->IsValid()) continue;
+		FString Kind;
+		(*Obj)->TryGetStringField(TEXT("kind"), Kind);
+		if (Kind == TEXT("composite")) PageComposites.Add(Row);
+		else if (Kind == TEXT("task")) PageTasks.Add(Row);
+		else if (Kind == TEXT("decorator")) PageDecorators.Add(Row);
+		else if (Kind == TEXT("service")) PageServices.Add(Row);
+	}
+	if (bAll || KindFilter == TEXT("composite")) Result->SetArrayField(TEXT("composites"), PageComposites);
+	if (bAll || KindFilter == TEXT("task")) Result->SetArrayField(TEXT("tasks"), PageTasks);
+	if (bAll || KindFilter == TEXT("decorator")) Result->SetArrayField(TEXT("decorators"), PageDecorators);
+	if (bAll || KindFilter == TEXT("service")) Result->SetArrayField(TEXT("services"), PageServices);
 	return MCPResult(Result);
 }
 

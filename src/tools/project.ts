@@ -33,6 +33,7 @@ import { listContent } from "../content-index.js";
 import { getWorkarounds } from "../workaround-tracker.js";
 import { readLogState, readEngineSnapshot } from "../engine-observer.js";
 import { switchProject, isTargetDiverged } from "../project-switch.js";
+import { CURSOR_PARAM, paged } from "../pagination.js";
 
 /**
  * The engine tree the engine-source readers work against.
@@ -894,14 +895,14 @@ export const projectTool: ToolDef = categoryTool(
       }),
     },
     list_project_modules: bp(
-      "List native modules in the current project (name, host type, source path). Feed moduleName from here into create_cpp_class. Params: none",
+      paged("List native modules in the current project (name, host type, source path), in the .uproject's own declaration order. Feed moduleName from here into create_cpp_class."),
       "list_project_modules",
-      () => ({}),
+      (p) => ({ cursor: p.cursor, limit: p.limit }),
     ),
     list_loaded_modules: bp(
-      "Enumerate ALL engine+project modules with runtime load state (loaded/gameModule), not just uproject-declared ones. Params: filter? (case-insensitive substring), loadedOnly? (default false) (#689)",
+      paged("Enumerate ALL engine+project modules with runtime load state (loaded/gameModule), not just uproject-declared ones. Params: filter? (case-insensitive substring), loadedOnly? (default false) (#689)"),
       "list_loaded_modules",
-      (p) => ({ filter: p.filter, loadedOnly: p.loadedOnly }),
+      (p) => ({ filter: p.filter, loadedOnly: p.loadedOnly, cursor: p.cursor, limit: p.limit }),
     ),
     is_module_loaded: bp(
       "Report whether a named module is currently loaded in the editor. Params: moduleName (#689)",
@@ -909,9 +910,9 @@ export const projectTool: ToolDef = categoryTool(
       (p) => ({ moduleName: p.moduleName }),
     ),
     list_available_plugins: bp(
-      "List every plugin installed in this engine or project, with its category, version, type, whether it is enabled in THIS editor session, whether it is enabled by default, and the .uproject's current reference to it under projectReference {present, enabled}. Those two disagree after enable_plugin until the editor restarts, which is the point of reporting both. Params: filter?, pluginCategory?, enabledOnly?, limit?",
+      paged("List every plugin installed in this engine or project, sorted by name, with its category, version, type, whether it is enabled in THIS editor session, whether it is enabled by default, and the .uproject's current reference to it under projectReference {present, enabled}. Those two disagree after enable_plugin until the editor restarts, which is the point of reporting both. Params: filter?, pluginCategory?, enabledOnly?, limit? (default 200, max 2000)"),
       "list_available_plugins",
-      (p) => ({ filter: p.filter, pluginCategory: p.pluginCategory, enabledOnly: p.enabledOnly, limit: p.limit }),
+      (p) => ({ filter: p.filter, pluginCategory: p.pluginCategory, enabledOnly: p.enabledOnly, cursor: p.cursor, limit: p.limit }),
     ),
     enable_plugin: bp(
       "Enable a plugin in the .uproject. Plugin enablement is neither a UPROPERTY nor an INI key, it is a JSON array in the .uproject read once at startup, so set_config cannot reach it and without this a plugin-gated capability stays permanently unreachable through the bridge. Idempotent: a plugin already enabled, or enabled by default with no entry, reports existed and writes nothing. The change is a file change, so modules, classes, content and settings appear only after editor(restart_editor), which the result says. Params: pluginName",
@@ -1476,7 +1477,10 @@ export const projectTool: ToolDef = categoryTool(
     pluginCategory: z.string().optional().describe("list_available_plugins: case-insensitive substring of the plugin's category"),
     enabledOnly: z.boolean().optional().describe("list_available_plugins: only plugins enabled in this editor session"),
     loadedOnly: z.boolean().optional().describe("For list_loaded_modules: only loaded modules (#689)"),
-    limit: z.number().optional().describe("Max results: search_tools (default 20), find_example_usage (10), find_references (40), find_callers (25), find_callees (100), class_hierarchy descendants (100) (#704)"),
+    limit: z.number().optional().describe("Max results: search_tools (default 20), find_example_usage (10), find_references (40), find_callers (25), find_callees (100), class_hierarchy descendants (100). The paged list actions: rows on this page (#704)"),
+    // The paged list actions in this category resume on a cursor. `limit`
+    // is already declared above and shared with the unpaged readers.
+    cursor: CURSOR_PARAM,
     name: z.string().optional().describe("describe_action: the action to describe, as 'tool.action' or a bare action name"),
     category: z.string().optional().describe("describe_action / list_available_actions: narrow to one category instead of the whole surface"),
     includeNames: z.boolean().optional().describe("list_available_actions: list the action names, not just the counts (default false)"),

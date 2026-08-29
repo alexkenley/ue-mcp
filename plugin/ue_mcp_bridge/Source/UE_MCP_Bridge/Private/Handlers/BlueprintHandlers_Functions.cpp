@@ -7,6 +7,7 @@
 #include "BlueprintHandlers_Internal.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "BlueprintEditorLibrary.h"
@@ -225,6 +226,18 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListBlueprintFunctions(const TSharedP
 	// already owns it. Opt in when one combined view of the callable surface is wanted.
 	const bool bIncludeInherited = OptionalBool(Params, TEXT("includeInherited"), false);
 
+	// T3: paged. With includeInherited on, the parent chain of an Actor
+	// Blueprint contributes several hundred overridable functions on its own.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_blueprint_functions|path=%s|includeInherited=%d"),
+				*AssetPath, bIncludeInherited ? 1 : 0),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
 	{
@@ -394,11 +407,41 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListBlueprintFunctions(const TSharedP
 		}
 	}
 
+	// The rows are built by five ordered passes (own graphs, interfaces,
+	// ubergraphs and their entry points, macros and delegate signatures, then
+	// inherited), and that order is authored rather than enumerated, so it is
+	// deliberately NOT sorted. Each row's anchor is its graph object path where
+	// it has one, since two Blueprints can each own an EventGraph, and the
+	// kind-plus-name pair for the entries that are nodes rather than graphs.
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(Functions.Num());
+	for (const TSharedPtr<FJsonValue>& Entry : Functions)
+	{
+		FString Id;
+		const TSharedPtr<FJsonObject>* Obj = nullptr;
+		if (Entry.IsValid() && Entry->TryGetObject(Obj) && Obj && Obj->IsValid())
+		{
+			if (!(*Obj)->TryGetStringField(TEXT("objectPath"), Id) || Id.IsEmpty())
+			{
+				// An entry point or an unimplemented inherited function is a
+				// node or a declaration rather than a graph, so it has no
+				// object path. Its kind, its owning graph and its name together
+				// name exactly one row: two ubergraph pages may each hold a
+				// custom event of the same name.
+				FString Kind, GraphName, Name;
+				(*Obj)->TryGetStringField(TEXT("kind"), Kind);
+				(*Obj)->TryGetStringField(TEXT("graphName"), GraphName);
+				(*Obj)->TryGetStringField(TEXT("name"), Name);
+				Id = FString::Printf(TEXT("%s:%s:%s"), *Kind, *GraphName, *Name);
+			}
+		}
+		Rows.Add({ Id, Entry });
+	}
+
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("path"), AssetPath);
-	Result->SetArrayField(TEXT("functions"), Functions);
-	Result->SetNumberField(TEXT("count"), Functions.Num());
 	Result->SetBoolField(TEXT("includeInherited"), bIncludeInherited);
+	MCPPagination::EmitPage(Page, Rows, TEXT("functions"), Result);
 	return MCPResult(Result);
 }
 

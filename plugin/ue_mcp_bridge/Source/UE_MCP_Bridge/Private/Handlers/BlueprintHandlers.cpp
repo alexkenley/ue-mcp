@@ -2,6 +2,7 @@
 #include "BlueprintHandlers_Internal.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "HandlerJsonProperty.h"
 #include "JsonSerializer.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -1761,6 +1762,10 @@ namespace MCPNodeSearch
 	{
 		int32 Score = 0;
 		FString SortName;
+		// The row's stable identity for paging: the function's or node class's
+		// full object path. Two classes can each declare a Cast function, and a
+		// page boundary has to name exactly one of them.
+		FString Id;
 		TSharedPtr<FJsonObject> Entry;
 	};
 }
@@ -1787,7 +1792,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SearchNodeTypes(const TSharedPtr<FJso
 		if (!NormToken.IsEmpty()) NormTokens.Add(NormToken);
 	}
 
-	const int32 Limit = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 50), 1, 500);
 	const bool bIncludeGraphNodes = OptionalBool(Params, TEXT("includeGraphNodes"), true);
 
 	// Optional narrowing to one owning class, by short name or object path.
@@ -1805,6 +1809,19 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SearchNodeTypes(const TSharedPtr<FJso
 		{
 			return MCPError(FString::Printf(TEXT("Class not found: %s"), *ClassFilter));
 		}
+	}
+
+	// T3: paged. This used to score every match, return the top `limit` and set
+	// `truncated`, which told a caller there was more without giving it any way
+	// to read the rest. The whole ranked list is enumerated and paged instead.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("search_node_types|query=%s|className=%s|includeGraphNodes=%d"),
+				*Query, *ClassFilter, bIncludeGraphNodes ? 1 : 0),
+			/*DefaultLimit*/ 50, /*MaxLimit*/ 500, Page))
+	{
+		return Err;
 	}
 
 	static const FName NAME_KeywordsMeta(TEXT("Keywords"));
@@ -1905,7 +1922,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SearchNodeTypes(const TSharedPtr<FJso
 			AddNodeCall->SetObjectField(TEXT("nodeParams"), NodeParams);
 			Entry->SetObjectField(TEXT("addNode"), AddNodeCall);
 
-			Hits.Add(FHit{ Score, FuncName, Entry });
+			Hits.Add(FHit{ Score, FuncName, Func->GetPathName(), Entry });
 		}
 	}
 
@@ -1941,30 +1958,33 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SearchNodeTypes(const TSharedPtr<FJso
 			AddNodeCall->SetStringField(TEXT("nodeClass"), ClassName);
 			Entry->SetObjectField(TEXT("addNode"), AddNodeCall);
 
-			Hits.Add(FHit{ Score, ClassName, Entry });
+			Hits.Add(FHit{ Score, ClassName, NodeClass->GetPathName(), Entry });
 		}
 	}
 
+	// TObjectIterator walks the object hash, whose order is not a contract, so
+	// the ranking is completed by the object path: without that last tiebreak
+	// two functions of the same name and score can swap places between two
+	// calls, and a page anchor cannot resume into a sequence that reshuffles.
 	Hits.Sort([](const FHit& A, const FHit& B)
 	{
 		if (A.Score != B.Score) return A.Score > B.Score;
 		if (A.SortName.Len() != B.SortName.Len()) return A.SortName.Len() < B.SortName.Len();
-		return A.SortName < B.SortName;
+		if (A.SortName != B.SortName) return A.SortName < B.SortName;
+		return A.Id < B.Id;
 	});
 
-	const int32 TotalMatches = Hits.Num();
-	TArray<TSharedPtr<FJsonValue>> MatchingTypes;
-	for (int32 Index = 0; Index < FMath::Min(TotalMatches, Limit); ++Index)
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(Hits.Num());
+	for (const FHit& Hit : Hits)
 	{
-		MatchingTypes.Add(MakeShared<FJsonValueObject>(Hits[Index].Entry));
+		Rows.Add({ Hit.Id, MakeShared<FJsonValueObject>(Hit.Entry) });
 	}
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("query"), Query);
-	Result->SetArrayField(TEXT("results"), MatchingTypes);
-	Result->SetNumberField(TEXT("count"), MatchingTypes.Num());
-	Result->SetNumberField(TEXT("totalMatches"), TotalMatches);
-	Result->SetBoolField(TEXT("truncated"), TotalMatches > MatchingTypes.Num());
+	Result->SetNumberField(TEXT("totalMatches"), Hits.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("results"), Result);
 	return MCPResult(Result);
 }
 
@@ -1972,7 +1992,18 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListNodeTypes(const TSharedPtr<FJsonO
 {
 	FString Category = OptionalString(Params, TEXT("category"), TEXT("Utilities"));
 
-	TArray<TSharedPtr<FJsonValue>> NodeTypes;
+	// T3: paged. KismetMathLibrary alone declares several hundred callable
+	// functions, so the default category returns a list no caller reads whole.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_node_types|category=%s"), *Category),
+			/*DefaultLimit*/ 100, /*MaxLimit*/ 1000, Page))
+	{
+		return Err;
+	}
+
+	TArray<MCPPagination::FPageRow> Rows;
 	FString LowerCategory = Category.ToLower();
 
 	// Map categories to relevant classes and function sets
@@ -2006,6 +2037,11 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListNodeTypes(const TSharedPtr<FJsonO
 		ClassesToSearch.Add(UGameplayStatics::StaticClass());
 	}
 
+	// TFieldIterator here includes inherited functions, and the default
+	// category searches three classes that share a base, so one function can be
+	// reached twice. A page anchor has to name exactly one row, so the second
+	// sighting is dropped rather than emitted as a duplicate.
+	TSet<FString> SeenFunctionPaths;
 	for (UClass* SearchClass : ClassesToSearch)
 	{
 		if (!SearchClass) continue;
@@ -2014,18 +2050,31 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListNodeTypes(const TSharedPtr<FJsonO
 			UFunction* Func = *FuncIt;
 			if (!Func) continue;
 			if (!Func->HasAnyFunctionFlags(FUNC_BlueprintCallable | FUNC_BlueprintPure)) continue;
+			bool bAlreadySeen = false;
+			SeenFunctionPaths.Add(Func->GetPathName(), &bAlreadySeen);
+			if (bAlreadySeen) continue;
 
 			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
 			Entry->SetStringField(TEXT("name"), Func->GetName());
 			Entry->SetStringField(TEXT("class"), SearchClass->GetName());
-			NodeTypes.Add(MakeShared<FJsonValueObject>(Entry));
+			Entry->SetStringField(TEXT("fullPath"), Func->GetPathName());
+			// The function's object path is the page anchor: it names the
+			// declaring class as well as the function, and TFieldIterator can
+			// reach the same name through two of the classes searched.
+			Rows.Add({ Func->GetPathName(), MakeShared<FJsonValueObject>(Entry) });
 		}
 	}
 
+	// TFieldIterator walks a class's field list, whose order is not a contract
+	// and which recompiles differently for a Blueprint-declared class, so the
+	// rows are sorted before paging. The path sorts by declaring class first,
+	// which keeps the old grouping.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
+
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("category"), Category);
-	Result->SetArrayField(TEXT("nodeTypes"), NodeTypes);
-	Result->SetNumberField(TEXT("count"), NodeTypes.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("nodeTypes"), Result);
 	return MCPResult(Result);
 }
 
@@ -2236,13 +2285,25 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListBlueprintVariables(const TSharedP
 	// verification loop asks for the values it needs.
 	const bool bIncludeValues = OptionalBool(Params, TEXT("includeValues"), false);
 
+	// T3: paged. A Blueprint carrying a hundred variables with includeValues on
+	// is one of the largest reads on this category.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_blueprint_variables|path=%s|includeValues=%d"),
+				*AssetPath, bIncludeValues ? 1 : 0),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
 	{
 		return BlueprintNotFoundError(AssetPath);
 	}
 
-	TArray<TSharedPtr<FJsonValue>> Variables;
+	TArray<MCPPagination::FPageRow> Rows;
 	for (const FBPVariableDescription& Var : Blueprint->NewVariables)
 	{
 		TSharedPtr<FJsonObject> VarObj = MakeShared<FJsonObject>();
@@ -2319,14 +2380,17 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListBlueprintVariables(const TSharedP
 			}
 		}
 
-		Variables.Add(MakeShared<FJsonValueObject>(VarObj));
+		// The variable NAME is the page anchor. NewVariables is authored order,
+		// which carries meaning in the details panel, so the rows are
+		// deliberately not sorted; a name is unique within that array and a
+		// reorder is exactly the change the anchor is there to report.
+		Rows.Add({ Var.VarName.ToString(), MakeShared<FJsonValueObject>(VarObj) });
 	}
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("path"), AssetPath);
 	AnnotateResolvedBlueprint(Result, Blueprint);
-	Result->SetArrayField(TEXT("variables"), Variables);
-	Result->SetNumberField(TEXT("count"), Variables.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("variables"), Result);
 	if (bIncludeValues)
 	{
 		// Persistence is a property of the package, not of any one variable, so
@@ -2892,8 +2956,11 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::FlushComponentTemplates(const TShared
 	}
 	if (Blueprint->GeneratedClass)
 	{
+		// Through the shared helper rather than GetObjectsWithOuter directly:
+		// EGetObjectsFlags is 5.8 and later only, and the helper in
+		// HandlerUtils.h is the one place that spelling is gated.
 		TArray<UObject*> OwnedObjects;
-		GetObjectsWithOuter(Blueprint->GeneratedClass, OwnedObjects, EGetObjectsFlags::None);
+		MCPGetDirectSubobjects(Blueprint->GeneratedClass, OwnedObjects);
 		for (UObject* OwnedObject : OwnedObjects)
 		{
 			UActorComponent* Template = Cast<UActorComponent>(OwnedObject);

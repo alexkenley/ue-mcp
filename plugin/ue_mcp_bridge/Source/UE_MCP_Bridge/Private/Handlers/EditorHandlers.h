@@ -38,6 +38,11 @@ public:
 	{
 		FScopeLock Lock(&CritSection);
 		FMCPLogLine Entry;
+		// The absolute write index is the line's identity in the log stream:
+		// unique, monotonic, and unchanged by later lines arriving. Cursor
+		// paging over the buffer anchors on it, and a line that has scrolled
+		// out of the ring is then reported as gone rather than guessed at.
+		Entry.Sequence = (int32)WriteIndex;
 		Entry.Message = V;
 		Entry.Category = Category.ToString();
 		switch (Verbosity)
@@ -57,6 +62,8 @@ public:
 		FString Message;
 		FString Category;
 		FString Verbosity;
+		/** Absolute position in the log stream, counted from editor start. */
+		int32 Sequence = 0;
 	};
 
 	TArray<FMCPLogLine> GetRecentLines(int32 Count) const

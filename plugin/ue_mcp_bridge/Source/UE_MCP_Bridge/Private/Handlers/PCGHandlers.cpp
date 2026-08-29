@@ -1,6 +1,7 @@
 #include "PCGHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "HandlerAssetCreate.h"
 #include "HandlerJsonProperty.h"
 #include "VolumeHelpers_Internal.h"
@@ -165,22 +166,34 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 
 TSharedPtr<FJsonValue> FPCGHandlers::ListPCGGraphs(const TSharedPtr<FJsonObject>& Params)
 {
+	// T3: paged.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params, TEXT("list_pcg_graphs"), /*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
 	TArray<FAssetData> Assets;
 	AR.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/PCG"), TEXT("PCGGraph")), Assets, true);
 
-	TArray<TSharedPtr<FJsonValue>> AssetArray;
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(Assets.Num());
 	for (const FAssetData& Asset : Assets)
 	{
 		TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
 		AssetObj->SetStringField(TEXT("name"), Asset.AssetName.ToString());
 		AssetObj->SetStringField(TEXT("path"), Asset.GetObjectPathString());
-		AssetArray.Add(MakeShared<FJsonValueObject>(AssetObj));
+		// The asset's object path is the page anchor.
+		Rows.Add({ Asset.GetObjectPathString(), MakeShared<FJsonValueObject>(AssetObj) });
 	}
+	// The registry returns assets in scan order, which is not a contract.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
 
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("graphs"), AssetArray);
-	Result->SetNumberField(TEXT("count"), AssetArray.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("graphs"), Result);
 	return MCPResult(Result);
 }
 

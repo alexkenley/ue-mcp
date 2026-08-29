@@ -1,6 +1,7 @@
 #include "EditorHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 
 #include "MessageLogModule.h"
 #include "IMessageLogListing.h"
@@ -1289,10 +1290,27 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetOutputLog(const TSharedPtr<FJsonObjec
 	FString Filter = OptionalString(Params, TEXT("filter"));
 	FString Category = OptionalString(Params, TEXT("category"));
 
+	// T3: paged. `maxLines` still selects the recency WINDOW read out of the
+	// ring buffer, so the default call returns what it always did. What it no
+	// longer does is stop at that count and say nothing: every matching line in
+	// the window is a row, and `limit` pages them.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("get_output_log|maxLines=%d|filter=%s|category=%s"),
+				MaxLines, *Filter, *Category),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 4096, Page))
+	{
+		return Err;
+	}
+
 	// Read from ring-buffer log capture (#82)
 	TArray<FMCPLogCapture::FMCPLogLine> RecentLines = FMCPLogCapture::Get().GetRecentLines(MaxLines * 2); // over-fetch for filtering
 
-	TArray<TSharedPtr<FJsonValue>> LinesArray;
+	// Chronological, oldest first, exactly as the ring buffer holds them. No
+	// sort: the log stream's own order is the contract here, and the sequence
+	// number the rows are anchored on is monotonic in it.
+	TArray<MCPPagination::FPageRow> Rows;
 	for (const FMCPLogCapture::FMCPLogLine& Line : RecentLines)
 	{
 		if (!Filter.IsEmpty() && !Line.Message.Contains(Filter, ESearchCase::IgnoreCase))
@@ -1308,15 +1326,16 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetOutputLog(const TSharedPtr<FJsonObjec
 		LineObj->SetStringField(TEXT("message"), Line.Message);
 		LineObj->SetStringField(TEXT("category"), Line.Category);
 		LineObj->SetStringField(TEXT("verbosity"), Line.Verbosity);
-		LinesArray.Add(MakeShared<FJsonValueObject>(LineObj));
-
-		if (LinesArray.Num() >= MaxLines) break;
+		LineObj->SetNumberField(TEXT("sequence"), Line.Sequence);
+		Rows.Add({ FString::FromInt(Line.Sequence), MakeShared<FJsonValueObject>(LineObj) });
 	}
 
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("lines"), LinesArray);
-	Result->SetNumberField(TEXT("lineCount"), LinesArray.Num());
 	Result->SetNumberField(TEXT("maxLines"), MaxLines);
+	MCPPagination::EmitPage(Page, Rows, TEXT("lines"), Result);
+	// The old field name for the row count, kept so an existing caller reads
+	// the same answer out of the same name.
+	Result->SetNumberField(TEXT("lineCount"), Result->GetNumberField(TEXT("count")));
 	return MCPResult(Result);
 }
 
@@ -1325,25 +1344,45 @@ TSharedPtr<FJsonValue> FEditorHandlers::SearchLog(const TSharedPtr<FJsonObject>&
 	FString Query;
 	if (auto Err = RequireString(Params, TEXT("query"), Query)) return Err;
 
-	int32 MaxResults = OptionalInt(Params, TEXT("maxResults"), 100);
+	// The buffer holds 4096 lines, so this default collects every match in it
+	// rather than the first 100. It used to cap the SEARCH at 100 and report
+	// nothing about the rest, which read as "that is all there is".
+	const int32 MaxResults = FMath::Clamp(OptionalInt(Params, TEXT("maxResults"), 4096), 1, 4096);
+
+	// T3: paged.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("search_log|query=%s|maxResults=%d"), *Query, MaxResults),
+			/*DefaultLimit*/ 100, /*MaxLimit*/ 4096, Page))
+	{
+		return Err;
+	}
 
 	// Search ring-buffer log capture (#82)
 	TArray<FMCPLogCapture::FMCPLogLine> Matches = FMCPLogCapture::Get().Search(Query, MaxResults);
 
-	TArray<TSharedPtr<FJsonValue>> MatchesArray;
+	// Chronological, as the buffer holds them, anchored on each line's absolute
+	// sequence number. No sort: the stream's own order is what a log read means.
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(Matches.Num());
 	for (const FMCPLogCapture::FMCPLogLine& Line : Matches)
 	{
 		TSharedPtr<FJsonObject> MatchObj = MakeShared<FJsonObject>();
 		MatchObj->SetStringField(TEXT("message"), Line.Message);
 		MatchObj->SetStringField(TEXT("category"), Line.Category);
 		MatchObj->SetStringField(TEXT("verbosity"), Line.Verbosity);
-		MatchesArray.Add(MakeShared<FJsonValueObject>(MatchObj));
+		MatchObj->SetNumberField(TEXT("sequence"), Line.Sequence);
+		Rows.Add({ FString::FromInt(Line.Sequence), MakeShared<FJsonValueObject>(MatchObj) });
 	}
 
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("matches"), MatchesArray);
-	Result->SetNumberField(TEXT("matchCount"), MatchesArray.Num());
 	Result->SetStringField(TEXT("query"), Query);
+	// `maxResults` bounds the search itself, so say when it was the thing that
+	// ended the collection rather than the buffer running out.
+	Result->SetBoolField(TEXT("cappedAtMaxResults"), Rows.Num() >= MaxResults);
+	MCPPagination::EmitPage(Page, Rows, TEXT("matches"), Result);
+	Result->SetNumberField(TEXT("matchCount"), Result->GetNumberField(TEXT("count")));
 	return MCPResult(Result);
 }
 
@@ -2436,11 +2475,24 @@ TSharedPtr<FJsonValue> FEditorHandlers::ListCrashes(const TSharedPtr<FJsonObject
 {
 	FString CrashesDir = FPaths::ProjectSavedDir() / TEXT("Crashes");
 
-	TArray<TSharedPtr<FJsonValue>> CrashArray;
+	// T3: paged. A project that has been crashing accumulates hundreds of
+	// folders, each carrying its own file listing.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params, TEXT("list_crashes"), /*DefaultLimit*/ 50, /*MaxLimit*/ 500, Page))
+	{
+		return Err;
+	}
+
+	TArray<MCPPagination::FPageRow> Rows;
 	IFileManager& FileManager = IFileManager::Get();
 
 	TArray<FString> CrashFolders;
 	FileManager.FindFiles(CrashFolders, *(CrashesDir / TEXT("*")), false, true);
+	// FindFiles returns whatever order the filesystem enumerates in, which is
+	// not a contract, so the folders are sorted before paging. Crash folder
+	// names carry their timestamp, so this is also chronological.
+	CrashFolders.Sort();
 
 	for (const FString& Folder : CrashFolders)
 	{
@@ -2463,13 +2515,15 @@ TSharedPtr<FJsonValue> FEditorHandlers::ListCrashes(const TSharedPtr<FJsonObject
 			FileArray.Add(MakeShared<FJsonValueString>(File));
 		}
 		CrashObj->SetArrayField(TEXT("files"), FileArray);
-		CrashArray.Add(MakeShared<FJsonValueObject>(CrashObj));
+		// The folder name is the page anchor: unique within Saved/Crashes, and
+		// unchanged while the folder is on disk.
+		Rows.Add({ Folder, MakeShared<FJsonValueObject>(CrashObj) });
 	}
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("crashesDir"), CrashesDir);
-	Result->SetNumberField(TEXT("crashCount"), CrashArray.Num());
-	Result->SetArrayField(TEXT("crashes"), CrashArray);
+	MCPPagination::EmitPage(Page, Rows, TEXT("crashes"), Result);
+	Result->SetNumberField(TEXT("crashCount"), Result->GetNumberField(TEXT("count")));
 	return MCPResult(Result);
 }
 

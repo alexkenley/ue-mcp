@@ -2,6 +2,7 @@
 #include "UE_MCP_BridgeModule.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "HandlerAssetCreate.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -624,8 +625,15 @@ FExpressionInput* FMaterialHandlers::GetMaterialPropertyInput(
 
 TSharedPtr<FJsonValue> FMaterialHandlers::ListExpressionTypes(const TSharedPtr<FJsonObject>& Params)
 {
+	// T3: paged.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params, TEXT("list_expression_types"), /*DefaultLimit*/ 100, /*MaxLimit*/ 1000, Page))
+	{
+		return Err;
+	}
+
 	auto Result = MCPSuccess();
-	TArray<TSharedPtr<FJsonValue>> TypesArray;
 
 	// Common material expression types
 	TArray<FString> ExpressionTypes = {
@@ -667,13 +675,19 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListExpressionTypes(const TSharedPtr<F
 		TEXT("MaterialExpressionActorPositionWS")
 	};
 
+	// Authored order, so this list is deliberately NOT sorted: it is a curated
+	// starting point grouped by what the nodes do, and alphabetising it would
+	// bury the constants under Abs.
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(ExpressionTypes.Num());
 	for (const FString& TypeName : ExpressionTypes)
 	{
-		TypesArray.Add(MakeShared<FJsonValueString>(TypeName));
+		// The class name is the page anchor: it is what add_material_node
+		// accepts, and it is unique in this list.
+		Rows.Add({ TypeName, MakeShared<FJsonValueString>(TypeName) });
 	}
 
-	Result->SetArrayField(TEXT("expressionTypes"), TypesArray);
-	Result->SetNumberField(TEXT("count"), ExpressionTypes.Num());
+	MCPPagination::EmitPage(Page, Rows, TEXT("expressionTypes"), Result);
 
 	return MCPResult(Result);
 }
@@ -1412,13 +1426,23 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressions(const TSharedP
 		}
 	}
 
+	// T3: paged. A production master material carries several hundred nodes.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_material_expressions|materialPath=%s"), *MaterialPath),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	UMaterial* Material = LoadMaterialFromPath(MaterialPath);
 	if (!Material)
 	{
 		return MCPError(FString::Printf(TEXT("Failed to load material at '%s'"), *MaterialPath));
 	}
 
-	TArray<TSharedPtr<FJsonValue>> ExpressionsArray;
+	TArray<MCPPagination::FPageRow> Rows;
 	auto Expressions = Material->GetExpressions();
 	for (int32 i = 0; i < Expressions.Num(); i++)
 	{
@@ -1443,13 +1467,21 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressions(const TSharedP
 			ExprObj->SetStringField(TEXT("parameterName"), VP->ParameterName.ToString());
 		}
 
-		ExpressionsArray.Add(MakeShared<FJsonValueObject>(ExprObj));
+		// The expression's OBJECT PATH is the page anchor, not its nodeId:
+		// nodeId is the index into GetExpressions(), which every insertion and
+		// deletion renumbers, and an index is exactly what a cursor must not
+		// resume on. nodeId is still reported, and is still the addressing
+		// scheme the other material actions take, because it is computed here
+		// over the whole enumeration rather than over the page.
+		Rows.Add({ Expression->GetPathName(), MakeShared<FJsonValueObject>(ExprObj) });
 	}
+	// GetExpressions() is the material's own stored order, which nodeId indexes
+	// into, so the rows are deliberately NOT sorted: reordering them would
+	// leave the reported nodeIds out of step with the sequence they name.
 
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("expressions"), ExpressionsArray);
-	Result->SetNumberField(TEXT("count"), ExpressionsArray.Num());
 	Result->SetStringField(TEXT("materialPath"), Material->GetPathName());
+	MCPPagination::EmitPage(Page, Rows, TEXT("expressions"), Result);
 
 	return MCPResult(Result);
 }

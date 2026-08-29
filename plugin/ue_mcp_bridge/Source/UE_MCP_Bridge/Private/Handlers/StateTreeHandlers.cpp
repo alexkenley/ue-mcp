@@ -1,6 +1,7 @@
 #include "StateTreeHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 
 // StateTree authoring depends on UStateTreeEditingSubsystem (compile +
 // validate entry points) and editor property binding support, both
@@ -802,8 +803,18 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListStates(const TSharedPtr<FJsonObje
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
+	// T3: paged.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_state_tree_states|assetPath=%s"), *AssetPath),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	auto Result = MCPSuccess();
-	TArray<TSharedPtr<FJsonValue>> StatesArr;
+	TArray<MCPPagination::FPageRow> Rows;
 
 	TFunction<void(const UStateTreeState*)> CollectStates = [&](const UStateTreeState* State)
 	{
@@ -813,7 +824,9 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListStates(const TSharedPtr<FJsonObje
 		SObj->SetStringField(TEXT("id"), GuidToString(State->ID));
 		SObj->SetStringField(TEXT("path"), GetStatePath(State));
 		SObj->SetStringField(TEXT("type"), StateTypeToString(State->Type));
-		StatesArr.Add(MakeShared<FJsonValueObject>(SObj));
+		// The state's GUID is the page anchor: it survives a rename and a move
+		// to another parent, which the state path does not.
+		Rows.Add({ GuidToString(State->ID), MakeShared<FJsonValueObject>(SObj) });
 
 		for (const TObjectPtr<UStateTreeState>& Child : State->Children)
 		{
@@ -825,8 +838,11 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListStates(const TSharedPtr<FJsonObje
 	{
 		CollectStates(SubTree);
 	}
+	// Depth-first in the tree's own authored order, which is the order the
+	// StateTree editor shows and the order selection evaluates in, so the rows
+	// are deliberately NOT sorted.
 
-	Result->SetArrayField(TEXT("states"), StatesArr);
+	MCPPagination::EmitPage(Page, Rows, TEXT("states"), Result);
 	return MCPResult(Result);
 }
 
@@ -1986,10 +2002,21 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListBindableSources(const TSharedPtr<
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
+	// T3: paged.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_state_tree_bindable_sources|assetPath=%s"), *AssetPath),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	TMap<FGuid, const FStateTreeDataView> AllValues;
 	EditorData->GetAllStructValues(AllValues);
 
-	TArray<TSharedPtr<FJsonValue>> Sources;
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(AllValues.Num());
 	for (const TPair<FGuid, const FStateTreeDataView>& Pair : AllValues)
 	{
 		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
@@ -1997,13 +2024,18 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListBindableSources(const TSharedPtr<
 		const UStruct* S = Pair.Value.GetStruct();
 		Obj->SetStringField(TEXT("structType"), S ? S->GetName() : TEXT("(none)"));
 		Obj->SetStringField(TEXT("structPath"), S ? S->GetPathName() : TEXT(""));
-		Sources.Add(MakeShared<FJsonValueObject>(Obj));
+		// The struct GUID is the page anchor: it is what add_binding addresses
+		// and it names one source across two enumerations.
+		Rows.Add({ Pair.Key.ToString(), MakeShared<FJsonValueObject>(Obj) });
 	}
+	// TMap iterates in hash order, which is not a contract and moves as nodes
+	// are added, so the rows are sorted by struct id before paging.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("assetPath"), AssetPath);
-	Result->SetNumberField(TEXT("count"), Sources.Num());
-	Result->SetArrayField(TEXT("sources"), Sources);
+	MCPPagination::EmitPage(Page, Rows, TEXT("sources"), Result);
 	return MCPResult(Result);
 }
 

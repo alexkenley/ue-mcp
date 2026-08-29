@@ -1,6 +1,7 @@
 #include "LandscapeHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
@@ -1426,10 +1427,19 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::GetMaterialUsageSummary(const TShared
 // the count + bounds to reason about coverage.
 TSharedPtr<FJsonValue> FLandscapeHandlers::ListLandscapeProxies(const TSharedPtr<FJsonObject>& Params)
 {
+	// T3: paged. A World Partition landscape is one proxy per grid cell, so a
+	// large map streams in hundreds of them.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params, TEXT("list_landscape_proxies"), /*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
+	{
+		return Err;
+	}
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	int32 ParentLandscapes = 0;
-	TArray<TSharedPtr<FJsonValue>> Proxies;
+	TArray<MCPPagination::FPageRow> Proxies;
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
 		AActor* Actor = *It;
@@ -1447,6 +1457,9 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::ListLandscapeProxies(const TSharedPtr
 
 		TSharedPtr<FJsonObject> ProxyObj = MakeShared<FJsonObject>();
 		ProxyObj->SetStringField(TEXT("label"), Proxy->GetActorLabel());
+		// The object path, reported alongside the label because labels are not
+		// unique and this is also what the page anchors on.
+		ProxyObj->SetStringField(TEXT("objectPath"), Proxy->GetPathName());
 		ProxyObj->SetBoolField(TEXT("loaded"), true);
 
 		TSharedPtr<FJsonObject> Bounds = MakeShared<FJsonObject>();
@@ -1462,13 +1475,18 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::ListLandscapeProxies(const TSharedPtr
 		Bounds->SetObjectField(TEXT("extent"), ExtentObj);
 		ProxyObj->SetObjectField(TEXT("worldBounds"), Bounds);
 
-		Proxies.Add(MakeShared<FJsonValueObject>(ProxyObj));
+		Proxies.Add({ Proxy->GetPathName(), MakeShared<FJsonValueObject>(ProxyObj) });
 	}
+
+	// TActorIterator walks the level's actor array, whose order moves as cells
+	// stream in and out, so the rows are sorted by object path before paging.
+	Proxies.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
 
 	auto Result = MCPSuccess();
 	Result->SetNumberField(TEXT("loadedProxies"), Proxies.Num());
 	Result->SetNumberField(TEXT("parentLandscapes"), ParentLandscapes);
-	Result->SetArrayField(TEXT("proxies"), Proxies);
+	MCPPagination::EmitPage(Page, Proxies, TEXT("proxies"), Result);
 	Result->SetStringField(TEXT("note"), TEXT("World Partition unloaded proxies are not spawned as actors, so only loaded proxies are listed."));
 	return MCPResult(Result);
 }

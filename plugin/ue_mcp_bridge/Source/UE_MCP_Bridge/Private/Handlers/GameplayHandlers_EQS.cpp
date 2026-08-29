@@ -18,6 +18,7 @@
 
 #include "GameplayHandlers.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Engine/World.h"
@@ -129,9 +130,22 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListEqsTypes(const TSharedPtr<FJsonObj
 {
 	const FString Filter = OptionalString(Params, TEXT("filter"), TEXT(""));
 
-	const auto Collect = [&Filter](UClass* Base)
+	// T3: paged. Three class groups come back here, so ONE cursor pages ONE
+	// collection: every row, each tagged with its `kind`, under `types`. The
+	// three familiar arrays are still emitted and hold this page's rows of that
+	// kind, while the counts stay counts of the WHOLE listing.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_eqs_types|filter=%s"), *Filter),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
 	{
-		TArray<TSharedPtr<FJsonValue>> Out;
+		return Err;
+	}
+
+	const auto Collect = [&Filter](UClass* Base, const TCHAR* Kind)
+	{
+		TArray<MCPPagination::FPageRow> Out;
 		TArray<UClass*> Found;
 		for (TObjectIterator<UClass> It; It; ++It)
 		{
@@ -141,7 +155,12 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListEqsTypes(const TSharedPtr<FJsonObj
 			if (!Filter.IsEmpty() && !Candidate->GetName().Contains(Filter)) continue;
 			Found.Add(Candidate);
 		}
-		Found.Sort([](const UClass& A, const UClass& B) { return A.GetName() < B.GetName(); });
+		// TObjectIterator walks the object hash, whose order is not a contract,
+		// so the group is sorted before paging. The sort is by class PATH, not
+		// by short name: two modules can each declare an EnvQueryTest_Distance
+		// and only the path separates them, which is also what the page anchors
+		// on.
+		Found.Sort([](const UClass& A, const UClass& B) { return A.GetPathName() < B.GetPathName(); });
 		for (UClass* Candidate : Found)
 		{
 			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
@@ -153,15 +172,43 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListEqsTypes(const TSharedPtr<FJsonObj
 			Entry->SetStringField(TEXT("shortName"),
 				Name.FindChar(TEXT('_'), Underscore) ? Name.RightChop(Underscore + 1) : Name);
 			Entry->SetStringField(TEXT("path"), Candidate->GetPathName());
-			Out.Add(MakeShared<FJsonValueObject>(Entry));
+			Entry->SetStringField(TEXT("kind"), Kind);
+			Out.Add({ Candidate->GetPathName(), MakeShared<FJsonValueObject>(Entry) });
 		}
 		return Out;
 	};
 
+	const TArray<MCPPagination::FPageRow> Generators = Collect(UEnvQueryGenerator::StaticClass(), TEXT("generator"));
+	const TArray<MCPPagination::FPageRow> Tests = Collect(UEnvQueryTest::StaticClass(), TEXT("test"));
+	const TArray<MCPPagination::FPageRow> Contexts = Collect(UEnvQueryContext::StaticClass(), TEXT("context"));
+
 	auto Result = MCPSuccess();
-	Result->SetArrayField(TEXT("generators"), Collect(UEnvQueryGenerator::StaticClass()));
-	Result->SetArrayField(TEXT("tests"), Collect(UEnvQueryTest::StaticClass()));
-	Result->SetArrayField(TEXT("contexts"), Collect(UEnvQueryContext::StaticClass()));
+	Result->SetNumberField(TEXT("generatorCount"), Generators.Num());
+	Result->SetNumberField(TEXT("testCount"), Tests.Num());
+	Result->SetNumberField(TEXT("contextCount"), Contexts.Num());
+
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(Generators.Num() + Tests.Num() + Contexts.Num());
+	Rows.Append(Generators);
+	Rows.Append(Tests);
+	Rows.Append(Contexts);
+	MCPPagination::EmitPage(Page, Rows, TEXT("types"), Result);
+
+	// This page's rows, regrouped the way this action always reported them.
+	TArray<TSharedPtr<FJsonValue>> PageGenerators, PageTests, PageContexts;
+	for (const TSharedPtr<FJsonValue>& Row : Result->GetArrayField(TEXT("types")))
+	{
+		const TSharedPtr<FJsonObject>* Obj = nullptr;
+		if (!Row.IsValid() || !Row->TryGetObject(Obj) || !Obj || !Obj->IsValid()) continue;
+		FString Kind;
+		(*Obj)->TryGetStringField(TEXT("kind"), Kind);
+		if (Kind == TEXT("generator")) PageGenerators.Add(Row);
+		else if (Kind == TEXT("test")) PageTests.Add(Row);
+		else if (Kind == TEXT("context")) PageContexts.Add(Row);
+	}
+	Result->SetArrayField(TEXT("generators"), PageGenerators);
+	Result->SetArrayField(TEXT("tests"), PageTests);
+	Result->SetArrayField(TEXT("contexts"), PageContexts);
 	return MCPResult(Result);
 }
 

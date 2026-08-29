@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { categoryTool, bp, type ToolDef } from "../types.js";
+import { PAGINATION_SCHEMA, paged } from "../pagination.js";
 
 export const statetreeTool: ToolDef = categoryTool(
   "statetree",
   "StateTree asset editing: read, modify states/tasks/conditions/transitions/bindings/evaluators/global tasks/colors/state parameters/root parameters, compile and validate.",
   {
     read:                   bp("Full dump of a StateTree asset: state hierarchy (with description, tag, customTickRate, color), tasks, conditions, transitions, evaluators, global tasks, root params, bindings. Params: assetPath", "read_state_tree"),
-    list_states:            bp("List all states with IDs and paths. Params: assetPath", "list_state_tree_states"),
+    list_states:            bp(paged("List all states with IDs and paths, depth-first in the tree's authored order. Params: assetPath"), "list_state_tree_states"),
     add_state:              bp("Add child state. Params: assetPath, stateId? (parent GUID, omit for root), name, stateType? (State|Group|LinkedAsset|Subtree), selectionBehavior?, insertIndex?", "add_state_tree_state"),
     remove_state:           bp("Remove a state by ID. Params: assetPath, stateId", "remove_state_tree_state"),
     set_state_property:     bp("Set a property on a state. Params: assetPath, stateId, propertyName (name|type|selectionBehavior|bEnabled|weight|linkedAsset|description|tag|customTickRate|color), value. For tag: gameplay tag string or empty to clear. For customTickRate: number in seconds or empty to disable. For color: palette color display name, GUID, or empty to clear.", "set_state_tree_state_property"),
@@ -23,7 +24,7 @@ export const statetreeTool: ToolDef = categoryTool(
     add_binding:            bp("Add a property binding. Params: assetPath, sourceStructId, sourcePath, targetStructId, targetPath", "add_state_tree_binding"),
     remove_binding:         bp("Remove a property binding. Params: assetPath, targetStructId, targetPath", "remove_state_tree_binding"),
     list_bindings:          bp("List all property bindings. Params: assetPath, structId? (filter)", "list_state_tree_bindings"),
-    list_bindable_sources:  bp("Enumerate the context/bindable sources in a StateTree (context objects, parameters, evaluators, global tasks, per-state nodes) with their structId + struct type - what a property can bind FROM. Params: assetPath (#681)", "list_state_tree_bindable_sources", (p) => ({ assetPath: p.assetPath })),
+    list_bindable_sources:  bp(paged("Enumerate the context/bindable sources in a StateTree (context objects, parameters, evaluators, global tasks, per-state nodes) with their structId + struct type - what a property can bind FROM, sorted by structId. Params: assetPath (#681)"), "list_state_tree_bindable_sources", (p) => ({ assetPath: p.assetPath, cursor: p.cursor, limit: p.limit })),
     add_evaluator:          bp("Add an evaluator to the StateTree (tree-level). Params: assetPath, structType (must derive from FStateTreeEvaluatorBase), instanceProperties?", "add_state_tree_evaluator"),
     remove_evaluator:       bp("Remove an evaluator by node ID. Params: assetPath, nodeId", "remove_state_tree_evaluator"),
     set_evaluator_instance_property: bp("Set a property on an evaluator's instance data. Params: assetPath, nodeId, propertyName, value", "set_state_tree_evaluator_instance_property"),
@@ -119,5 +120,9 @@ export const statetreeTool: ToolDef = categoryTool(
     origin: z.string().optional().describe("send_event: who the event says it came from (default \"ue-mcp\"), which a task can read to tell external events from in-tree ones."),
     targetStateTag: z.string().optional().describe("request_transition: the Tag of the state to transition to, as an alternative to targetStateId. UE 5.8 and later."),
     fallback: z.string().optional().describe("request_transition: None (default) or NextSelectableSibling, which is tried when the target state cannot be selected."),
+    // cursor + limit for the paged list actions. Declared once: the MCP layer
+    // strips a key the category never declares, so a paged action whose
+    // category omits these silently returns page one forever.
+    ...PAGINATION_SCHEMA,
   },
 );
