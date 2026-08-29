@@ -8,6 +8,12 @@ import { nearestActions } from "./action-schema.js";
 import { prepareCall, finishCall } from "./call-pipeline.js";
 
 /**
+ * Re-exported from its home in `call-pipeline.ts`, where the whole inbound
+ * half of a call lives. Importers are unaffected by the move.
+ */
+export { takeTimeout } from "./call-pipeline.js";
+
+/**
  * Elicit a deterministic, user-mediated form response via the MCP client.
  * The server blocks until the client returns one of accept / decline / cancel.
  * Returns null when the connected client did not advertise the `elicitation`
@@ -165,6 +171,20 @@ export interface ToolDef {
    * structurally instead.
    */
   rebuild?: (actions: Record<string, ActionSpec>) => ToolDef;
+  /**
+   * The category-wide options this tool was built with.
+   *
+   * Published on the ToolDef rather than kept in the `categoryTool` closure
+   * because DISPATCH needs them, and dispatch is the flow registry, not that
+   * closure. `normalizeParams` spent its whole life invisible to the live
+   * route for exactly this reason: a category advertised the spellings it
+   * accepts, the schema let them through, and the folding that was supposed to
+   * canonicalise them only ever ran on the route the tests use.
+   *
+   * Structural copies (`{ ...tool }`) and rebuilt copies both carry it, since
+   * `rebuild` passes the same options back through this constructor.
+   */
+  options?: CategoryOptions;
 }
 
 /**
@@ -333,6 +353,16 @@ export interface CategoryOptions {
    * parameter combination with a specific message.
    */
   normalizeParams?: (params: Record<string, unknown>) => Record<string, unknown>;
+  /**
+   * This tool is a gateway: every real parameter arrives nested under this key
+   * rather than at the top level.
+   *
+   * Set to `args` by the micro-context gateway. Dispatch reads it so the path
+   * repair, the field projection and the per-call budget apply to the
+   * parameters the target action will actually see, instead of to the
+   * `{category, method, args}` envelope, where none of them are present.
+   */
+  nestedParamsKey?: string;
 }
 
 /**
@@ -435,6 +465,7 @@ export function categoryTool(
 
   const def: ToolDef = {
     name,
+    options,
     description: `${summary}\n\nActions:\n${docs}`,
     schema: {
       action: actionEnum(actionNames),
@@ -474,17 +505,20 @@ export function categoryTool(
             + ` lists them with their parameters, and project(action="search_tools") searches by intent.`,
         );
       }
-      // Routing, not an argument. Pulled out before normalizeParams so no
-      // mapParams can forward it into a bridge call as a parameter (#989).
-      const { timeoutMs: requestedTimeout, rest: withoutTimeout } = takeTimeout(params);
-      // Strips select/omit and repairs the call's paths, before the category's
-      // own folding, so a category that reads a path in `normalizeParams` sees
-      // the repaired one. The same two functions run on the live route in
-      // flow/task-factory.ts; this must not grow a second implementation.
-      const pipeline = prepareCall(withoutTimeout);
-      const normalized = options?.normalizeParams
-        ? options.normalizeParams(pipeline.params)
-        : pipeline.params;
+      // THE per-call preparation, in the one place it is written: the routing
+      // parameters (`timeoutMs`, `select`, `omit`) come off so no mapParams can
+      // forward one into a bridge call, the paths are repaired before anything
+      // reads them, and the category's own folding runs last over the repaired
+      // bag. This route calls it; the live route in flow/task-factory.ts calls
+      // the same function with the same preparation. Neither reimplements a
+      // step of it, and nothing per-call belongs in this closure again.
+      const pipeline = prepareCall(params, {
+        action,
+        normalizeParams: options?.normalizeParams,
+        nestedParamsKey: options?.nestedParamsKey,
+      });
+      const requestedTimeout = pipeline.timeoutMs;
+      const normalized = pipeline.params;
       const finish = (raw: unknown): unknown => finishCall(raw, pipeline);
 
       if (spec.handler) {
@@ -516,21 +550,6 @@ export function categoryTool(
 function stripAction(params: Record<string, unknown>): Record<string, unknown> {
   const { action: _, ...rest } = params;
   return rest;
-}
-
-/**
- * Separate the per-call timeout budget from the action's own parameters.
- * A non-positive or non-numeric value is discarded rather than refused: the
- * schema already rejects it, and a direct caller gets the default.
- */
-export function takeTimeout(
-  params: Record<string, unknown>,
-): { timeoutMs?: number; rest: Record<string, unknown> } {
-  const { timeoutMs, ...rest } = params;
-  const usable = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
-    ? Math.min(timeoutMs, MAX_BRIDGE_TIMEOUT_MS)
-    : undefined;
-  return { timeoutMs: usable, rest };
 }
 
 /**
