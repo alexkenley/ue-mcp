@@ -377,10 +377,16 @@ static EStateTreeTransitionTrigger ParseTransitionTrigger(const FString& Str)
 	return ParseTransitionTriggerSingle(Str);
 }
 
-// Mirrors add_state_tree_transition's own priority parsing, which maps anything
-// it does not recognise to Normal. Round-tripping a priority through this and
-// TransitionPriorityToString is what says whether the string form describes it:
-// None, and any priority a later engine adds, do not survive.
+// The priority parser AddTransition writes through, and the one RemoveTransition
+// round-trips against. Deliberately ONE function rather than a writer plus a
+// replica: a round trip against a copy is only as good as the copy's tracking of
+// the original, and this enum already has a third, divergent parser in
+// StateTreeHandlers_Depth.cpp (case-insensitive, and it REJECTS an unrecognised
+// value instead of defaulting, which is a validating contract this authoring one
+// deliberately does not share).
+//
+// Anything unrecognised maps to Normal, which is exactly why None - and any
+// priority a later engine adds - does not survive the round trip.
 static EStateTreeTransitionPriority ParseTransitionPriority(const FString& Str)
 {
 	if (Str == TEXT("Low")) return EStateTreeTransitionPriority::Low;
@@ -2230,12 +2236,7 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddTransition(const TSharedPtr<FJsonO
 
 	if (Params->HasField(TEXT("priority")))
 	{
-		const FString PriorityStr = Params->GetStringField(TEXT("priority"));
-		if (PriorityStr == TEXT("Low")) Trans->Priority = EStateTreeTransitionPriority::Low;
-		else if (PriorityStr == TEXT("Medium")) Trans->Priority = EStateTreeTransitionPriority::Medium;
-		else if (PriorityStr == TEXT("High")) Trans->Priority = EStateTreeTransitionPriority::High;
-		else if (PriorityStr == TEXT("Critical")) Trans->Priority = EStateTreeTransitionPriority::Critical;
-		else Trans->Priority = EStateTreeTransitionPriority::Normal;
+		Trans->Priority = ParseTransitionPriority(Params->GetStringField(TEXT("priority")));
 	}
 
 	if (Params->HasField(TEXT("bDelayTransition")))
