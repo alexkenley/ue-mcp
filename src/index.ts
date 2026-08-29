@@ -316,7 +316,7 @@ async function main() {
   // during initialize. We lazily probe at call time so the function is bound
   // to whatever the live capabilities are, not a stale snapshot.
   const buildElicit = (mcp: McpServer): ElicitFn | undefined => {
-    return async (params) => {
+    const elicit: ElicitFn = async (params) => {
       const caps = mcp.server.getClientCapabilities();
       if (!caps?.elicitation) {
         // Surface a JSON-RPC-style error shape so callers can distinguish
@@ -329,6 +329,14 @@ async function main() {
       const result = await mcp.server.elicitInput(params);
       return result as Awaited<ReturnType<ElicitFn>>;
     };
+    // The gate is built before any client has connected, so this function
+    // exists whatever the client turns out to support, and its presence proves
+    // nothing. Callers deciding whether the user CAN be asked ask this, which
+    // reads the live capability at call time. Without it, every client looks
+    // like an elicitation client and a mode that is meant to fall back to defer
+    // would resolve to interactive for clients that advertised nothing.
+    elicit.clientAdvertisesElicitation = () => !!mcp.server.getClientCapabilities()?.elicitation;
+    return elicit;
   };
 
   // Each session already wraps its own raw bridge in the guard pipeline; the
@@ -1037,6 +1045,9 @@ if (subcmd === "init") {
 } else if (subcmd === "feedback") {
   process.argv.splice(2, 1);
   import("./feedback-cli.js");
+} else if (subcmd === "dialog") {
+  process.argv.splice(2, 1);
+  import("./dialog-cli.js");
 } else if (subcmd === "resolve") {
   import("./resolve.js");
 } else if (subcmd === "build") {

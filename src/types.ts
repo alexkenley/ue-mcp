@@ -14,7 +14,24 @@ import { prepareCall, finishCall } from "./call-pipeline.js";
  * capability - handlers that rely on this gate must refuse to proceed in
  * that case rather than fall back to an agent-mediated approval.
  */
-export type ElicitFn = (params: ElicitParams) => Promise<ElicitResult>;
+export interface ElicitFn {
+  (params: ElicitParams): Promise<ElicitResult>;
+  /**
+   * Whether the CONNECTED client advertised the `elicitation` capability.
+   *
+   * The presence of the function is NOT that answer. The server builds the
+   * gate at startup, before any client has connected, so it always has a
+   * function to hand over and the capability is only knowable once a client is
+   * on the other end. Callers that branch on "can this user actually be asked"
+   * must call this rather than test the function for undefined, which is true
+   * of every client and would silently promote a client that advertised
+   * nothing into the interactive path.
+   *
+   * Absent on a gate built outside the server (tests, embedders), where the
+   * function was handed over deliberately and is taken at face value.
+   */
+  clientAdvertisesElicitation?: () => boolean;
+}
 
 export interface ElicitParams {
   message: string;

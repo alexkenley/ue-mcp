@@ -32,6 +32,7 @@ const COLLAPSING: CollapsingEnvVar[] = [
   { variable: "UE_MCP_ENV", configKey: "env", decides: "the ue-mcp.<env>.yml overlay every session merges" },
   { variable: "UE_MCP_CONTEXT_STRATEGY", configKey: "context.strategy", decides: "the context strategy for the whole server" },
   { variable: "UE_MCP_FEEDBACK_MODE", configKey: "feedback mode (npx ue-mcp feedback mode <m> --editor <name>)", decides: "the feedback approval mode every session uses" },
+  { variable: "UE_MCP_DIALOG_MODE", configKey: "dialog mode (npx ue-mcp dialog mode <m> --editor <name>)", decides: "how a modal dialog blocking any session's editor is handled, including whether the agent gets to answer it" },
 ];
 
 /**
