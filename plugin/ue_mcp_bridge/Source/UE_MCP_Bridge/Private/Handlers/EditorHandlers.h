@@ -159,6 +159,29 @@ private:
 	static TSharedPtr<FJsonValue> GetUndoState(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> UndoRedoSteps(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> GetTransactionHistory(const TSharedPtr<FJsonObject>& Params);
+
+	// Insights trace control, frame timing and standalone profiling runs, in
+	// EditorHandlers_Profiling.cpp. None of this is a property write:
+	// FTraceAuxiliary and UE::Trace are static C++ APIs with no UObject in
+	// front of them, the frame timers are engine globals, and a child process
+	// is not reflected state at all. The one thing that IS a property write -
+	// the unfocused-editor CPU throttle - is deliberately left to
+	// editor(set_property) and only REPORTED here, by get_frame_timing.
+	static TSharedPtr<FJsonValue> StartInsightsTrace(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> StopInsightsTrace(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> PauseInsightsTrace(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> GetInsightsTraceStatus(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ListTraceChannels(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SetTraceChannels(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> BeginProfileRegion(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> EndProfileRegion(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> AddTraceBookmark(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> GetFrameTiming(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> TriggerHitch(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> LaunchStandaloneGame(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> GetStandaloneStatus(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> StopStandaloneGame(const TSharedPtr<FJsonObject>& Params);
+
 	static TSharedPtr<FJsonValue> ReloadHandlers(const TSharedPtr<FJsonObject>& Params);
 	// #378: flush dirty packages and report per-package success/failure
 	static TSharedPtr<FJsonValue> SaveDirty(const TSharedPtr<FJsonObject>& Params);

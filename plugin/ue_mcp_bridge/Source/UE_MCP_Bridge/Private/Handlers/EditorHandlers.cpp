@@ -254,6 +254,24 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("get_undo_state"), &GetUndoState);
 	Registry.RegisterHandler(TEXT("undo_redo_steps"), &UndoRedoSteps);
 	Registry.RegisterHandler(TEXT("get_transaction_history"), &GetTransactionHistory);
+	// Insights trace control, frame timing and standalone runs, in
+	// EditorHandlers_Profiling.cpp.
+	Registry.RegisterHandler(TEXT("start_insights_trace"), &StartInsightsTrace);
+	Registry.RegisterHandler(TEXT("stop_insights_trace"), &StopInsightsTrace);
+	Registry.RegisterHandler(TEXT("pause_insights_trace"), &PauseInsightsTrace);
+	Registry.RegisterHandler(TEXT("get_insights_trace_status"), &GetInsightsTraceStatus);
+	Registry.RegisterHandler(TEXT("list_trace_channels"), &ListTraceChannels);
+	Registry.RegisterHandler(TEXT("set_trace_channels"), &SetTraceChannels);
+	Registry.RegisterHandler(TEXT("begin_profile_region"), &BeginProfileRegion);
+	Registry.RegisterHandler(TEXT("end_profile_region"), &EndProfileRegion);
+	Registry.RegisterHandler(TEXT("add_trace_bookmark"), &AddTraceBookmark);
+	Registry.RegisterHandler(TEXT("get_frame_timing"), &GetFrameTiming);
+	// trigger_hitch blocks the game thread for up to 5 seconds by design, which
+	// is longer than a default handler budget allows for.
+	Registry.RegisterHandlerWithTimeout(TEXT("trigger_hitch"), &TriggerHitch, 30.0f);
+	Registry.RegisterHandler(TEXT("launch_standalone_game"), &LaunchStandaloneGame);
+	Registry.RegisterHandler(TEXT("get_standalone_status"), &GetStandaloneStatus);
+	Registry.RegisterHandler(TEXT("stop_standalone_game"), &StopStandaloneGame);
 	Registry.RegisterHandler(TEXT("reload_handlers"), &ReloadHandlers);
 	// save_asset is owned by FAssetHandlers (#768: adds force, file size, mtime).
 	// Registering it here too meant the winner was decided by registration
