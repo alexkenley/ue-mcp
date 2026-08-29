@@ -2208,7 +2208,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::BatchSetInstances(const TSharedPtr<FJs
 				const FString PName = (*PObj)->GetStringField(TEXT("name"));
 				const FString PType = (*PObj)->GetStringField(TEXT("type")).ToLower();
 				if (PName.IsEmpty()) continue;
-				const FMaterialParameterInfo PInfo(FName(*PName));
+				const FMaterialParameterInfo PInfo{ FName(*PName) };
 				if (PType == TEXT("scalar"))
 				{
 					double V = 0; (*PObj)->TryGetNumberField(TEXT("value"), V);

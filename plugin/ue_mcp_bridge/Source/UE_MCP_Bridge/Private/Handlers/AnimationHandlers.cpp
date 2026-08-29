@@ -21,6 +21,7 @@
 #include "PoseSearch/PoseSearchDerivedData.h"
 #include "Animation/AnimBlueprintGeneratedClass.h"
 #include "Animation/AnimNotifies/AnimNotify.h"
+#include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "Engine/SkeletalMeshSocket.h"
 // PhysicsEngine/SkeletalBodySetup.h is unavailable as a public include on
