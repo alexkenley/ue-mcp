@@ -32,6 +32,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "HandlerEditorState.h"
+#include "HandlerPagination.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
 
@@ -311,26 +312,39 @@ TSharedPtr<FJsonValue> FLevelHandlers::ListTransientActors(const TSharedPtr<FJso
 		return MCPError(FString::Printf(TEXT("World not available for scope '%s'"), *WorldScope));
 	}
 
+	// T3: paged. This stopped at MCPTransientMaxListed and reported `truncated`
+	// with no way to reach the rest, which on a run that spawned more than that
+	// left the caller unable to see what it still had to clean up.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_transient_actors|world=%s"), *WorldScope),
+			/*DefaultLimit*/ MCPTransientMaxListed, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
+
 	const FName MarkerTag(MCPTransientActorTag);
-	TArray<TSharedPtr<FJsonValue>> Actors;
-	int32 Total = 0;
+	TArray<MCPPagination::FPageRow> Rows;
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
 		AActor* Actor = *It;
 		if (!Actor || !Actor->Tags.Contains(MarkerTag)) continue;
-		++Total;
-		if (Actors.Num() < MCPTransientMaxListed)
-		{
-			Actors.Add(MakeShared<FJsonValueObject>(MCPDescribeTransientActor(Actor)));
-		}
+		// The actor path is the anchor: verification actors are spawned with a
+		// shared label prefix, so the label does not name one of them.
+		Rows.Add({ Actor->GetPathName(), MakeShared<FJsonValueObject>(MCPDescribeTransientActor(Actor)) });
 	}
+
+	// TActorIterator order is not a contract, and this list changes shape by
+	// construction as verification actors are spawned and destroyed, so it is
+	// sorted before paging.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("worldName"), World->GetName());
-	Result->SetNumberField(TEXT("total"), Total);
-	Result->SetNumberField(TEXT("returned"), Actors.Num());
-	Result->SetBoolField(TEXT("truncated"), Actors.Num() < Total);
-	Result->SetArrayField(TEXT("actors"), Actors);
+	MCPPagination::EmitPage(Page, Rows, TEXT("actors"), Result);
+	Result->SetNumberField(TEXT("returned"), Result->GetIntegerField(TEXT("count")));
 	Result->SetStringField(TEXT("note"),
 		TEXT("These are RF_Transient verification actors spawned by level(spawn_transient_actor). A save cannot write them into the map, and they do not survive a map reload, but they are in the open world until destroyed."));
 	return MCPResult(Result);

@@ -72,7 +72,7 @@ const MUTATE_VERBS: ReadonlySet<string> = new Set<string>([
   "pause", "resume", "teleport", "respond", "stage", "capture", "render", "scrub",
   // Authoring verbs the asset lexicon has no reason to know about.
   "author", "edit", "place", "load", "reload", "force", "regenerate", "recompile",
-  "rebuild", "reparent", "auto", "populate", "bind", "rebind", "fill", "append",
+  "rebuild", "reparent", "auto", "populate", "bind", "rebind", "unbind", "fill", "append",
   "reindex", "migrate", "override", "flush", "cleanup", "configure", "init",
   "initialize", "step", "go", "submit", "remap", "login", "logout", "sync",
   "toggle", "reactivate", "reorder", "wrap", "sculpt", "paint", "snap", "aim",
@@ -128,6 +128,57 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   // steps are.
   "flow.plan": "read",
 
+  // ── Read the engine tree and the project's own sources ──────────────
+  // These answer questions about C++ before any is written. They touch the
+  // engine install and the project's Source/ read-only, and the index they
+  // build is a cache under the user directory, not editor state. `verify` and
+  // `lint` are not in the verb lexicon because nothing else on the surface
+  // uses them.
+  "project.verify_symbols": "read",
+  "project.lint_cpp_header": "read",
+  // The relational half of the same reading: what a class derives from, what
+  // derives from it, and the lines around a declaration. `class` and `symbol`
+  // are nouns rather than verbs, so the lexicon has nothing to go on. The
+  // `find_*` analysis actions resolve through the lexicon already and are not
+  // listed here.
+  "project.class_hierarchy": "read",
+  "project.symbol_context": "read",
+
+  // ── Viewport, transactions and AI runtime ───────────────────────────
+  // Repaints the viewport. Nothing about the editor, the project on disk or
+  // the process changes; it is the visual equivalent of a read.
+  "editor.redraw_viewport": "read",
+  // Pure reads whose verb is not in the lexicon.
+  "editor.get_undo_state": "read",
+  "asset.read_skeletal_mesh_build_settings": "read",
+  // Rewrites a mesh's UV layout in place, so it changes the asset on disk.
+  "asset.unwrap_uvs": "mutate",
+  // Reports UV faults and writes nothing.
+  "asset.check_uvs": "read",
+  // Records another skeleton as compatible on this one, so it writes the asset.
+  "animation.register_compatible_skeleton": "mutate",
+  // Discards an open transaction, restoring what it touched. That is a change
+  // to editor state, so it is gated like one even though its purpose is undo.
+  "editor.cancel_transaction": "mutate",
+  // Asks whether A perceives B. Reads the perception component and nothing
+  // more; the verb is simply not in the lexicon.
+  "gameplay.check_perception": "read",
+  // Injects a stimulus into the running world, which AI then reacts to.
+  "gameplay.report_noise_event": "mutate",
+  // Creates the config asset when it is absent, so it can create.
+  "gameplay.ensure_mass_entity_config": "mutate",
+
+  // ── GAS granting and diagnosis ──────────────────────────────────────
+  // grant/revoke change a live actor's AbilitySystemComponent, so they are
+  // mutations even though neither verb is in the lexicon.
+  "gas.grant_ability": "mutate",
+  "gas.revoke_ability": "mutate",
+  // Reads by default. `activate: true` really does activate the ability, and
+  // an action whose effect a parameter decides is exactly what `unknown` is
+  // for: it is gated like a mutation, which is the safe answer, and the label
+  // stays honest.
+  "gas.trace_ability_activation": "unknown",
+
   // ── Arbitrary payload decides the effect ────────────────────────────
   "epic.call_tool": "unknown",
   "editor.execute_python": "mutate",
@@ -139,6 +190,17 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   "editor.invoke_function": "unknown",
   "widget.invoke_runtime_function": "unknown",
   "niagara.batch": "mutate",
+
+  // ── Terrain reads the verb lexicon has no word for ──────────────────
+  // "analyze", "plan" and "project" are not in either list, and adding them as
+  // verbs would classify every future action containing those segments from a
+  // guess. All three of these only measure: they read the height field, or in
+  // the case of plan_real_world read nothing but a file the caller named, and
+  // return arithmetic. Nothing about them reaches an editor that could be the
+  // wrong one.
+  "landscape.analyze_terrain": "read",
+  "landscape.plan_real_world": "read",
+  "landscape.project_geo_coordinates": "read",
 
   // ── Reads whose verb reads as a write ───────────────────────────────
   // Serializers: they render a graph as text or JSON and return it.
@@ -155,6 +217,12 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   "level.load_actor_descs": "read",
   // Extracts a widget subtree as a description. `widget.author` writes one.
   "widget.extract_subtree": "read",
+  // Both walk a widget tree and report on it. "focus" is a mutate verb because
+  // the editor focuses a viewport on an actor, and a mutate verb anywhere in the
+  // name wins, which is wrong for a report about focus and for a read of where
+  // focus currently sits. `widget.set_runtime_focus` is the action that moves it.
+  "widget.audit_focus_chain": "read",
+  "widget.get_runtime_focus_path": "read",
   // Cache metadata about the Fab library, not a cache write.
   "fab.cache_info": "read",
   // Computes bounds, area, volume and topology over mesh data already in the
@@ -198,6 +266,10 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   "gameplay.find_nav_path": "read",
   "editor.hit_test_viewport_pixel": "read",
   "editor.check_for_crashes": "read",
+  // Inspects the project descriptor, the engine tree and the deployed plugin
+  // on disk. It deploys nothing, enables nothing and builds nothing; the
+  // "install" in its name is the subject it reports on, not what it does.
+  "project.check_install": "read",
   "editor.search_log": "read",
   "project.live_coding_status": "read",
   "feedback.route": "read",
@@ -212,6 +284,10 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   "asset.export": "mutate",
   "asset.export_texture": "mutate",
   "level.export_actor_fbx": "mutate",
+  // Writes a 16-bit heightmap to a path the caller chose. It changes no
+  // terrain, but a file appearing on disk is an external side effect and the
+  // taxonomy above counts that as a mutation.
+  "landscape.export_heightmap": "mutate",
   "audio.extract_pcm": "mutate",
   // Rebuilds the full-text index in the editor's own database.
   "asset.reindex_fts": "mutate",
@@ -233,6 +309,29 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   // The verb says read; what it can do says mutate, and the gate follows what
   // it can do.
   "gas.get_live_attribute_value": "mutate",
+
+  // ── The workflow journal and the skill packs ────────────────────────
+  // Neither reaches a bridge, so nothing here can land in the wrong EDITOR.
+  // Both are still per project: the journal file is keyed by absolute project
+  // root and skill packs install under a project's own `.claude/skills/`, so a
+  // write that guessed the wrong session would record one project's history,
+  // or install into one project's checkout, under another project's name.
+  // Spelled out rather than left to the verb lexicon, which has no reason to
+  // know what "note", "attach", "finish" or "cancel" do.
+  "flow.journal_start": "mutate",
+  "flow.journal_note": "mutate",
+  "flow.journal_attach": "mutate",
+  "flow.journal_finish": "mutate",
+  "flow.journal_cancel": "mutate",
+  "flow.journal_delete": "mutate",
+  "flow.journal_list": "read",
+  "flow.journal_get": "read",
+  "flow.journal_status": "read",
+  "flow.skill_install": "mutate",
+  "flow.skill_remove": "mutate",
+  "flow.skill_list": "read",
+  "flow.skill_get": "read",
+  "flow.skill_check": "read",
 };
 
 /** Split `category.action`, tolerating an action name that contains a dot. */

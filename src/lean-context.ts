@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { categoryTool, takeTimeout, type ActionSpec, type ToolDef } from "./types.js";
+import { actionEnum, categoryTool, takeTimeout, type ActionSpec, type ToolDef } from "./types.js";
+import { applyCategoryFolding } from "./call-pipeline.js";
 import { McpError, ErrorCode } from "./errors.js";
 
 /**
@@ -81,7 +82,7 @@ function leanTool(tool: ToolDef): ToolDef {
     actions,
     schema: {
       ...tool.schema,
-      action: z.enum(actionNames).describe("Action to perform"),
+      action: actionEnum(actionNames),
     },
   };
 }
@@ -260,10 +261,20 @@ export function buildMicroGateway(tools: ToolDef[]): ToolDef {
         }
         const rawArgs = p.args && typeof p.args === "object" ? (p.args as Record<string, unknown>) : {};
         // #989: the gateway honours the same per-call budget the category tools
-        // take, whether it arrives beside `args` or inside it.
+        // take, whether it arrives beside `args` or inside it. Dispatch has
+        // already read both levels and put the answer on the context; this
+        // second read is what keeps a direct call to this handler working.
         const inner = takeTimeout(rawArgs);
         const requestedTimeout = ctx.callTimeoutMs ?? inner.timeoutMs;
-        const args = inner.rest;
+        // The TARGET category's parameter folding, which only this handler can
+        // apply: dispatch prepared the gateway's own envelope and has no way
+        // to know which category `args` were written for. Without it the whole
+        // advertised spelling contract of a category is off in micro mode
+        // while being on everywhere else.
+        const args = applyCategoryFolding(inner.rest, {
+          action: method,
+          normalizeParams: tool.options?.normalizeParams,
+        });
         if (spec.handler) return spec.handler(ctx, args);
         if (spec.bridge) {
           const mapped = spec.mapParams ? spec.mapParams(args) : args;
@@ -284,5 +295,11 @@ export function buildMicroGateway(tools: ToolDef[]): ToolDef {
       method: z.string().optional().describe('Action name for call, e.g. "create"'),
       args: z.record(z.unknown()).optional().describe("Params object passed to the called action"),
     },
+    // Every real parameter of a gateway call is one level down, so the path
+    // repair, the field projection and the per-call budget have to be applied
+    // there. Preparing `{category, method, args}` instead left a backslashed
+    // path inside `args` unrepaired and forwarded `args.select` to the editor
+    // as a method argument.
+    { nestedParamsKey: "args" },
   );
 }

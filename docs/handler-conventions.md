@@ -117,6 +117,17 @@ The TS bridge lifts the `rollback` field onto `TaskResult.rollback`. When `rollb
 - **Only emit a rollback record when the handler actually mutated state.** An `existed: true` result means nothing was changed, so there's nothing to undo - do NOT emit a record.
 - **The inverse must be another registered handler.** Don't invent bespoke inverse handlers unless necessary; for creates, it's almost always the paired `delete_X`. For modifies, it's the same handler called with the previous value (self-inverse).
 - **Modifies capture the previous value _before_ mutation.** The rollback payload restores exactly that value.
+- **A record on a `success: false` body is reported, not replayed.** A handler that partly applied a mutation before giving up may attach an inverse for the part that landed, and a few do. flowkit collects an inverse only from a step that succeeded, so the flow runner never invokes that one: it arrives on `steps[i].unappliedRollback` and in the step's error text instead, for a caller to run. Build the record the same way regardless; just do not expect the runner to fire it. See [docs/flows.md](flows.md).
+
+### Idempotency, and why a re-run must not fail
+
+A content mutation asked for twice REPORTS the second time rather than failing it. `success: true` with the marker that says nothing changed - `alreadyExists`, `alreadyRemoved`, `existed`, `unchanged` - and no rollback record, because nothing was mutated to undo. The caller asked for a state and the state holds.
+
+**Lifecycle actions are the exception, and they answer differently.** `editor(start_editor)` on an editor that is already up, `editor(stop_editor)` with nothing running, and both halves of `editor(play_in_editor)` report `success: false` and carry `alreadyRunning` or `alreadyStopped` beside it. The call did not start, stop or play anything, and saying otherwise would be the handler reporting a success for work it did not do. The marker is what lets a caller tell that apart from a real failure, which is the job the marker exists for; the verdict stays honest.
+
+This is not cosmetic for a content mutation. A `success: false` body fails the flow step that ran it and stops the run, so an asset create that treats "it already exists" as an error aborts every flow that makes sure of something before doing work, on the common path where it was already sure. `MCPError` is for a call that could not do what it was asked; being handed a state that already holds is not that.
+
+Where the answer genuinely is a failure, as with the lifecycle actions above, the flow absorbs it rather than the handler hiding it: a step marks itself `ignore_failure: true` and the run continues with the failure still recorded. See [docs/flows.md](flows.md). That is the right layer, because only the flow author knows whether a particular step failing is expected.
 
 ## Helpers
 
@@ -132,6 +143,9 @@ MCPSetExisted(Result)                         // { created: false, existed: true
 MCPSetUpdated(Result)                         // { updated: true }
 MCPSetRollback(Result, InverseMethod, Payload)
 MCPSetDeleteAssetRollback(Result, AssetPath)  // shorthand for delete_asset rollback
+MCPSetNoRollback(Result, Reason)              // { rollbackPossible: false, rollbackNote }
+                                              // The reason is required: see
+                                              // "rollbackPossible" below.
 
 // Existence probes - return a ready-to-return Existed/Error JSON value
 // on hit, an unset shared pointer on miss.
@@ -272,21 +286,56 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetActorMaterial(const TSharedPtr<FJsonOb
 }
 ```
 
-### Delete - document as non-reversible
+### Delete - reversible where the state can be captured, and explicit where it cannot
 
-Delete handlers are idempotent (deleting a non-existent thing is a no-op) but **not reversible** by default. Undoing a delete requires snapshotting the deleted entity beforehand, which is only worthwhile for high-value handlers.
+Delete handlers are idempotent: deleting a thing that is not there is a no-op, not an error.
+
+Reversibility is a decision, not a default. A delete that captures enough of the entity beforehand to recreate it emits a rollback record like any other mutation, and many now do. A delete that cannot must **say so in the result**, because a caller reading a body with no `rollback` field cannot tell a considered decision from an oversight, and neither can the conventions audit.
 
 ```cpp
 auto Result = MCPSuccess();
 if (NotFound) {
     Result->SetBoolField(TEXT("alreadyDeleted"), true);
-} else {
-    /* delete */
-    Result->SetBoolField(TEXT("deleted"), true);
-    // No rollback record - delete is not reversible by default.
+    return MCPResult(Result);
 }
+
+/* capture what recreating it would need, then delete */
+Result->SetBoolField(TEXT("deleted"), true);
+
+// Either the inverse:
+MCPSetRollback(Result, TEXT("add_socket"), Payload);
+
+// Or the reason there is not one, which is a call rather than a comment:
+MCPSetNoRollback(Result,
+    TEXT("The socket carried per-instance overrides on three meshes and this handler reads none of them, "
+         "so add_socket would put back a socket that is not the one removed."));
+
 return MCPResult(Result);
 ```
+
+Saying nothing is the one option that is not available. "Delete is not reversible by default" used to be written here as a licence to emit neither, and it is now the exact shape the ratchet in `tests/unit/handler-conventions.test.ts` counts and pins.
+
+### `rollbackPossible` - stating that there is no inverse
+
+The counterpart to `MCPSetRollback`, and the field the conventions audit actually gates on. It is set through `MCPSetNoRollback(Result, Reason)`, which writes both halves together:
+
+```json
+{
+  "success": true,
+  "updated": true,
+  "rollbackPossible": false,
+  "rollbackNote": "A one-shot sound is an event, not a state. It is already audible by the time this returns and nothing changed on disk or in the level, so there is nothing to undo and no action that would undo it. Calling again plays it again."
+}
+```
+
+Roughly 290 sites across the plugin carry it, which makes it the most common way a mutation in this codebase finishes.
+
+Two rules:
+
+- **The note is required.** `rollbackPossible: false` on its own tells a caller that recovery is off the table without telling it why, which is the half that decides what the caller does next. `MCPSetNoRollback` takes the reason as an argument so the pair cannot come apart.
+- **Say what was changed and what call would have to exist.** "No inverse" is not a note. "The offset was baked into the mesh descriptions and committed, and the bridge has no action that translates mesh vertices, so nothing can add it back" is: it names the change, names the missing capability, and tells the next person what would close it.
+
+A handler that emits both a rollback record and `rollbackPossible: false` is a contradiction, and the audit reports it as one.
 
 ### Batch handlers - preflight, then per-item results
 
@@ -298,33 +347,43 @@ A batch handler takes one bounded array and does N of something. It has two obli
 
 Batch handlers should also accept `dryRun`, which runs the full preflight and reports what each item *would* do (`wouldCreate`, `wouldUpdate`, `wouldRemainUnchanged`, `wouldSkip`) without dirtying or saving a package, and should size their array bound explicitly rather than accepting an unbounded request.
 
-## Non-convertible handlers
+## Handlers that cannot have an inverse
 
-These handlers cannot meaningfully participate:
+A handler with no natural key cannot be idempotent, and one whose effect is an event rather than a state cannot be undone. These are the standing cases:
 
 - `shell` - arbitrary command execution
 - `editor.execute_command` - arbitrary console commands
-- `editor.take_screenshot` - side-effect with no natural inverse
-- `editor.start_editor`, `editor.quit_editor`, `level.save`, `level.load` - lifecycle operations
+- `editor.take_screenshot` - produces an output artifact, and deleting a file that regenerates on demand is not an undo
+- `editor.start_editor`, `editor.quit_editor` - process lifecycle
+- `level.save` - writing packages to disk has no inverse call
+- `asset.reimport` - the previous import is not recoverable from the asset it replaced
 
-## Conversion progress
+Being on this list is not an exemption from saying so. Each of these still owes the caller a `rollbackPossible: false` and a note, and the ones that do not yet emit one are counted by the `mutationsSilentOnRollback` baseline rather than excused by it. The only entries the audit exempts outright live in `NO_INVERSE` in `tests/unit/handler-conventions.test.ts`, each with a written reason, and that list is deliberately three long.
 
-| Category | Done | Remaining |
-|---|---|---|
-| Level | place_actor, spawn_light, spawn_volume, move_actor, set_actor_material, set_light_properties, set_component_property, set_volume_properties, set_world_settings, add_component_to_actor, delete_actor | - |
-| Asset | duplicate_asset, rename_asset, move_asset, delete_asset, create_datatable, import_static_mesh, import_skeletal_mesh, import_animation, import_texture, set_mesh_material, set_texture_properties (partial), add_socket, remove_socket | recenter_pivot, reimport_* |
-| Blueprint | create_blueprint, add_variable, add_component, create_function, rename_function, delete_function, delete_node, delete_variable, remove_component, create_blueprint_interface | set_variable_properties, set_node_property, add_node, connect_pins, set_class_default, set_variable_default, add_function_parameter |
-| Material | create_material, create_material_instance, create_material_from_texture | add_material_expression, set_*, connect_expression, delete_expression |
-| Animation | create_anim_blueprint, create_montage, create_blendspace, create_sequence | add_anim_notify, create_state_machine, add_state, add_transition, set_*, set_bone_keyframes |
-| Audio | create_sound_cue, create_metasound_source, spawn_ambient_sound | - |
-| Foliage | create_foliage_type | set_foliage_type_settings |
-| Gameplay | create_smart_object_definition, create_input_action, create_input_mapping_context, create_blackboard, create_behavior_tree, create_eqs_query, create_state_tree, create_game_mode/state/player_controller/player_state/hud (via CreateBlueprintWithParent), spawn_nav_modifier_volume | set_collision_profile, set_physics_enabled, set_body_properties, create_ai_perception_config |
-| GAS | create_gameplay_effect, create_gameplay_ability, create_attribute_set, create_gameplay_cue, create_gameplay_cue_notify | add_ability_tag, add_attribute, set_ability_tags, set_effect_modifier, add_ability_system_component |
-| Niagara | create_niagara_system, create_niagara_emitter, create_niagara_system_from_emitter | spawn_niagara_at_location, set_niagara_parameter, add_emitter_to_system, set_emitter_property |
-| PCG | create_pcg_graph, spawn_pcg_volume | add_pcg_node, connect_pcg_nodes, remove_pcg_node, set_pcg_node_settings |
-| Sequencer | create_level_sequence | add_track, sequence_control |
-| Spline | create_spline_actor | set_spline_points |
-| Widget | create_widget_blueprint, create_editor_utility_widget, create_editor_utility_blueprint | set_widget_property, add_widget, remove_widget, move_widget |
-| Landscape/Networking/Physics/Reflection | create_landscape, create_landscape_layer_info, set_landscape_material, create_enum (#251/#303), set_replicates, set_collision_profile, set_simulate_physics, set_mass_override, set_linear_damping | - |
+`level.load` used to be on this list and is not any more: it captures the level that was open and emits the `load_level` call that returns to it.
 
-Every handler in the "Done" column is idempotent (checks for existing entity by natural key, returns `{ existed: true }` on replay) and emits a rollback record where a paired inverse exists. Handlers in "Remaining" are either pure modifies that need before-state capture, or pure deletes that need snapshot-before-delete to be reversible. They still work; they just don't yet participate in rollback.
+## Where the conversion stands
+
+The numbers move every time anyone touches a handler, so the live answer is the audit rather than a table here:
+
+```bash
+node scripts/audit-handler-conventions.mjs        # counts, plus the offenders by name
+node scripts/audit-handler-conventions.mjs --json # every handler, one row each
+```
+
+`tests/unit/handler-conventions.test.ts` pins those counts as a ratchet. A number that goes UP means a new handler skipped a convention. A number that goes DOWN means somebody fixed one, and the fix is not finished until the lower number is committed.
+
+The shape of what is left, as of the last sweep:
+
+| | |
+|---|---|
+| Registered handlers | ~1040 |
+| Classified as mutations | ~690 |
+| Emitting a rollback record | ~550 |
+| Emitting `rollbackPossible: false` with a reason instead | ~110 |
+| Emitting neither, and therefore actually outstanding | ~26 |
+| Missing an idempotency marker | ~19 |
+
+Every authoring category has been swept. Level, Asset, Blueprint, Material, Animation, Audio, Gameplay, GAS, Niagara, PCG, Sequencer, Spline, Widget, Landscape and Networking all emit an inverse from their creates and their modifies, including the ones an older version of this page listed as outstanding: `add_node`, `connect_pins`, `set_class_default`, `add_material_expression`, `delete_material_expression`, `create_state_machine`, `add_state`, `add_transition`, `set_bone_keyframes`, `add_attribute`, `set_ability_tags`, `set_niagara_parameter`, `add_emitter_to_system`, `add_pcg_node`, `set_pcg_node_settings`, `set_spline_points`, `add_widget`, `remove_widget`, `move_widget` and `set_sequence_keyframes`.
+
+What is left is the tail the audit names by hand each run. `foliage(set_settings)` is the clearest of them: it emits no inverse, no reason and no idempotency marker, so a flow that tunes a foliage type cannot be rolled back and a retried call cannot tell you whether it changed anything. Run the audit for the current list rather than reading one from here.
