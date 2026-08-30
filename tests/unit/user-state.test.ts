@@ -48,6 +48,17 @@ import {
 const WIN = path.sep === "\\";
 const PROJECT = WIN ? "C:/Projects/X" : "/Projects/X";
 const OTHER_PROJECT = WIN ? "D:/Other" : "/Other";
+/**
+ * The same root spelled with the other separator, and absolute on both
+ * platforms. A leading backslash is not absolute on POSIX, so the POSIX form
+ * keeps its leading slash and varies only the inner separator, which is
+ * exactly what the fold collapses.
+ */
+const SEP_SPELLING = WIN ? "C:\\Projects\\X" : "/Projects\\X";
+/** A trailing separator, which the fold strips. */
+const TRAILING_SPELLING = PROJECT + "/";
+/** A root with nothing of its own, used to prove the user-wide fallback. */
+const UNTOUCHED_PROJECT = WIN ? "D:/Untouched" : "/Untouched";
 const LEGACY_KEY = path.resolve(PROJECT);
 const CANON_KEY = LEGACY_KEY.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 
@@ -83,8 +94,8 @@ function readRaw(): { projects?: Record<string, Record<string, unknown>> } {
 describe("project keys fold the way every other project key folds (D2)", () => {
   it("finds a dialog mode written through one spelling when read through another", () => {
     setDialogMode("defer", PROJECT);
-    expect(getDialogMode("c:\\projects\\x")).toBe("defer");
-    expect(getDialogMode("C:/Projects/X/")).toBe("defer");
+    expect(getDialogMode(SEP_SPELLING)).toBe("defer");
+    expect(getDialogMode(TRAILING_SPELLING)).toBe("defer");
   });
 
   it("does the same for the feedback mode, which gates posting to a public tracker", () => {
@@ -94,12 +105,12 @@ describe("project keys fold the way every other project key folds (D2)", () => {
 
   it("does the same for installedHooks, which is what uninstall-hooks reads", () => {
     setInstalledHooks(PROJECT, ["C:/Users/me/.claude/settings.json"]);
-    expect(getInstalledHooks("c:\\projects\\x")).toEqual(["C:/Users/me/.claude/settings.json"]);
+    expect(getInstalledHooks(SEP_SPELLING)).toEqual(["C:/Users/me/.claude/settings.json"]);
   });
 
   it("stores one entry, not two, for two spellings of one root", () => {
     setDialogMode("defer", PROJECT);
-    setFeedbackMode("auto-approve", "c:\\projects\\x");
+    setFeedbackMode("auto-approve", SEP_SPELLING);
     expect(Object.keys(readRaw().projects ?? {})).toHaveLength(1);
     expect(getDialogMode(PROJECT)).toBe("defer");
     expect(getFeedbackMode(PROJECT)).toBe("auto-approve");
@@ -110,7 +121,7 @@ describe("keys already on disk in the old shape keep applying (D2 migration)", (
   it("reads a legacy key written before the normalization existed", () => {
     writeRaw({
       projects: {
-        "C:\\Projects\\X": { dialog: { mode: "defer" }, feedback: { mode: "defer" } },
+        [LEGACY_KEY]: { dialog: { mode: "defer" }, feedback: { mode: "defer" } },
       },
     });
     expect(getDialogMode(CANON_KEY)).toBe("defer");
@@ -118,7 +129,7 @@ describe("keys already on disk in the old shape keep applying (D2 migration)", (
   });
 
   it("keeps the legacy value when a later write touches a different key", () => {
-    writeRaw({ projects: { "C:\\Projects\\X": { dialog: { mode: "defer" } } } });
+    writeRaw({ projects: { [LEGACY_KEY]: { dialog: { mode: "defer" } } } });
     setFeedbackMode("auto-approve", OTHER_PROJECT);
     expect(getDialogMode(PROJECT)).toBe("defer");
   });
@@ -127,7 +138,7 @@ describe("keys already on disk in the old shape keep applying (D2 migration)", (
   it("loses nothing when two spellings of one root are both on disk", () => {
     writeRaw({
       projects: {
-        "C:\\Projects\\X": {
+        [LEGACY_KEY]: {
           dialog: { mode: "defer" },
           installedHooks: ["C:/a/settings.json"],
         },
@@ -152,7 +163,7 @@ describe("keys already on disk in the old shape keep applying (D2 migration)", (
   it("prefers the already-canonical spelling when both name a mode", () => {
     writeRaw({
       projects: {
-        "C:\\Projects\\X": { dialog: { mode: "auto" } },
+        [LEGACY_KEY]: { dialog: { mode: "auto" } },
         [CANON_KEY]: { dialog: { mode: "defer" } },
       },
     });
@@ -162,7 +173,7 @@ describe("keys already on disk in the old shape keep applying (D2 migration)", (
   it("persists the folded form on the next write, without dropping the merged values", () => {
     writeRaw({
       projects: {
-        "C:\\Projects\\X": { dialog: { mode: "defer" }, installedHooks: ["C:/a/settings.json"] },
+        [LEGACY_KEY]: { dialog: { mode: "defer" }, installedHooks: ["C:/a/settings.json"] },
       },
     });
     setFeedbackMode("defer", PROJECT);
@@ -176,12 +187,12 @@ describe("keys already on disk in the old shape keep applying (D2 migration)", (
   it("leaves the user-wide preferences alone while folding project keys", () => {
     writeRaw({
       preferences: { dialog: { mode: "auto" } },
-      projects: { "C:\\Projects\\X": { dialog: { mode: "defer" } } },
+      projects: { [LEGACY_KEY]: { dialog: { mode: "defer" } } },
     });
     expect(getDialogMode()).toBe("auto");
     expect(getDialogMode(CANON_KEY)).toBe("defer");
     // A project with nothing of its own still falls through to the user's.
-    expect(getDialogMode("D:/Untouched")).toBe("auto");
+    expect(getDialogMode(UNTOUCHED_PROJECT)).toBe("auto");
   });
 });
 
