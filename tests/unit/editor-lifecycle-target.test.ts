@@ -109,7 +109,13 @@ describe("stopEditor targeting", () => {
     const result = await stopEditor(projectDir);
     expect(result.success).toBe(false);
     expect(result.message).toContain("777");
-    expect(result.message).toContain("never force-kills");
+    // It must say the process is only ever asked, and it must NOT offer the
+    // old blanket reassurance. "ue-mcp never force-kills processes" was true
+    // about signals and false about consequences: a shutdown prompt answered
+    // to discard changes loses the same work a kill would have.
+    expect(result.message).toContain("only ever ASKS");
+    expect(result.message).toContain("unsaved work");
+    expect(result.message).not.toContain("never force-kills");
   });
 
   it("refuses a lockfile whose process is gone rather than trusting its port", async () => {

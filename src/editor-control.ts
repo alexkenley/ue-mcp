@@ -1319,7 +1319,7 @@ export async function resolveOwnedEditor(
       message:
         `Editor is running (pid ${running.map((p) => p.pid).join(", ")}) but no bridge port is published for it, ` +
         `so it cannot be asked to quit cleanly. ${target.reason} ${state.summary} ` +
-        "Close it manually - ue-mcp never force-kills processes.",
+        `Close it in the editor window. ${NEVER_KILLS}`,
       state,
     };
   }
@@ -1447,6 +1447,25 @@ export interface RestartEditorResult {
   dialogMode?: DialogMode;
   dialogModeSource?: string;
 }
+
+/**
+ * What this tool will and will not do to a process that is not closing.
+ *
+ * This used to read "ue-mcp never force-kills processes", offered as
+ * reassurance. It is true about signals and misleading about consequences.
+ * Nothing here sends a terminating signal, but a Save Content prompt is
+ * answerable: under `auto` the agent picks a button, and picking "Do not
+ * Save" destroys exactly what a kill would have destroyed. Telling a user
+ * their work is safe because no signal was sent is a distinction that does
+ * not survive contact with the outcome.
+ *
+ * So it says what is actually true: the process is only ever asked, and if
+ * something answers a prompt on the way out, unsaved work goes with it.
+ */
+const NEVER_KILLS =
+  "ue-mcp only ever ASKS an editor to quit and sends no terminating signal, "
+  + "but a shutdown prompt answered to discard changes loses unsaved work just "
+  + "as surely, so check the dialog mode before assuming nothing can be lost.";
 
 /**
  * How the refusal reads. It names every dirty package and the ways forward,
@@ -1589,7 +1608,7 @@ export async function stopEditor(
     const state = await readEngineState(projectPath, { probeWindows: true });
     return {
       success: false,
-      message: `Editor is running but its bridge is unreachable, so it cannot be asked to quit cleanly.${blockedStopDetail(state, { pressCalls })} Close it manually - ue-mcp never force-kills processes.`,
+      message: `Editor is running but its bridge is unreachable, so it cannot be asked to quit cleanly.${blockedStopDetail(state, { pressCalls })} Close it in the editor window. ${NEVER_KILLS}`,
       state,
     };
   }
@@ -1676,7 +1695,7 @@ export async function stopEditor(
       ...dialogFields(),
       message:
         `The editor refused to schedule its own shutdown: ${why}. Nothing was asked to quit. ` +
-        "ue-mcp never force-kills processes.",
+        NEVER_KILLS,
     };
   }
 
@@ -1714,7 +1733,7 @@ export async function stopEditor(
       return {
         success: false,
         ...dialogFields(),
-        message: "Could not deliver a quit request to the editor bridge. Close the editor manually - ue-mcp never force-kills processes.",
+        message: `Could not deliver a quit request to the editor bridge. Close it in the editor window. ${NEVER_KILLS}`,
       };
     }
   }
@@ -1812,7 +1831,7 @@ export async function stopEditor(
     message:
       "Asked the editor to quit but its bridge is still up after 20s." +
       holdingItOpen +
-      " ue-mcp never force-kills processes.",
+      " " + NEVER_KILLS,
     ...dialogFields(),
     ...(late
       ? {
