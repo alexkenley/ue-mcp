@@ -233,18 +233,49 @@ function updatePackageDescription(counts: Counts): boolean {
   return true;
 }
 
+/**
+ * Keep the .uplugin in step with package.json.
+ *
+ * This is ONE product in ONE repo: the npm package carries the plugin source
+ * and a user compiles it from that tarball. A plugin reporting a different
+ * version from the package that shipped it is telling the user their install
+ * is something it is not. It had drifted to 0.3.0 against a 1.3.0 package,
+ * and its description still advertised 185 tools against more than a
+ * thousand.
+ *
+ * VersionName tracks the package exactly, prerelease suffix and all, since UE
+ * treats it as a free-form display string. The integer `Version` is Epic's own
+ * install-ordering field and is deliberately left alone.
+ */
+function updatePluginDescriptor(counts: Counts): boolean {
+  const file = path.join(repo, "plugin", "ue_mcp_bridge", "UE_MCP_Bridge.uplugin");
+  if (!fs.existsSync(file)) return false;
+  const raw = fs.readFileSync(file, "utf8");
+  const plugin = JSON.parse(raw);
+  const pkg = JSON.parse(fs.readFileSync(path.join(repo, "package.json"), "utf8"));
+  const desc = `C++ WebSocket bridge for UE-MCP, providing ${counts.bridgeActions}+ editor actions over the MCP protocol`;
+  if (plugin.VersionName === pkg.version && plugin.Description === desc) return false;
+  plugin.VersionName = pkg.version;
+  plugin.Description = desc;
+  const trailing = raw.endsWith("\n") ? "\n" : "";
+  fs.writeFileSync(file, JSON.stringify(plugin, null, "\t") + trailing);
+  return true;
+}
+
 function main(): void {
   const counts = computeCounts();
   const json = writeCountsJson(counts);
   const ref = regenerateToolReference(counts);
   const updated = applyMarkersToFiles(counts);
   const pkgChanged = updatePackageDescription(counts);
+  const upluginChanged = updatePluginDescriptor(counts);
 
   console.log(`tools=${counts.tools} actions=${counts.actions} (bridge=${counts.bridgeActions}, local=${counts.localActions})`);
   console.log(`wrote ${path.relative(repo, json)}`);
   console.log(`wrote ${path.relative(repo, ref)}`);
   if (updated.length) console.log(`stamped markers in: ${updated.join(", ")}`);
   if (pkgChanged) console.log(`updated package.json description`);
+  if (upluginChanged) console.log(`updated UE_MCP_Bridge.uplugin version and description`);
 }
 
 main();
