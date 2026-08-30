@@ -247,9 +247,20 @@ function updatePackageDescription(counts: Counts): boolean {
  * treats it as a free-form display string. The integer `Version` is Epic's own
  * install-ordering field and is deliberately left alone.
  */
+export function findUpluginPath(): string | null {
+  const dir = path.join(repo, "plugin", "ue_mcp_bridge");
+  if (!fs.existsSync(dir)) return null;
+  const hit = fs.readdirSync(dir).find((f) => f.toLowerCase().endsWith(".uplugin"));
+  return hit ? path.join(dir, hit) : null;
+}
+
 function updatePluginDescriptor(counts: Counts): boolean {
-  const file = path.join(repo, "plugin", "ue_mcp_bridge", "UE_MCP_Bridge.uplugin");
-  if (!fs.existsSync(file)) return false;
+  // Resolved by scanning rather than by name. The working tree and the git
+  // index had disagreed on the case of this filename, which Windows hides and
+  // a case-sensitive filesystem does not, so a hardcoded spelling silently
+  // skipped the file on Linux and shipped a stale descriptor.
+  const file = findUpluginPath();
+  if (!file) return false;
   const raw = fs.readFileSync(file, "utf8");
   const plugin = JSON.parse(raw);
   const pkg = JSON.parse(fs.readFileSync(path.join(repo, "package.json"), "utf8"));

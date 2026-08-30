@@ -37,6 +37,21 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..")
 const read = (rel: string): string => fs.readFileSync(path.join(repo, rel), "utf8");
 const readJson = (rel: string): any => JSON.parse(read(rel));
 
+/**
+ * The plugin descriptor, found by scanning rather than by name.
+ *
+ * The working tree and the git index had disagreed on the case of this
+ * filename. Windows hides that; a case-sensitive filesystem does not, so a
+ * hardcoded spelling reads a missing file on Linux and this whole gate passes
+ * vacuously on the one platform CI runs.
+ */
+function readUplugin(): { path: string; json: any } {
+  const dir = path.join(repo, "plugin", "ue_mcp_bridge");
+  const hit = fs.readdirSync(dir).find((f) => f.toLowerCase().endsWith(".uplugin"));
+  if (!hit) throw new Error(`no .uplugin found in ${dir}`);
+  return { path: hit, json: JSON.parse(fs.readFileSync(path.join(dir, hit), "utf8")) };
+}
+
 const REGENERATE = "Run `npm run generate:metadata` and commit what it changes.";
 
 const pkg = readJson("package.json");
@@ -56,7 +71,7 @@ const counts = (() => {
 
 describe("one product, one version", () => {
   it("ships a plugin descriptor that names the package version", () => {
-    const plugin = readJson("plugin/ue_mcp_bridge/UE_MCP_Bridge.uplugin");
+    const plugin = readUplugin().json;
     expect(
       plugin.VersionName,
       `UE_MCP_Bridge.uplugin says VersionName ${plugin.VersionName} and package.json says `
@@ -117,7 +132,7 @@ describe("one surface, one count", () => {
     expect(pkg.description, `package.json description is stale. ${REGENERATE}`)
       .toContain(`${counts.actions}+`);
     expect(pkg.description).toContain(`${counts.tools} tools`);
-    const plugin = readJson("plugin/ue_mcp_bridge/UE_MCP_Bridge.uplugin");
+    const plugin = readUplugin().json;
     expect(plugin.Description, `.uplugin description is stale. ${REGENERATE}`)
       .toContain(`${counts.bridgeActions}+`);
   });
