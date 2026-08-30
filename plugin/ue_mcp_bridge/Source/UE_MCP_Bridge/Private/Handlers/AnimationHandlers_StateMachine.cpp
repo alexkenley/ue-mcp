@@ -44,6 +44,7 @@
 #endif
 #include "PoseSearch/PoseSearchDatabase.h"
 #include "PoseSearch/PoseSearchSchema.h"
+#include "HandlerPoseSearchSchema.h"
 #include "PoseSearch/PoseSearchDerivedData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Animation/AnimComposite.h"
@@ -2074,15 +2075,61 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreatePoseSearchDatabase(const TShare
 	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
 	const FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/MotionMatching"));
 	const FString SchemaPath = OptionalString(Params, TEXT("schemaPath"), TEXT(""));
+	// #833: a database indexes THROUGH its schema, so a database whose schema
+	// is missing or unsamplable fails BuildIndex and the editor reports the
+	// database as the invalid asset. Naming a skeleton is enough to author the
+	// schema here, so the one call produces something that can actually index.
+	const FString SkeletonPath = OptionalString(Params, TEXT("skeletonPath"), TEXT(""));
+
+	// Resolve (or author) the schema BEFORE the database exists, so a bad
+	// schema argument leaves no half-built database behind.
+	UPoseSearchSchema* Schema = nullptr;
+	FString ResolvedSchemaPath = SchemaPath;
+	bool bSchemaCreated = false;
+	if (!SchemaPath.IsEmpty())
+	{
+		Schema = Cast<UPoseSearchSchema>(UEditorAssetLibrary::LoadAsset(SchemaPath));
+		if (!Schema) return MCPError(FString::Printf(TEXT("Schema not found: %s"), *SchemaPath));
+	}
+	else if (!SkeletonPath.IsEmpty())
+	{
+		ResolvedSchemaPath = PackagePath + TEXT("/") + Name + TEXT("_Schema");
+		Schema = Cast<UPoseSearchSchema>(UEditorAssetLibrary::LoadAsset(ResolvedSchemaPath));
+		if (!Schema)
+		{
+			// Same authoring routine animation(create_pose_search_schema) runs,
+			// called rather than reimplemented, so the schema this makes is the
+			// schema that action makes.
+			TSharedPtr<FJsonObject> SchemaParams = MakeShared<FJsonObject>();
+			SchemaParams->SetStringField(TEXT("name"), Name + TEXT("_Schema"));
+			SchemaParams->SetStringField(TEXT("packagePath"), PackagePath);
+			SchemaParams->SetStringField(TEXT("skeletonPath"), SkeletonPath);
+			SchemaParams->SetStringField(TEXT("onConflict"), TEXT("skip"));
+			TSharedPtr<FJsonValue> SchemaResult = CreatePoseSearchSchema(SchemaParams);
+			Schema = Cast<UPoseSearchSchema>(UEditorAssetLibrary::LoadAsset(ResolvedSchemaPath));
+			if (!Schema) return SchemaResult;
+			bSchemaCreated = true;
+		}
+	}
+
+	if (Schema)
+	{
+		const FString Problems = MCPPoseSearch::DescribeProblems(Schema);
+		if (!Problems.IsEmpty())
+		{
+			return MCPError(FString::Printf(
+				TEXT("Schema '%s' cannot index because %s. A database pointed at it fails BuildIndex and the editor ")
+				TEXT("reports the database as invalid, so no database was created."),
+				*Schema->GetPathName(), *Problems));
+		}
+	}
 
 	auto Created = MCPCreateAssetIdempotentNewObject<UPoseSearchDatabase>(Name, PackagePath, OptionalString(Params, TEXT("onConflict"), TEXT("skip")), TEXT("PoseSearchDatabase"));
 	if (Created.EarlyReturn) return Created.EarlyReturn;
 	UPoseSearchDatabase* Database = Created.Asset;
 
-	if (!SchemaPath.IsEmpty())
+	if (Schema)
 	{
-		UPoseSearchSchema* Schema = Cast<UPoseSearchSchema>(UEditorAssetLibrary::LoadAsset(SchemaPath));
-		if (!Schema) return MCPError(FString::Printf(TEXT("Schema not found: %s"), *SchemaPath));
 		Database->Schema = Schema;
 	}
 
@@ -2093,7 +2140,16 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreatePoseSearchDatabase(const TShare
 	Res->SetStringField(TEXT("path"), Database->GetPathName());
 	Res->SetStringField(TEXT("name"), Name);
 	Res->SetStringField(TEXT("packagePath"), PackagePath);
-	Res->SetStringField(TEXT("schemaPath"), SchemaPath);
+	Res->SetStringField(TEXT("schemaPath"), Schema ? Schema->GetPathName() : ResolvedSchemaPath);
+	Res->SetBoolField(TEXT("schemaCreated"), bSchemaCreated);
+	Res->SetBoolField(TEXT("indexable"), Schema != nullptr);
+	if (!Schema)
+	{
+		Res->SetStringField(TEXT("note"),
+			TEXT("This database has no schema, so it cannot be indexed and animation(add_pose_search_sequence) will ")
+			TEXT("refuse to add clips to it. Give it one with animation(set_pose_search_schema), or pass skeletonPath ")
+			TEXT("to this action and it authors the schema alongside the database."));
+	}
 	MCPSetDeleteAssetRollback(Res, Database->GetPathName());
 	return MCPResult(Res);
 }
@@ -2111,6 +2167,16 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchSchema(const TSharedPtr<
 
 	UPoseSearchSchema* Schema = Cast<UPoseSearchSchema>(UEditorAssetLibrary::LoadAsset(SchemaPath));
 	if (!Schema) return MCPError(FString::Printf(TEXT("Schema not found: %s"), *SchemaPath));
+	// #833: assigning a schema that cannot index converts a database that was
+	// merely empty into one the editor reports as invalid.
+	const FString SchemaProblems = MCPPoseSearch::DescribeProblems(Schema);
+	if (!SchemaProblems.IsEmpty())
+	{
+		return MCPError(FString::Printf(
+			TEXT("Schema '%s' cannot index because %s. It was not assigned, because a database using it fails ")
+			TEXT("BuildIndex and the editor then reports the database as the invalid asset."),
+			*SchemaPath, *SchemaProblems));
+	}
 
 	const FString PrevSchemaPath = Database->Schema ? Database->Schema->GetPathName() : FString();
 	Database->Modify();
@@ -2149,6 +2215,14 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSequence(const TSharedPt
 	if (!AnimAsset->IsA<UAnimSequenceBase>() && !AnimAsset->IsA<UBlendSpace>())
 	{
 		return MCPError(FString::Printf(TEXT("Animation asset type not supported by PoseSearch: %s"), *AnimAsset->GetClass()->GetName()));
+	}
+
+	// #833: clips are only meaningful once the database can index them. A
+	// database that carries clips with no usable schema is the exact asset the
+	// editor rejects, so the clip write is refused rather than saved.
+	{
+		const FString Refusal = MCPPoseSearch::DescribeClipRefusal(Database->Schema, AssetPath);
+		if (!Refusal.IsEmpty()) return MCPError(Refusal);
 	}
 
 	// #684: optional per-clip flags (mirror / disableReselection / samplingRange / enabled).
@@ -2214,6 +2288,14 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchClips(const TSharedPtr<F
 	if (!Params->TryGetArrayField(TEXT("clips"), Clips) || !Clips)
 	{
 		return MCPError(TEXT("Missing required parameter 'clips' (array of {sequencePath, mirror?, disableReselection?, sampleStart?, sampleEnd?, enabled?})"));
+	}
+
+	// #833: clips are only meaningful once the database can index them. A
+	// database that carries clips with no usable schema is the exact asset the
+	// editor rejects, so the clip write is refused rather than saved.
+	{
+		const FString Refusal = MCPPoseSearch::DescribeClipRefusal(Database->Schema, AssetPath);
+		if (!Refusal.IsEmpty()) return MCPError(Refusal);
 	}
 
 	const bool bClearExisting = OptionalBool(Params, TEXT("clearExisting"), true);
