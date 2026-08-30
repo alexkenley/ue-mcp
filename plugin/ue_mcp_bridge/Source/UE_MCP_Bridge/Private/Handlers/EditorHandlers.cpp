@@ -2617,6 +2617,27 @@ TSharedPtr<FJsonValue> FEditorHandlers::CreateNewLevel(const TSharedPtr<FJsonObj
 		return MCPResult(Existed);
 	}
 
+	// #833: validate the destination BEFORE handing it to the subsystem.
+	// NewLevel("") logs "NewLevel. Failed to create the level." at Error and
+	// leaves the editor on an untitled map, so a caller that simply omitted the
+	// parameter produced an engine error in the log AND unloaded whatever level
+	// was open. Every one of these is knowable up front.
+	if (LevelPath.IsEmpty())
+	{
+		return MCPError(TEXT("levelPath is required (e.g. \"/Game/Maps/MyLevel\"). Nothing was created and the "
+			"currently loaded level was left alone."));
+	}
+	{
+		FText PackageNameError;
+		if (!FPackageName::IsValidLongPackageName(LevelPath, /*bIncludeReadOnlyRoots*/ false, &PackageNameError))
+		{
+			return MCPError(FString::Printf(
+				TEXT("levelPath '%s' is not a valid long package name: %s. Use a mounted root, e.g. ")
+				TEXT("\"/Game/Maps/MyLevel\". Nothing was created."),
+				*LevelPath, *PackageNameError.ToString()));
+		}
+	}
+
 	// #224: treat templateLevel="Empty" / "None" / "" as "no template",
 	// since callers reasonably read "Empty" as a sentinel for the empty
 	// template. NewLevelFromTemplate("/Game/X", "Empty") otherwise tries to
@@ -2638,16 +2659,10 @@ TSharedPtr<FJsonValue> FEditorHandlers::CreateNewLevel(const TSharedPtr<FJsonObj
 	if (!bSuccess)
 	{
 		// #224: surface concrete reasons instead of a bare "Failed to create".
+		// The empty and malformed paths are rejected above, before the engine
+		// is asked, so what reaches here is a real refusal.
 		FString Reason;
-		if (LevelPath.IsEmpty())
-		{
-			Reason = TEXT("levelPath is required (e.g. \"/Game/Maps/MyLevel\")");
-		}
-		else if (!LevelPath.StartsWith(TEXT("/")))
-		{
-			Reason = FString::Printf(TEXT("levelPath must be a /Game/... mount point, got '%s'"), *LevelPath);
-		}
-		else if (bHasTemplate && !UEditorAssetLibrary::DoesAssetExist(TemplateLevel))
+		if (bHasTemplate && !UEditorAssetLibrary::DoesAssetExist(TemplateLevel))
 		{
 			Reason = FString::Printf(TEXT("templateLevel asset not found: '%s' (omit or pass \"Empty\" for an empty level)"), *TemplateLevel);
 		}
@@ -2686,6 +2701,20 @@ TSharedPtr<FJsonValue> FEditorHandlers::SaveCurrentLevel(const TSharedPtr<FJsonO
 	if (!LevelEditorSubsystem)
 	{
 		return MCPError(TEXT("LevelEditorSubsystem not available"));
+	}
+
+	// #833: an untitled map has no file to write, and SaveCurrentLevel answers
+	// that with "Can't save the level because it doesn't have a filename" in
+	// the editor log and a bare false here. The world knows its own package, so
+	// say which call gives it a name instead of asking for an impossible save.
+	const FString PackageName = World->GetOutermost()->GetName();
+	if (!FPackageName::DoesPackageExist(PackageName))
+	{
+		return MCPError(FString::Printf(
+			TEXT("The current level '%s' has never been saved, so it has no file to save to and this action cannot ")
+			TEXT("give it one. Write it to a path first with level(create, levelPath=\"/Game/Maps/<Name>\"), which ")
+			TEXT("creates and saves the map, or level(save) to save the packages that do have files."),
+			*PackageName));
 	}
 
 	bool bSuccess = LevelEditorSubsystem->SaveCurrentLevel();

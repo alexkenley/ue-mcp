@@ -32,6 +32,7 @@
 #include "StateTreeEvaluatorBase.h"
 #include "StateTreeTaskBase.h"
 #include "StateTreeEditorTypes.h"
+#include "HandlerStateTreeSchema.h"
 
 #define UE_MCP_HAS_STATETREE_STATE_DESCRIPTION (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6))
 #define UE_MCP_HAS_STATETREE_STATE_CUSTOM_TICK_RATE (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6))
@@ -89,6 +90,7 @@ void FStateTreeHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("remove_state_tree_state_parameter"), &RemoveStateParameter);
 	Registry.RegisterHandler(TEXT("set_state_tree_state_parameter"), &SetStateParameter);
 	Registry.RegisterHandler(TEXT("set_state_tree_root_parameters"), &SetRootParameters);
+	Registry.RegisterHandler(TEXT("set_state_tree_schema"), &SetSchema);
 	Registry.RegisterHandler(TEXT("compile_state_tree"), &CompileStateTree);
 	Registry.RegisterHandler(TEXT("validate_state_tree"), &ValidateStateTree);
 
@@ -121,6 +123,42 @@ UStateTreeEditorData* FStateTreeHandlers::GetEditorData(UStateTree* StateTree)
 {
 	if (!StateTree) return nullptr;
 	return Cast<UStateTreeEditorData>(StateTree->EditorData);
+}
+
+// #833: a StateTree with no editor data reached every authoring action as a
+// bare "EditorData not found", which reads like a bug in the action rather
+// than a fact about the asset. asset(create_asset_by_class) writes exactly
+// this shape, and the fix is one call, so the message names it.
+FString FStateTreeHandlers::MissingEditorDataMessage(const FString& AssetPath)
+{
+	return FString::Printf(
+		TEXT("StateTree '%s' has no editor data, so it has no schema, no states, and cannot compile. ")
+		TEXT("A tree created through the generic asset(create_asset_by_class) route lands in this state. ")
+		TEXT("Repair it with statetree(set_schema, assetPath=\"%s\"), which attaches the editor data, a schema ")
+		TEXT("and a root state, or create trees with gameplay(create_state_tree), which does that up front."),
+		*AssetPath, *AssetPath);
+}
+
+// The compiler refuses a schema-less tree by logging to LogStateTreeEditor and
+// returning false with an EMPTY compiler log, so a caller saw compiled=false
+// and errors=[] and had nothing to act on. Answer with the reason before
+// handing the asset to a compiler that cannot report it.
+TSharedPtr<FJsonValue> FStateTreeHandlers::RequireSchema(UStateTree* StateTree, const FString& AssetPath)
+{
+	UStateTreeEditorData* EditorData = GetEditorData(StateTree);
+	if (!EditorData)
+	{
+		return MCPError(MissingEditorDataMessage(AssetPath));
+	}
+	if (!EditorData->Schema)
+	{
+		return MCPError(FString::Printf(
+			TEXT("StateTree '%s' has no schema, and the compiler cannot build a tree without one ")
+			TEXT("(it logs \"does not have a schema\" and stops). Attach one with ")
+			TEXT("statetree(set_schema, assetPath=\"%s\")."),
+			*AssetPath, *AssetPath));
+	}
+	return nullptr;
 }
 
 UStateTreeState* FStateTreeHandlers::FindStateByID(UStateTreeEditorData* EditorData, const FGuid& StateID)
@@ -742,7 +780,7 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ReadStateTree(const TSharedPtr<FJsonO
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
-	if (!EditorData) return MCPError(TEXT("EditorData not found on StateTree"));
+	if (!EditorData) return MCPError(MissingEditorDataMessage(AssetPath));
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("assetPath"), AssetPath);
@@ -3174,6 +3212,7 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::CompileStateTree(const TSharedPtr<FJs
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
+	if (auto SchemaErr = RequireSchema(ST, AssetPath)) return SchemaErr;
 
 	auto Result = MCPSuccess();
 	// CompileAndSave gates SaveAssetPackage on success, so `saved` is a fact this
@@ -3199,6 +3238,7 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ValidateStateTree(const TSharedPtr<FJ
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
+	if (auto SchemaErr = RequireSchema(ST, AssetPath)) return SchemaErr;
 
 	UStateTreeEditingSubsystem::ValidateStateTree(ST);
 
@@ -3215,6 +3255,74 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ValidateStateTree(const TSharedPtr<FJ
 		}
 	}
 	Result->SetBoolField(TEXT("validated"), true);
+	return MCPResult(Result);
+}
+
+// #833: set_state_tree_schema. The schema is what makes a StateTree compilable,
+// and until now nothing in the surface could write one: every Schema reference
+// in these handlers read it back. A tree that arrived without one - from
+// asset(create_asset_by_class), or from any route that did not go through
+// gameplay(create_state_tree) - was unrepairable through the bridge and had to
+// be rebuilt by hand in the editor.
+TSharedPtr<FJsonValue> FStateTreeHandlers::SetSchema(const TSharedPtr<FJsonObject>& Params)
+{
+	FString AssetPath;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	UStateTree* ST = LoadStateTree(AssetPath);
+	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
+
+	MCPStateTreeSchema::FResolution Schema = MCPStateTreeSchema::Resolve(
+		OptionalString(Params, TEXT("schema")));
+	if (!Schema.SchemaClass)
+	{
+		return MCPStateTreeSchema::UnresolvedError(Schema);
+	}
+
+	ST->Modify();
+	const MCPStateTreeSchema::FAttachOutcome Attach =
+		MCPStateTreeSchema::AttachSchema(ST, Schema.SchemaClass);
+
+	auto Result = MCPSuccess();
+	Result->SetStringField(TEXT("assetPath"), ST->GetPathName());
+	Result->SetStringField(TEXT("schema"), Schema.SchemaClass->GetPathName());
+	Result->SetStringField(TEXT("schemaSource"), Schema.Source);
+	Result->SetBoolField(TEXT("createdEditorData"), Attach.bCreatedEditorData);
+	Result->SetBoolField(TEXT("createdRootState"), Attach.bCreatedRootState);
+	Result->SetStringField(TEXT("previousSchema"), Attach.PreviousSchemaPath);
+	if (!Schema.Note.IsEmpty())
+	{
+		Result->SetStringField(TEXT("schemaNote"), Schema.Note);
+		Result->SetArrayField(TEXT("availableSchemas"), MCPStateTreeSchema::ConcreteSchemaPathsJson());
+	}
+
+	// Compile here rather than leaving it to the caller: the point of writing a
+	// schema is that the tree can be built, and an asset saved without compiled
+	// data still reports "failed to link" to anything that loads it.
+	// CompileAndSave saves only on success. The schema landed either way, and a
+	// tree that does not compile yet is a normal in-progress shape (an empty
+	// root state with no tasks), so the write is saved regardless - otherwise
+	// the repair would be lost on the next reload.
+	const bool bCompiled = CompileAndSave(ST, Result);
+	if (!bCompiled) SaveAssetPackage(ST);
+	Result->SetBoolField(TEXT("saved"), true);
+	if (Attach.bSchemaChanged || Attach.bCreatedEditorData) MCPSetUpdated(Result);
+	else Result->SetBoolField(TEXT("updated"), false);
+
+	if (Attach.PreviousSchemaPath.IsEmpty())
+	{
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("The tree had no schema before this call, and nothing in this surface removes a schema: a StateTree ")
+			TEXT("without one cannot compile, so putting it back is not a state worth restoring. Delete the asset if ")
+			TEXT("the create was wrong."));
+	}
+	else
+	{
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("assetPath"), ST->GetPathName());
+		Payload->SetStringField(TEXT("schema"), Attach.PreviousSchemaPath);
+		MCPSetRollback(Result, TEXT("set_state_tree_schema"), Payload);
+	}
 	return MCPResult(Result);
 }
 

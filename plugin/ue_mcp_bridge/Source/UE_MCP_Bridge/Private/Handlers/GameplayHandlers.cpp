@@ -15,6 +15,7 @@
 #include "StateTreeSchema.h"
 #include "StateTreeEditingSubsystem.h"
 #include "StateTreeCompilerLog.h"
+#include "HandlerStateTreeSchema.h"
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -214,37 +215,10 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("remove_smart_object_slot"), &RemoveSmartObjectSlot);
 	Registry.RegisterHandler(TEXT("list_smart_object_slots"), &ListSmartObjectSlots);
 	Registry.RegisterHandler(TEXT("add_smart_object_slot_behavior"), &AddSmartObjectSlotBehavior);
+	Registry.RegisterHandler(TEXT("add_smart_object_default_behavior"), &AddSmartObjectDefaultBehavior);
 	// read_imc through get_pie_subsystem_state moved to pie-studio
 	Registry.RegisterHandler(TEXT("get_navmesh_details"), &GetNavmeshDetails);
 	// apply_damage_in_pie moved to pie-studio
-}
-
-TSharedPtr<FJsonValue> FGameplayHandlers::CreateSmartObjectDefinition(const TSharedPtr<FJsonObject>& Params)
-{
-	FString Name;
-	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
-
-	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/AI/SmartObjects"));
-	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
-
-	UClass* SmartObjectDefClass = FindObject<UClass>(nullptr, TEXT("/Script/SmartObjectsModule.SmartObjectDefinition"));
-	if (!SmartObjectDefClass)
-	{
-		return MCPError(TEXT("SmartObjectDefinition class not found. Enable SmartObjects plugin."));
-	}
-
-	auto Created = MCPCreateAssetIdempotent<UObject>(Name, PackagePath, OnConflict, TEXT("SmartObjectDefinition"), SmartObjectDefClass, nullptr);
-	if (Created.EarlyReturn) return Created.EarlyReturn;
-
-	UEditorAssetLibrary::SaveAsset(Created.Asset->GetPathName());
-
-	auto Result = MCPSuccess();
-	MCPSetCreated(Result);
-	Result->SetStringField(TEXT("path"), Created.Asset->GetPathName());
-	Result->SetStringField(TEXT("name"), Name);
-	MCPSetDeleteAssetRollback(Result, Created.Asset->GetPathName());
-
-	return MCPResult(Result);
 }
 
 // ── #416: SmartObject slot authoring (reflection-only) ────────────────
@@ -337,7 +311,248 @@ namespace
 		}
 		return FString();
 	}
+
+	// ── #833: behavior definitions ────────────────────────────────────────
+	//
+	// USmartObjectDefinition::Validate refuses a definition whose slot has no
+	// behavior definition when the definition carries no default either:
+	//   "Slot at index N needs to provide a behavior definition since there is
+	//    no default one in the SmartObject definition"
+	// Slots were addable and behaviors were not settable at create time, and
+	// DefaultBehaviorDefinitions had no route at all, so every definition the
+	// bridge built with slots failed the editor's own asset check.
+
+	static UClass* BehaviorDefinitionBaseClass()
+	{
+		return FindObject<UClass>(nullptr, TEXT("/Script/SmartObjectsModule.SmartObjectBehaviorDefinition"));
+	}
+
+	// Accepts a behavior-definition asset path or a class spelling, and
+	// instances the class under the definition (the arrays are Instanced).
+	static UObject* ResolveBehaviorDefinition(UObject* Outer, const FString& Spec, FString& OutError)
+	{
+		if (UObject* Existing = LoadObject<UObject>(nullptr, *Spec))
+		{
+			if (!Existing->IsA<UClass>()) return Existing;
+		}
+		UClass* Base = BehaviorDefinitionBaseClass();
+		UClass* BehaviorClass = Base
+			? MCPResolveClassOfType(Spec, Base)
+			: MCPResolveClass(Spec);
+		if (!BehaviorClass)
+		{
+			OutError = FString::Printf(
+				TEXT("Behavior definition class not found: '%s'. Pass a USmartObjectBehaviorDefinition subclass ")
+				TEXT("(/Script/<Module>.<Class>) or the path of an existing behavior asset. ")
+				TEXT("The engine's concrete behavior definitions ship in optional plugins: ")
+				TEXT("GameplayBehaviorSmartObjects (GameplayBehaviorSmartObjectBehaviorDefinition) and ")
+				TEXT("MassGameplay (SmartObjectMassBehaviorDefinition). Enable one with project(enable_plugin) if this ")
+				TEXT("project has none. reflection(list_classes, parentFilter=\"SmartObjectBehaviorDefinition\") lists ")
+				TEXT("what is loaded right now."),
+				*Spec);
+			return nullptr;
+		}
+		if (BehaviorClass->HasAnyClassFlags(CLASS_Abstract))
+		{
+			OutError = FString::Printf(
+				TEXT("'%s' resolves to %s, which is abstract and cannot be instanced. Name a concrete subclass."),
+				*Spec, *BehaviorClass->GetPathName());
+			return nullptr;
+		}
+		return NewObject<UObject>(Outer, BehaviorClass);
+	}
+
+	// Append one behavior instance to a TArray<TObjectPtr<USmartObjectBehaviorDefinition>>
+	// reached by reflection - the slot's BehaviorDefinitions or the definition's
+	// DefaultBehaviorDefinitions, which are the same shape.
+	static FString AppendBehaviorDefinition(
+		UObject* Asset,
+		UStruct* Owner,
+		void* Container,
+		const TCHAR* PropertyName,
+		const FString& Spec,
+		const TSharedPtr<FJsonObject>* InstanceProperties,
+		UObject*& OutInstance,
+		int32& OutIndex)
+	{
+		FArrayProperty* Arr = CastField<FArrayProperty>(Owner->FindPropertyByName(FName(PropertyName)));
+		if (!Arr) return FString::Printf(TEXT("No '%s' TArray property (engine layout changed?)"), PropertyName);
+		FObjectProperty* Inner = CastField<FObjectProperty>(Arr->Inner);
+		if (!Inner) return FString::Printf(TEXT("'%s' inner is not a UObject*"), PropertyName);
+
+		FString ResolveError;
+		OutInstance = ResolveBehaviorDefinition(Asset, Spec, ResolveError);
+		if (!OutInstance) return ResolveError;
+
+		if (InstanceProperties && (*InstanceProperties).IsValid())
+		{
+			for (const auto& Pair : (*InstanceProperties)->Values)
+			{
+				FProperty* P = OutInstance->GetClass()->FindPropertyByName(FName(*Pair.Key));
+				if (!P) continue;
+				FString E;
+				MCPJsonProperty::SetJsonOnProperty(P, P->ContainerPtrToValuePtr<void>(OutInstance), Pair.Value, E);
+			}
+		}
+
+		FScriptArrayHelper Helper(Arr, Arr->ContainerPtrToValuePtr<void>(Container));
+		OutIndex = Helper.AddValue();
+		Inner->SetObjectPropertyValue(Helper.GetRawPtr(OutIndex), OutInstance);
+		return FString();
+	}
+
+	static int32 CountDefaultBehaviorDefinitions(UObject* Asset)
+	{
+		FArrayProperty* Arr = CastField<FArrayProperty>(
+			Asset->GetClass()->FindPropertyByName(FName(TEXT("DefaultBehaviorDefinitions"))));
+		if (!Arr) return 0;
+		FScriptArrayHelper Helper(Arr, Arr->ContainerPtrToValuePtr<void>(Asset));
+		return Helper.Num();
+	}
+
+	// The engine's rule, restated where the bridge can act on it: a slot with
+	// no behavior definition is only legal when the definition has a default.
+	// Reported on every write so a caller learns the asset is unusable at the
+	// call that made it so, rather than from the editor's asset check later.
+	static void ReportDefinitionValidity(const FSlotsAccess& SA, TSharedPtr<FJsonObject>& Result)
+	{
+		const int32 DefaultCount = CountDefaultBehaviorDefinitions(SA.Asset);
+		FScriptArrayHelper Slots(SA.SlotsProp, SA.ArrayAddr);
+		FArrayProperty* SlotBehaviors = CastField<FArrayProperty>(
+			SA.SlotStruct->Struct->FindPropertyByName(FName(TEXT("BehaviorDefinitions"))));
+
+		TArray<TSharedPtr<FJsonValue>> Offenders;
+		if (DefaultCount == 0 && SlotBehaviors)
+		{
+			for (int32 i = 0; i < Slots.Num(); ++i)
+			{
+				FScriptArrayHelper Behaviors(
+					SlotBehaviors, SlotBehaviors->ContainerPtrToValuePtr<void>(Slots.GetRawPtr(i)));
+				if (Behaviors.Num() == 0) Offenders.Add(MakeShared<FJsonValueNumber>(i));
+			}
+		}
+
+		Result->SetNumberField(TEXT("defaultBehaviorCount"), DefaultCount);
+		Result->SetBoolField(TEXT("definitionValid"), Offenders.Num() == 0);
+		if (Offenders.Num() > 0)
+		{
+			Result->SetArrayField(TEXT("slotsMissingBehavior"), Offenders);
+			Result->SetStringField(TEXT("validationError"), FString::Printf(
+				TEXT("%d slot(s) provide no behavior definition and the definition has no default one, so the editor's ")
+				TEXT("asset check rejects this asset (\"Slot at index N needs to provide a behavior definition since ")
+				TEXT("there is no default one in the SmartObject definition\"). Fix it either way: ")
+				TEXT("gameplay(add_smart_object_slot_behavior, slotIndex, behaviorClass) per slot, or ")
+				TEXT("gameplay(add_smart_object_default_behavior, behaviorClass) once for the whole definition."),
+				Offenders.Num()));
+		}
+	}
 }
+
+TSharedPtr<FJsonValue> FGameplayHandlers::CreateSmartObjectDefinition(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Name;
+	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
+
+	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/AI/SmartObjects"));
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+
+	UClass* SmartObjectDefClass = FindObject<UClass>(nullptr, TEXT("/Script/SmartObjectsModule.SmartObjectDefinition"));
+	if (!SmartObjectDefClass)
+	{
+		return MCPError(TEXT("SmartObjectDefinition class not found. Enable SmartObjects plugin."));
+	}
+
+	auto Created = MCPCreateAssetIdempotent<UObject>(Name, PackagePath, OnConflict, TEXT("SmartObjectDefinition"), SmartObjectDefClass, nullptr);
+	if (Created.EarlyReturn) return Created.EarlyReturn;
+
+	auto Result = MCPSuccess();
+	MCPSetCreated(Result);
+
+	// #833: a definition with slots and no behavior definition anywhere fails
+	// the editor's asset check. Setting the default here is the one-call way to
+	// make every slot added later legal, and it had no route before.
+	const FString DefaultBehavior = OptionalString(Params, TEXT("defaultBehaviorClass"));
+	if (!DefaultBehavior.IsEmpty())
+	{
+		const TSharedPtr<FJsonObject>* InstanceProps = nullptr;
+		Params->TryGetObjectField(TEXT("instanceProperties"), InstanceProps);
+		UObject* Instance = nullptr;
+		int32 Index = INDEX_NONE;
+		Created.Asset->Modify();
+		const FString Err = AppendBehaviorDefinition(
+			Created.Asset, Created.Asset->GetClass(), Created.Asset,
+			TEXT("DefaultBehaviorDefinitions"), DefaultBehavior, InstanceProps, Instance, Index);
+		if (!Err.IsEmpty())
+		{
+			// Nothing usable was written, so do not leave the asset behind: a
+			// definition whose default silently failed is the broken shape.
+			UEditorAssetLibrary::DeleteAsset(Created.Asset->GetPathName());
+			return MCPError(Err);
+		}
+		Created.Asset->PostEditChange();
+		Result->SetStringField(TEXT("defaultBehavior"), Instance->GetClass()->GetPathName());
+		Result->SetNumberField(TEXT("defaultBehaviorIndex"), Index);
+	}
+
+	UEditorAssetLibrary::SaveAsset(Created.Asset->GetPathName());
+
+	Result->SetStringField(TEXT("path"), Created.Asset->GetPathName());
+	Result->SetStringField(TEXT("name"), Name);
+	Result->SetNumberField(TEXT("defaultBehaviorCount"), CountDefaultBehaviorDefinitions(Created.Asset));
+	// No slots yet, so the definition is valid either way; the field is set so
+	// a caller reads the same key on create as on every slot write.
+	Result->SetBoolField(TEXT("definitionValid"), true);
+	if (DefaultBehavior.IsEmpty())
+	{
+		Result->SetStringField(TEXT("note"),
+			TEXT("This definition has no default behavior definition. That is legal while it has no slots, but the ")
+			TEXT("editor's asset check rejects any slot added later that carries no behavior of its own. Pass ")
+			TEXT("defaultBehaviorClass here, or behaviorClass on gameplay(add_smart_object_slot)."));
+	}
+	MCPSetDeleteAssetRollback(Result, Created.Asset->GetPathName());
+
+	return MCPResult(Result);
+}
+
+// #833: add a default behavior definition to an EXISTING definition. The
+// per-slot route (add_smart_object_slot_behavior) shipped; the definition-wide
+// default it falls back to had no route, so a definition already carrying
+// slots could not be made valid without editing it by hand.
+TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectDefaultBehavior(const TSharedPtr<FJsonObject>& Params)
+{
+	FSlotsAccess SA;
+	if (auto Err = ResolveSlots(Params, SA)) return Err;
+	FString BehaviorSpec;
+	if (auto Err = RequireString(Params, TEXT("behaviorClass"), BehaviorSpec)) return Err;
+
+	const TSharedPtr<FJsonObject>* InstanceProps = nullptr;
+	Params->TryGetObjectField(TEXT("instanceProperties"), InstanceProps);
+
+	SA.Asset->Modify();
+	UObject* Instance = nullptr;
+	int32 Index = INDEX_NONE;
+	const FString Err = AppendBehaviorDefinition(
+		SA.Asset, SA.Asset->GetClass(), SA.Asset,
+		TEXT("DefaultBehaviorDefinitions"), BehaviorSpec, InstanceProps, Instance, Index);
+	if (!Err.IsEmpty()) return MCPError(Err);
+
+	SA.Asset->PostEditChange();
+	SA.Asset->MarkPackageDirty();
+	UEditorAssetLibrary::SaveAsset(SA.Asset->GetPathName());
+
+	auto Result = MCPSuccess();
+	MCPSetCreated(Result);
+	Result->SetStringField(TEXT("assetPath"), SA.Asset->GetPathName());
+	Result->SetStringField(TEXT("behavior"), Instance->GetClass()->GetPathName());
+	Result->SetNumberField(TEXT("behaviorIndex"), Index);
+	ReportDefinitionValidity(SA, Result);
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
+		TEXT("Nothing in this surface removes an entry from DefaultBehaviorDefinitions, so adding one has no inverse ")
+		TEXT("call. The entry added here is at index %d if it has to be cleared by hand."), Index));
+	return MCPResult(Result);
+}
+
 
 TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectSlot(const TSharedPtr<FJsonObject>& Params)
 {
@@ -353,6 +568,29 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectSlot(const TSharedPtr<FJ
 		Helper.RemoveValues(NewIdx, 1);
 		return MCPError(ApplyErr);
 	}
+
+	// #833: a slot with no behavior definition is what the editor's asset check
+	// rejects, so the slot can be born with one instead of being added and then
+	// repaired by a second call.
+	const FString BehaviorSpec = OptionalString(Params, TEXT("behaviorClass"));
+	FString AddedBehavior;
+	if (!BehaviorSpec.IsEmpty())
+	{
+		const TSharedPtr<FJsonObject>* InstanceProps = nullptr;
+		Params->TryGetObjectField(TEXT("instanceProperties"), InstanceProps);
+		UObject* Instance = nullptr;
+		int32 BehaviorIndex = INDEX_NONE;
+		const FString BehaviorErr = AppendBehaviorDefinition(
+			SA.Asset, SA.SlotStruct->Struct, SlotAddr,
+			TEXT("BehaviorDefinitions"), BehaviorSpec, InstanceProps, Instance, BehaviorIndex);
+		if (!BehaviorErr.IsEmpty())
+		{
+			Helper.RemoveValues(NewIdx, 1);
+			return MCPError(BehaviorErr);
+		}
+		AddedBehavior = Instance->GetClass()->GetPathName();
+	}
+
 	SA.Asset->PostEditChange();
 	SA.Asset->MarkPackageDirty();
 	UEditorAssetLibrary::SaveAsset(SA.Asset->GetPathName());
@@ -362,6 +600,8 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectSlot(const TSharedPtr<FJ
 	Result->SetStringField(TEXT("assetPath"), SA.Asset->GetPathName());
 	Result->SetNumberField(TEXT("slotIndex"), NewIdx);
 	Result->SetNumberField(TEXT("slotCount"), Helper.Num());
+	if (!AddedBehavior.IsEmpty()) Result->SetStringField(TEXT("behavior"), AddedBehavior);
+	ReportDefinitionValidity(SA, Result);
 
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetStringField(TEXT("assetPath"), SA.Asset->GetPathName());
@@ -527,6 +767,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveSmartObjectSlot(const TSharedPtr
 	Result->SetBoolField(TEXT("alreadyDeleted"), false);
 	Result->SetNumberField(TEXT("slotCount"), Helper.Num());
 	Result->SetStringField(TEXT("removedSlot"), RemovedSlotText);
+	ReportDefinitionValidity(SA, Result);
 	Result->SetBoolField(TEXT("wasLastSlot"), bWasLastSlot);
 
 	if (bWasLastSlot)
@@ -541,9 +782,9 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveSmartObjectSlot(const TSharedPtr
 		{
 			Result->SetStringField(TEXT("rollbackNote"), FString::Printf(
 				TEXT("The slot comes back at the same index with its offset, rotation, tags and name, but the %d "
-					 "BehaviorDefinition(s) it carried do NOT: gameplay(add_smart_object_slot) has no parameter for "
-					 "them. Re-add them with gameplay(add_smart_object_slot_behavior); 'removedSlot' names what was "
-					 "there."),
+					 "BehaviorDefinition(s) it carried do NOT: gameplay(add_smart_object_slot) takes at most one "
+					 "behaviorClass and cannot describe an instanced behavior's own property values. Re-add them with "
+					 "gameplay(add_smart_object_slot_behavior); 'removedSlot' names what was there."),
 				RemovedBehaviorCount));
 		}
 	}
@@ -607,6 +848,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListSmartObjectSlots(const TSharedPtr<
 	Result->SetStringField(TEXT("assetPath"), SA.Asset->GetPathName());
 	Result->SetNumberField(TEXT("slotCount"), Helper.Num());
 	Result->SetArrayField(TEXT("slots"), Slots);
+	ReportDefinitionValidity(SA, Result);
 	return MCPResult(Result);
 }
 
@@ -626,42 +868,19 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectSlotBehavior(const TShar
 	if (SlotIdx >= Helper.Num()) return MCPError(FString::Printf(TEXT("slotIndex %d out of range"), SlotIdx));
 	void* SlotAddr = Helper.GetRawPtr(SlotIdx);
 
-	FProperty* BDProp = SA.SlotStruct->Struct->FindPropertyByName(FName(TEXT("BehaviorDefinitions")));
-	if (!BDProp) return MCPError(TEXT("Slot struct has no 'BehaviorDefinitions' property"));
-	FArrayProperty* BDArr = CastField<FArrayProperty>(BDProp);
-	if (!BDArr) return MCPError(TEXT("'BehaviorDefinitions' is not a TArray"));
-	FObjectProperty* BDObj = CastField<FObjectProperty>(BDArr->Inner);
-	if (!BDObj) return MCPError(TEXT("'BehaviorDefinitions' inner is not a UObject*"));
-
-	// Resolve the behavior class. Caller may pass either a class path or an
-	// existing UBehaviorDefinition asset; the array holds object pointers.
-	UObject* BehaviorAsset = LoadObject<UObject>(nullptr, *BehaviorClassPath);
-	if (!BehaviorAsset)
-	{
-		// Try as a class path
-		UClass* BehaviorClass = LoadClass<UObject>(nullptr, *BehaviorClassPath);
-		if (!BehaviorClass) return MCPError(FString::Printf(TEXT("Could not load behavior asset/class '%s'"), *BehaviorClassPath));
-		BehaviorAsset = NewObject<UObject>(SA.Asset, BehaviorClass);
-	}
+	// Resolution, instancing and the instanceProperties write are shared with
+	// add_smart_object_slot and add_smart_object_default_behavior: one route to
+	// a behavior definition, so a name that works on one works on all three.
+	const TSharedPtr<FJsonObject>* InstObj = nullptr;
+	Params->TryGetObjectField(TEXT("instanceProperties"), InstObj);
 
 	SA.Asset->Modify();
-	FScriptArrayHelper BDHelper(BDArr, BDProp->ContainerPtrToValuePtr<void>(SlotAddr));
-	const int32 NewBDIdx = BDHelper.AddValue();
-	BDObj->SetObjectPropertyValue(BDHelper.GetRawPtr(NewBDIdx), BehaviorAsset);
-
-	// Optional instance properties: dictionary of name -> JSON value applied
-	// to the new behavior asset.
-	const TSharedPtr<FJsonObject>* InstObj = nullptr;
-	if (Params->TryGetObjectField(TEXT("instanceProperties"), InstObj) && InstObj && (*InstObj).IsValid())
-	{
-		for (const auto& Pair : (*InstObj)->Values)
-		{
-			FProperty* P = BehaviorAsset->GetClass()->FindPropertyByName(FName(*Pair.Key));
-			if (!P) continue;
-			FString E;
-			MCPJsonProperty::SetJsonOnProperty(P, P->ContainerPtrToValuePtr<void>(BehaviorAsset), Pair.Value, E);
-		}
-	}
+	UObject* BehaviorAsset = nullptr;
+	int32 NewBDIdx = INDEX_NONE;
+	const FString BehaviorErr = AppendBehaviorDefinition(
+		SA.Asset, SA.SlotStruct->Struct, SlotAddr,
+		TEXT("BehaviorDefinitions"), BehaviorClassPath, InstObj, BehaviorAsset, NewBDIdx);
+	if (!BehaviorErr.IsEmpty()) return MCPError(BehaviorErr);
 
 	SA.Asset->PostEditChange();
 	SA.Asset->MarkPackageDirty();
@@ -673,6 +892,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectSlotBehavior(const TShar
 	Result->SetNumberField(TEXT("slotIndex"), SlotIdx);
 	Result->SetNumberField(TEXT("behaviorIndex"), NewBDIdx);
 	Result->SetStringField(TEXT("behavior"), BehaviorAsset->GetClass()->GetPathName());
+	ReportDefinitionValidity(SA, Result);
 	// No inverse. Nothing in this surface removes an entry from a slot's
 	// BehaviorDefinitions: the array is reachable only through this call, which
 	// appends. gameplay(remove_smart_object_slot) would delete the whole slot,
@@ -1064,52 +1284,26 @@ TSharedPtr<FJsonValue> FGameplayHandlers::CreateStateTree(const TSharedPtr<FJson
 		return MCPError(TEXT("Created asset is not a UStateTree"));
 	}
 
-	if (StateTree->EditorData == nullptr)
+	// #833: the schema is not optional dressing. Without one the compiler bails
+	// with "does not have a schema" and the asset is written dead, so the
+	// resolution failing is a failed create, not a silent substitution.
+	MCPStateTreeSchema::FResolution Schema = MCPStateTreeSchema::Resolve(
+		OptionalString(Params, TEXT("schema")));
+	if (!Schema.SchemaClass)
 	{
-		// Resolve the schema class (default: actor-component schema). Resolved by
-		// path so no hard GameplayStateTreeModule build dependency is needed.
-		const FString SchemaName = OptionalString(Params, TEXT("schema"),
-			TEXT("/Script/GameplayStateTreeModule.StateTreeComponentSchema"));
-		// The standard actor-component schema lives in GameplayStateTreeModule,
-		// which is not loaded until something uses a StateTreeComponent. Force it
-		// (and the AI variant) so the schema class registers.
-		FModuleManager::Get().LoadModule(TEXT("GameplayStateTreeModule"));
-		UClass* SchemaClass = LoadClass<UStateTreeSchema>(nullptr, *SchemaName);
-		// #823: shared resolution catches the prefixed C++ spelling
-		// (UStateTreeComponentSchema, /Script/Module.UMySchema).
-		if (!SchemaClass) SchemaClass = MCPResolveClassOfType(SchemaName, UStateTreeSchema::StaticClass());
-		if (!SchemaClass)
-		{
-			// Fall back to any concrete, non-abstract StateTreeSchema subclass so
-			// authoring still works even if the named schema is unavailable.
-			for (TObjectIterator<UClass> It; It; ++It)
-			{
-				if (It->IsChildOf(UStateTreeSchema::StaticClass()) &&
-					*It != UStateTreeSchema::StaticClass() &&
-					!It->HasAnyClassFlags(CLASS_Abstract) &&
-					!It->GetName().Contains(TEXT("Test")))
-				{
-					SchemaClass = *It;
-					break;
-				}
-			}
-		}
-		if (!SchemaClass)
-		{
-			return MCPError(FString::Printf(
-				TEXT("StateTree schema class not found: %s (pass 'schema' as a /Script/<Module>.<SchemaClass> path)"), *SchemaName));
-		}
-
-		UStateTreeEditorData* EditorData = NewObject<UStateTreeEditorData>(
-			StateTree, UStateTreeEditorData::StaticClass(), FName(), RF_Transactional);
-		StateTree->EditorData = EditorData;
-		EditorData->Schema = NewObject<UStateTreeSchema>(EditorData, SchemaClass, FName(), RF_Transactional);
-		EditorData->AddRootState();
-
-		FStateTreeCompilerLog Log;
-		UStateTreeEditingSubsystem::CompileStateTree(StateTree, Log);
-		StateTree->MarkPackageDirty();
+		// The asset exists at this point. Delete it rather than leave a
+		// schema-less tree behind, which is the exact shape being fixed.
+		const FString OrphanPath = StateTree->GetPathName();
+		UEditorAssetLibrary::DeleteAsset(OrphanPath);
+		return MCPStateTreeSchema::UnresolvedError(Schema);
 	}
+
+	const MCPStateTreeSchema::FAttachOutcome Attach =
+		MCPStateTreeSchema::AttachSchema(StateTree, Schema.SchemaClass);
+
+	FStateTreeCompilerLog Log;
+	const bool bCompiled = UStateTreeEditingSubsystem::CompileStateTree(StateTree, Log);
+	StateTree->MarkPackageDirty();
 
 	SaveAssetPackage(StateTree);
 
@@ -1117,9 +1311,14 @@ TSharedPtr<FJsonValue> FGameplayHandlers::CreateStateTree(const TSharedPtr<FJson
 	MCPSetCreated(Result);
 	Result->SetStringField(TEXT("path"), StateTree->GetPathName());
 	Result->SetStringField(TEXT("name"), Name);
-	if (UStateTreeEditorData* ED = Cast<UStateTreeEditorData>(StateTree->EditorData))
+	Result->SetStringField(TEXT("schema"), Schema.SchemaClass->GetPathName());
+	Result->SetStringField(TEXT("schemaSource"), Schema.Source);
+	Result->SetBoolField(TEXT("compiled"), bCompiled);
+	Result->SetBoolField(TEXT("createdEditorData"), Attach.bCreatedEditorData);
+	if (!Schema.Note.IsEmpty())
 	{
-		if (ED->Schema) Result->SetStringField(TEXT("schema"), ED->Schema->GetClass()->GetPathName());
+		Result->SetStringField(TEXT("schemaNote"), Schema.Note);
+		Result->SetArrayField(TEXT("availableSchemas"), MCPStateTreeSchema::ConcreteSchemaPathsJson());
 	}
 	MCPSetDeleteAssetRollback(Result, StateTree->GetPathName());
 

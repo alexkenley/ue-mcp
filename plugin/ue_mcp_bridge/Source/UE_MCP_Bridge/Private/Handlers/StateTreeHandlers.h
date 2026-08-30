@@ -21,6 +21,8 @@ private:
 	static UStateTreeState* FindStateByPath(UStateTreeEditorData* EditorData, const FString& Path);
 	static UStateTreeState* ResolveState(UStateTreeEditorData* EditorData, const TSharedPtr<FJsonObject>& Params);
 	static bool CompileAndSave(UStateTree* StateTree, TSharedPtr<FJsonObject>& OutResult);
+	static FString MissingEditorDataMessage(const FString& AssetPath);
+	static TSharedPtr<FJsonValue> RequireSchema(UStateTree* StateTree, const FString& AssetPath);
 	static TSharedPtr<FJsonObject> SerializeStateHierarchy(const UStateTreeState* State);
 
 	// Read / Introspect
@@ -77,6 +79,9 @@ private:
 
 	// Root Parameters
 	static TSharedPtr<FJsonValue> SetRootParameters(const TSharedPtr<FJsonObject>& Params);
+
+	// Schema
+	static TSharedPtr<FJsonValue> SetSchema(const TSharedPtr<FJsonObject>& Params);
 
 	// Lifecycle
 	static TSharedPtr<FJsonValue> CompileStateTree(const TSharedPtr<FJsonObject>& Params);

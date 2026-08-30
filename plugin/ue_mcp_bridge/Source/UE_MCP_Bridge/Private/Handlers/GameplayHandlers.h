@@ -177,6 +177,7 @@ private:
 	static TSharedPtr<FJsonValue> RemoveSmartObjectSlot(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ListSmartObjectSlots(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> AddSmartObjectSlotBehavior(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> AddSmartObjectDefaultBehavior(const TSharedPtr<FJsonObject>& Params);
 
 	// IMC read/write, PIE inspection, anim state, subsystem state - moved to pie-studio
 

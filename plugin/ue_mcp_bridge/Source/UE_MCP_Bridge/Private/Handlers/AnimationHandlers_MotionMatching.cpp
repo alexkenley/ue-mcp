@@ -13,6 +13,7 @@
 #include "HandlerUtils.h"
 #include "HandlerAssetCreate.h"
 #include "PoseSearch/PoseSearchSchema.h"
+#include "HandlerPoseSearchSchema.h"
 #include "PoseSearch/PoseSearchFeatureChannel.h"
 #include "PoseSearch/PoseSearchFeatureChannel_Pose.h"
 #include "PoseSearch/PoseSearchFeatureChannel_Trajectory.h"
@@ -86,14 +87,6 @@ static const TMap<FString, int32>& TrajectoryFlagTable()
 		{ TEXT("facingdirectionxy"),   int32(EPoseSearchTrajectoryFlags::FacingDirectionXY) },
 	};
 	return Table;
-}
-
-// Finalize a schema after channel edits (recomputes cardinality + finalized
-// channels). Finalize() is private; PostEditChangeProperty triggers it publicly.
-static void FinalizeSchema(UPoseSearchSchema* Schema)
-{
-	FPropertyChangedEvent EmptyEvent(nullptr);
-	Schema->PostEditChangeProperty(EmptyEvent);
 }
 
 // ─── AnimGraph node authoring helpers ─────────────────────────────────────
@@ -208,7 +201,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreatePoseSearchSchema(const TSharedP
 	{
 		Schema->AddDefaultChannels();
 	}
-	FinalizeSchema(Schema);
+	MCPPoseSearch::Finalize(Schema);
 	UEditorAssetLibrary::SaveLoadedAsset(Schema);
 
 	TSharedPtr<FJsonObject> Res = MCPSuccess();
@@ -269,7 +262,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSchemaPoseChannel(const 
 	}
 
 	Schema->AddChannel(Channel);
-	FinalizeSchema(Schema);
+	MCPPoseSearch::Finalize(Schema);
 	UEditorAssetLibrary::SaveLoadedAsset(Schema);
 
 	TSharedPtr<FJsonObject> Res = MCPSuccess();
@@ -323,7 +316,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSchemaTrajectoryChannel(
 	}
 
 	Schema->AddChannel(Channel);
-	FinalizeSchema(Schema);
+	MCPPoseSearch::Finalize(Schema);
 	UEditorAssetLibrary::SaveLoadedAsset(Schema);
 
 	TSharedPtr<FJsonObject> Res = MCPSuccess();
