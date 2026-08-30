@@ -371,7 +371,7 @@ static UStruct* FindLocalVariableScope(UBlueprint* Blueprint, const FString& Fun
 
 /** Compile and persist after a structural edit, the way every other authoring
  *  handler in this category finishes. */
-static void CompileAndSave(UBlueprint* Blueprint)
+static void RecompileAfterStructuralEdit(UBlueprint* Blueprint)
 {
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 	FKismetEditorUtilities::CompileBlueprint(Blueprint);
@@ -576,7 +576,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RemoveBlueprintInterface(const TShare
 
 	FBlueprintEditorUtils::RemoveInterface(
 		Blueprint, FTopLevelAssetPath(InterfaceClass->GetPathName()), bPreserveFunctions);
-	CompileAndSave(Blueprint);
+	RecompileAfterStructuralEdit(Blueprint);
 
 	auto Result = MCPSuccess();
 	MCPSetUpdated(Result);
@@ -762,7 +762,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetFunctionProperties(const TSharedPt
 	if (bHasDeprecated)   Meta->bIsDeprecated = bDeprecated;
 	if (bHasDeprMsg)      Meta->DeprecationMessage = DeprecationMessage;
 
-	CompileAndSave(Blueprint);
+	RecompileAfterStructuralEdit(Blueprint);
 
 	auto Result = MCPSuccess();
 	MCPSetUpdated(Result);
@@ -1019,7 +1019,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditGraphParameters(const TSharedPtr<
 			}
 		}
 		Result->SetArrayField(TEXT("parameters"), Now);
-		CompileAndSave(Blueprint);
+		RecompileAfterStructuralEdit(Blueprint);
 		return MCPResult(Result);
 	};
 
@@ -1493,7 +1493,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RenameBlueprintVariable(const TShared
 	// the RepNotify function name and the SCS entry when the variable is a
 	// component. Recreating the variable would leave all of them dangling.
 	FBlueprintEditorUtils::RenameMemberVariable(Blueprint, OldVar, NewVar);
-	CompileAndSave(Blueprint);
+	RecompileAfterStructuralEdit(Blueprint);
 
 	const int32 ReferencesAfter = CountVariableReferences(Blueprint, NewVar);
 	const int32 StillOld = CountVariableReferences(Blueprint, OldVar);
@@ -1735,7 +1735,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetBlueprintVariableMetadata(const TS
 		}
 	}
 
-	CompileAndSave(Blueprint);
+	RecompileAfterStructuralEdit(Blueprint);
 
 	auto Result = MCPSuccess();
 	MCPSetUpdated(Result);
@@ -1848,7 +1848,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditLocalVariable(const TSharedPtr<FJ
 		const FString PrevDefault = Entry->LocalVariables[At].DefaultValue;
 
 		FBlueprintEditorUtils::RemoveLocalVariable(Blueprint, Scope, VarFName);
-		CompileAndSave(Blueprint);
+		RecompileAfterStructuralEdit(Blueprint);
 
 		auto Result = MCPSuccess();
 		MCPSetUpdated(Result);
@@ -1902,7 +1902,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditLocalVariable(const TSharedPtr<FJ
 		// RenameLocalVariable rewrites the get/set nodes inside the function,
 		// which a remove-then-add pair would destroy.
 		FBlueprintEditorUtils::RenameLocalVariable(Blueprint, Scope, VarFName, NewVar);
-		CompileAndSave(Blueprint);
+		RecompileAfterStructuralEdit(Blueprint);
 
 		auto Result = MCPSuccess();
 		MCPSetUpdated(Result);
@@ -1946,7 +1946,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditLocalVariable(const TSharedPtr<FJ
 		if (auto Err = RequireScope()) return Err;
 
 		FBlueprintEditorUtils::ChangeLocalVariableType(Blueprint, Scope, VarFName, PinType);
-		CompileAndSave(Blueprint);
+		RecompileAfterStructuralEdit(Blueprint);
 
 		auto Result = MCPSuccess();
 		MCPSetUpdated(Result);
@@ -1994,7 +1994,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditLocalVariable(const TSharedPtr<FJ
 		// in the first place. There is no engine helper and none is needed.
 		Entry->Modify();
 		Entry->LocalVariables[At].DefaultValue = DefaultValue;
-		CompileAndSave(Blueprint);
+		RecompileAfterStructuralEdit(Blueprint);
 
 		auto Result = MCPSuccess();
 		MCPSetUpdated(Result);
@@ -2157,7 +2157,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RemoveEventDispatcher(const TSharedPt
 	{
 		FBlueprintEditorUtils::RemoveGraph(Blueprint, Signature);
 	}
-	CompileAndSave(Blueprint);
+	RecompileAfterStructuralEdit(Blueprint);
 
 	auto Result = MCPSuccess();
 	MCPSetUpdated(Result);
@@ -2313,7 +2313,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddCustomEvent(const TSharedPtr<FJson
 	Event->ReconstructNode();
 
 	Graph->NotifyGraphChanged();
-	CompileAndSave(Blueprint);
+	RecompileAfterStructuralEdit(Blueprint);
 
 	auto Result = MCPSuccess();
 	MCPSetCreated(Result);
@@ -2467,7 +2467,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CreateMacro(const TSharedPtr<FJsonObj
 	if (InputOwner) InputOwner->ReconstructNode();
 	if (OutputOwner) OutputOwner->ReconstructNode();
 
-	CompileAndSave(Blueprint);
+	RecompileAfterStructuralEdit(Blueprint);
 
 	auto Result = MCPSuccess();
 	MCPSetCreated(Result);
@@ -2555,7 +2555,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteMacro(const TSharedPtr<FJsonObj
 	}
 
 	FBlueprintEditorUtils::RemoveGraph(Blueprint, Graph);
-	CompileAndSave(Blueprint);
+	RecompileAfterStructuralEdit(Blueprint);
 
 	auto Result = MCPSuccess();
 	MCPSetUpdated(Result);
