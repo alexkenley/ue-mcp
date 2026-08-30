@@ -279,6 +279,33 @@ steps:
 
 Omit `retryOn` to retry on any error. The actual attempt count surfaces on `result.steps[i].attempts`.
 
+## Expected Failures (`ignore_failure`)
+
+The fourth per-step option, beside `retries` / `retryDelay` / `retryOn`. A step declares that its own failure is expected and must not stop the run:
+
+```yaml
+steps:
+  1:
+    task: editor.stop_editor
+    ignore_failure: true    # nothing running is a failure, and this step expects it
+  2: { task: editor.build_project }
+  3: { task: editor.start_editor }
+```
+
+Stop, build, start is the case it exists for. `editor(stop_editor)` closed no editor when none was running, so it answers `success: false` with `alreadyStopped: true`, and that is the correct answer: the call did not do the thing. Whether that matters is the caller's question, and only the caller knows. So a step whose failure is expected marks itself, rather than the handler reporting a success for something it did not do. The same shape covers `editor(start_editor)` on an editor already up (`alreadyRunning`), and both halves of `editor(play_in_editor)`.
+
+This is not what the [flow-level hooks](#flow-level-hooks) do. `on_failure` fires once the FLOW has failed and `finally` after either outcome, which in both cases is after the run has already stopped, so they compensate and clean up but cannot keep a later step running. `ignore_failure` is per step, and it is the only thing that keeps step 2 running when step 1 fails.
+
+What it does, and does not do:
+
+- The step is still **recorded as failed**. It keeps `success: false`, its error message, and the handler's whole body under `steps[i].data`; the run response marks it `ignoredFailure: true` and prints it as `FAILED (ignored)`. It is not converted into a pass, and it is not skipped - it ran.
+- The run **continues**, and the flow's own outcome is unaffected: `result.success` stays true if nothing else fails.
+- `failedStep` names the step that **stopped** the run, so an ignored failure never appears there.
+- It applies **after** `retries` are exhausted, so a step can retry first and only then be absorbed.
+- It covers a `success: false` body, a thrown error, and a `when:` expression that throws. The runner reads it on main steps only.
+
+Use it for the step whose failure you predicted. A step that fails for a reason you did not predict should still stop the run, which is why this is per step and not a flow-level switch.
+
 ## Rollback on Failure
 
 Mutating bridge handlers emit a `rollback: { method, payload }` record on success. When a flow sets `rollback_on_failure: true` (or the caller passes it) and a later step fails, the runner invokes the collected inverses **in reverse order**, best-effort, and reports the outcome in `result.rollback`:
@@ -300,7 +327,7 @@ If step 3 fails: the `delete_actor` inverses for B and A run, leaving the level 
 
 A step fails when the call throws AND when the handler answers `{ success: false }` in its body. The bridge resolves a refusal like any other reply, so the verdict is read off the answer: a destructive action that reported its own failure stops the run, fires `on_failure`, and arms `rollback_on_failure`, instead of being walked past as a pass.
 
-Handlers that are idempotent report a re-run rather than failing it - `alreadyRunning`, `alreadyStopped`, `alreadyExists`, `alreadyRemoved` alongside `success: true` - so a flow that makes sure the editor is up, or stops it before a build, walks on when it already was. See [docs/handler-conventions.md](handler-conventions.md).
+A handler that did the work it was asked for reports `success: true` with a marker saying nothing changed - `alreadyExists`, `alreadyRemoved`, `existed` - because the thing the caller wanted exists and this call is why it is safe to ask twice. The editor lifecycle actions are the other case: `start_editor` on a running editor launched nothing and `stop_editor` on a stopped one closed nothing, so they fail, carrying `alreadyRunning` / `alreadyStopped` to say the failure was a no-op rather than a broken call. Absorb those at the step with [`ignore_failure`](#expected-failures-ignore_failure). See [docs/handler-conventions.md](handler-conventions.md).
 
 ### The failing step's own inverse
 
@@ -320,6 +347,8 @@ steps[i].unappliedRollback = {
 ```
 
 The same call is appended to that step's `error.message` and printed under the step in the summary. Run it as its own flow step, or call the bridge method named in `record.payload.method` with the rest of the payload. Every other step's inverse is unaffected and still runs automatically.
+
+A step carrying `ignore_failure: true` is no different here. It failed, so the runner's harvest gate (`taskResult.success && taskResult.rollback`) skips its record exactly as it skips any failing step's: the inverse is reported on the step and never replayed, and the run carries on without it. What the flag does change is what happens next - the ignored step does not stop the run, so a LATER real failure is what arms `rollback_on_failure`, and that unwinds the successful steps before it as usual.
 
 A **nested** flow behaves the same way, and reports it in one place rather than two: a nested step is summarised to its step count, so the child's step results never reach the parent's `steps` array, and the undo call arrives in the nested step's `error.message`. That is the reason it is written into the message and not only into a field.
 

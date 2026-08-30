@@ -187,18 +187,18 @@ describe("the editor's own records", () => {
 });
 
 describe("lifecycle, without starting or stopping anything", () => {
-  it("reports the editor a project already has instead of starting a second", async () => {
+  it("refuses to start an editor for a project that already has one", async () => {
     // Before (#819): the guard asked whether ANY editor was running on the
     // machine, so a second project could not be started at all. It now asks
     // about this project, and answers from the port this project published.
     const project = new ProjectContext();
     project.setProject(target.uproject);
     const result = await startEditor(project, 1);
-    // Reported, not refused. Being asked for an editor that is already up is
-    // the request satisfied - nothing was spawned, and `alreadyRunning` is what
-    // says so - because a refusal here aborts any flow step that makes sure the
-    // editor is running before doing work, on the path where it already was.
-    expect(result.success).toBe(true);
+    // A refusal, because no editor was launched. The markers are what make it
+    // readable: `alreadyRunning` says the reason was an editor that is already
+    // up, and `bridgeReady` with `port` say it can be reached at this address
+    // right now. A flow step that expects this sets ignore_failure on itself.
+    expect(result.success).toBe(false);
     expect(result.alreadyRunning).toBe(true);
     expect(result.bridgeReady).toBe(true);
     expect(result.port).toBe(target.port);

@@ -121,9 +121,13 @@ The TS bridge lifts the `rollback` field onto `TaskResult.rollback`. When `rollb
 
 ### Idempotency, and why a re-run must not fail
 
-A mutation asked for twice REPORTS the second time rather than failing it. `success: true` with the marker that says nothing changed - `alreadyRunning`, `alreadyStopped`, `alreadyExists`, `alreadyRemoved`, `existed` - and no rollback record, because nothing was mutated to undo.
+A content mutation asked for twice REPORTS the second time rather than failing it. `success: true` with the marker that says nothing changed - `alreadyExists`, `alreadyRemoved`, `existed`, `unchanged` - and no rollback record, because nothing was mutated to undo. The caller asked for a state and the state holds.
 
-This is not cosmetic. A `success: false` body fails the flow step that ran it and stops the whole run, and flowkit's step schema has no `continue_on_error`, so there is no per-step escape. An action that reports "already in the state you asked for" as a failure aborts every flow that makes sure of something before doing work, on the common path where it was already sure. `MCPError` is for a call that could not do what it was asked; being asked for a state the editor is already in is not that.
+**Lifecycle actions are the exception, and they answer differently.** `editor(start_editor)` on an editor that is already up, `editor(stop_editor)` with nothing running, and both halves of `editor(play_in_editor)` report `success: false` and carry `alreadyRunning` or `alreadyStopped` beside it. The call did not start, stop or play anything, and saying otherwise would be the handler reporting a success for work it did not do. The marker is what lets a caller tell that apart from a real failure, which is the job the marker exists for; the verdict stays honest.
+
+This is not cosmetic for a content mutation. A `success: false` body fails the flow step that ran it and stops the run, so an asset create that treats "it already exists" as an error aborts every flow that makes sure of something before doing work, on the common path where it was already sure. `MCPError` is for a call that could not do what it was asked; being handed a state that already holds is not that.
+
+Where the answer genuinely is a failure, as with the lifecycle actions above, the flow absorbs it rather than the handler hiding it: a step marks itself `ignore_failure: true` and the run continues with the failure still recorded. See [docs/flows.md](flows.md). That is the right layer, because only the flow author knows whether a particular step failing is expected.
 
 ## Helpers
 

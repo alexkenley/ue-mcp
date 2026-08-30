@@ -510,19 +510,23 @@ function buildEditorLaunchEnv(dialogPolicy?: string, paramEcho?: boolean): NodeJ
 /**
  * What a launch returns.
  *
- * `alreadyRunning` is the idempotency report. Asking for an editor that is
- * already up is the request being satisfied, not refused: the editor holding
- * this project is running, which is the state the caller asked for, so the
- * verdict is success and the marker says no process was spawned. Reporting it
- * as a failure made a flow step abort on the common path, since "make sure the
- * editor is up, then work" is the shape the flow tool's own description
- * advertises, and there is no per-step escape from a failed step.
+ * The verdict answers one question: did this call start an editor. An editor
+ * that was already up means it did not, so `success` is false. That is the
+ * honest report, and it stays the honest report even when a caller would
+ * rather hear yes: a step that wanted an editor running got one, but the call
+ * it made did nothing, and a handler that says otherwise is lying about what
+ * happened to make somebody else's control flow easier.
+ *
+ * `alreadyRunning` is what makes the failure readable. A caller has to tell
+ * "there was nothing to do" apart from "the launch broke", and the marker is
+ * that distinction as a field rather than as prose to be parsed. A flow whose
+ * step expects this failure absorbs it with `ignore_failure: true`, which
+ * records the step as failed and walks on; see docs/flows.md.
  *
  * `bridgeReady` distinguishes the two ways an editor can already be up: its
  * bridge is answering (the port is carried in `port`), or its process is alive
- * but has not started listening yet. The second is still not a launch this call
- * has to perform, and a caller that needs the bridge learns so from the flag
- * rather than from prose.
+ * but has not started listening yet. A caller that needs the bridge learns
+ * which from the flag rather than from the sentence.
  */
 export interface StartEditorResult {
   success: boolean;
@@ -592,10 +596,11 @@ export async function startEditor(
   const target = resolveBridgeTarget(projectDir);
   const targetIsLive = target.ok && (target.pid === null || isPidAlive(target.pid));
   if (target.ok && targetIsLive && (await isBridgeAvailable(bridgeHost(projectDir), target.port))) {
-    // A re-run reports rather than fails: the editor asked for is up, on the
-    // port named here, and nothing was spawned. See StartEditorResult.
+    // No editor was launched, so the verdict is false. The marker says why,
+    // and the port says where the one that is already up can be reached. See
+    // StartEditorResult.
     return {
-      success: true,
+      success: false,
       alreadyRunning: true,
       bridgeReady: true,
       port: target.port,
@@ -606,11 +611,11 @@ export async function startEditor(
   const alreadyRunning = await findInteractiveEditors(project.projectPath);
   if (alreadyRunning.length > 0) {
     const state = await readEngineState(project.projectPath, { probeWindows: true });
-    // Still nothing to launch, so still not a failure - but the bridge is not
-    // answering yet, and `bridgeReady: false` is how a caller that needs it
-    // learns that without reading the sentence.
+    // Nothing was launched here either, and the bridge is not answering yet:
+    // `bridgeReady: false` is how a caller that needs it learns that without
+    // reading the sentence.
     return {
-      success: true,
+      success: false,
       alreadyRunning: true,
       bridgeReady: false,
       message: `Editor is already running for this project (pid ${alreadyRunning.map((p) => p.pid).join(", ")}) but its bridge is not answering yet. ${state.summary}`,
@@ -1262,13 +1267,15 @@ export type EditorOwnership =
       state?: EngineState;
       /**
        * Set when the reason there is no owned editor is that no editor for
-       * this project is running at all. A stop asked for in that state has
-       * nothing left to do and is idempotent rather than failed, which is what
-       * `stopEditor` turns it into, and `request_editor_shutdown` with it,
-       * since its own description promises the two can never disagree about
-       * one editor. It never means the bridge call can proceed: `owned` stays
-       * false, and every other refusal here - no project loaded, an editor
-       * that is up but published no port - leaves this unset and still fails.
+       * this project is running at all. It is a label on the refusal, never a
+       * softening of it: a stop that reaches this branch closed nothing, and
+       * both `stopEditor` and `request_editor_shutdown` still report failure,
+       * which is what their shared description promises they can never
+       * disagree about. What the marker buys a caller is the difference
+       * between "there was nothing to close" and "closing broke", which is the
+       * half that decides what it does next - and, in a flow, whether the step
+       * carries `ignore_failure: true`. Every other refusal here - no project
+       * loaded, an editor that is up but published no port - leaves this unset.
        */
       alreadyStopped?: boolean;
     };
@@ -1365,12 +1372,13 @@ export async function resolveOwnedEditor(
     ? `names pid ${target.pid}, which is no longer the editor for this project - that process now has ` +
       `${owner.projectPath} open`
     : `names pid ${target.pid}, which is no longer running`;
-  // This is the branch a cleanly closed editor leaves behind: the plugin never
-  // deletes port.json, so the file outlives the process it named. When nothing
-  // of this project's is running, that is the editor being DOWN, which is the
-  // idempotent case a stop reports rather than fails. `live.length` is what
-  // separates the two, and the sentence has to follow it: an editor that is
-  // running while its instance record could not be resolved is a different
+  // A clean exit takes port.json with it: FMCPBridgeServer::DeletePortLockfileIfOwned
+  // removes the record this instance wrote on its way out. So a lockfile that
+  // outlives the pid it names is what a CRASH leaves behind, and the state to
+  // report is the one that is actually true afterwards - no editor of this
+  // project is running - not a stop that broke. `live.length` is what
+  // separates the two cases, and the sentence has to follow it: an editor that
+  // is running while its instance record could not be resolved is a different
   // situation, and claiming nothing is running would be untrue there.
   const nothingRunning = live.length === 0;
   const runningDetail = nothingRunning
@@ -1393,9 +1401,11 @@ export interface StopEditorResult {
   state?: EngineState;
   /**
    * Set when no editor for this project was running, so nothing was asked to
-   * quit. The verdict is success: the editor is down, which is what the call
-   * asked for. The marker is how a caller tells that apart from a stop that
-   * actually closed something.
+   * quit. The verdict stays false, because this call closed no editor. The
+   * marker is how a caller tells that apart from a stop that reached a
+   * running editor and failed, which is the distinction that decides what it
+   * does next. In a flow, a step that expects this outcome says so itself
+   * with `ignore_failure: true`.
    */
   alreadyStopped?: boolean;
   /** Why the stop refused, for a caller that would rather branch than parse. */
@@ -1543,33 +1553,30 @@ export async function stopEditor(
   const pressCalls = dialogMode.mode !== "defer";
   const ownership = await resolveOwnedEditor(projectDir, projectPath);
   if (!ownership.owned) {
-    // Being asked to stop an editor that is not running is the request already
-    // satisfied, not a refusal: the state the caller asked for is the state the
-    // machine is in, and no quit was sent because none was needed. Reported as
-    // success with `alreadyStopped`, the repo's marker for an idempotent
-    // re-run, so a flow step that stops the editor before building does not
-    // abort the whole run on the common path where it was already down.
-    // Everything else here - no project loaded, a running editor that published
-    // no port, an unreachable bridge - is a genuine refusal and still fails.
-    if (ownership.alreadyStopped) {
-      return {
-        success: true,
-        alreadyStopped: true,
-        message: ownership.message,
-        ...(ownership.state ? { state: ownership.state } : {}),
-      };
-    }
-    return { success: false, message: ownership.message, ...(ownership.state ? { state: ownership.state } : {}) };
+    // No editor was closed, so the verdict is false on every branch here. What
+    // varies is the reason, and `alreadyStopped` is the one reason a caller
+    // routinely wants to treat differently: there was nothing to close, as
+    // opposed to no project loaded, a running editor that published no port,
+    // or an unreachable bridge. Carried as a field so the distinction survives
+    // without anybody parsing the sentence, and so a flow step that expects it
+    // can absorb it with `ignore_failure: true` instead of this call pretending
+    // it quit something.
+    return {
+      success: false,
+      ...(ownership.alreadyStopped ? { alreadyStopped: true } : {}),
+      message: ownership.message,
+      ...(ownership.state ? { state: ownership.state } : {}),
+    };
   }
 
   const port = ownership.port;
   const host = bridgeHost(projectDir);
   const bridgeUp = await isBridgeAvailable(host, port);
   if (!bridgeUp && (await findInteractiveEditors(projectPath)).length === 0) {
-    // Same idempotent report: a published port with no listener and no editor
-    // process holding the project means the editor this call would have stopped
-    // is already gone.
-    return { success: true, alreadyStopped: true, message: "Editor is not running" };
+    // Same reason, one branch later: a published port with no listener and no
+    // editor process holding the project means the editor this call would have
+    // stopped is already gone, so nothing was quit and the marker says why.
+    return { success: false, alreadyStopped: true, message: "Editor is not running" };
   }
   if (!bridgeUp) {
     // "Unreachable" is where the user is left guessing, so say what the engine

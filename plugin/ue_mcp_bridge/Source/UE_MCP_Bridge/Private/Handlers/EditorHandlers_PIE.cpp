@@ -222,20 +222,22 @@ TSharedPtr<FJsonValue> FEditorHandlers::PieControl(const TSharedPtr<FJsonObject>
 	{
 		if (GEditor->PlayWorld != nullptr)
 		{
-			// A re-run REPORTS rather than fails. The caller asked for a PIE
-			// session and there is one, which is the state it asked for; the
-			// only thing that did not happen is a second launch, and the engine
-			// does not have second sessions to launch. Reporting this as a
-			// failure aborted any flow whose first step made sure play was
-			// running, because a failed step has no per-step escape.
-			auto Already = MCPSuccess();
+			// No session was started, so the verdict is false. `alreadyRunning`
+			// is the reason as a field rather than as prose: a caller has to
+			// tell "there was nothing to start" from "the launch broke", and
+			// that is the whole job the marker does. It does not turn the
+			// answer into a yes. A flow step that expects this outcome says so
+			// on itself with ignore_failure: true, which is the flow's decision
+			// to make and not this handler's to hide.
+			TSharedPtr<FJsonObject> Already = MakeShared<FJsonObject>();
+			Already->SetBoolField(TEXT("success"), false);
+			Already->SetStringField(TEXT("error"),
+				TEXT("PIE session already active, so none was started. This call changed nothing; stop the session with pie_control(action=stop) before starting a different one."));
 			Already->SetBoolField(TEXT("alreadyRunning"), true);
 			Already->SetBoolField(TEXT("isPlaying"), true);
 			Already->SetStringField(TEXT("action"), Action);
 			Already->SetBoolField(TEXT("changed"), false);
 			Already->SetBoolField(TEXT("rollbackPossible"), false);
-			Already->SetStringField(TEXT("message"),
-				TEXT("A PIE session is already active, so none was started. This call changed nothing; stop the session with pie_control(action=stop) before starting a different one."));
 			return MCPResult(Already);
 		}
 
@@ -412,17 +414,18 @@ TSharedPtr<FJsonValue> FEditorHandlers::PieControl(const TSharedPtr<FJsonObject>
 	{
 		if (GEditor->PlayWorld == nullptr)
 		{
-			// The mirror of the start above: play is not running, which is what
-			// a stop was asked to achieve, so nothing was sent and the verdict
-			// is success with the idempotency marker.
-			auto Already = MCPSuccess();
+			// The mirror of the start above: nothing was ended, so the verdict
+			// is false, and `alreadyStopped` says the reason was an absent
+			// session rather than a stop that failed to take.
+			TSharedPtr<FJsonObject> Already = MakeShared<FJsonObject>();
+			Already->SetBoolField(TEXT("success"), false);
+			Already->SetStringField(TEXT("error"),
+				TEXT("No PIE session active, so nothing was asked to end. Play is already stopped."));
 			Already->SetBoolField(TEXT("alreadyStopped"), true);
 			Already->SetBoolField(TEXT("isPlaying"), false);
 			Already->SetStringField(TEXT("action"), Action);
 			Already->SetBoolField(TEXT("changed"), false);
 			Already->SetBoolField(TEXT("rollbackPossible"), false);
-			Already->SetStringField(TEXT("message"),
-				TEXT("No PIE session was active, so nothing was asked to end. Play is already stopped."));
 			return MCPResult(Already);
 		}
 

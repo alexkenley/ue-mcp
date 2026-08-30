@@ -113,6 +113,7 @@ interface RunResponse {
   steps: Array<{
     name: string;
     success: boolean;
+    ignoredFailure?: boolean;
     error?: { message: string };
     data?: Record<string, unknown>;
     unappliedRollback?: {
@@ -548,5 +549,146 @@ describe("the YAML bridge task (ue-mcp.bridge), which is also the inverse execut
 
     expect(result.success).toBe(true);
     expect(result.data).toMatchObject({ success: false, error: "refused" });
+  });
+});
+
+/**
+ * `ignore_failure`, which is where an expected failure belongs.
+ *
+ * The alternative is a handler that answers `success: true` to a call that did
+ * nothing, so that a flow which stops, builds and starts the editor survives an
+ * editor that was already stopped. That trades one honest report for one
+ * shorter plan, and every OTHER caller of that handler is then told the editor
+ * was closed when it was not. flowkit already carries the right hook: the step
+ * that expects the failure declares it, the runner records the failure and
+ * walks on, and nothing about the handler's answer changes.
+ *
+ * Read off `node_modules/@db-lyon/flowkit/dist/flow/runner.js`: the flag is
+ * planned onto the step (`planStepFromDef`), and consulted on the failed-result
+ * path, the thrown path, and the `when:`-threw path. Each sets
+ * `ignoredFailure` on the step result and continues without setting
+ * `flowError`.
+ */
+describe("a step that declares its own failure expected", () => {
+  it("completes the run, and still records the step as FAILED", async () => {
+    const bridge = fakeBridge({
+      wipe_the_thing: { success: false, error: "the editor is not running" },
+      touch_the_thing: { success: true, touched: 1 },
+    });
+    const body = await runFlow(probeTool(ACCEPTED), bridge, {
+      stop_then_work: {
+        description: "the stop is allowed to have had nothing to stop",
+        steps: {
+          "1": { task: "probe.wipe", ignore_failure: true },
+          "2": { task: "probe.touch" },
+        },
+      },
+    }, "stop_then_work");
+
+    // The run finished and the later step ran.
+    expect(body.success).toBe(true);
+    expect(bridge.calls.map((c) => c.method)).toEqual(["wipe_the_thing", "touch_the_thing"]);
+
+    // The failure is recorded, not laundered: verdict, marker, message, body.
+    expect(body.steps[0].success).toBe(false);
+    expect(body.steps[0].ignoredFailure).toBe(true);
+    expect(body.steps[0].error?.message).toBe("the editor is not running");
+    expect(body.steps[0].data).toMatchObject({ success: false });
+    expect(body.summary).toContain("FAILED (ignored)");
+
+    // And it is not the step that stopped anything, because nothing stopped.
+    expect(body.failedStep).toBeUndefined();
+    expect(body.steps[1].success).toBe(true);
+    expect(body.steps[1].ignoredFailure).toBeUndefined();
+  });
+
+  it("absorbs a thrown step as well as a reported one", async () => {
+    // The bridge has no answer for the method, so the task class throws rather
+    // than returning a refusal. runner.js catches that separately and consults
+    // the same flag.
+    const bridge = fakeBridge({ touch_the_thing: { success: true } });
+    const body = await runFlow(probeTool(ACCEPTED), bridge, {
+      throwing: {
+        description: "a step that throws",
+        steps: {
+          "1": { task: "probe.wipe", ignore_failure: true },
+          "2": { task: "probe.touch" },
+        },
+      },
+    }, "throwing");
+
+    expect(body.success).toBe(true);
+    expect(body.steps[0].success).toBe(false);
+    expect(body.steps[0].ignoredFailure).toBe(true);
+    expect(body.steps[1].success).toBe(true);
+  });
+
+  it("absorbs only the step that asked, and a later real failure still stops the run", async () => {
+    const bridge = fakeBridge({
+      wipe_the_thing: { success: false, error: "the editor is not running" },
+      touch_the_thing: { success: false, error: "the build broke" },
+    });
+    const body = await runFlow(probeTool(ACCEPTED), bridge, {
+      one_expected_one_not: {
+        description: "an expected failure, then an unexpected one",
+        steps: {
+          "1": { task: "probe.wipe", ignore_failure: true },
+          "2": { task: "probe.touch" },
+        },
+      },
+    }, "one_expected_one_not");
+
+    expect(body.success).toBe(false);
+    expect(body.failedStep).toBe("probe.touch");
+    expect(body.steps[0].ignoredFailure).toBe(true);
+    expect(body.steps[1].ignoredFailure).toBeUndefined();
+  });
+
+  it("leaves rollback where it was: prior inverses unwind, the ignored step contributes none", async () => {
+    // The interaction worth pinning. An ignored failure is still a failure, so
+    // flowkit's harvest gate (`taskResult.success && taskResult.rollback`)
+    // skips its record exactly as it skips any failing step's - the step's own
+    // inverse is reported on the step, never replayed. And because the ignored
+    // step does not set flowError, rollback is armed by the LATER real failure,
+    // which unwinds the successful steps before it.
+    const bridge = fakeBridge({
+      wipe_the_thing: {
+        success: false,
+        error: "wrote half of it",
+        rollback: { method: "undo_the_half", payload: { id: 9 } },
+      },
+      touch_the_thing: {
+        success: true,
+        rollback: { method: "untouch_the_thing", payload: { id: 7 } },
+      },
+      untouch_the_thing: { success: true },
+    });
+    const body = await runFlow(probeTool(REFUSED), bridge, {
+      mixed: {
+        description: "an ignored partial write, a recorded mutation, then a real failure",
+        rollback_on_failure: true,
+        steps: {
+          "1": { task: "probe.wipe", ignore_failure: true },
+          "2": { task: "probe.touch" },
+          "3": { task: "probe.refuse" },
+        },
+      },
+    }, "mixed");
+
+    expect(body.success).toBe(false);
+    expect(body.failedStep).toBe("probe.refuse");
+
+    // Step 1's own inverse was never replayed, and it is handed back instead.
+    expect(body.steps[0].ignoredFailure).toBe(true);
+    expect(body.steps[0].unappliedRollback?.replayed).toBe(false);
+    expect(body.steps[0].unappliedRollback?.record.payload).toMatchObject({
+      method: "undo_the_half",
+      id: 9,
+    });
+    expect(bridge.calls.map((c) => c.method)).not.toContain("undo_the_half");
+
+    // Step 2's inverse DID run, armed by step 3's failure.
+    expect(body.rollback).toMatchObject({ attempted: 1, succeeded: 1 });
+    expect(bridge.calls.map((c) => c.method)).toContain("untouch_the_thing");
   });
 });

@@ -80,7 +80,11 @@ export function createFlowTool(
         + "highest priority), rollback_on_failure? (invoke inverse tasks in reverse order when a "
         + "later step fails). A step whose handler reports success:false FAILS the step and stops the "
         + "run, and the inverses collected from the steps BEFORE it are what rollback_on_failure "
-        + "unwinds. The failing step's OWN inverse, which a few handlers attach after a partial write, "
+        + "unwinds. A step whose failure is EXPECTED says so itself, in the YAML, with "
+        + "ignore_failure: true - the run walks on, and the step is still recorded as failed with its "
+        + "error and its data, marked ignoredFailure. That is how stop, build, start survives an editor "
+        + "that was already stopped, instead of editor(stop_editor) reporting a success it did not "
+        + "achieve. The failing step's OWN inverse, which a few handlers attach after a partial write, "
         + "is reported rather than replayed: it arrives verbatim on steps[i].unappliedRollback and in "
         + "that step's error text, ready to run as its own step, and in a nested flow it arrives in the "
         + "nested step's error text. Returns a summary, every step's data, "
@@ -121,7 +125,9 @@ export function createFlowTool(
         .map(([name, spec]) => `- ${name}: ${spec.description ?? ""}`)
         .join("\n") +
       `\n\nStep types supported in YAML flows: any MCP action (category.action), nested flows (flow:),\n` +
-      `and 'shell' for running shell/exec commands. Example shell step:\n` +
+      `and 'shell' for running shell/exec commands. Per-step options: options, when, retries,\n` +
+      `retryDelay, retryOn, and ignore_failure (record this step's failure and carry on).\n` +
+      `Example shell step:\n` +
       `  steps:\n` +
       `    1: { task: shell, options: { command: "npm run up:build" } }`,
     schema: {
@@ -361,7 +367,7 @@ function makeRunner(
           }
         }
       }
-      const failedStep = result.steps.find((s) => s.result?.success === false)?.name;
+      const failedStep = stoppingStep(result);
       journalSafely("closing the run", () => {
         endRun(journalPath, runId, {
           status: result.success ? "completed" : "failed",
@@ -411,6 +417,18 @@ function journalStep(s: FlowStepResult): JournalStep {
   };
 }
 
+/**
+ * The step that STOPPED the run, which is not the same as any step that failed.
+ *
+ * A step carrying `ignore_failure: true` fails, is recorded as failed, and the
+ * runner walks past it. Naming it here would report a failed step on a run
+ * that completed, which is the reading the flag exists to prevent - so the
+ * search skips the ones the flow declared it expected.
+ */
+function stoppingStep(result: FlowRunResult): string | undefined {
+  return result.steps.find((s) => s.result?.success === false && !s.ignoredFailure)?.name;
+}
+
 function formatFlowResult(result: FlowRunResult): Record<string, unknown> {
   const lines: string[] = [];
   const icon = result.success ? "✓" : "✗";
@@ -418,8 +436,17 @@ function formatFlowResult(result: FlowRunResult): Record<string, unknown> {
   lines.push("");
 
   for (const s of result.steps) {
-    const stepIcon = s.skipped ? "○" : s.result?.success ? "✓" : "✗";
-    const status = s.skipped ? "skipped" : s.result?.success ? formatDuration(s.duration) : "FAILED";
+    const stepIcon = s.skipped ? "○" : s.result?.success ? "✓" : s.ignoredFailure ? "!" : "✗";
+    // "FAILED (ignored)" and not "ok": the step failed, the flow said in
+    // advance that it would tolerate this one, and both halves have to be
+    // visible or the run reads as though the step passed.
+    const status = s.skipped
+      ? "skipped"
+      : s.result?.success
+        ? formatDuration(s.duration)
+        : s.ignoredFailure
+          ? "FAILED (ignored)"
+          : "FAILED";
     const attempts = s.attempts && s.attempts > 1 ? ` [${s.attempts} attempts]` : "";
     lines.push(`  ${stepIcon} ${s.stepNumber}. ${s.name} (${s.type}) - ${status}${attempts}`);
 
@@ -486,7 +513,7 @@ function formatFlowResult(result: FlowRunResult): Record<string, unknown> {
     success: result.success,
     duration: result.duration,
     stepCount: result.steps.length,
-    failedStep: result.steps.find((s) => s.result?.success === false)?.name,
+    failedStep: stoppingStep(result),
     // What each step answered. The per-step events carry no data by design
     // (an SSE subscriber does not want a shell log or an asset listing pushed
     // at it), which left the run response as the only place the data could
@@ -499,6 +526,10 @@ function formatFlowResult(result: FlowRunResult): Record<string, unknown> {
       type: s.type,
       skipped: s.skipped,
       success: s.result?.success ?? false,
+      // Declared in the flow, reported on the step: this one failed and was
+      // tolerated. Absent on every other step, so a reader never has to guess
+      // which failure was expected.
+      ignoredFailure: s.ignoredFailure ? true : undefined,
       duration: s.duration,
       attempts: s.attempts,
       error: s.result?.error
