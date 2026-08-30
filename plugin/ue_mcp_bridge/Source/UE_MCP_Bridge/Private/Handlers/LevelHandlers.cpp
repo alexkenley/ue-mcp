@@ -3970,6 +3970,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::ExportActorFbx(const TSharedPtr<FJsonObje
 	const int64 FbxSize = IFileManager::Get().FileSize(*AbsPath);
 	auto Result = MCPSuccess();
 	MCPSetCreated(Result);
+	// Nothing in the project or the level changed, but two files did, and a
+	// caller that pointed outputPath at an existing FBX has lost it.
+	MCPSetNoRollback(Result,
+		TEXT("The FBX and its .json sidecar were written to the caller's outputPath, overwriting whatever was already there, and any missing directories were created. ")
+		TEXT("Undoing that would need a call that deletes or restores a file on disk outside the content browser, and the bridge has none."));
 	Result->SetStringField(TEXT("actorLabel"), Actor->GetActorLabel());
 	Result->SetStringField(TEXT("fbx"), AbsPath);
 	Result->SetStringField(TEXT("metadata"), MetaPath);

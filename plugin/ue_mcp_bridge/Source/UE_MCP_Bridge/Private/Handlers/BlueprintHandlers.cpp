@@ -1697,10 +1697,18 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CompileBlueprint(const TSharedPtr<FJs
 	// and it is not a claim that this call did no work.
 	Result->SetBoolField(TEXT("wasUpToDate"), bWasUpToDate);
 	Result->SetBoolField(TEXT("idempotent"), false);
+	// The two questions a caller has are different and both get an answer.
+	// `idempotent` is about the work: a compile always rebuilds the generated
+	// class and reinstances its objects, so calling twice does real work twice.
+	// `changed` is about the outcome: a Blueprint that came in up to date and
+	// compiled clean ends where it started, so a retry after a timeout learns
+	// that its second call moved nothing even though it was not free.
+	Result->SetBoolField(TEXT("changed"), !bWasUpToDate || !bCompiled);
 	Result->SetStringField(TEXT("idempotencyNote"),
 		TEXT("A compile always rebuilds the generated class and reinstances its objects, so calling twice does real "
 		     "work twice and there is no 'already compiled' short circuit to report. wasUpToDate says what the "
-		     "Blueprint's status was before this ran, not that this call changed nothing."));
+		     "Blueprint's status was before this ran, and changed says whether that status moved; neither claims the "
+		     "call itself was free."));
 
 	// A compile has no inverse. It rebuilds the generated class from the graphs
 	// that are already saved; there is no call that un-compiles a Blueprint, and
@@ -3503,6 +3511,29 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RunConstructionScript(const TSharedPt
 	Result->SetStringField(TEXT("className"), SpawnClass->GetName());
 	Result->SetArrayField(TEXT("components"), ComponentsArr);
 	Result->SetNumberField(TEXT("componentCount"), ComponentsArr.Num());
+
+	// Nothing to undo, and the reason is worth stating rather than leaving as
+	// an absent field. This spawns one RF_Transient actor, reads the component
+	// list its construction script produced, and destroys it above before
+	// building this result. The blueprint is not touched, nothing is saved, and
+	// the probe actor does not outlive the call.
+	//
+	// It stays classified as a MUTATION even so, because the construction
+	// script is the user's own graph and it runs. A graph that spawns child
+	// actors, writes to a referenced asset or drives an editor subsystem has
+	// done that by the time this returns, and none of it is visible from here.
+	// So the routing gate keeps asking for an explicit editor, on the grounds
+	// that arbitrary user code should not run in whichever project happens to
+	// be active, and this note says the probe itself left nothing behind.
+	MCPSetNoRollback(Result, TEXT(
+		"Spawned a transient actor from the generated class, read the components its construction script "
+		"built, and destroyed it before returning. The blueprint was not modified and nothing was saved, "
+		"so there is nothing to undo. Whatever the construction script itself did while it ran is not "
+		"observable from here and is not covered by this statement."));
+	MCPSetIdempotencyUnobservable(Result, TEXT(
+		"Every call spawns a fresh probe actor and runs the construction script again, so the work is "
+		"repeated rather than skipped. Whether that run changed anything outside the probe is decided by "
+		"the user's own graph and is not reported back to this handler."));
 
 	return MCPResult(Result);
 }

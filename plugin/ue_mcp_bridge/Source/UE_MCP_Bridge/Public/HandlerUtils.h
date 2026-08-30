@@ -139,6 +139,34 @@ inline void MCPSetUpdated(TSharedPtr<FJsonObject> Result)
 	Result->SetBoolField(TEXT("updated"), true);
 }
 
+/** State that whether this call changed anything CANNOT BE READ, and say why.
+ *
+ *  The idempotency counterpart to MCPSetNoRollback, and it exists for the same
+ *  reason: a handler that cannot answer and says so has finished the job, and
+ *  one that says nothing has not, but from the outside the two look identical.
+ *
+ *  The cases are real and narrow. epic(call_tool) dispatches a wrapped engine
+ *  tool whose writes it never sees, and the Fab module publishes no
+ *  authentication or library state this build can read back. Both are asking
+ *  about somebody else's code, so a fabricated `unchanged: false` would be a
+ *  claim rather than a reading, which is worse than an honest absence.
+ *
+ *  This is NOT the escape hatch for a handler that could measure its effect and
+ *  did not. If the state is readable, read it before and after and report what
+ *  moved. The reason is a required argument for the same purpose it is on
+ *  MCPSetNoRollback: the flag alone tells a caller that replay safety is
+ *  unknown without telling it why, and the pair cannot come apart if one call
+ *  sets both.
+ *
+ *  The spelling was already in use in FabHandlers before this helper existed,
+ *  which is exactly how the earlier rollbackPossible drift started: an idiom
+ *  spread by copy while the convention audit recognised none of it. */
+inline void MCPSetIdempotencyUnobservable(TSharedPtr<FJsonObject> Result, const FString& Reason)
+{
+	Result->SetBoolField(TEXT("idempotencyObservable"), false);
+	Result->SetStringField(TEXT("idempotencyNote"), Reason);
+}
+
 /** Check for an existing asset at `PackagePath/Name`. Returns a fully-formed
  *  "already existed" result on hit (caller can return it directly), or an
  *  unset pointer on miss so the caller proceeds to create. Also honors an

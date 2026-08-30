@@ -2313,6 +2313,10 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CompileBlueprints(const TSharedPtr<FJ
 
 	TArray<TSharedPtr<FJsonValue>> Results;
 	int32 Compiled = 0, Failed = 0, NotFound = 0, AlreadyUpToDate = 0;
+	// Blueprints whose compiled status actually moved: one that came in stale,
+	// or one that came out in error. A batch where every entry was already up
+	// to date and compiled clean ends where it started.
+	int32 StatusChanged = 0;
 	for (const TSharedPtr<FJsonValue>& Entry : *PathsArray)
 	{
 		FString AssetPath = Entry->AsString();
@@ -2341,6 +2345,10 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CompileBlueprints(const TSharedPtr<FJ
 		FCompilerResultsLog CompileLog;
 		FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None, &CompileLog);
 
+		const bool bItemChanged = !bWasUpToDate || CompileLog.NumErrors > 0;
+		Item->SetBoolField(TEXT("changed"), bItemChanged);
+		if (bItemChanged) StatusChanged++;
+
 		if (CompileLog.NumErrors > 0)
 		{
 			Item->SetStringField(TEXT("status"), TEXT("failed"));
@@ -2364,17 +2372,20 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CompileBlueprints(const TSharedPtr<FJ
 	Result->SetNumberField(TEXT("failed"), Failed);
 	Result->SetNumberField(TEXT("notFound"), NotFound);
 	Result->SetNumberField(TEXT("alreadyUpToDate"), AlreadyUpToDate);
+	Result->SetNumberField(TEXT("statusChanged"), StatusChanged);
 	Result->SetArrayField(TEXT("results"), Results);
 
-	// No no-op flag here either: CompileBlueprint rebuilds and reinstances on
-	// every call regardless of status, so a batch where every Blueprint was
-	// already up to date still did the full work. alreadyUpToDate reports what
-	// the statuses were on the way in, nothing more.
+	// The work and the outcome are separate answers. CompileBlueprint rebuilds
+	// and reinstances on every call regardless of status, so a batch where
+	// every Blueprint was already up to date still did the full work, which is
+	// what idempotent=false says. `changed` is the outcome: false when no
+	// Blueprint's compiled status moved, which is what a retried batch needs.
 	Result->SetBoolField(TEXT("idempotent"), false);
+	Result->SetBoolField(TEXT("changed"), StatusChanged > 0);
 	Result->SetStringField(TEXT("idempotencyNote"),
 		TEXT("A compile always rebuilds each generated class and reinstances its objects, so calling twice does "
-		     "real work twice. alreadyUpToDate counts the Blueprints whose status said up to date BEFORE this ran; "
-		     "it is not a count of calls that did nothing."));
+		     "real work twice. alreadyUpToDate counts the Blueprints whose status said up to date BEFORE this ran, "
+		     "and statusChanged counts the ones whose status actually moved; neither claims the call was free."));
 
 	// Same as the single-Blueprint compile: a compile rebuilds the generated
 	// class from graphs that were already saved, and nothing un-compiles one.

@@ -2566,6 +2566,15 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAsset(const TSharedPtr<FJsonObject>& 
 		Result->SetStringField(TEXT("path"), AssetPath);
 		Result->SetBoolField(TEXT("force"), bForce);
 
+		// The dirty flag is the only honest answer to "did this call change
+		// anything", and it has to be read before the save, because afterwards
+		// every package is clean and a save that wrote nothing is
+		// indistinguishable from one that flushed an edit.
+		UObject* PreSaveAsset = MCPLoadAssetObject(AssetPath);
+		UPackage* PreSavePackage = PreSaveAsset ? PreSaveAsset->GetOutermost() : nullptr;
+		const bool bWasDirty = PreSavePackage && PreSavePackage->IsDirty();
+		Result->SetBoolField(TEXT("wasDirty"), bWasDirty);
+
 		bool bSuccess = false;
 		if (bForce)
 		{
@@ -2598,6 +2607,35 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAsset(const TSharedPtr<FJsonObject>& 
 			}
 		}
 		Result->SetBoolField(TEXT("success"), bSuccess);
+
+		// A clean package had nothing to flush. Without force the save was a
+		// no-op and says so; with force the file was rewritten anyway, which is
+		// a write to disk even though no edit was pending, so it does not claim
+		// to have changed nothing.
+		if (bWasDirty)
+		{
+			MCPSetUpdated(Result);
+		}
+		else if (bForce && bSuccess)
+		{
+			MCPSetUpdated(Result);
+			Result->SetStringField(TEXT("note"),
+				TEXT("The package was not dirty. force=true rewrote the file on disk anyway; without it this call would have written nothing."));
+		}
+		else
+		{
+			Result->SetBoolField(TEXT("updated"), false);
+			Result->SetBoolField(TEXT("unchanged"), true);
+			if (bSuccess)
+			{
+				// Only when the save itself reported success. A failed save
+				// wrote nothing either, and telling that caller the package was
+				// simply clean would hide the failure behind a no-op.
+				Result->SetStringField(TEXT("note"),
+					TEXT("The package was not dirty, so nothing was written. Pass force=true to write it regardless."));
+			}
+		}
+
 		Result->SetBoolField(TEXT("rollbackPossible"), false);
 		Result->SetStringField(TEXT("rollbackNote"),
 			TEXT("A save overwrites the file on disk with what is in memory. The previous file contents are gone and the ")
@@ -2613,10 +2651,36 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAsset(const TSharedPtr<FJsonObject>& 
 		{
 			return MCPError(TEXT("'force' requires an assetPath - it forces one package to disk. To flush everything, use asset(save_all_dirty), which reports exactly which packages were written."));
 		}
+		// Counted before the sweep for the same reason as the single-asset
+		// branch: SaveDirectory is dirty-only, so with nothing dirty it writes
+		// nothing, and afterwards there is no way to tell that from a sweep
+		// that flushed a hundred packages.
+		TArray<UPackage*> DirtyBefore;
+		FEditorFileUtils::GetDirtyContentPackages(DirtyBefore);
+		FEditorFileUtils::GetDirtyWorldPackages(DirtyBefore);
+		int32 DirtyUnderGame = 0;
+		for (UPackage* Package : DirtyBefore)
+		{
+			if (Package && Package->IsDirty() && Package->GetName().StartsWith(TEXT("/Game/")))
+			{
+				++DirtyUnderGame;
+			}
+		}
+
 		UEditorAssetLibrary::SaveDirectory(TEXT("/Game"));
 		auto Result = MCPSuccess();
 		Result->SetBoolField(TEXT("success"), true);
 		Result->SetStringField(TEXT("message"), TEXT("All modified assets under /Game saved (dirty only). Use save_all_dirty for a per-package report."));
+		Result->SetNumberField(TEXT("dirtyPackagesBefore"), DirtyUnderGame);
+		if (DirtyUnderGame > 0)
+		{
+			MCPSetUpdated(Result);
+		}
+		else
+		{
+			Result->SetBoolField(TEXT("updated"), false);
+			Result->SetBoolField(TEXT("unchanged"), true);
+		}
 		Result->SetBoolField(TEXT("rollbackPossible"), false);
 		Result->SetStringField(TEXT("rollbackNote"),
 			TEXT("A save overwrites the files on disk with what is in memory. The previous file contents are gone and the ")

@@ -321,6 +321,16 @@ TSharedPtr<FJsonValue> FFoliageHandlers::SetFoliageTypeSettings(const TSharedPtr
 	// Apply settings via property reflection
 	TArray<FString> AppliedSettings;
 	TArray<FString> FailedSettings;
+	// Settings whose property already held the requested value. Writing one of
+	// those changed nothing, and a result that counted it as applied would
+	// report a no-op replay as a state change.
+	TArray<FString> UnchangedSettings;
+	// The previous values, captured BEFORE each write and in the same text form
+	// the settings parameter takes, so the record below is a call that restores
+	// them. Reading the properties back afterwards would only ever recover the
+	// values this call just installed.
+	TSharedPtr<FJsonObject> PreviousSettings = MakeShared<FJsonObject>();
+	int32 ChangedCount = 0;
 
 	for (const auto& KV : (*SettingsObj)->Values)
 	{
@@ -358,6 +368,12 @@ TSharedPtr<FJsonValue> FFoliageHandlers::SetFoliageTypeSettings(const TSharedPtr
 		}
 
 		void* PropertyAddr = Property->ContainerPtrToValuePtr<void>(FoliageType);
+		// Exported with no default to compare against, so a value that happens
+		// to equal the class default still comes back in full rather than as
+		// the empty delta a struct property would otherwise write.
+		FString OldText;
+		Property->ExportText_Direct(OldText, PropertyAddr, nullptr, FoliageType, PPF_None);
+
 		const TCHAR* ImportResult = Property->ImportText_Direct(*PropertyValue, PropertyAddr, FoliageType, PPF_None);
 		if (ImportResult == nullptr)
 		{
@@ -366,17 +382,37 @@ TSharedPtr<FJsonValue> FFoliageHandlers::SetFoliageTypeSettings(const TSharedPtr
 		else
 		{
 			AppliedSettings.Add(PropertyName);
+			// Compare the exported forms rather than the caller's string: "1"
+			// and "1.000000" are the same float, and a text comparison against
+			// what was asked for would call that a change.
+			FString NewText;
+			Property->ExportText_Direct(NewText, PropertyAddr, nullptr, FoliageType, PPF_None);
+			if (NewText == OldText)
+			{
+				UnchangedSettings.Add(PropertyName);
+			}
+			else
+			{
+				++ChangedCount;
+				PreviousSettings->SetStringField(PropertyName, OldText);
+			}
 		}
 	}
 
-	// Mark the foliage type as dirty
-	FoliageType->MarkPackageDirty();
-
-	// Save the asset if it has a valid package path
-	FString PackagePath = FoliageType->GetPathName();
-	if (PackagePath.Contains(TEXT("/Game/")))
+	// Dirty and save only when a value actually moved. A call that wrote the
+	// values the asset already held has nothing to persist, and dirtying the
+	// package anyway would hand the user an unsaved asset for a no-op.
+	if (ChangedCount > 0)
 	{
-		UEditorAssetLibrary::SaveAsset(FoliageType->GetOutermost()->GetName(), false);
+		// Mark the foliage type as dirty
+		FoliageType->MarkPackageDirty();
+
+		// Save the asset if it has a valid package path
+		FString PackagePath = FoliageType->GetPathName();
+		if (PackagePath.Contains(TEXT("/Game/")))
+		{
+			UEditorAssetLibrary::SaveAsset(FoliageType->GetOutermost()->GetName(), false);
+		}
 	}
 
 	auto Result = MakeShared<FJsonObject>();
@@ -398,6 +434,38 @@ TSharedPtr<FJsonValue> FFoliageHandlers::SetFoliageTypeSettings(const TSharedPtr
 			FailedArray.Add(MakeShared<FJsonValueString>(S));
 		}
 		Result->SetArrayField(TEXT("failedSettings"), FailedArray);
+	}
+
+	if (UnchangedSettings.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> UnchangedArray;
+		for (const FString& S : UnchangedSettings)
+		{
+			UnchangedArray.Add(MakeShared<FJsonValueString>(S));
+		}
+		Result->SetArrayField(TEXT("unchangedSettings"), UnchangedArray);
+	}
+
+	if (ChangedCount > 0) MCPSetUpdated(Result);
+	Result->SetBoolField(TEXT("unchanged"), ChangedCount == 0);
+	Result->SetNumberField(TEXT("changedCount"), ChangedCount);
+
+	if (ChangedCount > 0)
+	{
+		// The inverse is this same action with the values that were there
+		// before. Only the properties that actually moved are listed: replaying
+		// the ones that did not would be a second no-op write, and a property
+		// whose import failed was never touched.
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("foliageTypePath"), FoliageType->GetPathName());
+		Payload->SetObjectField(TEXT("settings"), PreviousSettings);
+		MCPSetRollback(Result, TEXT("set_foliage_type_settings"), Payload);
+	}
+	else
+	{
+		MCPSetNoRollback(Result, TEXT(
+			"No property value moved, so nothing was written to the foliage type and there is nothing to undo. "
+			"Anything listed in failedSettings was rejected before the write and never reached the asset."));
 	}
 
 	Result->SetBoolField(TEXT("success"), FailedSettings.Num() == 0);

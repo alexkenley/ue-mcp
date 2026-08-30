@@ -156,7 +156,9 @@ TSharedPtr<FJsonValue> FSkeletalMeshHandlers::SetOptimizeForInstancing(const TSh
 	}
 
 	TArray<TSharedPtr<FJsonValue>> Lods;
-	int32 ChangedLodCount = 0;
+	// Which LODs this call actually flipped, not how many. The rollback below has
+	// to address exactly those and no others.
+	TArray<int32> ChangedLodIndices;
 	if (bNeedsMutation)
 	{
 		// Establish the transaction before the first setter. The subsystem also
@@ -167,7 +169,7 @@ TSharedPtr<FJsonValue> FSkeletalMeshHandlers::SetOptimizeForInstancing(const TSh
 		{
 			if (Target.Before.bOptimizeForInstancing != bEnabled)
 			{
-				++ChangedLodCount;
+				ChangedLodIndices.Add(Target.Index);
 				FSkeletalMeshBuildSettings Updated = Target.Before;
 				Updated.bOptimizeForInstancing = bEnabled;
 				USkeletalMeshEditorSubsystem::SetLodBuildSettings(Mesh, Target.Index, Updated);
@@ -194,7 +196,44 @@ TSharedPtr<FJsonValue> FSkeletalMeshHandlers::SetOptimizeForInstancing(const TSh
 	Result->SetBoolField(TEXT("enabled"), bEnabled);
 	Result->SetBoolField(TEXT("updated"), bNeedsMutation);
 	Result->SetBoolField(TEXT("saved"), bNeedsMutation);
-	Result->SetNumberField(TEXT("changedLods"), ChangedLodCount);
+	Result->SetNumberField(TEXT("changedLods"), ChangedLodIndices.Num());
 	Result->SetArrayField(TEXT("lods"), Lods);
+
+	// The inverse is this same action carrying the flag the mesh used to hold.
+	// bOptimizeForInstancing is a bool, so every LOD this call flipped held
+	// !bEnabled, and one replay restores all of them. What limits the rollback is
+	// addressing: the action targets one lodIndex or every LOD, so a partial set
+	// of flipped LODs cannot be named.
+	const int32 LodCount = Mesh->GetLODNum();
+	if (ChangedLodIndices.IsEmpty())
+	{
+		MCPSetNoRollback(Result,
+			TEXT("Every targeted LOD already held the requested bOptimizeForInstancing value, ")
+			TEXT("so no build setting was written and there is nothing to undo."));
+	}
+	else if (ChangedLodIndices.Num() == 1 || ChangedLodIndices.Num() == LodCount)
+	{
+		auto Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("assetPath"), Mesh->GetPathName());
+		Payload->SetBoolField(TEXT("enabled"), !bEnabled);
+		if (ChangedLodIndices.Num() == LodCount)
+		{
+			Payload->SetBoolField(TEXT("allLods"), true);
+		}
+		else
+		{
+			Payload->SetNumberField(TEXT("lodIndex"), ChangedLodIndices[0]);
+		}
+		MCPSetRollback(Result, TEXT("set_skeletal_mesh_optimize_for_instancing"), Payload);
+	}
+	else
+	{
+		MCPSetNoRollback(Result, FString::Printf(
+			TEXT("bOptimizeForInstancing was flipped on %d of this mesh's %d LODs, and ")
+			TEXT("set_skeletal_mesh_optimize_for_instancing addresses a single lodIndex or all LODs; ")
+			TEXT("restoring that mixed state needs a call that accepts a list of LOD indices."),
+			ChangedLodIndices.Num(),
+			LodCount));
+	}
 	return MCPResult(Result);
 }
