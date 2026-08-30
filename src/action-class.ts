@@ -288,7 +288,13 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   // terrain, but a file appearing on disk is an external side effect and the
   // taxonomy above counts that as a mutation.
   "landscape.export_heightmap": "mutate",
-  "audio.extract_pcm": "mutate",
+  // Not one of the exports above, despite sitting next to them here since it
+  // was written. It decodes a USoundWave's imported audio into memory and
+  // returns the samples base64-encoded in the response: no intermediate file,
+  // no path parameter to write one to, nothing dirtied and nothing saved. It
+  // was classified `mutate` by association with the file-writing exports, and
+  // the handler body settles it the other way.
+  "audio.extract_pcm": "read",
   // Rebuilds the full-text index in the editor's own database.
   "asset.reindex_fts": "mutate",
   // Loads, rewrites and saves the packages that reference a set of
@@ -309,6 +315,33 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   // The verb says read; what it can do says mutate, and the gate follows what
   // it can do.
   "gas.get_live_attribute_value": "mutate",
+
+  // Runs an EQS query through FEnvQueryManager::RunInstantQuery against an
+  // already-spawned querier and serialises the scored items. `run` is a mutate
+  // verb and this one does not: no spawn, no Modify, no save, nothing written
+  // back to the query asset or the world. Landing it in the wrong editor
+  // returns the wrong scores and changes nothing.
+  "gameplay.run_eqs_query": "read",
+
+  // ── Reads whose name leads with a subsystem, not a verb ─────────────
+  // The lexicon only trusts a read verb in the leading segment, so these say
+  // out loud what they read. Each one was confirmed against its handler: they
+  // open an asset, walk a graph or a document, and write nothing back.
+  "audio.metasound_get_graph": "read",
+  "audio.metasound_read_document": "read",
+  "audio.metasound_list_node_classes": "read",
+  "audio.metasound_list_node_pins": "read",
+  "audio.metasound_list_connections": "read",
+  "audio.metasound_list_variables": "read",
+  "audio.metasound_search_nodes": "read",
+  "audio.metasound_inspect_node": "read",
+  // Runs the MetaSound builder's own validation over a document and reports
+  // the errors. It builds nothing and saves nothing.
+  "audio.metasound_validate": "read",
+  "audio.cue_get_graph": "read",
+  // Answers whether a named weightmap layer is present on a landscape. The
+  // `exists` question never creates the layer it asks about.
+  "landscape.layer_exists": "read",
 
   // ── The workflow journal and the skill packs ────────────────────────
   // Neither reaches a bridge, so nothing here can land in the wrong EDITOR.
@@ -355,7 +388,20 @@ export function classifyActionClass(tool: string, action: string): ActionClassif
 
   const segments = action.toLowerCase().split(/[._]/).filter(Boolean);
   if (segments.some((s) => MUTATE_VERBS.has(s))) return { class: "mutate", source: "lexicon" };
-  if (segments.some((s) => READ_VERBS.has(s))) return { class: "read", source: "lexicon" };
+  // A read verb only settles the question from the FRONT of the name. Anywhere
+  // else it is a noun as often as a verb, and the direction of that mistake is
+  // the dangerous one: `wire_rvt_sample` was a mutation that classified as a
+  // read on the strength of `sample`, and untargeted dispatch would have let it
+  // edit whichever editor happened to be active. It reached a human review
+  // rather than a release, and was renamed to `add_rvt_sampler`, which is a fix
+  // to one name and not to the rule that produced it.
+  //
+  // So a trailing read verb now decides nothing and falls through to
+  // `unresolved`, which is gated exactly like a mutation and which the drift
+  // guard fails on. The cost is an override line for every genuine read whose
+  // name leads with a subsystem instead of a verb; those are below, each saying
+  // what it reads. The alternative costs a silent wrong-editor write.
+  if (READ_VERBS.has(segments[0] ?? "")) return { class: "read", source: "lexicon" };
 
   // Epic's wrapped engine tools are injected at runtime from a live catalog, so
   // no build-time guard can enumerate them: enrichment can invent whole

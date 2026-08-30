@@ -278,8 +278,23 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::CompileSystem(const TSharedPtr<FJsonObj
 			   "the compiler reported one, the node and pin guid that produced it. Read the whole graph "
 			   "back with niagara(get_emitter_info) or niagara(list_dynamic_inputs)."));
 
-	// No rollback: compiling changes no authored state. It writes the compiled
-	// results onto the scripts, which is what an uncompiled system is missing.
+	// Idempotency: RequestCompile answers whether this call actually put a
+	// compile on the queue. With force=false a system whose scripts are already
+	// translated and unchanged returns false, so a replayed flow step is a
+	// no-op rather than a second translation. force=true is the default, and it
+	// requests one every time by design, which the field then reports honestly.
+	Result->SetBoolField(TEXT("unchanged"), !bQueued);
+	if (bQueued) MCPSetUpdated(Result);
+
+	// Compiling changes no authored state. It writes the translated VM bytecode
+	// and shader maps onto the system's scripts, which is exactly what an
+	// uncompiled system is missing, and leaves the package dirty. There is no
+	// previous graph to put back and no bridge call that un-translates a
+	// script; the only route to the old build is to edit the graph back.
+	MCPSetNoRollback(Result, TEXT(
+		"Compiling replaces the translated bytecode and shader maps cached on this system's scripts and leaves the "
+		"package dirty. No authored state changed, so there is nothing to restore, and no bridge call un-translates "
+		"a script back to its previous build."));
 	return MCPResult(Result);
 #endif // WITH_EDITORONLY_DATA
 }

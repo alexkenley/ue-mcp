@@ -45,42 +45,30 @@ import { classifyActionClass } from "../../src/action-class.js";
  * what this file exists to stop.
  */
 const BASELINE = {
-  // Re-pinned from a real measurement, and the numbers moved a long way:
-  // 356 to 135 without a rollback, 129 to 21 without an idempotency marker.
-  // Almost none of that is exemption. It is three things.
+  // What a mutation owes its caller is an ANSWER, and two of these three counts
+  // are now zero because every mutation gives one. They are flat rules below,
+  // not ratchets: there is no debt left to ratchet down.
   //
-  // Most of it is the convention pass itself. Every category was swept and the
-  // mutations that had no inverse got one, or got an honest statement that
-  // they cannot have one.
+  // The journey is worth recording, because the numbers were quoted in review
+  // while none of them were being enforced. 356 and 129 were measured by a
+  // scanner that could not see a marker emitted inside a shared helper and
+  // collided two classes with the same method name. Fixing the scanner put the
+  // real figures at 135 and 21. Fixing the shebang that stopped this file from
+  // LOADING is what made any of it enforced at all.
   //
-  // Some of it is the audit getting STRICTER, which lowered a count only by
-  // making the rest of the sweep necessary. `has()` now strips C++ comments
-  // before matching. Every idempotency marker is a bare English word -
-  // "unchanged", "skipped", "nested" - so a rollbackNote explaining that a
-  // value was left unchanged used to earn the credit it was being audited for,
-  // and an adversarial audit found a handler drawing its ONLY credit from a
-  // comment. That is this file's own failure mode occurring inside this file.
-  //
-  // And some of it was never debt. `classifyActionClass` scans a whole action
-  // name for a mutating verb, because at the routing gate over-classifying
-  // costs an explicit target and nothing else. Reused here it demanded an
-  // inverse for `editor(get_frame_timing)` and nine other reads. A leading read
-  // verb now settles it; see READ_LED below.
-  //
-  // The rule is unchanged: if a number goes UP, a new handler skipped a
-  // convention. If it goes DOWN, lower it here and commit that. Never edit
-  // these to whatever makes the test pass.
-  mutationsWithoutRollback: 135,
-  // Re-measured: 21 -> 19. Two handlers picked up an idempotency marker since
-  // the last pin, and a baseline left at the old number is a ratchet with two
-  // teeth of slack in it, which is the same as no ratchet for the next two
-  // handlers that skip the convention.
-  mutationsWithoutIdempotency: 19,
-  // The count that matters most, and the one nothing measured before: a
-  // mutation that emits neither an inverse nor a reason there is none. The
-  // rest of the 135 above said out loud that they cannot be undone.
-  // Re-measured: 28 -> 26.
-  mutationsSilentOnRollback: 26,
+  // `mutationsWithoutRollback` stays a number rather than a rule, and stays
+  // non-zero, because a rollback is not always possible and pretending
+  // otherwise would mean emitting inverses that do not invert. What is not
+  // allowed is silence: see mutationsSilentOnRollback.
+  mutationsWithoutRollback: 127,
+  // Zero, and held there by a flat assertion. Every mutation with no inverse
+  // now says so in its own result body with the reason, which is the half a
+  // caller can act on.
+  mutationsSilentOnRollback: 0,
+  // Zero on the same terms. A handler that cannot read whether it changed
+  // anything says that too, through MCPSetIdempotencyUnobservable, rather than
+  // inventing an `unchanged` flag about somebody else's code.
+  mutationsWithoutIdempotency: 0,
   orphanedHandlers: 22,
 };
 
@@ -138,35 +126,18 @@ const KNOWN_ORPHANS: Record<string, string> = {
 };
 
 /**
- * Mutations with no meaningful inverse.
+ * There is no allowlist any more, and that is the point.
  *
- * Not every change can be undone by another call, and pretending otherwise
- * would mean emitting a rollback that does not roll anything back. Each entry
- * states why, and the list is short on purpose: "there is no inverse" is a
- * strong claim and almost always wrong.
+ * This file used to carry a `NO_INVERSE` map: four mutations exempted from the
+ * rollback rule with the reason written HERE, in the test, where no caller can
+ * read it. That was the right shape while the reasons had nowhere else to live,
+ * and the wrong shape once `MCPSetNoRollback` existed, because a caller holding
+ * the result body still could not tell a considered decision from an oversight.
+ *
+ * All four now state it in the handler, which is where the caller reads it, so
+ * the audit sees the statement and the exemption is redundant. An exemption
+ * list that outlives its reason is how a convention quietly stops applying.
  */
-const NO_INVERSE: Record<string, string> = {
-  cancel_editor_transaction:
-    "Discarding a transaction IS the undo. There is nothing to un-cancel: the "
-    + "objects were already restored and the transaction no longer exists.",
-  export_uv_layout:
-    "Writes a preview PNG to Saved/. An export produces an output artifact "
-    + "rather than project state, and deleting a file that regenerates on "
-    + "demand is not a meaningful undo. The same reasoning covers the six "
-    + "export_* actions that predate this one, all of which likewise emit no "
-    + "rollback; they belong to the deferred convention pass.",
-  add_smart_object_default_behavior:
-    "Appends an instanced behavior definition to a SmartObjectDefinition's "
-    + "DefaultBehaviorDefinitions. Nothing in this surface removes an entry "
-    + "from that array, exactly as for its per-slot twin "
-    + "add_smart_object_slot_behavior, which carries the same statement. The "
-    + "response says rollbackPossible=false and names the index it wrote.",
-  report_noise_event:
-    "Injects a one-shot stimulus into the running world. An AI either heard it "
-    + "or did not; there is no call that un-hears it. For the same reason it "
-    + "carries no idempotency marker: reporting the same noise twice is two "
-    + "events, not a repeated state change.",
-};
 
 /** bridge method -> the TS tool+action that reaches it. */
 function bridgeToAction(): Map<string, { tool: string; action: string }> {
@@ -184,6 +155,8 @@ type Row = {
   idempotent: boolean; rollback: boolean; bodyFound: boolean;
   /** True when the body emits `rollbackPossible`, i.e. it CONSIDERED the inverse. */
   declaresNoRollback: boolean;
+  /** True when the body emits `idempotencyObservable`, i.e. it cannot measure its own effect and said so. */
+  declaresNoIdempotency: boolean;
   /** The TS action name, which is what the read-verb test above reads. */
   tsAction?: string;
 };
@@ -282,18 +255,25 @@ describe("handler conventions", () => {
     ).toBe(0);
   });
 
-  it("only claims a mutation has no inverse when that is true", () => {
-    // An entry here that DOES emit a rollback is a stale claim, and a stale
-    // exemption is how a convention quietly stops applying.
-    const stale = Object.keys(NO_INVERSE).filter(
-      (action) => rows.find((r) => r.action === action)?.rollback,
-    );
-    expect(stale, `These now emit a rollback and should leave NO_INVERSE: ${stale.join(", ")}`).toEqual([]);
+  it("answers the rollback question in the result body, not in this file", () => {
+    // What the deleted NO_INVERSE allowlist used to assert, asked the right way
+    // round. The four handlers it exempted now carry their reason in the
+    // response, so the property to hold is that no mutation needs an exemption
+    // here at all: every one of them either emits an inverse or says why it
+    // cannot, and a caller can read the answer without reading this repo.
+    const unanswered = mutations
+      .filter((r) => !r.rollback && !r.declaresNoRollback)
+      .map((r) => r.action);
+    expect(
+      unanswered,
+      "A mutation must answer the rollback question in its own result body. There is no "
+        + "allowlist to add it to: emit MCPSetRollback, or MCPSetNoRollback with the reason.",
+    ).toEqual([]);
   });
 
   it("does not add a mutation without a rollback", () => {
     const without = mutations
-      .filter((r) => !r.rollback && !(r.action in NO_INVERSE))
+      .filter((r) => !r.rollback)
       .map((r) => r.action);
     expect(
       without.length,
@@ -316,7 +296,7 @@ describe("handler conventions", () => {
     // inverse, here is why" has finished the job, and one that says nothing has
     // not. This is the assertion nothing in the repo made.
     const silent = mutations
-      .filter((r) => !r.rollback && !r.declaresNoRollback && !(r.action in NO_INVERSE))
+      .filter((r) => !r.rollback && !r.declaresNoRollback)
       .map((r) => r.action);
     expect(
       silent.length,
@@ -329,12 +309,17 @@ describe("handler conventions", () => {
         `Offenders:`,
         ...silent.map((a) => `  ${a}`),
       ].join(String.fromCharCode(10)),
-    ).toBeLessThanOrEqual(BASELINE.mutationsSilentOnRollback);
+    ).toBe(BASELINE.mutationsSilentOnRollback);
   });
 
   it("does not add a mutation without an idempotency marker", () => {
+    // `declaresNoIdempotency` satisfies this the way `declaresNoRollback`
+    // satisfies the silence test above: a handler that CANNOT read whether it
+    // changed anything, and says so with the reason, has answered. The cases
+    // are handlers dispatching somebody else's code, where a fabricated
+    // `unchanged: false` would be a claim rather than a reading.
     const without = mutations
-      .filter((r) => !r.idempotent && !(r.action in NO_INVERSE))
+      .filter((r) => !r.idempotent && !r.declaresNoIdempotency)
       .map((r) => r.action);
     expect(
       without.length,
@@ -343,7 +328,7 @@ describe("handler conventions", () => {
         + `A mutation must report whether it actually changed anything, via MCPSetCreated /\n`
         + `MCPSetExisted / MCPSetUpdated or an explicit already* field, so a retry after a\n`
         + `timeout that in fact succeeded does not double-apply.`,
-    ).toBeLessThanOrEqual(BASELINE.mutationsWithoutIdempotency);
+    ).toBe(BASELINE.mutationsWithoutIdempotency);
   });
 
   it("does not add an unreachable handler", () => {

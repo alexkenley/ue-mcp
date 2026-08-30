@@ -221,7 +221,7 @@ namespace
 		Object->SetObjectField(TEXT("worldTransform"), TransformObject);
 
 		Object->SetObjectField(TEXT("localBounds"), MCPRefreshDescribeBounds(Component->GetLocalBounds()));
-		Object->SetObjectField(TEXT("worldBounds"), MCPRefreshDescribeBounds(Component->GetBounds()));
+		Object->SetObjectField(TEXT("worldBounds"), MCPRefreshDescribeBounds(MCPComponentWorldBounds(*Component)));
 
 		// #914's original ask: the UNSCALED authored extent, which is what the
 		// details panel shows and what no existing read returned.
@@ -696,8 +696,8 @@ TSharedPtr<FJsonValue> FLevelHandlers::TestComponentOverlap(const TSharedPtr<FJs
 
 	if (Method == TEXT("AABB"))
 	{
-		const FBox BoxA = ComponentA->GetBounds().GetBox();
-		const FBox BoxB = ComponentB->GetBounds().GetBox();
+		const FBox BoxA = MCPComponentWorldBounds(*ComponentA).GetBox();
+		const FBox BoxB = MCPComponentWorldBounds(*ComponentB).GetBox();
 		bOverlap = BoxA.Intersect(BoxB);
 		// Per-axis gap or overlap depth, which is what a caller tuning a
 		// placement actually wants back.

@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 //
 // Does docs/tool-reference.md list every action the server actually advertises?
 //

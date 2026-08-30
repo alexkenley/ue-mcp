@@ -355,7 +355,16 @@ TSharedPtr<FJsonValue> FEditorHandlers::ValidateAssets(const TSharedPtr<FJsonObj
 		DetailsArray.Add(MakeShared<FJsonValueObject>(DetailObject));
 	}
 	Result->SetArrayField(TEXT("assets"), DetailsArray);
+#if UE_MCP_HAS_5_8_API
 	Result->SetArrayField(TEXT("validatorMessages"), MCPValidationMessageArray(ValidationResults.ValidatorMessages));
+#else
+	// FValidateAssetsResults::ValidatorMessages arrived in 5.8. Earlier engines
+	// keep no bucket for a message a validator raised outside any one asset, so
+	// the field is omitted rather than sent as an empty array, which would read
+	// as "every validator ran and none had anything to say".
+	Result->SetStringField(TEXT("validatorMessagesNote"),
+		TEXT("validatorMessages omitted: cross-asset validator messages need UE 5.8, and this editor is older. Per-asset messages are still reported under assets[].messages."));
+#endif
 	Result->SetStringField(TEXT("message"), FString::Printf(TEXT("Validated %d assets"), ValidationResults.NumRequested));
 	return MCPResult(Result);
 }

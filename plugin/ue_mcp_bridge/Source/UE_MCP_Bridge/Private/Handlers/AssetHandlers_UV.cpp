@@ -2743,6 +2743,10 @@ TSharedPtr<FJsonValue> FAssetHandlers::ExportUvLayout(const TSharedPtr<FJsonObje
 			TEXT("The %dx%d UV layout for '%s' could not be PNG-encoded."), Size, Size, *Target.AssetPath));
 	}
 	const TArray64<uint8> PngData = PngWrapper->GetCompressed(100);
+	// Asked before the write, because afterwards every export looks like a
+	// first one. A caller rerunning this over a directory it is collecting
+	// pictures in wants to know which of them it just replaced.
+	const bool bOverwroteExistingFile = FPaths::FileExists(OutputPath);
 	if (!FFileHelper::SaveArrayToFile(PngData, *OutputPath))
 	{
 		return MCPError(FString::Printf(
@@ -2764,6 +2768,33 @@ TSharedPtr<FJsonValue> FAssetHandlers::ExportUvLayout(const TSharedPtr<FJsonObje
 		TEXT("White wire = UV triangle edges. Yellow border = the unit square. Grey grid = quarters. Coloured fill ")
 			TEXT("= one hue per UV island. Red fill = two or more triangles on the same texel, which is what breaks ")
 			TEXT("a lightmap bake."));
+
+	// The render always runs and the file is always written, so the honest
+	// answer to "did this change anything" is whether a picture was already
+	// sitting at that path.
+	if (bOverwroteExistingFile)
+	{
+		MCPSetExisted(Result);
+		MCPSetUpdated(Result);
+	}
+	else
+	{
+		MCPSetCreated(Result);
+	}
+
+	// The mesh is untouched: this writes a preview PNG under Saved/ and nothing
+	// else. An export produces an output artifact rather than project state,
+	// and deleting a picture that regenerates on demand from the same call is
+	// not a meaningful undo, so no inverse is named. The six export_* actions
+	// that predate this one emit no rollback for the same reason.
+	const FString OverwriteNote = bOverwroteExistingFile
+		? FString(TEXT(" The picture that was already at that path is gone and no copy was kept."))
+		: FString();
+	MCPSetNoRollback(Result, FString::Printf(
+		TEXT("Wrote the preview PNG '%s' and changed no project state. An export produces an output artifact, and ")
+		TEXT("deleting a file that this same call regenerates on demand is not a meaningful undo, so no inverse is ")
+		TEXT("named.%s"),
+		*OutputPath, *OverwriteNote));
 	return MCPResult(Result);
 }
 

@@ -2785,6 +2785,45 @@ TSharedPtr<FJsonValue> FWidgetHandlers::InvokeRuntimeWidgetFunction(const TShare
 		{
 			return Err;
 		}
+		// Whether the widget's own value moved. The interactions that carry a
+		// value record what it was and what it became, so this is a reading
+		// rather than an assumption; a click has neither, and gets no flag.
+		//
+		// It says nothing about the blueprint behind the widget. The delegate
+		// is broadcast whether or not the value moved, deliberately, because
+		// re-driving a slider to the value it already holds is still a request
+		// to run the graph. So `valueUnchanged` is about the widget, and the
+		// graph ran either way.
+		//
+		// Compared on the JSON type the interaction wrote rather than through a
+		// string or number accessor: a text field holding "42" and one holding
+		// "042" are different text, and a numeric accessor would call them the
+		// same value.
+		const TSharedPtr<FJsonValue> Before = Result->TryGetField(TEXT("previousValue"));
+		const TSharedPtr<FJsonValue> After = Result->TryGetField(TEXT("value"));
+		if (Before.IsValid() && After.IsValid())
+		{
+			bool bSameValue = false;
+			if (Before->Type == EJson::Number && After->Type == EJson::Number)
+			{
+				bSameValue = Before->AsNumber() == After->AsNumber();
+			}
+			else if (Before->Type == EJson::String && After->Type == EJson::String)
+			{
+				bSameValue = Before->AsString().Equals(After->AsString(), ESearchCase::CaseSensitive);
+			}
+			Result->SetBoolField(TEXT("valueUnchanged"), bSameValue);
+		}
+		else
+		{
+			// A click, a hover, a press: an event, not a state write. Firing it
+			// twice is two events rather than one repeated change, so there is
+			// no value to compare and no no-op to report.
+			Result->SetStringField(TEXT("idempotencyNote"),
+				TEXT("This interaction delivers an event rather than writing a value, so there is nothing to compare "
+				     "against and no valueUnchanged is reported. Sending it twice fires the delegate twice."));
+		}
+
 		// A simulated click, commit or value change fires the child's delegates,
 		// and what those handlers then do is decided by the running blueprint.
 		// Nothing here knows what changed, so nothing here can name an inverse.
@@ -2814,6 +2853,13 @@ TSharedPtr<FJsonValue> FWidgetHandlers::InvokeRuntimeWidgetFunction(const TShare
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("widget"), Found->GetName());
 	Result->SetStringField(TEXT("invoked"), FunctionName);
+	// No valueUnchanged here either: calling a UFUNCTION is an invocation, not a
+	// write of a value this action chose, so there is no before and after to
+	// compare. Whether the function did anything the second time is the
+	// function's own business.
+	Result->SetStringField(TEXT("idempotencyNote"),
+		TEXT("This calls a function rather than setting a value, so no unchanged flag is reported. Calling it twice "
+		     "runs it twice, and whether the second run does anything is decided inside the function."));
 	Result->SetBoolField(TEXT("rollbackPossible"), false);
 	Result->SetStringField(TEXT("rollbackNote"),
 		TEXT("This calls a UFUNCTION the widget's author wrote. What it changed is the function's business, not this action's, so there is ")

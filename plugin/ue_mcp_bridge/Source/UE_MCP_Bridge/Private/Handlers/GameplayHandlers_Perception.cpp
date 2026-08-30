@@ -1415,6 +1415,23 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReportNoiseEvent(const TSharedPtr<FJso
 		}
 	}
 
+	// A one-shot stimulus, and the two statements that follow from that.
+	//
+	// There is no inverse. The event is already queued on the perception system
+	// and an AI that receives it has heard it; nothing in the engine or in this
+	// surface un-hears a stimulus or drains the queue behind one.
+	//
+	// It is also not idempotent, and `changed` is unconditionally true for that
+	// reason. A replay after a timeout does not converge on a state the way a
+	// property write does: reporting the same noise twice queues two events,
+	// each one perceived on its own. A caller retrying this call is making a
+	// second noise, not repeating the first.
+	Result->SetBoolField(TEXT("changed"), true);
+	MCPSetNoRollback(Result, TEXT(
+		"The stimulus is already queued on the world's AIPerceptionSystem and is delivered on its "
+		"next update. There is no call that un-hears a reported event or withdraws one from the "
+		"queue, so a flow cannot undo this step; it can only let the perception age out."));
+
 	// Reporting an event is fire-and-forget, so the only way to know it could
 	// possibly land is to say who was listening for that sense when it went
 	// out, and how far away they were.

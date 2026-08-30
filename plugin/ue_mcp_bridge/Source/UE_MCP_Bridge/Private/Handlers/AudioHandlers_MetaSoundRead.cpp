@@ -39,9 +39,14 @@
 
 #include "MetasoundBuilderSubsystem.h"
 #include "MetasoundBuilderBase.h"
+// MetasoundDocumentBuilderRegistry.h, and never MetasoundFrontendDocumentBuilderRegistry.h:
+// the frontend header ships on 5.8 only. This MetasoundEngine header reaches
+// Metasound::Frontend::IDocumentBuilderRegistry on every supported engine, by
+// including the frontend header on 5.8 and MetasoundDocumentInterface.h, where
+// 5.7 and earlier declare the class, on all of them.
+#include "MetasoundDocumentBuilderRegistry.h"
 #include "MetasoundDocumentInterface.h"
 #include "MetasoundFrontendDocument.h"
-#include "MetasoundFrontendDocumentBuilderRegistry.h"
 #include "MetasoundFrontendLiteral.h"
 #include "MetasoundSource.h"
 

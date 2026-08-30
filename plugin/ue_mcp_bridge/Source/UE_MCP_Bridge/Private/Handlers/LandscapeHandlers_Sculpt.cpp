@@ -2394,6 +2394,19 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::ExportHeightmap(const TSharedPtr<FJso
 		bFileExisted
 			? TEXT("This overwrote an existing file and the previous contents were not read back, so the write cannot be undone through the bridge. Move or copy the old file first if it mattered.")
 			: TEXT("No inverse is emitted for a file this call created: the bridge has no delete-file method, and deleting a path the caller chose is not something a rollback should do on its own."));
+	// Both fields, for the same reason remove_layer_info below states: they
+	// answer different questions. rollbackOmitted says the previous file
+	// contents were not carried; rollbackPossible says no call restores them
+	// even if they had been. The landscape itself is untouched, so this is the
+	// argument asset(export_uv_layout) carries, applied to a heightmap file.
+	MCPSetNoRollback(Result, FString::Printf(
+		TEXT("Wrote the %s heightmap '%s' and changed no landscape, actor or asset state. An export produces an ")
+		TEXT("output artifact, and deleting a file that this same call regenerates on demand is not a meaningful ")
+		TEXT("undo, so no inverse is named. Undoing it would need a delete-file call the bridge does not have.%s"),
+		*Format, *Resolved,
+		bFileExisted
+			? TEXT(" The file that was already at that path is gone and no copy was kept.")
+			: TEXT("")));
 	Result->SetStringField(TEXT("note"), FString::Printf(
 		TEXT("%s Row-major from (minX,minY). Values are the landscape's raw uint16 heights, 32768 at the actor's own Z, one unit per 1/128 local cm."),
 		Format == TEXT("png16")

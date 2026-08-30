@@ -504,20 +504,71 @@ TSharedPtr<FJsonValue> FDialogHandlers::ClearDialogPolicy(const TSharedPtr<FJson
 	auto Result = MCPSuccess();
 
 	FString Pattern = OptionalString(Params, TEXT("pattern"));
+
+	// Copied BEFORE the removal. Re-arming a policy needs the response and the
+	// button label it was armed with, and both are gone the moment it leaves
+	// the list, so a rollback captured afterwards would re-arm the pattern with
+	// a different answer than the one that was cleared.
+	TArray<FDialogPolicy> Cleared;
 	if (!Pattern.IsEmpty())
 	{
-		int32 Removed = Policies.RemoveAll([&Pattern](const FDialogPolicy& P) { return P.Pattern == Pattern; });
+		for (const FDialogPolicy& P : Policies)
+		{
+			if (P.Pattern == Pattern) Cleared.Add(P);
+		}
+		Policies.RemoveAll([&Pattern](const FDialogPolicy& P) { return P.Pattern == Pattern; });
 		Result->SetStringField(TEXT("pattern"), Pattern);
-		Result->SetNumberField(TEXT("removed"), Removed);
 	}
 	else
 	{
-		int32 Count = Policies.Num();
+		Cleared = Policies;
 		Policies.Empty();
-		Result->SetNumberField(TEXT("removed"), Count);
 	}
 
+	Result->SetNumberField(TEXT("removed"), Cleared.Num());
 	Result->SetNumberField(TEXT("policyCount"), Policies.Num());
+
+	// Clearing a pattern nothing was armed for is a no-op, and saying so is the
+	// difference between "your policy is gone" and "there was never one".
+	Result->SetBoolField(TEXT("unchanged"), Cleared.Num() == 0);
+
+	// Every policy that was actually removed, in the form set_dialog_policy
+	// takes back. A caller that cleared several can re-arm them from this
+	// without having read get_dialog_policy first.
+	TArray<TSharedPtr<FJsonValue>> ClearedJson;
+	for (const FDialogPolicy& P : Cleared)
+	{
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("pattern"), P.Pattern);
+		Entry->SetStringField(TEXT("response"), ResponseTypeToString(P.Response));
+		Entry->SetStringField(TEXT("buttonLabel"), P.ButtonLabel);
+		ClearedJson.Add(MakeShared<FJsonValueObject>(Entry));
+	}
+	Result->SetArrayField(TEXT("cleared"), ClearedJson);
+
+	if (Cleared.Num() == 1)
+	{
+		// A cleared policy has a real inverse: arm it again exactly as it was.
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("pattern"), Cleared[0].Pattern);
+		Payload->SetStringField(TEXT("response"), ResponseTypeToString(Cleared[0].Response));
+		Payload->SetStringField(TEXT("buttonLabel"), Cleared[0].ButtonLabel);
+		MCPSetRollback(Result, TEXT("set_dialog_policy"), Payload);
+	}
+	else if (Cleared.Num() == 0)
+	{
+		MCPSetNoRollback(Result,
+			TEXT("Nothing was armed for that pattern, so no policy was removed and there is nothing to put back. "
+			     "set_dialog_policy is what arms one."));
+	}
+	else
+	{
+		MCPSetNoRollback(Result, FString::Printf(
+			TEXT("%d policies were cleared, and a rollback record carries one call. set_dialog_policy arms a single "
+			     "pattern, so putting these back takes one call per entry in 'cleared', which lists each pattern with "
+			     "the response and buttonLabel it was armed with."),
+			Cleared.Num()));
+	}
 
 	return MCPResult(Result);
 }
@@ -753,7 +804,17 @@ TSharedPtr<FJsonValue> FDialogHandlers::RespondToDialog(const TSharedPtr<FJsonOb
 	TSharedPtr<SWindow> ActiveModal = CollectActiveModal(Title, Message, Buttons);
 	if (!ActiveModal.IsValid())
 	{
-		return MCPError(TEXT("No active modal dialog"));
+		// Still a failure: nothing was pressed on this call, and a caller
+		// waiting on a particular button must not read this as done. But a
+		// retry after a timeout whose click actually landed arrives here too,
+		// so the reason is named rather than left to be inferred from a
+		// sentence. alreadyClosed separates "the dialog is gone" from "you
+		// aimed at an editor that never had one".
+		TSharedPtr<FJsonObject> Gone = MakeShared<FJsonObject>();
+		Gone->SetBoolField(TEXT("success"), false);
+		Gone->SetStringField(TEXT("error"), TEXT("No active modal dialog"));
+		Gone->SetBoolField(TEXT("alreadyClosed"), true);
+		return MCPResult(Gone);
 	}
 
 	// Determine action: buttonIndex, buttonLabel, or key simulation
@@ -795,6 +856,17 @@ TSharedPtr<FJsonValue> FDialogHandlers::RespondToDialog(const TSharedPtr<FJsonOb
 
 		Result->SetStringField(TEXT("clickedButton"), Buttons[TargetIndex].Label);
 		Result->SetNumberField(TEXT("buttonIndex"), TargetIndex);
+		Result->SetBoolField(TEXT("alreadyClosed"), false);
+
+		// A pressed button cannot be un-pressed. The dialog's own handler ran
+		// on the press and whatever it did - saving packages, discarding them,
+		// aborting an import - belongs to the editor code behind the button,
+		// not to this call, which never saw it.
+		MCPSetNoRollback(Result, FString::Printf(
+			TEXT("Pressed '%s' on the dialog '%s'. The editor code behind that button has already run and this call "
+			     "captured none of what it did, so there is nothing to restore. No action re-raises a dismissed modal "
+			     "or reverses the answer given to it."),
+			*Buttons[TargetIndex].Label, *Title));
 	}
 	else
 	{
@@ -809,6 +881,16 @@ TSharedPtr<FJsonValue> FDialogHandlers::RespondToDialog(const TSharedPtr<FJsonOb
 			FSlateApplication::Get().ProcessKeyUpEvent(FKeyEvent(EKeys::Escape, FModifierKeysState(), 0, false, 0, 0));
 			ActiveModal->RequestDestroyWindow();
 			Result->SetStringField(TEXT("action"), TEXT("closed window"));
+			Result->SetBoolField(TEXT("alreadyClosed"), false);
+
+			// Destroying the window ends the modal loop without answering the
+			// question, so the editor carries on down whatever path it takes
+			// for an unanswered prompt.
+			MCPSetNoRollback(Result, FString::Printf(
+				TEXT("Destroyed the dialog window '%s' without pressing any of its buttons. The editor has already "
+				     "resumed on its unanswered-prompt path and no action re-raises a destroyed modal, so the "
+				     "question cannot be put back to be answered differently."),
+				*Title));
 		}
 		else
 		{

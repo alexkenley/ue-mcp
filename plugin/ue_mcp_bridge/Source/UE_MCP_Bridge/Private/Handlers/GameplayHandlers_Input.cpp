@@ -1717,11 +1717,26 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetActionValue(const TSharedPtr<FJsonO
 	}
 	else
 	{
-		// ActionInstanceData is protected, but the applied mapping view is
-		// public and names every action the player currently has bound, which
-		// is the same set.
+		// ActionInstanceData is protected, but the player's applied mappings
+		// name every action it currently has bound, which is the same set.
+		TConstArrayView<FEnhancedActionKeyMapping> Mappings;
+#if UE_MCP_HAS_5_8_API
+		Mappings = Player.PlayerInput->GetEnhancedActionMappingsView();
+#else
+		// GetEnhancedActionMappingsView() arrived in 5.8 and is the only public
+		// route to this list: GetEnhancedActionMappings() is protected. The
+		// backing EnhancedActionMappings is a UPROPERTY though, and FProperty
+		// reflection ignores C++ access specifiers, so the same array is still
+		// readable. Same route gameplay(get_applied_imcs) takes to the applied
+		// contexts.
+		if (FArrayProperty* MappingsProp = CastField<FArrayProperty>(
+				Player.PlayerInput->GetClass()->FindPropertyByName(TEXT("EnhancedActionMappings"))))
+		{
+			Mappings = *MappingsProp->ContainerPtrToValuePtr<TArray<FEnhancedActionKeyMapping>>(Player.PlayerInput);
+		}
+#endif
 		TSet<const UInputAction*> Seen;
-		for (const FEnhancedActionKeyMapping& Mapping : Player.PlayerInput->GetEnhancedActionMappingsView())
+		for (const FEnhancedActionKeyMapping& Mapping : Mappings)
 		{
 			const UInputAction* Action = Mapping.Action;
 			if (Action && !Seen.Contains(Action))

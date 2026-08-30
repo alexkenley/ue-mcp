@@ -146,6 +146,11 @@ MCPSetDeleteAssetRollback(Result, AssetPath)  // shorthand for delete_asset roll
 MCPSetNoRollback(Result, Reason)              // { rollbackPossible: false, rollbackNote }
                                               // The reason is required: see
                                               // "rollbackPossible" below.
+MCPSetIdempotencyUnobservable(Result, Reason) // { idempotencyObservable: false, idempotencyNote }
+                                              // The same statement, one
+                                              // convention over: this call
+                                              // cannot read whether it changed
+                                              // anything, and here is why.
 
 // Existence probes - return a ready-to-return Existed/Error JSON value
 // on hit, an unset shared pointer on miss.
@@ -358,7 +363,7 @@ A handler with no natural key cannot be idempotent, and one whose effect is an e
 - `level.save` - writing packages to disk has no inverse call
 - `asset.reimport` - the previous import is not recoverable from the asset it replaced
 
-Being on this list is not an exemption from saying so. Each of these still owes the caller a `rollbackPossible: false` and a note, and the ones that do not yet emit one are counted by the `mutationsSilentOnRollback` baseline rather than excused by it. The only entries the audit exempts outright live in `NO_INVERSE` in `tests/unit/handler-conventions.test.ts`, each with a written reason, and that list is deliberately three long.
+Being on this list is not an exemption from saying so. Each of these owes the caller a `rollbackPossible: false` and a note, and every one of them now emits it. There is no allowlist to be added to: the `NO_INVERSE` map that used to exempt four handlers is gone, because it stated their reasons inside a test file where no caller could read them, and all four now state the same reasons in the response body.
 
 `level.load` used to be on this list and is not any more: it captures the level that was open and emits the `load_level` call that returns to it.
 
@@ -371,19 +376,43 @@ node scripts/audit-handler-conventions.mjs        # counts, plus the offenders b
 node scripts/audit-handler-conventions.mjs --json # every handler, one row each
 ```
 
-`tests/unit/handler-conventions.test.ts` pins those counts as a ratchet. A number that goes UP means a new handler skipped a convention. A number that goes DOWN means somebody fixed one, and the fix is not finished until the lower number is committed.
+`tests/unit/handler-conventions.test.ts` pins those counts. Two of them are flat
+rules at zero: a mutation that answers neither question fails the suite outright.
+The rest are a ratchet, where a number that goes UP means a new handler skipped a
+convention, and a number that goes DOWN means somebody fixed one and the fix is
+not finished until the lower number is committed.
+
+Worth knowing when reading any figure quoted from this audit: for most of its
+life the gating test did not run at all. It imports the audit out of a
+`scripts/*.mjs` file that began with a shebang, which Vite hands to the ESM
+loader unstripped, so the suite failed to LOAD rather than to assert and
+contributed no assertions and no failure. Numbers from that period were produced
+by running the CLI by hand.
 
 The shape of what is left, as of the last sweep:
 
 | | |
 |---|---|
 | Registered handlers | ~1040 |
-| Classified as mutations | ~690 |
-| Emitting a rollback record | ~550 |
-| Emitting `rollbackPossible: false` with a reason instead | ~110 |
-| Emitting neither, and therefore actually outstanding | ~26 |
-| Missing an idempotency marker | ~19 |
+| Classified as mutations | ~685 |
+| Emitting a rollback record | ~555 |
+| Emitting `rollbackPossible: false` with a reason instead | ~127 |
+| Emitting neither, and therefore actually outstanding | 0 |
+| Giving no idempotency answer | 0 |
 
 Every authoring category has been swept. Level, Asset, Blueprint, Material, Animation, Audio, Gameplay, GAS, Niagara, PCG, Sequencer, Spline, Widget, Landscape and Networking all emit an inverse from their creates and their modifies, including the ones an older version of this page listed as outstanding: `add_node`, `connect_pins`, `set_class_default`, `add_material_expression`, `delete_material_expression`, `create_state_machine`, `add_state`, `add_transition`, `set_bone_keyframes`, `add_attribute`, `set_ability_tags`, `set_niagara_parameter`, `add_emitter_to_system`, `add_pcg_node`, `set_pcg_node_settings`, `set_spline_points`, `add_widget`, `remove_widget`, `move_widget` and `set_sequence_keyframes`.
 
-What is left is the tail the audit names by hand each run. `foliage(set_settings)` is the clearest of them: it emits no inverse, no reason and no idempotency marker, so a flow that tunes a foliage type cannot be rolled back and a retried call cannot tell you whether it changed anything. Run the audit for the current list rather than reading one from here.
+The last two rows are zero and are held there by flat assertions rather than by a
+ratchet, because there is no debt left to ratchet down. `foliage(set_settings)`
+was the clearest of the tail and is now the clearest of the fixes: it captures
+each property's previous exported value before writing, emits itself as its own
+inverse with those values, and reports `changedCount` against the exported form
+so `1` and `1.000000` do not read as a change.
+
+A caveat that has not changed: this audit is source-level. It proves a rollback
+is EMITTED, never that it is correct. Correctness is what the live tier is for.
+
+`mutationsWithoutRollback` stays a number rather than a rule and stays non-zero
+on purpose. Not every change has an inverse, and a codebase where that count
+reached zero would be one that had started emitting rollbacks that do not roll
+anything back.

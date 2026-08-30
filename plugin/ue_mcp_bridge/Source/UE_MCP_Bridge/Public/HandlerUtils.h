@@ -13,6 +13,7 @@
 #include "Engine/Blueprint.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
+#include "Components/SceneComponent.h"
 #include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -137,6 +138,34 @@ inline void MCPSetCreated(TSharedPtr<FJsonObject> Result)
 inline void MCPSetUpdated(TSharedPtr<FJsonObject> Result)
 {
 	Result->SetBoolField(TEXT("updated"), true);
+}
+
+/** State that whether this call changed anything CANNOT BE READ, and say why.
+ *
+ *  The idempotency counterpart to MCPSetNoRollback, and it exists for the same
+ *  reason: a handler that cannot answer and says so has finished the job, and
+ *  one that says nothing has not, but from the outside the two look identical.
+ *
+ *  The cases are real and narrow. epic(call_tool) dispatches a wrapped engine
+ *  tool whose writes it never sees, and the Fab module publishes no
+ *  authentication or library state this build can read back. Both are asking
+ *  about somebody else's code, so a fabricated `unchanged: false` would be a
+ *  claim rather than a reading, which is worse than an honest absence.
+ *
+ *  This is NOT the escape hatch for a handler that could measure its effect and
+ *  did not. If the state is readable, read it before and after and report what
+ *  moved. The reason is a required argument for the same purpose it is on
+ *  MCPSetNoRollback: the flag alone tells a caller that replay safety is
+ *  unknown without telling it why, and the pair cannot come apart if one call
+ *  sets both.
+ *
+ *  The spelling was already in use in FabHandlers before this helper existed,
+ *  which is exactly how the earlier rollbackPossible drift started: an idiom
+ *  spread by copy while the convention audit recognised none of it. */
+inline void MCPSetIdempotencyUnobservable(TSharedPtr<FJsonObject> Result, const FString& Reason)
+{
+	Result->SetBoolField(TEXT("idempotencyObservable"), false);
+	Result->SetStringField(TEXT("idempotencyNote"), Reason);
 }
 
 /** Check for an existing asset at `PackagePath/Name`. Returns a fully-formed
@@ -2157,6 +2186,32 @@ inline void MCPGetNestedSubobjects(const UObjectBase* Outer, TArray<UObject*>& O
 #else
 	GetObjectsWithOuter(Outer, OutObjects, /*bIncludeNestedObjects*/ true,
 		RF_NoFlags, EInternalObjectFlags::Garbage);
+#endif
+}
+
+// ── Component bounds ─────────────────────────────────────────────────────────
+
+/** A scene component's cached world-space bounds, spelled the way each engine
+ *  wants it. 5.8 added USceneComponent::GetBounds(), an inline getter that
+ *  returns a const reference to the public Bounds member; 5.7 and earlier offer
+ *  the member alone. Both branches read the same field, so every supported
+ *  engine returns the same value at the same freshness - the accessor is a
+ *  rename, and UpdateBounds is still what refreshes what either one reads.
+ *
+ *  Bounds is public on 5.8 too, so the gate decides which spelling is used
+ *  rather than which one compiles. Preferring the accessor there is what keeps
+ *  these call sites correct on the engine that eventually makes the member
+ *  private, which is the reason Epic added the getter.
+ *
+ *  Both spellings live here and nowhere else. This module is a unity build, so
+ *  a file-local copy in a second .cpp is a C2084 redefinition the moment the
+ *  adaptive-unity working set puts the two files in one blob. */
+inline const FBoxSphereBounds& MCPComponentWorldBounds(const USceneComponent& Component)
+{
+#if UE_MCP_HAS_5_8_API
+	return Component.GetBounds();
+#else
+	return Component.Bounds;
 #endif
 }
 

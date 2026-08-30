@@ -264,15 +264,30 @@ TSharedPtr<FJsonValue> FLevelHandlers::DestroyTransientActor(const TSharedPtr<FJ
 		return MCPResult(Result);
 	}
 
+	// What the inverse needs, read while the actor still exists. A destroyed
+	// actor cannot be asked what class it was or where it stood.
+	struct FDestroyedTransient
+	{
+		FString ClassPath;
+		FString Label;
+		FTransform Transform;
+	};
+	TArray<FDestroyedTransient> Restorable;
+
 	TArray<FString> Destroyed;
 	TArray<FString> Failed;
 	for (AActor* Actor : Targets)
 	{
 		const FString Description = FString::Printf(
 			TEXT("%s (%s)"), *Actor->GetActorLabel(), *Actor->GetClass()->GetName());
+		FDestroyedTransient Snapshot;
+		Snapshot.ClassPath = Actor->GetClass()->GetPathName();
+		Snapshot.Label = Actor->GetActorLabel();
+		Snapshot.Transform = Actor->GetActorTransform();
 		if (World->DestroyActor(Actor))
 		{
 			Destroyed.Add(Description);
+			Restorable.Add(MoveTemp(Snapshot));
 		}
 		else
 		{
@@ -288,8 +303,47 @@ TSharedPtr<FJsonValue> FLevelHandlers::DestroyTransientActor(const TSharedPtr<FJ
 	}
 	Result->SetNumberField(TEXT("matched"), Targets.Num());
 	Result->SetNumberField(TEXT("destroyed"), Destroyed.Num());
+	// A replay of the same call finds nothing left to destroy, which is a
+	// success that changed nothing. Saying so is what lets a retried step tell
+	// the two apart.
+	Result->SetBoolField(TEXT("alreadyDeleted"), Targets.IsEmpty());
 	Result->SetArrayField(TEXT("destroyedActors"), MCPStringListToJson(Destroyed));
 	Result->SetArrayField(TEXT("failed"), MCPStringListToJson(Failed));
+	// The spawn_transient_actor call that brings one of them back, in that
+	// action's own parameter names so it can be replayed unedited.
+	auto MakeSpawnPayload = [&WorldScope](const FDestroyedTransient& Entry)
+	{
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("world"), WorldScope);
+		Payload->SetStringField(TEXT("actorClass"), Entry.ClassPath);
+		if (!Entry.Label.IsEmpty()) Payload->SetStringField(TEXT("label"), Entry.Label);
+		Payload->SetObjectField(TEXT("location"), MCPVec3ToJsonObject(Entry.Transform.GetLocation()));
+		Payload->SetObjectField(TEXT("rotation"), MCPRotatorToJsonObject(Entry.Transform.Rotator()));
+		Payload->SetObjectField(TEXT("scale"), MCPVec3ToJsonObject(Entry.Transform.GetScale3D()));
+		return Payload;
+	};
+
+	if (Restorable.Num() == 1)
+	{
+		MCPSetRollback(Result, TEXT("spawn_transient_actor"), MakeSpawnPayload(Restorable[0]));
+		Result->SetStringField(TEXT("rollbackNote"),
+			TEXT("The inverse spawns a fresh verification actor of the same class at the same transform. It is a new actor with a new object path, so anything written onto the destroyed one after it was spawned is not restored."));
+	}
+	else if (Restorable.Num() > 1)
+	{
+		// One rollback record is one call, so a batch destroy has no single
+		// inverse. The per-actor calls are handed over instead of described.
+		TArray<TSharedPtr<FJsonValue>> RestoreCalls;
+		for (const FDestroyedTransient& Entry : Restorable)
+		{
+			RestoreCalls.Add(MakeShared<FJsonValueObject>(MakeSpawnPayload(Entry)));
+		}
+		Result->SetArrayField(TEXT("restorable"), RestoreCalls);
+		MCPSetNoRollback(Result, FString::Printf(
+			TEXT("%d transient verification actors were destroyed in one call, and level(spawn_transient_actor) makes one actor at a time, so no single call undoes the batch. ")
+			TEXT("Each entry of 'restorable' is a ready spawn_transient_actor payload for one of them."),
+			Restorable.Num()));
+	}
 	if (Targets.IsEmpty())
 	{
 		Result->SetStringField(TEXT("zeroMatchNote"),
