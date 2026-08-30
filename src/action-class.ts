@@ -310,6 +310,26 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   // it can do.
   "gas.get_live_attribute_value": "mutate",
 
+  // ── Reads whose name leads with a subsystem, not a verb ─────────────
+  // The lexicon only trusts a read verb in the leading segment, so these say
+  // out loud what they read. Each one was confirmed against its handler: they
+  // open an asset, walk a graph or a document, and write nothing back.
+  "audio.metasound_get_graph": "read",
+  "audio.metasound_read_document": "read",
+  "audio.metasound_list_node_classes": "read",
+  "audio.metasound_list_node_pins": "read",
+  "audio.metasound_list_connections": "read",
+  "audio.metasound_list_variables": "read",
+  "audio.metasound_search_nodes": "read",
+  "audio.metasound_inspect_node": "read",
+  // Runs the MetaSound builder's own validation over a document and reports
+  // the errors. It builds nothing and saves nothing.
+  "audio.metasound_validate": "read",
+  "audio.cue_get_graph": "read",
+  // Answers whether a named weightmap layer is present on a landscape. The
+  // `exists` question never creates the layer it asks about.
+  "landscape.layer_exists": "read",
+
   // ── The workflow journal and the skill packs ────────────────────────
   // Neither reaches a bridge, so nothing here can land in the wrong EDITOR.
   // Both are still per project: the journal file is keyed by absolute project
@@ -355,7 +375,20 @@ export function classifyActionClass(tool: string, action: string): ActionClassif
 
   const segments = action.toLowerCase().split(/[._]/).filter(Boolean);
   if (segments.some((s) => MUTATE_VERBS.has(s))) return { class: "mutate", source: "lexicon" };
-  if (segments.some((s) => READ_VERBS.has(s))) return { class: "read", source: "lexicon" };
+  // A read verb only settles the question from the FRONT of the name. Anywhere
+  // else it is a noun as often as a verb, and the direction of that mistake is
+  // the dangerous one: `wire_rvt_sample` was a mutation that classified as a
+  // read on the strength of `sample`, and untargeted dispatch would have let it
+  // edit whichever editor happened to be active. It reached a human review
+  // rather than a release, and was renamed to `add_rvt_sampler`, which is a fix
+  // to one name and not to the rule that produced it.
+  //
+  // So a trailing read verb now decides nothing and falls through to
+  // `unresolved`, which is gated exactly like a mutation and which the drift
+  // guard fails on. The cost is an override line for every genuine read whose
+  // name leads with a subsystem instead of a verb; those are below, each saying
+  // what it reads. The alternative costs a silent wrong-editor write.
+  if (READ_VERBS.has(segments[0] ?? "")) return { class: "read", source: "lexicon" };
 
   // Epic's wrapped engine tools are injected at runtime from a live catalog, so
   // no build-time guard can enumerate them: enrichment can invent whole
