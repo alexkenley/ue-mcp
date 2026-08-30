@@ -234,7 +234,18 @@ export function readRuns(file: string): JournalRun[] {
       if (rec.steps) run.steps = rec.steps;
     }
   }
-  return [...byId.values()].sort((a, b) => b.startedAt - a.startedAt);
+  // Newest first, and DETERMINISTIC when two runs share a millisecond.
+  //
+  // Sorting on the timestamp alone left ties to whatever order the map
+  // happened to yield, so two runs started in the same millisecond came back
+  // in one order on a slow machine and the other on a fast one. The journal is
+  // append-only, so its own file order is the true sequence: a later record is
+  // the later run. Ties therefore break on position, reversed to match the
+  // newest-first intent.
+  const order = new Map([...byId.keys()].map((id, i) => [id, i]));
+  return [...byId.values()].sort(
+    (a, b) => b.startedAt - a.startedAt || order.get(b.runId)! - order.get(a.runId)!,
+  );
 }
 
 /** One run by id, or undefined. */
