@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Convention audit over every registered C++ handler.
  *

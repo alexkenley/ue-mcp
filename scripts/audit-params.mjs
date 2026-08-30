@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 //
 // Do the parameters an action's description names match the ones its row in
 // docs/tool-reference.md names?
