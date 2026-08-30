@@ -384,8 +384,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::PlaySoundAtLocation(const TSharedPtr<FJso
 	Result->SetStringField(TEXT("assetPath"), SoundPath);
 	// Stated in the result, not just in the comment above, so a flow can read
 	// the answer rather than infer it from a missing field.
-	Result->SetBoolField(TEXT("rollbackPossible"), false);
-	Result->SetStringField(TEXT("rollbackNote"),
+	MCPSetNoRollback(Result,
 		TEXT("A one-shot sound is an event, not a state. It is already audible by the time this returns and nothing changed on disk or ")
 		TEXT("in the level, so there is nothing to undo and no action that would undo it. Calling again plays it again."));
 

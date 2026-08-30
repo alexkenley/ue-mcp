@@ -85,6 +85,12 @@ const ROLLBACK_MARKERS = [
  * tell them apart, so an honest `rollbackPossible: false` with a note read
  * exactly like an omission. A caller reading the result can tell them apart,
  * which is the whole point of emitting the field.
+ *
+ * `MCPSetNoRollback(Result, Reason)` in Public/HandlerUtils.h is the helper
+ * spelling, and it sets the field and its note together. This list carried the
+ * name before the helper was written, which made it a marker that could never
+ * match: the audit advertised two accepted spellings and only ever recognised
+ * one. Both are recognised now because both exist.
  */
 const NO_ROLLBACK_MARKERS = [
   "rollbackPossible", "MCPSetNoRollback",

@@ -71,11 +71,16 @@ const BASELINE = {
   // convention. If it goes DOWN, lower it here and commit that. Never edit
   // these to whatever makes the test pass.
   mutationsWithoutRollback: 135,
-  mutationsWithoutIdempotency: 21,
+  // Re-measured: 21 -> 19. Two handlers picked up an idempotency marker since
+  // the last pin, and a baseline left at the old number is a ratchet with two
+  // teeth of slack in it, which is the same as no ratchet for the next two
+  // handlers that skip the convention.
+  mutationsWithoutIdempotency: 19,
   // The count that matters most, and the one nothing measured before: a
   // mutation that emits neither an inverse nor a reason there is none. The
-  // other 107 of the 135 above said out loud that they cannot be undone.
-  mutationsSilentOnRollback: 28,
+  // rest of the 135 above said out loud that they cannot be undone.
+  // Re-measured: 28 -> 26.
+  mutationsSilentOnRollback: 26,
   orphanedHandlers: 22,
 };
 
@@ -150,6 +155,12 @@ const NO_INVERSE: Record<string, string> = {
     + "demand is not a meaningful undo. The same reasoning covers the six "
     + "export_* actions that predate this one, all of which likewise emit no "
     + "rollback; they belong to the deferred convention pass.",
+  add_smart_object_default_behavior:
+    "Appends an instanced behavior definition to a SmartObjectDefinition's "
+    + "DefaultBehaviorDefinitions. Nothing in this surface removes an entry "
+    + "from that array, exactly as for its per-slot twin "
+    + "add_smart_object_slot_behavior, which carries the same statement. The "
+    + "response says rollbackPossible=false and names the index it wrote.",
   report_noise_event:
     "Injects a one-shot stimulus into the running world. An AI either heard it "
     + "or did not; there is no call that un-hears it. For the same reason it "
@@ -259,13 +270,16 @@ describe("handler conventions", () => {
 
   it("finds a body for every registered handler", () => {
     // A handler whose body cannot be located is not audited at all, so this
-    // guards the audit itself rather than the handlers.
+    // guards the audit itself rather than the handlers. The cap is 0 because
+    // the measured number is 0: a tolerance of six unreadable bodies is six
+    // handlers that could skip every convention in this file without failing
+    // anything, and the whole point of the ratchet is that the slack is real.
     const missing = rows.filter((r) => !r.bodyFound).map((r) => `${r.action} (${r.method})`);
     expect(
       missing.length,
       `The audit could not locate these handler bodies, so their conventions are unchecked:\n  `
         + missing.join("\n  "),
-    ).toBeLessThanOrEqual(6);
+    ).toBe(0);
   });
 
   it("only claims a mutation has no inverse when that is true", () => {

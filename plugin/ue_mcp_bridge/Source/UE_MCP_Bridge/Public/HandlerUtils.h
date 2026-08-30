@@ -97,6 +97,28 @@ inline void MCPSetRollback(
 	Result->SetObjectField(TEXT("rollback"), Rollback);
 }
 
+/** State that this mutation has no inverse, and say why.
+ *
+ *  The counterpart to MCPSetRollback, and the difference between a mutation
+ *  that FORGOT its inverse and one that DECIDED it has none. Both emit no
+ *  rollback record, so from the outside they are indistinguishable unless the
+ *  second one says so in the result body.
+ *
+ *  The reason is a required argument rather than an optional one. A bare
+ *  `rollbackPossible: false` tells a caller that recovery is off the table
+ *  without telling it why, which is the half of the answer that decides what
+ *  the caller does next; and a handler that sets the flag and forgets the note
+ *  still reads as considered to anything auditing the pair. Taking both in one
+ *  call is what makes them inseparable.
+ *
+ *  Keep the note concrete: what was changed, and what call would have to exist
+ *  for it to be undone. See docs/handler-conventions.md. */
+inline void MCPSetNoRollback(TSharedPtr<FJsonObject> Result, const FString& Reason)
+{
+	Result->SetBoolField(TEXT("rollbackPossible"), false);
+	Result->SetStringField(TEXT("rollbackNote"), Reason);
+}
+
 /** Mark a result as "already existed, nothing created" - idempotent replay. */
 inline void MCPSetExisted(TSharedPtr<FJsonObject> Result)
 {
