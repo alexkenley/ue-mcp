@@ -186,8 +186,8 @@ Everything the server injects at session start - the `initialize` instructions p
 
 | Strategy | Seed (test project) | What's advertised | Cost to use |
 |----------|--------------------|-------------------|-------------|
-| **`full`** (default) | ~45k tokens | all 22 category tools, every action + parameter inline | zero discovery calls |
-| **`lean`** | ~23k tokens | the same 22 tools with their validated `action` enums, but descriptions collapsed to a summary; a `catalog` tool (`search` / `describe` / `list_categories`) and a per-category `describe` action serve the details on demand | ~1 round-trip to learn a category |
+| **`full`** (default) | ~45k tokens | all <!-- count:tools -->24<!-- /count --> category tools, every action + parameter inline | zero discovery calls |
+| **`lean`** | ~23k tokens | the same <!-- count:tools -->24<!-- /count --> tools with their validated `action` enums, but descriptions collapsed to a summary; a `catalog` tool (`search` / `describe` / `list_categories`) and a per-category `describe` action serve the details on demand | ~1 round-trip to learn a category |
 | **`micro`** | ~1k tokens | a single `tools` gateway - `list_categories`, `describe`, and `call` - fronting every category; nothing else | discovery for everything |
 
 - **full** is best when the agent should see the entire surface up front and you are not token-constrained.

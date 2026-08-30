@@ -180,13 +180,25 @@ function regenerateToolReference(counts: Counts): string {
 function applyCountMarkers(text: string, counts: Counts): string {
   return text
     .replace(/<!--\s*count:tools\s*-->[^<]*<!--\s*\/count\s*-->/g, `<!-- count:tools -->${counts.tools}<!-- /count -->`)
-    .replace(/<!--\s*count:actions\s*-->[^<]*<!--\s*\/count\s*-->/g, `<!-- count:actions -->${counts.actions}+<!-- /count -->`);
+    .replace(/<!--\s*count:actions\s*-->[^<]*<!--\s*\/count\s*-->/g, `<!-- count:actions -->${counts.actions}+<!-- /count -->`)
+    // The actions that dispatch to the C++ bridge, which is what the smoke
+    // tier exercises and therefore the number CLAUDE.md quotes for it.
+    .replace(
+      /<!--\s*count:bridgeActions\s*-->[^<]*<!--\s*\/count\s*-->/g,
+      `<!-- count:bridgeActions -->${counts.bridgeActions}<!-- /count -->`,
+    );
 }
 
+// Any doc that states a tool or action count belongs here, marker and all. A
+// file left off the list has to be corrected by hand every time the surface
+// grows, which is how docs/configuration.md came to say "all 22 category
+// tools" twice while the server advertised twenty-four.
 const MARKER_FILES = [
+  "CLAUDE.md",
   "README.md",
   "docs/index.md",
   "docs/architecture.md",
+  "docs/configuration.md",
   "docs/development.md",
   "docs/flows.md",
   "docs/tool-reference.md",

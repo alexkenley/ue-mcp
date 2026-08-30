@@ -2,7 +2,7 @@
 
 This page lists ue-mcp's own category tools and actions. For the official Unreal 5.8 tools that ue-mcp wraps (surfaced inside these same categories), see [Native Tools](native-tools.md).
 
-UE-MCP exposes **<!-- count:tools -->24<!-- /count --> category tools** covering **<!-- count:actions -->1088+<!-- /count --> actions**, plus a `flow` tool for running multi-step YAML workflows. Every category tool takes an `action` parameter that selects the operation, plus action-specific parameters.
+UE-MCP exposes **<!-- count:tools -->24<!-- /count --> category tools** covering **<!-- count:actions -->1090+<!-- /count --> actions**, plus a `flow` tool for running multi-step YAML workflows. Every category tool takes an `action` parameter that selects the operation, plus action-specific parameters.
 
 !!! tip "First call in any session"
     Start with `project(action="get_status")` to check the connection, then `level(action="get_outliner")` or `asset(action="list")` to explore.
@@ -14,6 +14,60 @@ UE-MCP exposes **<!-- count:tools -->24<!-- /count --> category tools** covering
      this file from ALL_TOOLS and keeps only what precedes the first `## `
      heading, so hand-written prose that must survive a regeneration lives here
      and stays at `###` or deeper. -->
+
+### Parameters every category tool accepts
+
+Four parameters sit outside any one action. They are read by dispatch and stripped before the call reaches the bridge, so they can never collide with an action's own parameter of the same name, and they behave identically on every category tool.
+
+| Parameter | Type | What it does |
+|-----------|------|--------------|
+| `select` | string or string list | Keep only these result fields. |
+| `omit` | string or string list | Drop these result fields. Runs after `select`. |
+| `timeoutMs` | integer, 1 to 3600000 | How long to wait for this one call. |
+| `pathsRepaired` | (response field, not a parameter) | Reports backslashes the server folded out of your path parameters. |
+
+#### `select` and `omit`
+
+Some reads are large by nature. `level(get_component_tree)` on a character answers with every component's transform, collision, materials and tags; `asset(bulk_read_properties)` answers a library-wide question across hundreds of assets. An agent that wanted one field out of either still pays for all of it, and the cost lands in a context window rather than on a wire, where it cannot be recovered later in the conversation.
+
+Both take dotted paths, and both traverse arrays transparently:
+
+```
+level(action="get_outliner", select="actors.name")
+level(action="get_component_tree", actorName="BP_Hero", select=["components.name", "components.class"])
+asset(action="get_metadata", assetPath="/Game/Hero", omit="thumbnail")
+```
+
+`components.name` keeps the name of every component in the array. `components[].name` means the same thing: the brackets are accepted and discarded rather than being a second syntax with different behaviour. Two paths into the same array produce one array of two-key objects, not two arrays.
+
+`select` runs first and `omit` second, so keeping a subtree and dropping one field inside it does what it reads like.
+
+A path that matches nothing comes back in a `fieldsNotFound` field on the result rather than being ignored, because the alternative failure is a caller concluding a field is absent from the data when it only misspelled the path. If **no** path matched, the filter is not applied at all and the full result is returned with the same report: handing back `{}` would read as an empty answer from the editor rather than as a filter that did not fit.
+
+#### `timeoutMs`
+
+How long to wait for this call, in milliseconds. Omitted, the wait is 30 seconds, or longer for the actions the editor itself allows longer. Raise it for a large batch, or for an editor busy compiling shaders.
+
+A timeout never means the call did not happen. The request was sent; only the wait ended. Read the state back before retrying.
+
+#### `pathsRepaired`
+
+Unreal addresses content with forward slashes, and so does every bridge handler. An agent running on Windows does not reliably produce them: it writes `\Game\UI\WBP_Menu` or `/Game/UI\WBP_Menu`, because that is what the surrounding shell, the file explorer and half its training data look like. The bridge then fails to resolve an asset that is right there, and the error says the asset does not exist, which sends the caller looking for the wrong problem.
+
+So the server repairs it at the boundary, on any parameter whose **name** says it holds a path (one ending in `Path`, `Paths`, `Dir`, `Directory`, `File` or `Folder`, including every element of a list like `assetPaths`). Doing that silently would be worse than not doing it, so every repair comes back on the result:
+
+```json
+{
+  "pathsRepaired": {
+    "note": "Backslashes were replaced with forward slashes in these parameters. Unreal addresses content with forward slashes; send them that way to avoid the repair.",
+    "repairs": [{ "param": "assetPath", "from": "\\Game\\UI\\WBP_Menu", "to": "/Game/UI/WBP_Menu" }]
+  }
+}
+```
+
+Two shapes are deliberately left alone. A UNC path (`\\server\share\x`) keeps its leading pair, which is syntax rather than a mistake, and a parameter whose name does not say it holds a path is never touched, so a string that merely looks escaped survives intact. A Windows drive path (`C:\Users\...`) **is** repaired, because forward slashes are accepted everywhere it can be used: Node's fs layer, UBT and Unreal's own file APIs all take them.
+
+The field only appears when something was repaired, and only on an object result. It is absent from a clean call.
 
 ### Dialog handling modes
 
@@ -371,7 +425,7 @@ Nothing outside these modes ever answers a dialog by itself. `editor(set_dialog_
 | `clear_level_script` | Preview or remove every node and member variable from the currently loaded persistent level's Level Blueprint. Defaults to dryRun=true. Actors are untouched; save=true saves only the current level after a successful compile. Params: `dryRun?, save?` |
 | `save` | Save the level currently being edited, and say what happened to each package. Takes the same package path editor(save_dirty) uses, so the two can no longer disagree about whether one package was written: the old action returned a bare {success:false, error:'Failed to save current level'} on a map that save_dirty then wrote seconds later, and a false failure makes an agent redo work that was already on disk (#964). On a World Partition or one-file-per-actor map the actors live in their own packages, so those are saved too and each is reported separately. A package that was already clean is reported as skipped, not as a failure. On failure the error names the package, the resolved file, whether that file exists and is read-only, the engine's ESavePackageResult and the error/warning lines the save itself emitted. Saving during PIE is refused by name rather than failing silently. Params: `force? (write even a clean package, default false), includeExternalActors? (default true)` |
 | `list` | List levels: the persistent level first, then every streaming level with its loaded and visible state, in the world's own streaming order. Params: `directory?, recursive?, cursor?, limit?` |
-| `create` | Create new level. Params: `levelPath?, templateLevel?` |
+| `create` | Create a new level at a path and open it. levelPath is required and is validated before the engine is asked: an omitted or malformed path is refused outright, because NewLevel("") logs an engine error and lands the editor on an untitled map that cannot then be saved. Params: `levelPath, templateLevel? (omit, "Empty" or "None" for a blank level) (#833)` |
 | `spawn_volume` | Place volume. Params: `volumeType, location?, extent?, label?` |
 | `list_volumes` | List volumes, sorted by actor path so a page boundary is stable. Params: `volumeType? (substring over the volume class name), cursor?, limit?` |
 | `set_volume_properties` | Edit volume. Params: `actorLabel OR actorPath, properties` |
@@ -606,7 +660,7 @@ Nothing outside these modes ever answers a dialog by itself. `editor(set_dialog_
 | `batch_retarget_animations` | Bake validated source AnimSequences onto the target skeleton through an IK Retargeter (RunBatchRetarget), save every output, and roll back newly created outputs if the batch is incomplete or unsavable. Overwrite is rejected. Returns mapping completeness and every unmapped target chain so partial retargets are explicit; pass requireCompleteMapping=true only when the target should have no intentional extra chains. Params: `retargeterPath, sourceMesh, targetMesh, animPaths[], outputPath? (default: alongside source), prefix?, suffix? (default _Retargeted), overwrite? (must be false), requireCompleteMapping? (default false) (#701)` |
 | `set_anim_blueprint_skeleton` | Set target skeleton on AnimBP. Params: `assetPath, skeletonPath` |
 | `read_bone_track` | Read bone transform samples from AnimSequence. Params: `assetPath, boneName, frames?: [int]` |
-| `create_pose_search_database` | Create a PoseSearchDatabase asset (motion matching). Params: `name, packagePath?, schemaPath?` |
+| `create_pose_search_database` | Create a PoseSearchDatabase asset (motion matching). Pass skeletonPath and it authors the matching PoseSearchSchema (<name>_Schema, default channels) alongside it, which is what makes the database indexable at all; pass schemaPath to reuse an existing one. A schema that cannot index (no skeleton, or no feature channels) is refused rather than assigned, because the editor then reports the DATABASE as the invalid asset. Without either, the database is created empty and unindexable and says so in note. Params: `name, packagePath?, skeletonPath?, schemaPath?, onConflict? (#833)` |
 | `set_pose_search_schema` | Set the Schema on an existing PoseSearchDatabase. Params: `assetPath, schemaPath` |
 | `add_pose_search_sequence` | Append an AnimSequence/AnimComposite/AnimMontage/BlendSpace to a PoseSearchDatabase, with optional per-clip flags. Params: `assetPath, sequencePath, mirror? ('original'\|'mirrored'\|'both'), disableReselection?, sampleStart?, sampleEnd?, enabled? (#684)` |
 | `set_pose_search_clips` | Author the whole clip list of a PoseSearchDatabase in one call (the 'duplicate a stock PSD, swap its clips' pipeline step). Replaces the list by default. Each clip carries per-entry flags. Params: `assetPath, clips ([{sequencePath, mirror? ('original'\|'mirrored'\|'both'), disableReselection?, sampleStart?, sampleEnd?, enabled?}] - a bare string path also works), clearExisting? (default true)` |
@@ -1123,16 +1177,17 @@ Nothing outside these modes ever answers a dialog by itself. `editor(set_dialog_
 | `add_perception` | Add an AIPerceptionComponent to a Blueprint and configure its senses. senses takes short names (Sight, Hearing, Damage, Touch, Team, Prediction), AISenseConfig_* names, or class paths - a component with no sense configs perceives nothing. Params: `blueprintPath, senses?` |
 | `configure_sense` | Add OR tune an AI perception sense config on the blueprint's AIPerceptionComponent. settings are applied whether the sense was just created or was already there, so 'add a sense then tune it' writes on the second call. Reports the three outcomes apart: created, existed+updated (changedProperties), existed+unchanged (unchangedProperties, asset untouched). An unknown settings key is refused with the valid property names and nothing is written; a value that will not convert restores what it had already applied. Params: `blueprintPath, senseType (Sight\|Hearing\|Damage\|Touch\|Team\|Prediction\|Blueprint), settings? ({SightRadius: ...}), componentName?` |
 | `get_state_tree_runtime` | Read a running StateTreeComponent's active state names in PIE (the 'brain' state). Params: `actorLabel OR actorPath, world? (default pie), componentName? (#654)` |
-| `create_state_tree` | Create a StateTree with a proper UStateTreeEditorData (schema + root state), so states/tasks are authorable via statetree(*) and persist across save/load (#653). Params: `name, packagePath?, schema? (default /Script/GameplayStateTreeModule.StateTreeComponentSchema), onConflict?` |
+| `create_state_tree` | Create a StateTree with editor data, a schema and a root state, so states/tasks are authorable via statetree(*) and persist across save/load (#653). The schema is required for the tree to compile at all: omit it to take StateTreeComponentSchema, then StateTreeAIComponentSchema, then whatever concrete schema this editor has, and read schemaSource / schemaNote to see which was used. Refuses (and writes nothing) when a named schema does not resolve, or when the editor has no schema class at all, listing availableSchemas and naming the plugin to enable (#833). Params: `name, packagePath?, schema?, onConflict?` |
 | `list_state_trees` | List StateTrees, sorted by object path. Params: `directory?, cursor?, limit?` |
 | `add_state_tree_component` | Add StateTreeComponent. Params: `blueprintPath` |
-| `create_smart_object_def` | Create SmartObjectDefinition. Params: `name, packagePath?` |
+| `create_smart_object_def` | Create SmartObjectDefinition. Pass defaultBehaviorClass to give it a default behavior definition, which is what makes every slot added later legal: the editor rejects a definition whose slot has no behavior and whose definition has no default. Returns definitionValid + defaultBehaviorCount (#833). Params: `name, packagePath?, defaultBehaviorClass?, instanceProperties?, onConflict?` |
 | `add_smart_object_component` | Add SmartObjectComponent. Params: `blueprintPath` |
-| `add_smart_object_slot` | Append a FSmartObjectSlotDefinition to a SmartObjectDefinition's Slots array. Params: `assetPath, name?, offset? ({x,y,z}), rotation? ({pitch,yaw,roll}), tags? (array)` |
+| `add_smart_object_slot` | Append a FSmartObjectSlotDefinition to a SmartObjectDefinition's Slots array. Pass behaviorClass to give the slot its behavior definition in the same call; without one the definition needs a default or the editor's asset check rejects the asset, which the response reports as definitionValid=false plus the exact fix. Params: `assetPath, name?, offset? ({x,y,z}), rotation? ({pitch,yaw,roll}), tags? (array), behaviorClass?, instanceProperties?` |
 | `set_smart_object_slot` | Mutate an existing slot's offset/rotation/tags. Params: `assetPath, slotIndex, offset? ({x,y,z}), rotation? ({pitch,yaw,roll}), tags? (array)` |
-| `remove_smart_object_slot` | Remove a slot by index. Idempotent: out-of-range returns alreadyDeleted=true. Removing the LAST slot rolls back through add_smart_object_slot, which appends it to the same index (lossy on the slot BehaviorDefinitions, which that action has no parameter for). Removing any other slot has no inverse, because re-adding would append it to the end and leave every later slotIndex shifted; the full removed slot is reported as removedSlot for manual recovery. Params: `assetPath, slotIndex (#416)` |
+| `remove_smart_object_slot` | Remove a slot by index. Idempotent: out-of-range returns alreadyDeleted=true. Removing the LAST slot rolls back through add_smart_object_slot, which appends it to the same index (lossy on the slot BehaviorDefinitions, which that action can only restore one class of, with no instance values). Removing any other slot has no inverse, because re-adding would append it to the end and leave every later slotIndex shifted; the full removed slot is reported as removedSlot for manual recovery. Params: `assetPath, slotIndex (#416)` |
 | `list_smart_object_slots` | List slots on a SmartObjectDefinition with index, offset, rotation, and raw text. Params: `assetPath (#416)` |
 | `add_smart_object_slot_behavior` | Attach a behavior definition (UBehaviorDefinition asset or class) to a slot's BehaviorDefinitions array. Pass instanceProperties to seed UPROPERTYs on a freshly-spawned class-instance. No inverse: nothing removes an entry from a slot BehaviorDefinitions array, and removing the slot would undo more than this did, so the response says rollbackPossible=false and names the behaviorIndex it added. Params: `assetPath, slotIndex, behaviorClass (asset path or class path), instanceProperties? (#416)` |
+| `add_smart_object_default_behavior` | Add a behavior definition to the SmartObjectDefinition's DefaultBehaviorDefinitions, the list every slot falls back to when it provides none of its own. This is the definition-wide half of add_smart_object_slot_behavior, and it is what makes an existing definition that already carries bare slots pass the editor's asset check. Returns definitionValid and, when slots are still short, the indices that are. Params: `assetPath, behaviorClass (asset path or class path), instanceProperties? (#833)` |
 | `create_game_mode` | Create GameMode BP. parentClass must derive from GameModeBase (short name, /Script path, or a Blueprint asset path). Params: `name, packagePath?, parentClass?` |
 | `create_game_state` | Create GameState BP. parentClass must derive from GameStateBase. Params: `name, packagePath?, parentClass?` |
 | `create_player_controller` | Create PlayerController BP. parentClass must derive from PlayerController. Params: `name, packagePath?, parentClass?` |
@@ -1277,6 +1332,7 @@ Nothing outside these modes ever answers a dialog by itself. `editor(set_dialog_
 | `remove_state_parameter` | Remove a parameter from a state's property bag by name. Rejects fixed-layout (linked) states. Params: `assetPath, stateId, paramName` |
 | `set_state_parameter` | Set the value of an existing state parameter. On fixed-layout states, also marks the parameter as overridden. Params: `assetPath, stateId, paramName, value` |
 | `set_root_parameters` | Define root parameters (property bag). Params: `assetPath, parameters[] ({name, type}) where type is float\|int32\|bool\|string\|name\|double` |
+| `set_schema` | Attach or replace the StateTree schema, then compile. The schema is what makes a tree compilable: without one the compiler logs "does not have a schema" and stops, and everything that loads the asset reports it as failed to link. Repairs a tree that has no editor data at all (what asset(create_asset_by_class) writes) by creating the editor data, the schema and a root state. Omit schema to take StateTreeComponentSchema, then StateTreeAIComponentSchema, then whatever concrete schema this editor has, and read schemaSource / schemaNote to see which was used. Params: `assetPath, schema? (/Script/<Module>.<SchemaClass>) (#833)` |
 | `compile` | Compile a StateTree asset. Returns success, errors[], warnings[]. Params: `assetPath` |
 | `validate` | Validate a StateTree asset without compiling. Params: `assetPath` |
 | `list_node_types` | Enumerate every task, condition, evaluator and utility consideration THIS tree's schema allows, with the exact structType string add_task / add_enter_condition / add_transition_condition / add_consideration / add_evaluator / add_global_task take, and the property names their instanceProperties map accepts. Every add_* action takes a C++ struct name and nothing listed them, so authoring meant guessing. Also reports the schema's own capability flags (allowEnterConditions, allowUtilityConsiderations, allowEvaluators, allowMultipleTasks, allowGlobalParameters), which is what decides whether an add would be refused, and the context data a binding can come from. Blueprint-authored nodes are listed separately with the wrapper struct and the two calls that author one, because a Blueprint node needs set_node_class after the wrapper is added. Params: `assetPath, nodeType? (task\|condition\|evaluator\|consideration\|all), filter? (substring on the struct or class name), includeInstanceProperties?, schemaAllowedOnly?` |
