@@ -5,6 +5,7 @@ import { z } from "zod";
 import { categoryTool, bp, type ToolContext, type ToolDef } from "../types.js";
 import { deploy, deploySummary, attach, attachSummary } from "../deployer.js";
 import { selectEngine } from "../engine-root.js";
+import { collapsingEnvWarnings } from "../session-env.js";
 import { buildProject, startEditor, isBridgeReachable } from "../editor-control.js";
 import { resolveConfigPath, findIniFiles, parseIni, buildTagTree } from "../config-parser.js";
 import { parseHeader, collectFiles, findSourceRoots, resolveModuleDir } from "../cpp-parser.js";
@@ -35,6 +36,27 @@ import { readLogState, readEngineSnapshot } from "../engine-observer.js";
 import { switchProject, isTargetDiverged } from "../project-switch.js";
 import { ueMcpConfigRejections, describeConfigRejections } from "../project.js";
 import { CURSOR_PARAM, paged } from "../pagination.js";
+
+/**
+ * The environment variables flattening every registered editor into one, right
+ * now.
+ *
+ * `collapsingEnvWarnings` is answered from the session set, and the session set
+ * is not fixed. index.ts computes it once over the projects named on the
+ * command line, where the list is empty by design at one editor - and
+ * `add_editor` is the only runtime path to a second one, so a server that
+ * started single and grew had asked the question exactly once, at the moment
+ * the answer was guaranteed to be "nothing to say".
+ *
+ * Asking again wherever the set is read or changed is the fix. Undefined
+ * rather than an empty array when there is nothing to report, so a
+ * single-editor response is byte-identical to what it always was.
+ */
+export function envWarningsFor(ctx: ToolContext): string[] | undefined {
+  if (!ctx.sessions) return undefined;
+  const lines = collapsingEnvWarnings(ctx.sessions.list().map((s) => s.name));
+  return lines.length > 0 ? lines : undefined;
+}
 
 /**
  * The engine tree the engine-source readers work against.
@@ -316,6 +338,11 @@ export const projectTool: ToolDef = categoryTool(
           editorCount: editors.length,
           activeEditor: active.name,
           editors,
+          // Recomputed here rather than read from a startup snapshot. The
+          // warning is a function of the CURRENT session set, and the set
+          // grows at runtime through add_editor, so a value captured once at
+          // startup answers a question about a server that no longer exists.
+          envWarnings: envWarningsFor(ctx),
           targeting: editors.length > 1
             ? "Pass editor=\"<name>\" on any call to run it in that editor. Untargeted calls run in the active editor."
             : "One editor: every call runs in it, and no 'editor' parameter is advertised.",
@@ -378,6 +405,11 @@ export const projectTool: ToolDef = categoryTool(
         }
         try { await session.bridge.connect(); } catch { /* editor may not be running yet */ }
 
+        // Same lines the startup path prints, on the same stream, because the
+        // person watching the console is the one who exported the variable.
+        const envWarnings = envWarningsFor(ctx);
+        for (const line of envWarnings ?? []) console.error(`[ue-mcp] ${line}`);
+
         return {
           success: true,
           editor: session.name,
@@ -389,6 +421,19 @@ export const projectTool: ToolDef = categoryTool(
           bridgeSetup: attachSummary(attachResult),
           started,
           editorCount: ctx.sessions.size,
+          // The env vars that flatten every editor into one are reported at
+          // startup from the startup session set, and at one editor there is
+          // nothing to report - so a server that started on one project and
+          // grew to two here had never said anything and never would.
+          //
+          // That is the whole failure: `UE_MCP_TEST_ENGINE_ROOT` exported for
+          // the first project decides the engine tree for THIS one too, ahead
+          // of its own editor.path, so a 5.6 project launches and builds
+          // against a 5.8 engine and the only symptom is a build that should
+          // not have worked. The list is a function of the session set, and
+          // this call is the one that changes it, so it is recomputed here and
+          // said out loud on the same response that created the second editor.
+          envWarnings,
           hint: `Call any action with editor="${session.name}" to run it there, or project(action="use_editor", editorTarget="${session.name}") to make it the default.`,
         };
       },
