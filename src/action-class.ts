@@ -288,7 +288,13 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   // terrain, but a file appearing on disk is an external side effect and the
   // taxonomy above counts that as a mutation.
   "landscape.export_heightmap": "mutate",
-  "audio.extract_pcm": "mutate",
+  // Not one of the exports above, despite sitting next to them here since it
+  // was written. It decodes a USoundWave's imported audio into memory and
+  // returns the samples base64-encoded in the response: no intermediate file,
+  // no path parameter to write one to, nothing dirtied and nothing saved. It
+  // was classified `mutate` by association with the file-writing exports, and
+  // the handler body settles it the other way.
+  "audio.extract_pcm": "read",
   // Rebuilds the full-text index in the editor's own database.
   "asset.reindex_fts": "mutate",
   // Loads, rewrites and saves the packages that reference a set of
@@ -309,6 +315,13 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   // The verb says read; what it can do says mutate, and the gate follows what
   // it can do.
   "gas.get_live_attribute_value": "mutate",
+
+  // Runs an EQS query through FEnvQueryManager::RunInstantQuery against an
+  // already-spawned querier and serialises the scored items. `run` is a mutate
+  // verb and this one does not: no spawn, no Modify, no save, nothing written
+  // back to the query asset or the world. Landing it in the wrong editor
+  // returns the wrong scores and changes nothing.
+  "gameplay.run_eqs_query": "read",
 
   // ── Reads whose name leads with a subsystem, not a verb ─────────────
   // The lexicon only trusts a read verb in the leading segment, so these say

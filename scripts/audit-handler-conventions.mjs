@@ -96,6 +96,32 @@ const NO_ROLLBACK_MARKERS = [
 ];
 
 /**
+ * Markers that say a handler CANNOT READ whether it changed anything, and said
+ * so.
+ *
+ * The same distinction as NO_ROLLBACK_MARKERS, one convention over. A handler
+ * that dispatches somebody else's code cannot measure its effect: epic(call_tool)
+ * runs a wrapped engine tool whose writes it never sees, and the Fab module
+ * publishes no authentication or library state this build can read back. An
+ * invented `unchanged: false` there would be a claim rather than a reading.
+ *
+ * This list exists because the spelling was ALREADY in the codebase, in three
+ * Fab handlers, written deliberately and explained in comments, and this audit
+ * recognised none of it and counted all three as omissions. That is the exact
+ * failure the NO_ROLLBACK_MARKERS comment above describes happening to
+ * `rollbackPossible`, repeated: an idiom spreading by copy while the audit
+ * scores it as debt, which makes the ledger wrong in the direction that costs
+ * somebody a day writing markers for handlers that already answered.
+ *
+ * `MCPSetIdempotencyUnobservable(Result, Reason)` in Public/HandlerUtils.h is
+ * the helper spelling, and it sets the flag and its note together so the pair
+ * cannot come apart. Both spellings are recognised because both exist.
+ */
+const NO_IDEMPOTENCY_MARKERS = [
+  "idempotencyObservable", "MCPSetIdempotencyUnobservable",
+];
+
+/**
  * Words that take a parenthesised head and a brace body without being a
  * function definition. Without these the definition scan below reads every
  * `if (...) {` as a function named `if`.
@@ -419,6 +445,7 @@ export function auditHandlers(classify) {
     // Only meaningful when no rollback is emitted, but recorded either way so
     // a handler that emits both can be spotted as the contradiction it is.
     const declaresNoRollback = found ? has(found.body, NO_ROLLBACK_MARKERS) : false;
+    const declaresNoIdempotency = found ? has(found.body, NO_IDEMPOTENCY_MARKERS) : false;
 
     rows.push({
       action,
@@ -432,6 +459,7 @@ export function auditHandlers(classify) {
       idempotent: idempotentDirect || Boolean(idempotentVia),
       rollback: rollbackDirect || Boolean(rollbackVia),
       declaresNoRollback,
+      declaresNoIdempotency,
       idempotentVia,
       rollbackVia,
     });
