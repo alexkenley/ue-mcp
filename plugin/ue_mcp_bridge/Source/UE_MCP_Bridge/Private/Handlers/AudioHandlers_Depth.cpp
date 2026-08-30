@@ -65,10 +65,14 @@
 #include "EdGraph/EdGraphNode.h"
 
 #include "MetasoundBuilderBase.h"
+// MetasoundDocumentBuilderRegistry.h, and never MetasoundFrontendDocumentBuilderRegistry.h:
+// the frontend header ships on 5.8 only. This MetasoundEngine header reaches
+// Metasound::Frontend::IDocumentBuilderRegistry on every supported engine, by
+// including the frontend header on 5.8 and MetasoundDocumentInterface.h, where
+// 5.7 and earlier declare the class, on all of them.
 #include "MetasoundDocumentBuilderRegistry.h"
 #include "MetasoundDocumentInterface.h"
 #include "MetasoundFrontendDocument.h"
-#include "MetasoundFrontendDocumentBuilderRegistry.h"
 #include "MetasoundFrontendLiteral.h"
 #include "MetasoundSource.h"
 
@@ -240,9 +244,18 @@ namespace
 	const FMetasoundFrontendDocument* MSEditDocument(const FMSEditTarget& T)
 	{
 		if (!T.Builder) return nullptr;
-		TScriptInterface<IMetaSoundDocumentInterface> Doc = T.Builder->GetMetaSound();
-		const IMetaSoundDocumentInterface* Iface = Doc.GetInterface();
-		return Iface ? &Iface->GetConstDocument() : nullptr;
+		// Through the builder's own document rather than through the MetaSound
+		// object it is editing. UMetaSoundBuilderBase::GetMetaSound arrived in
+		// 5.8, and the two accessors that would stand in for it on 5.7 are
+		// private in both engines, but GetConstDocumentChecked has been public
+		// on FMetaSoundFrontendDocumentBuilder throughout and is what the
+		// GetMetaSound round trip was reaching for anyway.
+		//
+		// IsValid first, because the Checked form asserts on a builder with no
+		// document while the round trip it replaces returned null for it.
+		const FMetaSoundFrontendDocumentBuilder& Builder = T.Builder->GetConstBuilder();
+		if (!Builder.IsValid()) return nullptr;
+		return &Builder.GetConstDocumentChecked();
 	}
 
 	/**

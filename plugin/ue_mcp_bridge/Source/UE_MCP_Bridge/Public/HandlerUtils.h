@@ -13,6 +13,7 @@
 #include "Engine/Blueprint.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
+#include "Components/SceneComponent.h"
 #include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -2185,6 +2186,32 @@ inline void MCPGetNestedSubobjects(const UObjectBase* Outer, TArray<UObject*>& O
 #else
 	GetObjectsWithOuter(Outer, OutObjects, /*bIncludeNestedObjects*/ true,
 		RF_NoFlags, EInternalObjectFlags::Garbage);
+#endif
+}
+
+// ── Component bounds ─────────────────────────────────────────────────────────
+
+/** A scene component's cached world-space bounds, spelled the way each engine
+ *  wants it. 5.8 added USceneComponent::GetBounds(), an inline getter that
+ *  returns a const reference to the public Bounds member; 5.7 and earlier offer
+ *  the member alone. Both branches read the same field, so every supported
+ *  engine returns the same value at the same freshness - the accessor is a
+ *  rename, and UpdateBounds is still what refreshes what either one reads.
+ *
+ *  Bounds is public on 5.8 too, so the gate decides which spelling is used
+ *  rather than which one compiles. Preferring the accessor there is what keeps
+ *  these call sites correct on the engine that eventually makes the member
+ *  private, which is the reason Epic added the getter.
+ *
+ *  Both spellings live here and nowhere else. This module is a unity build, so
+ *  a file-local copy in a second .cpp is a C2084 redefinition the moment the
+ *  adaptive-unity working set puts the two files in one blob. */
+inline const FBoxSphereBounds& MCPComponentWorldBounds(const USceneComponent& Component)
+{
+#if UE_MCP_HAS_5_8_API
+	return Component.GetBounds();
+#else
+	return Component.Bounds;
 #endif
 }
 

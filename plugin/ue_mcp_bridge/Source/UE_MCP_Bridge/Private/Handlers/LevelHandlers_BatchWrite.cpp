@@ -988,7 +988,7 @@ TSharedPtr<FJsonValue> FLevelHandlers::SpawnActorsBatch(const TSharedPtr<FJsonOb
 				}
 				else
 				{
-					const FBoxSphereBounds WorldBounds = SceneComponent->GetBounds();
+					const FBoxSphereBounds WorldBounds = MCPComponentWorldBounds(*SceneComponent);
 					Location = WorldBounds.Origin + WorldBounds.BoxExtent * ExtentFraction + Offset;
 				}
 

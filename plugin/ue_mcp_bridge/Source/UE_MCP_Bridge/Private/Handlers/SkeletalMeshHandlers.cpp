@@ -80,7 +80,9 @@ namespace
 		Out->SetBoolField(TEXT("bUseHighPrecisionSkinWeights"), Settings.bUseHighPrecisionSkinWeights);
 		Out->SetBoolField(TEXT("bUseFullPrecisionUVs"), Settings.bUseFullPrecisionUVs);
 		Out->SetBoolField(TEXT("bUseBackwardsCompatibleF16TruncUVs"), Settings.bUseBackwardsCompatibleF16TruncUVs);
+#if UE_MCP_HAS_5_8_API
 		Out->SetBoolField(TEXT("bOptimizeForInstancing"), Settings.bOptimizeForInstancing);
+#endif
 		Out->SetNumberField(TEXT("thresholdPosition"), Settings.ThresholdPosition);
 		Out->SetNumberField(TEXT("thresholdTangentNormal"), Settings.ThresholdTangentNormal);
 		Out->SetNumberField(TEXT("thresholdUV"), Settings.ThresholdUV);
@@ -95,9 +97,20 @@ namespace
 		Lod->SetNumberField(TEXT("lodIndex"), Index);
 		Lod->SetObjectField(TEXT("beforeBuildSettings"), SerializeBuildSettings(Before));
 		Lod->SetObjectField(TEXT("afterBuildSettings"), SerializeBuildSettings(After));
+#if UE_MCP_HAS_5_8_API
 		Lod->SetBoolField(TEXT("beforeOptimizeForInstancing"), Before.bOptimizeForInstancing);
 		Lod->SetBoolField(TEXT("afterOptimizeForInstancing"), After.bOptimizeForInstancing);
 		Lod->SetBoolField(TEXT("changed"), Before.bOptimizeForInstancing != After.bOptimizeForInstancing);
+#else
+		// Every field below reports one 5.8-only build setting, so on an older
+		// engine they are omitted and named instead. Reporting false would say
+		// the flag is off, which is a different answer from the engine having no
+		// such flag at all.
+		Lod->SetStringField(TEXT("optimizeForInstancingNote"),
+			TEXT("beforeOptimizeForInstancing, afterOptimizeForInstancing, changed and ")
+			TEXT("buildSettings.bOptimizeForInstancing are omitted: ")
+			TEXT("FSkeletalMeshBuildSettings::bOptimizeForInstancing needs UE 5.8, and this editor is older."));
+#endif
 		return Lod;
 	}
 }
@@ -131,6 +144,15 @@ TSharedPtr<FJsonValue> FSkeletalMeshHandlers::ReadBuildSettings(const TSharedPtr
 
 TSharedPtr<FJsonValue> FSkeletalMeshHandlers::SetOptimizeForInstancing(const TSharedPtr<FJsonObject>& Params)
 {
+#if !UE_MCP_HAS_5_8_API
+	// bOptimizeForInstancing is a 5.8 engine feature with no earlier equivalent,
+	// so there is nothing to write and nothing to stand in for it. The action
+	// stays registered and says why, rather than answering "Unknown method".
+	return MCPError(
+		TEXT("set_skeletal_mesh_optimize_for_instancing requires Unreal Engine 5.8 or newer: ")
+		TEXT("FSkeletalMeshBuildSettings::bOptimizeForInstancing does not exist in this engine, ")
+		TEXT("and no earlier skeletal mesh build setting stands in for it."));
+#else
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	bool bEnabled = false;
@@ -236,4 +258,5 @@ TSharedPtr<FJsonValue> FSkeletalMeshHandlers::SetOptimizeForInstancing(const TSh
 			LodCount));
 	}
 	return MCPResult(Result);
+#endif // UE_MCP_HAS_5_8_API
 }
