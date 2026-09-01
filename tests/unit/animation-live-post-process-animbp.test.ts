@@ -62,6 +62,9 @@ describe("animation.set_live_post_process_anim_blueprint", () => {
     expect(registry).toContain('RegisterHandler(TEXT("set_live_post_process_anim_blueprint"), &SetLivePostProcessAnimBlueprint)');
     expect(header).toContain("SetLivePostProcessAnimBlueprint");
     expect(live).toContain("LoadObject<UAnimBlueprintGeneratedClass>");
+    expect(live).toContain("IsCompatibleForEditor");
+    expect(live).toContain("SK->GetAnimClass() == NewClass");
+    expect(live).toContain("if (!bAlreadySet)");
     expect(live).toContain("SetOverridePostProcessAnimBP(NewClass, /*ReinitAnimInstances*/ true)");
     expect(live).toContain("SK->GetPostProcessInstance()");
     expect(live).toContain('SetBoolField(TEXT("transient"), true)');

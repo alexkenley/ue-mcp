@@ -545,22 +545,50 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetLivePostProcessAnimBlueprint(const
 	ActorLabel = Actor->GetActorLabel();
 	USkeletalMeshComponent* SK = ResolveSkeletalMeshComp(Actor, ComponentName);
 	if (!SK) return MakeSkeletalComponentNotFoundError(Actor, ActorLabel, ComponentName);
+	const USkeletalMesh* MeshAsset = SK->GetSkeletalMeshAsset();
+	if (!MeshAsset)
+	{
+		return MCPError(FString::Printf(TEXT("Skeletal mesh component '%s' has no skeletal mesh"), *SK->GetName()));
+	}
+	if (NewClass)
+	{
+		if (SK->GetAnimClass() == NewClass)
+		{
+			return MCPError(TEXT("The post-process AnimBP must differ from the component's main AnimBP"));
+		}
+
+		const USkeleton* MeshSkeleton = MeshAsset->GetSkeleton();
+		const USkeleton* AnimSkeleton = NewClass->GetTargetSkeleton();
+		if (MeshSkeleton && AnimSkeleton && MeshSkeleton != AnimSkeleton
+			&& !MeshSkeleton->IsCompatibleForEditor(AnimSkeleton)
+			&& !AnimSkeleton->IsCompatibleForEditor(MeshSkeleton))
+		{
+			return MCPError(FString::Printf(
+				TEXT("Post-process AnimBP skeleton '%s' is not compatible with component mesh skeleton '%s'"),
+				*AnimSkeleton->GetPathName(), *MeshSkeleton->GetPathName()));
+		}
+	}
 
 	const TSubclassOf<UAnimInstance> PreviousOverride = SK->OverridePostProcessAnimBP;
-	SK->SetOverridePostProcessAnimBP(NewClass, /*ReinitAnimInstances*/ true);
+	const bool bAlreadySet = PreviousOverride == NewClass;
+	if (!bAlreadySet)
+	{
+		SK->SetOverridePostProcessAnimBP(NewClass, /*ReinitAnimInstances*/ true);
+	}
 
 	const TSubclassOf<UAnimInstance> OverrideAfter = SK->OverridePostProcessAnimBP;
 	const TSubclassOf<UAnimInstance> EffectiveAfter = SK->GetPostProcessAnimBPClassToBeUsed();
 	UAnimInstance* InstanceAfter = SK->GetPostProcessInstance();
 
 	auto Result = MCPSuccess();
-	MCPSetUpdated(Result);
+	if (bAlreadySet) MCPSetExisted(Result); else MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("actorLabel"), ActorLabel);
 	Result->SetStringField(TEXT("actorPath"), Actor->GetPathName());
 	Result->SetStringField(TEXT("world"), ResolvedWorldScope);
 	Result->SetStringField(TEXT("worldName"), World ? World->GetName() : TEXT(""));
 	AddSkeletalComponentMetadata(Result, SK);
 	Result->SetBoolField(TEXT("clear"), bClear);
+	Result->SetBoolField(TEXT("alreadySet"), bAlreadySet);
 	Result->SetBoolField(TEXT("transient"), true);
 	Result->SetStringField(TEXT("persistence"), TEXT("live component override only; no asset or component template was modified"));
 	Result->SetStringField(TEXT("previousOverrideClass"), PreviousOverride ? PreviousOverride->GetPathName() : TEXT(""));
