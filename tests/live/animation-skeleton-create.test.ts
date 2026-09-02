@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { callBridge, disconnectBridge, getBridge, resultArray, TEST_PREFIX } from "../setup.js";
 import type { EditorBridge } from "../../src/bridge.js";
 
+// Runs only against the dedicated disposable test project.
+
 const SOURCE_MESH = "/Engine/EngineMeshes/SkeletalCube";
 const TEST_MESH = `${TEST_PREFIX}/SKM_CreateSkeleton`;
 const TEST_SKELETON_NAME = "SK_CreateSkeleton";

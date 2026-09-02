@@ -1,6 +1,6 @@
 // Safe registration and validation coverage for animation(create_skeleton).
 // Creating a real skeleton requires a project-owned skeletal mesh, so the
-// asset-producing path belongs to the dedicated smoke project rather than an
+// asset-producing path belongs to the dedicated live test project rather than an
 // arbitrary editor automation run.
 
 #if WITH_DEV_AUTOMATION_TESTS

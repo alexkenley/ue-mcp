@@ -71,7 +71,7 @@
 // Curve identifiers for UE5 animation data controller
 #include "Animation/AnimCurveTypes.h"
 #include "Animation/Skeleton.h"
-#include "Animation/ReferenceSkeleton.h"
+#include "ReferenceSkeleton.h"
 
 void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
