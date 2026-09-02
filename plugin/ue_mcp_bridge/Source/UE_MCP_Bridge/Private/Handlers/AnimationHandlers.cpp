@@ -33,6 +33,7 @@
 #include "Factories/AnimBlueprintFactory.h"
 #include "Factories/AnimMontageFactory.h"
 #include "Factories/BlendSpaceFactoryNew.h"
+#include "Factories/SkeletonFactory.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/Package.h"
 // FArrayProperty / FScriptArrayHelper: the #880 readback of the montage's
@@ -74,6 +75,7 @@
 void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	Registry.RegisterHandler(TEXT("list_anim_assets"), &ListAnimAssets);
+	Registry.RegisterHandler(TEXT("create_skeleton"), &CreateSkeleton);
 	Registry.RegisterHandler(TEXT("begin_skeleton_edit"), &BeginSkeletonEdit);
 	Registry.RegisterHandler(TEXT("edit_skeleton_bones"), &EditSkeletonBones);
 	Registry.RegisterHandler(TEXT("commit_skeleton_edit"), &CommitSkeletonEdit);
@@ -386,6 +388,152 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetSkeletonInfo(const TSharedPtr<FJso
 	Result->SetArrayField(TEXT("bones"), BonesArray);
 	Result->SetNumberField(TEXT("boneCount"), BonesArray.Num());
 
+	return MCPResult(Result);
+}
+
+// create_skeleton - create an initialized USkeleton from a SkeletalMesh.
+// USkeletonFactory is the engine's Create Skeleton asset implementation. Its
+// factory path deliberately assigns the new skeleton to its target mesh, so
+// this handler saves and reads back both assets rather than pretending this is
+// an isolated create.
+TSharedPtr<FJsonValue> FAnimationHandlers::CreateSkeleton(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Name;
+	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
+	Name.TrimStartAndEndInline();
+	FText InvalidNameReason;
+	const FName AssetName(*Name);
+	if (AssetName.IsNone() || !AssetName.IsValidObjectName(InvalidNameReason))
+	{
+		return MCPError(FString::Printf(TEXT("Invalid skeleton name '%s': %s"), *Name, *InvalidNameReason.ToString()));
+	}
+
+	FString SkeletalMeshPath;
+	if (auto Err = RequireString(Params, TEXT("skeletalMeshPath"), SkeletalMeshPath)) return Err;
+	USkeletalMesh* SkeletalMesh = LoadObject<USkeletalMesh>(nullptr, *SkeletalMeshPath);
+	if (!SkeletalMesh)
+	{
+		return MCPError(FString::Printf(TEXT("Failed to load SkeletalMesh at '%s'"), *SkeletalMeshPath));
+	}
+
+	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game"));
+	PackagePath.TrimStartAndEndInline();
+	while (PackagePath.EndsWith(TEXT("/"))) PackagePath.LeftChopInline(1);
+	FText InvalidPackageReason;
+	if (!FPackageName::IsValidLongPackageName(PackagePath, true, &InvalidPackageReason))
+	{
+		return MCPError(FString::Printf(TEXT("Invalid packagePath '%s': %s"), *PackagePath, *InvalidPackageReason.ToString()));
+	}
+	if (MCPIsProtectedAssetPath(PackagePath)) return MCPProtectedPathError(PackagePath);
+	if (!FPackageName::IsValidLongPackageName(PackagePath + TEXT("/") + Name, true, &InvalidPackageReason))
+	{
+		return MCPError(FString::Printf(TEXT("Invalid skeleton destination '%s/%s': %s"), *PackagePath, *Name, *InvalidPackageReason.ToString()));
+	}
+
+	FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	OnConflict.ToLowerInline();
+	if (OnConflict != TEXT("skip") && OnConflict != TEXT("error"))
+	{
+		return MCPError(TEXT("onConflict must be 'skip' or 'error'"));
+	}
+
+	const FString DestinationPath = PackagePath + TEXT("/") + Name + TEXT(".") + Name;
+	if (UObject* ExistingObject = LoadObject<UObject>(nullptr, *DestinationPath))
+	{
+		USkeleton* ExistingSkeleton = Cast<USkeleton>(ExistingObject);
+		if (!ExistingSkeleton)
+		{
+			return MCPError(FString::Printf(TEXT("Skeleton destination '%s' is occupied by %s"), *DestinationPath, *ExistingObject->GetClass()->GetName()));
+		}
+		if (OnConflict == TEXT("error"))
+		{
+			return MCPError(FString::Printf(TEXT("Skeleton '%s' already exists"), *DestinationPath));
+		}
+
+		const bool bMeshAlreadyAssigned = SkeletalMesh->GetSkeleton() == ExistingSkeleton;
+		const bool bHierarchyCompatible = ExistingSkeleton->IsCompatibleMesh(SkeletalMesh, true);
+		if (!bMeshAlreadyAssigned || !bHierarchyCompatible)
+		{
+			return MCPError(FString::Printf(
+				TEXT("Skeleton destination '%s' already exists but is not an idempotent result for mesh '%s' (meshAlreadyAssigned=%s, hierarchyCompatible=%s). Choose another destination or resolve the existing asset deliberately."),
+				*DestinationPath,
+				*SkeletalMesh->GetPathName(),
+				bMeshAlreadyAssigned ? TEXT("true") : TEXT("false"),
+				bHierarchyCompatible ? TEXT("true") : TEXT("false")));
+		}
+
+		auto Result = MCPSuccess();
+		MCPSetExisted(Result);
+		Result->SetStringField(TEXT("path"), ExistingSkeleton->GetPathName());
+		Result->SetStringField(TEXT("sourceSkeletalMeshPath"), SkeletalMesh->GetPathName());
+		Result->SetBoolField(TEXT("meshAssigned"), true);
+		Result->SetBoolField(TEXT("hierarchyCompatible"), true);
+		Result->SetNumberField(TEXT("boneCount"), ExistingSkeleton->GetReferenceSkeleton().GetNum());
+		return MCPResult(Result);
+	}
+
+	if (auto Blocked = MCPAssetWriteBlockedError(SkeletalMesh, SkeletalMesh->GetPathName(), TEXT("create a skeleton from this skeletal mesh"))) return Blocked;
+
+	USkeleton* PreviousSkeleton = SkeletalMesh->GetSkeleton();
+	USkeletonFactory* Factory = NewObject<USkeletonFactory>(GetTransientPackage());
+	if (!Factory) return MCPError(TEXT("Failed to create USkeletonFactory"));
+	Factory->TargetSkeletalMesh = SkeletalMesh;
+
+	auto Created = MCPCreateAssetIdempotent<USkeleton>(Name, PackagePath, OnConflict, TEXT("USkeleton"), Factory);
+	if (Created.EarlyReturn) return Created.EarlyReturn;
+	USkeleton* Skeleton = Created.Asset;
+	if (SkeletalMesh->GetSkeleton() != Skeleton)
+	{
+		SkeletalMesh->SetSkeleton(PreviousSkeleton);
+		return MCPError(TEXT("USkeletonFactory created a skeleton but did not assign it to the source SkeletalMesh"));
+	}
+
+	FString SaveError;
+	if (!SaveAssetPackageChecked(Skeleton, SaveError))
+	{
+		SkeletalMesh->SetSkeleton(PreviousSkeleton);
+		SkeletalMesh->MarkPackageDirty();
+		return MCPError(FString::Printf(TEXT("Created skeleton '%s' but could not save it: %s. The source mesh was restored in memory."), *Skeleton->GetPathName(), *SaveError));
+	}
+	if (!SaveAssetPackageChecked(SkeletalMesh, SaveError))
+	{
+		SkeletalMesh->SetSkeleton(PreviousSkeleton);
+		SkeletalMesh->MarkPackageDirty();
+		FString RestoreError;
+		const bool bSourceRestored = SaveAssetPackageChecked(SkeletalMesh, RestoreError);
+		const FString RestoreSuffix = bSourceRestored
+			? TEXT("")
+			: FString::Printf(TEXT(" (%s)"), *RestoreError);
+		return MCPError(FString::Printf(TEXT("Created skeleton '%s' but could not save source SkeletalMesh '%s': %s. Source restoration %s%s."),
+			*Skeleton->GetPathName(),
+			*SkeletalMesh->GetPathName(),
+			*SaveError,
+			bSourceRestored ? TEXT("succeeded") : TEXT("failed"),
+			*RestoreSuffix));
+	}
+
+	auto Result = MCPSuccess();
+	MCPSetCreated(Result);
+	Result->SetStringField(TEXT("path"), Skeleton->GetPathName());
+	Result->SetStringField(TEXT("sourceSkeletalMeshPath"), SkeletalMesh->GetPathName());
+	if (PreviousSkeleton) Result->SetStringField(TEXT("previousSkeletonPath"), PreviousSkeleton->GetPathName());
+	else Result->SetField(TEXT("previousSkeletonPath"), MakeShared<FJsonValueNull>());
+	Result->SetBoolField(TEXT("meshAssigned"), SkeletalMesh->GetSkeleton() == Skeleton);
+	Result->SetBoolField(TEXT("hierarchyCompatible"), Skeleton->IsCompatibleMesh(SkeletalMesh, true));
+	Result->SetNumberField(TEXT("boneCount"), Skeleton->GetReferenceSkeleton().GetNum());
+	Result->SetNumberField(TEXT("sourceMeshBoneCount"), SkeletalMesh->GetRefSkeleton().GetNum());
+	Result->SetBoolField(TEXT("skeletonSaved"), true);
+	Result->SetBoolField(TEXT("sourceSkeletalMeshSaved"), true);
+
+	TSharedPtr<FJsonObject> Rollback = MakeShared<FJsonObject>();
+	Rollback->SetStringField(TEXT("assetPath"), SkeletalMesh->GetPathName());
+	Rollback->SetStringField(TEXT("propertyName"), TEXT("Skeleton"));
+	if (PreviousSkeleton) Rollback->SetStringField(TEXT("value"), PreviousSkeleton->GetPathName());
+	else Rollback->SetField(TEXT("value"), MakeShared<FJsonValueNull>());
+	Rollback->SetBoolField(TEXT("save"), true);
+	MCPSetRollback(Result, TEXT("set_asset_property"), Rollback);
+	Result->SetBoolField(TEXT("rollbackLossy"), true);
+	Result->SetStringField(TEXT("rollbackNote"), TEXT("The rollback restores the source mesh's previous Skeleton reference but intentionally does not delete the newly created Skeleton. Delete that asset only after confirming no other asset references it."));
 	return MCPResult(Result);
 }
 
