@@ -71,6 +71,7 @@
 // Curve identifiers for UE5 animation data controller
 #include "Animation/AnimCurveTypes.h"
 #include "Animation/Skeleton.h"
+#include "Animation/ReferenceSkeleton.h"
 
 void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
@@ -391,6 +392,32 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetSkeletonInfo(const TSharedPtr<FJso
 	return MCPResult(Result);
 }
 
+namespace
+{
+// Factory idempotency must be stronger than USkeleton::IsCompatibleMesh. That
+// API accepts compatible/additive skeletons, whereas replaying this create
+// action is safe only when the factory output is exactly the mesh hierarchy.
+bool HasExactReferenceSkeletonHierarchy(const USkeleton* Skeleton, const USkeletalMesh* SkeletalMesh)
+{
+	if (!Skeleton || !SkeletalMesh) return false;
+
+	const FReferenceSkeleton& SkeletonReference = Skeleton->GetReferenceSkeleton();
+	const FReferenceSkeleton& MeshReference = SkeletalMesh->GetRefSkeleton();
+	if (SkeletonReference.GetNum() != MeshReference.GetNum()) return false;
+
+	for (int32 BoneIndex = 0; BoneIndex < SkeletonReference.GetNum(); ++BoneIndex)
+	{
+		if (SkeletonReference.GetBoneName(BoneIndex) != MeshReference.GetBoneName(BoneIndex)
+			|| SkeletonReference.GetParentIndex(BoneIndex) != MeshReference.GetParentIndex(BoneIndex))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+}
+
 // create_skeleton - create an initialized USkeleton from a SkeletalMesh.
 // USkeletonFactory is the engine's Create Skeleton asset implementation. Its
 // factory path deliberately assigns the new skeleton to its target mesh, so
@@ -451,15 +478,15 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateSkeleton(const TSharedPtr<FJson
 		}
 
 		const bool bMeshAlreadyAssigned = SkeletalMesh->GetSkeleton() == ExistingSkeleton;
-		const bool bHierarchyCompatible = ExistingSkeleton->IsCompatibleMesh(SkeletalMesh, true);
-		if (!bMeshAlreadyAssigned || !bHierarchyCompatible)
+		const bool bExactReferenceHierarchy = HasExactReferenceSkeletonHierarchy(ExistingSkeleton, SkeletalMesh);
+		if (!bMeshAlreadyAssigned || !bExactReferenceHierarchy)
 		{
 			return MCPError(FString::Printf(
-				TEXT("Skeleton destination '%s' already exists but is not an idempotent result for mesh '%s' (meshAlreadyAssigned=%s, hierarchyCompatible=%s). Choose another destination or resolve the existing asset deliberately."),
+				TEXT("Skeleton destination '%s' already exists but is not an idempotent result for mesh '%s' (meshAlreadyAssigned=%s, exactReferenceHierarchy=%s). Choose another destination or resolve the existing asset deliberately."),
 				*DestinationPath,
 				*SkeletalMesh->GetPathName(),
 				bMeshAlreadyAssigned ? TEXT("true") : TEXT("false"),
-				bHierarchyCompatible ? TEXT("true") : TEXT("false")));
+				bExactReferenceHierarchy ? TEXT("true") : TEXT("false")));
 		}
 
 		auto Result = MCPSuccess();
@@ -467,49 +494,98 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateSkeleton(const TSharedPtr<FJson
 		Result->SetStringField(TEXT("path"), ExistingSkeleton->GetPathName());
 		Result->SetStringField(TEXT("sourceSkeletalMeshPath"), SkeletalMesh->GetPathName());
 		Result->SetBoolField(TEXT("meshAssigned"), true);
-		Result->SetBoolField(TEXT("hierarchyCompatible"), true);
+		Result->SetBoolField(TEXT("exactReferenceHierarchy"), true);
 		Result->SetNumberField(TEXT("boneCount"), ExistingSkeleton->GetReferenceSkeleton().GetNum());
 		return MCPResult(Result);
 	}
 
 	if (auto Blocked = MCPAssetWriteBlockedError(SkeletalMesh, SkeletalMesh->GetPathName(), TEXT("create a skeleton from this skeletal mesh"))) return Blocked;
 
+	// USkeletonFactory can mutate TargetSkeletalMesh before CreateAsset reports
+	// an error, so capture this before constructing or invoking the factory.
 	USkeleton* PreviousSkeleton = SkeletalMesh->GetSkeleton();
+	auto RestoreMeshAndDeleteCreatedSkeleton = [&](USkeleton* CreatedSkeleton, const FString& FailureMessage) -> TSharedPtr<FJsonValue>
+	{
+		SkeletalMesh->SetSkeleton(PreviousSkeleton);
+		SkeletalMesh->MarkPackageDirty();
+
+		FString RestoreError;
+		const bool bSourceRestored = SaveAssetPackageChecked(SkeletalMesh, RestoreError);
+		const bool bSkeletonCleanupAttempted = bSourceRestored && CreatedSkeleton != nullptr;
+		const bool bSkeletonDeleted = bSkeletonCleanupAttempted
+			&& UEditorAssetLibrary::DeleteAsset(CreatedSkeleton->GetPathName());
+
+		if (bSourceRestored && (!CreatedSkeleton || bSkeletonDeleted))
+		{
+			return MCPError(FString::Printf(
+				TEXT("%s The source SkeletalMesh was restored and saved%s."),
+				*FailureMessage,
+				CreatedSkeleton ? TEXT("; the newly created Skeleton was deleted") : TEXT("")));
+		}
+
+		// A failed restore means the created skeleton might still be referenced by
+		// the mesh, so never delete it speculatively. Expose enough state for a
+		// caller to recover deterministically instead.
+		auto Error = MakeShared<FJsonObject>();
+		Error->SetBoolField(TEXT("success"), false);
+		Error->SetStringField(TEXT("error"), FailureMessage);
+		auto Recovery = MakeShared<FJsonObject>();
+		Recovery->SetStringField(TEXT("sourceSkeletalMeshPath"), SkeletalMesh->GetPathName());
+		if (PreviousSkeleton) Recovery->SetStringField(TEXT("previousSkeletonPath"), PreviousSkeleton->GetPathName());
+		else Recovery->SetField(TEXT("previousSkeletonPath"), MakeShared<FJsonValueNull>());
+		if (CreatedSkeleton) Recovery->SetStringField(TEXT("createdSkeletonPath"), CreatedSkeleton->GetPathName());
+		else Recovery->SetField(TEXT("createdSkeletonPath"), MakeShared<FJsonValueNull>());
+		Recovery->SetBoolField(TEXT("sourceSkeletalMeshRestored"), bSourceRestored);
+		Recovery->SetStringField(TEXT("sourceSkeletalMeshRestoreError"), RestoreError);
+		Recovery->SetBoolField(TEXT("skeletonCleanupAttempted"), bSkeletonCleanupAttempted);
+		Recovery->SetBoolField(TEXT("skeletonDeleted"), bSkeletonDeleted);
+		Recovery->SetStringField(TEXT("restoreMethod"), TEXT("set_asset_property"));
+		Recovery->SetBoolField(TEXT("requiresManualRecovery"), true);
+		Error->SetObjectField(TEXT("recovery"), Recovery);
+		return MCPResult(Error);
+	};
+
 	USkeletonFactory* Factory = NewObject<USkeletonFactory>(GetTransientPackage());
 	if (!Factory) return MCPError(TEXT("Failed to create USkeletonFactory"));
 	Factory->TargetSkeletalMesh = SkeletalMesh;
 
 	auto Created = MCPCreateAssetIdempotent<USkeleton>(Name, PackagePath, OnConflict, TEXT("USkeleton"), Factory);
-	if (Created.EarlyReturn) return Created.EarlyReturn;
+	if (Created.EarlyReturn)
+	{
+		const TSharedPtr<FJsonObject> EarlyResult = Created.EarlyReturn->Type == EJson::Object
+			? Created.EarlyReturn->AsObject()
+			: nullptr;
+		if (EarlyResult.IsValid() && EarlyResult->HasTypedField<EJson::Boolean>(TEXT("success"))
+			&& EarlyResult->GetBoolField(TEXT("success")))
+		{
+			// A late idempotency probe can still race the first probe. AssetTools
+			// was not invoked in this branch, so it cannot have changed the mesh.
+			return Created.EarlyReturn;
+		}
+
+		// FactoryCreateNew may have cleared/changed the target mesh even if the
+		// asset-tools wrapper reports a failure. The recovery helper restores the
+		// mesh before it attempts to clean up a partial destination asset.
+		USkeleton* PartialSkeleton = LoadObject<USkeleton>(nullptr, *DestinationPath);
+		return RestoreMeshAndDeleteCreatedSkeleton(PartialSkeleton, TEXT("USkeletonFactory failed to create the Skeleton"));
+	}
 	USkeleton* Skeleton = Created.Asset;
 	if (SkeletalMesh->GetSkeleton() != Skeleton)
 	{
-		SkeletalMesh->SetSkeleton(PreviousSkeleton);
-		return MCPError(TEXT("USkeletonFactory created a skeleton but did not assign it to the source SkeletalMesh"));
+		return RestoreMeshAndDeleteCreatedSkeleton(Skeleton, TEXT("USkeletonFactory created a skeleton but did not assign it to the source SkeletalMesh"));
 	}
 
 	FString SaveError;
 	if (!SaveAssetPackageChecked(Skeleton, SaveError))
 	{
-		SkeletalMesh->SetSkeleton(PreviousSkeleton);
-		SkeletalMesh->MarkPackageDirty();
-		return MCPError(FString::Printf(TEXT("Created skeleton '%s' but could not save it: %s. The source mesh was restored in memory."), *Skeleton->GetPathName(), *SaveError));
+		return RestoreMeshAndDeleteCreatedSkeleton(Skeleton,
+			FString::Printf(TEXT("Created skeleton '%s' but could not save it: %s."), *Skeleton->GetPathName(), *SaveError));
 	}
 	if (!SaveAssetPackageChecked(SkeletalMesh, SaveError))
 	{
-		SkeletalMesh->SetSkeleton(PreviousSkeleton);
-		SkeletalMesh->MarkPackageDirty();
-		FString RestoreError;
-		const bool bSourceRestored = SaveAssetPackageChecked(SkeletalMesh, RestoreError);
-		const FString RestoreSuffix = bSourceRestored
-			? TEXT("")
-			: FString::Printf(TEXT(" (%s)"), *RestoreError);
-		return MCPError(FString::Printf(TEXT("Created skeleton '%s' but could not save source SkeletalMesh '%s': %s. Source restoration %s%s."),
-			*Skeleton->GetPathName(),
-			*SkeletalMesh->GetPathName(),
-			*SaveError,
-			bSourceRestored ? TEXT("succeeded") : TEXT("failed"),
-			*RestoreSuffix));
+		return RestoreMeshAndDeleteCreatedSkeleton(Skeleton,
+			FString::Printf(TEXT("Created skeleton '%s' but could not save source SkeletalMesh '%s': %s."),
+				*Skeleton->GetPathName(), *SkeletalMesh->GetPathName(), *SaveError));
 	}
 
 	auto Result = MCPSuccess();
@@ -519,7 +595,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateSkeleton(const TSharedPtr<FJson
 	if (PreviousSkeleton) Result->SetStringField(TEXT("previousSkeletonPath"), PreviousSkeleton->GetPathName());
 	else Result->SetField(TEXT("previousSkeletonPath"), MakeShared<FJsonValueNull>());
 	Result->SetBoolField(TEXT("meshAssigned"), SkeletalMesh->GetSkeleton() == Skeleton);
-	Result->SetBoolField(TEXT("hierarchyCompatible"), Skeleton->IsCompatibleMesh(SkeletalMesh, true));
+	Result->SetBoolField(TEXT("exactReferenceHierarchy"), HasExactReferenceSkeletonHierarchy(Skeleton, SkeletalMesh));
 	Result->SetNumberField(TEXT("boneCount"), Skeleton->GetReferenceSkeleton().GetNum());
 	Result->SetNumberField(TEXT("sourceMeshBoneCount"), SkeletalMesh->GetRefSkeleton().GetNum());
 	Result->SetBoolField(TEXT("skeletonSaved"), true);
