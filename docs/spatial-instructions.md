@@ -18,7 +18,7 @@ transform is unambiguous.
 
 | Field | Answers | Example |
 |---|---|---|
-| Target | Which actor, and which component on it | `Player` / `LeatherHood` |
+| Target | Which actor, and which component on it | `Player` / `HeadMesh` |
 | Frame | Whose axes | `actor` |
 | Viewpoint | Looking from where | looking down |
 | Operation | Translate, rotate, or scale | rotate about up |
@@ -76,7 +76,7 @@ attached or socketed component from drifting on axes that were never mentioned.
 ```text
 level(action="nudge_component",
       actorLabel="Player",
-      componentName="LeatherHood",
+      componentName="HeadMesh",
       frame="actor",
       viewRotation={ viewFrom: "above", direction: "clockwise", degrees: 15 },
       dryRun=true,
