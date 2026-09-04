@@ -357,7 +357,9 @@ A step carrying `ignore_failure: true` contributes its record on the same terms.
 
 A **nested** flow behaves the same way. Its records bubble to the parent, so arming rollback on the outer flow reaches a partial write made inside a child, and the child's own steps arrive on `steps[i].nestedSteps`, each reported exactly like a top-level step. The child's run error still carries the undo call in its text as well.
 
-Requires `@db-lyon/flowkit` 0.17.1 or newer. Up to 0.17.0 the runner harvested an inverse only from a step that succeeded, so a failing step's record was discarded on every run and `replayed` was always `false`.
+The outermost flow with rollback armed is the one that invokes the inverses, including the ones a child handed up. A child does not also unwind them itself: the parent holds the full reverse order, and running each inverse at both levels would undo state the first pass had already restored. A nested flow whose parents asked for no rollback still unwinds its own, so `rollback_on_failure` on a child flow means what it says.
+
+Requires `@db-lyon/flowkit` 0.17.2 or newer. 0.17.1 unwound a failed child's records at both levels. Up to 0.17.0 the runner harvested an inverse only from a step that succeeded, so a failing step's record was discarded on every run and `replayed` was always `false`.
 
 Conventions for handlers - natural keys, the `onConflict: skip|update|error` option, and rollback record shape - live in [docs/handler-conventions.md](handler-conventions.md).
 
