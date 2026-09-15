@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { GuardedBridge } from "../../src/flow/guarded-bridge.js";
+import { DialogGatedBridge, GuardedBridge } from "../../src/flow/guarded-bridge.js";
 import { GuardRegistry, type BridgeGuard, type CallContext } from "../../src/flow/guard.js";
-import type { IBridge } from "../../src/bridge.js";
+import type { BridgeCapabilities, IBridge } from "../../src/bridge.js";
+import type { EditorSession } from "../../src/session.js";
 
 function fakeInner(result: unknown = { ok: true }): IBridge & { calls: Array<{ method: string; params?: Record<string, unknown> }> } {
   const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
@@ -103,5 +104,28 @@ describe("GuardedBridge pipeline", () => {
     const { gb } = bridgeWith();
     expect(gb.isConnected).toBe(true);
     await expect(gb.connect()).resolves.toBeUndefined();
+  });
+
+  it("keeps live capabilities visible through both wrappers", () => {
+    let capabilities: BridgeCapabilities | null | undefined;
+    const inner = {
+      ...fakeInner(),
+      get capabilities() { return capabilities; },
+    };
+    const guarded = new GuardedBridge(inner, new GuardRegistry(), resolveExisting);
+    const dialogGated = new DialogGatedBridge(inner, {} as EditorSession);
+
+    for (const current of [
+      undefined,
+      null,
+      { protocolVersion: 2, legacy: false, builtAt: "first" },
+      { protocolVersion: 2, legacy: false, builtAt: "replacement" },
+      null,
+    ] satisfies Array<BridgeCapabilities | null | undefined>) {
+      capabilities = current;
+      expect(guarded.capabilities).toBe(current);
+      expect(dialogGated.capabilities).toBe(current);
+    }
+    expect(inner.calls).toHaveLength(0);
   });
 });
