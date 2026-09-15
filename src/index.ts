@@ -7,7 +7,7 @@ import type { ProjectContext } from "./project.js";
 import { ueMcpConfigRejections, describeConfigRejections } from "./project.js";
 import { attach, attachSummary } from "./deployer.js";
 import { SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS_LEAN, SERVER_INSTRUCTIONS_MICRO, multiEditorInstructions } from "./instructions.js";
-import { resolveContextStrategy, applyLeanContext, buildMicroGateway } from "./lean-context.js";
+import { resolveContextStrategy, applyLeanContext, buildMicroGateway, microCallParams } from "./lean-context.js";
 import {
   routeEditorCall,
   effectiveTaskName,
@@ -877,8 +877,8 @@ async function main() {
         const result = await withAssetLocks(
           session.guarded,
           lockingCfg,
-          taskName,
-          taskParams,
+          effectiveTaskName(tool, params),
+          effectiveTaskName(tool, params) === taskName ? taskParams : microCallParams(params),
           () => task.run(),
           session.lockOwnerId,
         );
