@@ -121,6 +121,12 @@ function mergeActions(target: ToolDef, added: Record<string, ActionSpec>, donor:
     if (key === "action") continue;
     if (!(key in target.schema)) target.schema[key] = schema;
   }
+  const actionsMarker = "\n\nActions:\n";
+  if (target.description.includes(actionsMarker) && donor.description.includes(actionsMarker)) {
+    target.description += Object.entries(added)
+      .map(([name, spec]) => `\n- ${name}${spec.description ? `: ${spec.description}` : ""}`)
+      .join("");
+  }
   rebuildActionEnum(target);
 }
 
