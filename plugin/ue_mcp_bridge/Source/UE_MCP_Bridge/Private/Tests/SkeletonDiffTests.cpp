@@ -251,6 +251,11 @@ bool FSkeletonDiffRegistrationAndValidationTest::RunTest(const FString& Paramete
 	}
 
 	const FString MissingFromPath = Fixture.GetPackage()->GetName() + TEXT(".MissingFrom");
+	AddExpectedError(
+		FString::Printf(TEXT("LoadAsset failed: The AssetData '%s'"),
+			*MissingFromPath.Replace(TEXT("."), TEXT("\\."))),
+		EAutomationExpectedErrorFlags::Contains,
+		1);
 	const TSharedPtr<FJsonObject> MissingFrom = ExecuteDiff(
 		Registry,
 		MissingFromPath,
@@ -265,6 +270,11 @@ bool FSkeletonDiffRegistrationAndValidationTest::RunTest(const FString& Paramete
 	}
 
 	const FString MissingToPath = Fixture.GetPackage()->GetName() + TEXT(".MissingTo");
+	AddExpectedError(
+		FString::Printf(TEXT("LoadAsset failed: The AssetData '%s'"),
+			*MissingToPath.Replace(TEXT("."), TEXT("\\."))),
+		EAutomationExpectedErrorFlags::Contains,
+		1);
 	const TSharedPtr<FJsonObject> MissingTo = ExecuteDiff(
 		Registry,
 		Skeleton->GetPathName(),
