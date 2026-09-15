@@ -1,10 +1,33 @@
 import { TaskRegistry, ShellTask } from "@db-lyon/flowkit";
-import type { TaskConstructor } from "@db-lyon/flowkit";
+import type { TaskConstructor, TaskContextInput } from "@db-lyon/flowkit";
 import type { ToolDef } from "../types.js";
 import type { CallPreparation } from "../call-pipeline.js";
 import type { FlowContext } from "./context.js";
 import { BridgeTask } from "./bridge-task.js";
 import { bridgeTaskClass, handlerTaskClass } from "./task-factory.js";
+import { MICRO_GATEWAY_TOOL, MICRO_GATEWAY_CALL, resolveMicroCall } from "../lean-context.js";
+import { McpError, ErrorCode } from "../errors.js";
+
+/** A gateway call is an alias for the target task, not a handler that executes
+ *  another action and repackages its result. Both MCP and FlowRunner create
+ *  tasks here, so plugin dispatch, failures and rollback keep the same path. */
+class MicroTaskRegistry extends TaskRegistry {
+  constructor(private readonly tools: ToolDef[]) {
+    super();
+  }
+
+  override async create(name: string, ctx: TaskContextInput, options: Record<string, unknown>) {
+    if (name === `${MICRO_GATEWAY_TOOL}.${MICRO_GATEWAY_CALL}`) {
+      const graph = (ctx as FlowContext).getToolGraph?.() ?? this.tools;
+      const call = resolveMicroCall(graph, options);
+      if (!this.listRegistered().includes(call.taskName)) {
+        throw new McpError(ErrorCode.NO_HANDLER, `Action ${call.taskName} has no registered task.`);
+      }
+      return super.create(call.taskName, ctx, call.params);
+    }
+    return super.create(name, ctx, options);
+  }
+}
 
 /**
  * Walk all category tools and register every action as a flowkit task.
@@ -15,7 +38,9 @@ import { bridgeTaskClass, handlerTaskClass } from "./task-factory.js";
  * Also registers `ue-mcp.bridge` as a class_path for YAML-defined bridge tasks.
  */
 export function buildFlowRegistry(tools: ToolDef[]): TaskRegistry {
-  const registry = new TaskRegistry();
+  const registry = tools.some((tool) => tool.name === MICRO_GATEWAY_TOOL)
+    ? new MicroTaskRegistry(tools)
+    : new TaskRegistry();
 
   // Register built-in task class paths
   registry.registerClassPath("ue-mcp.bridge", BridgeTask as unknown as TaskConstructor);
