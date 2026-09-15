@@ -117,7 +117,10 @@ export function searchToolGraph(tools: SearchableTool[], query: string, limit = 
 
       // Collapse aliases that route to the same bridge handler (e.g.
       // add_instances / add_hismc_instances) - keep the best-scoring name.
-      const key = `${tool.name}:${spec?.bridge ?? actionName}`;
+      // Generated Epic actions are different tools multiplexed through one
+      // gateway, so their action names remain their search identities.
+      const isEpicGatewayAction = actionName.startsWith("epic_") && spec?.bridge === "epic_call_tool";
+      const key = `${tool.name}:${isEpicGatewayAction ? actionName : spec?.bridge ?? actionName}`;
       const existing = hitsByHandler.get(key);
       if (!existing || score > existing.score) {
         hitsByHandler.set(key, { tool: tool.name, action: actionName, description: desc, score });
