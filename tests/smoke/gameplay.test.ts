@@ -9,6 +9,7 @@ let hasSmartObjects = false;
 
 const testAssets = [
   `${TEST_PREFIX}/IA_SmokeTest`,
+  `${TEST_PREFIX}/IA_MappableSettings`,
   `${TEST_PREFIX}/IMC_SmokeTest`,
   `${TEST_PREFIX}/BB_SmokeTest`,
   `${TEST_PREFIX}/BT_SmokeTest`,
@@ -185,5 +186,73 @@ describe("gameplay - create assets (with cleanup)", () => {
       name: "HUD_SmokeTest", packagePath: TEST_PREFIX,
     });
     expect(r.ok, r.error).toBe(true);
+  });
+});
+
+describe("gameplay - set_player_mappable_settings", () => {
+  const assetName = "IA_MappableSettings";
+  const assetPath = `${TEST_PREFIX}/${assetName}`;
+
+  it("creates settings, reads them back, is idempotent, and rejects an empty mappingName", async () => {
+    await callBridge(bridge, "delete_asset", { assetPath }).catch(() => {});
+    const createdAction = await callBridge(bridge, "create_input_action", {
+      name: assetName, packagePath: TEST_PREFIX,
+    });
+    expect(createdAction.ok, createdAction.error).toBe(true);
+
+    const created = await callBridge(bridge, "set_player_mappable_settings", {
+      inputActionPath: assetPath,
+      mappingName: "Jump",
+      displayName: "Jump",
+      displayCategory: "Movement",
+    });
+    expect(created.ok, created.error).toBe(true);
+    const createdResult = created.result as Record<string, unknown>;
+    expect(createdResult.success, String(createdResult.error)).not.toBe(false);
+    expect(createdResult.created).toBe(true);
+    expect(createdResult.unchanged).toBe(false);
+    expect(createdResult.mappingName).toBe("Jump");
+    expect(createdResult.displayName).toBe("Jump");
+    expect(createdResult.displayCategory).toBe("Movement");
+    expect(String(createdResult.playerMappableKeySettings)).not.toBe("None");
+
+    const read = await callBridge(bridge, "read_input_action", { inputActionPath: assetPath });
+    expect(read.ok, read.error).toBe(true);
+    const readResult = read.result as Record<string, unknown>;
+    expect(String(readResult.playerMappableKeySettings)).toBe(String(createdResult.playerMappableKeySettings));
+
+    const named = await callBridge(bridge, "get_property", {
+      objectPath: String(createdResult.playerMappableKeySettings),
+      propertyName: "Name",
+    });
+    expect(named.ok, named.error).toBe(true);
+    const namedResult = named.result as Record<string, unknown>;
+    const namedValue = namedResult.value ?? namedResult.Name ?? namedResult.propertyValue ?? namedResult;
+    expect(JSON.stringify(namedValue)).toContain("Jump");
+
+    const replay = await callBridge(bridge, "set_player_mappable_settings", {
+      inputActionPath: assetPath,
+      mappingName: "Jump",
+      displayName: "Jump",
+      displayCategory: "Movement",
+    });
+    expect(replay.ok, replay.error).toBe(true);
+    const replayResult = replay.result as Record<string, unknown>;
+    expect(replayResult.success, String(replayResult.error)).not.toBe(false);
+    expect(replayResult.unchanged).toBe(true);
+    expect(replayResult.updated).toBe(false);
+    expect(replayResult.mappingName).toBe("Jump");
+    expect(replayResult.displayName).toBe("Jump");
+    expect(replayResult.displayCategory).toBe("Movement");
+
+    const empty = await callBridge(bridge, "set_player_mappable_settings", {
+      inputActionPath: assetPath,
+      mappingName: "",
+    });
+    expect(empty.ok, empty.error).toBe(true);
+    const emptyResult = empty.result as Record<string, unknown>;
+    expect(emptyResult.success).toBe(false);
+    expect(String(emptyResult.error)).toMatch(/mappingName/i);
+    expect(String(emptyResult.error)).toMatch(/non-empty|empty/i);
   });
 });
