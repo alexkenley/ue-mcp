@@ -1372,53 +1372,6 @@ namespace InputDepth_Internal
 			Action->GetClass()->FindPropertyByName(TEXT("PlayerMappableKeySettings")));
 	}
 
-	static UPlayerMappableKeySettings* GetPlayerMappableSettings(UInputAction* Action)
-	{
-		FObjectPropertyBase* Property = FindPlayerMappableSettingsProperty(Action);
-		if (!Property) return nullptr;
-		return Cast<UPlayerMappableKeySettings>(Property->GetObjectPropertyValue_InContainer(Action));
-	}
-
-	static FName ReadMappableName(const UObject* Settings)
-	{
-		if (!Settings) return NAME_None;
-		if (const FNameProperty* NameProp =
-				CastField<FNameProperty>(Settings->GetClass()->FindPropertyByName(TEXT("Name"))))
-		{
-			return NameProp->GetPropertyValue_InContainer(Settings);
-		}
-		return NAME_None;
-	}
-
-	static FString ReadMappableText(const UObject* Settings, const TCHAR* PropertyName)
-	{
-		if (!Settings) return FString();
-		if (const FTextProperty* TextProp =
-				CastField<FTextProperty>(Settings->GetClass()->FindPropertyByName(PropertyName)))
-		{
-			return TextProp->GetPropertyValue_InContainer(Settings).ToString();
-		}
-		return FString();
-	}
-
-	static bool WriteMappableName(UObject* Settings, FName Value)
-	{
-		if (!Settings) return false;
-		FNameProperty* NameProp = CastField<FNameProperty>(Settings->GetClass()->FindPropertyByName(TEXT("Name")));
-		if (!NameProp) return false;
-		NameProp->SetPropertyValue_InContainer(Settings, Value);
-		return true;
-	}
-
-	static bool WriteMappableText(UObject* Settings, const TCHAR* PropertyName, const FString& Value)
-	{
-		if (!Settings) return false;
-		FTextProperty* TextProp = CastField<FTextProperty>(Settings->GetClass()->FindPropertyByName(PropertyName));
-		if (!TextProp) return false;
-		TextProp->SetPropertyValue_InContainer(Settings, FText::FromString(Value));
-		return true;
-	}
-
 	static void ReportPlayerMappableMetadata(
 		TSharedPtr<FJsonObject>& Result,
 		const UInputAction* Action,
@@ -1426,9 +1379,9 @@ namespace InputDepth_Internal
 	{
 		Result->SetStringField(TEXT("inputActionPath"), Action->GetPathName());
 		Result->SetStringField(TEXT("playerMappableKeySettings"), Settings ? Settings->GetPathName() : TEXT("None"));
-		Result->SetStringField(TEXT("mappingName"), Settings ? ReadMappableName(Settings).ToString() : FString());
-		Result->SetStringField(TEXT("displayName"), ReadMappableText(Settings, TEXT("DisplayName")));
-		Result->SetStringField(TEXT("displayCategory"), ReadMappableText(Settings, TEXT("DisplayCategory")));
+		Result->SetStringField(TEXT("mappingName"), Settings ? Settings->Name.ToString() : FString());
+		Result->SetStringField(TEXT("displayName"), Settings ? Settings->DisplayName.ToString() : FString());
+		Result->SetStringField(TEXT("displayCategory"), Settings ? Settings->DisplayCategory.ToString() : FString());
 	}
 }
 
@@ -1671,13 +1624,17 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetPlayerMappableSettings(const TShare
 		return MCPError(TEXT("InputAction has no PlayerMappableKeySettings property (engine layout changed?)"));
 	}
 
-	UPlayerMappableKeySettings* Settings = GetPlayerMappableSettings(Action);
+	UPlayerMappableKeySettings* Settings = Action->GetPlayerMappableKeySettings().Get();
 	const bool bCreated = Settings == nullptr;
 	const FName DesiredName(*MappingName);
+	if (DesiredName.IsNone())
+	{
+		return MCPError(TEXT("mappingName must not resolve to None"));
+	}
 
-	const FName PreviousName = ReadMappableName(Settings);
-	const FString PreviousDisplayName = ReadMappableText(Settings, TEXT("DisplayName"));
-	const FString PreviousDisplayCategory = ReadMappableText(Settings, TEXT("DisplayCategory"));
+	const FName PreviousName = Settings ? Settings->Name : NAME_None;
+	const FString PreviousDisplayName = Settings ? Settings->DisplayName.ToString() : FString();
+	const FString PreviousDisplayCategory = Settings ? Settings->DisplayCategory.ToString() : FString();
 
 	const bool bNameUnchanged = Settings && PreviousName == DesiredName;
 	const bool bDisplayNameUnchanged = !bHasDisplayName || (Settings && PreviousDisplayName == DisplayName);
@@ -1716,21 +1673,9 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetPlayerMappableSettings(const TShare
 		Settings->Modify();
 	}
 
-	if (!WriteMappableName(Settings, DesiredName))
-	{
-		Transaction.Cancel();
-		return MCPError(TEXT("UPlayerMappableKeySettings has no FName 'Name' property (engine layout changed?)"));
-	}
-	if (bHasDisplayName && !WriteMappableText(Settings, TEXT("DisplayName"), DisplayName))
-	{
-		Transaction.Cancel();
-		return MCPError(TEXT("UPlayerMappableKeySettings has no FText 'DisplayName' property (engine layout changed?)"));
-	}
-	if (bHasDisplayCategory && !WriteMappableText(Settings, TEXT("DisplayCategory"), DisplayCategory))
-	{
-		Transaction.Cancel();
-		return MCPError(TEXT("UPlayerMappableKeySettings has no FText 'DisplayCategory' property (engine layout changed?)"));
-	}
+	Settings->Name = DesiredName;
+	if (bHasDisplayName) Settings->DisplayName = FText::FromString(DisplayName);
+	if (bHasDisplayCategory) Settings->DisplayCategory = FText::FromString(DisplayCategory);
 
 #if WITH_EDITOR
 	Action->PostEditChange();

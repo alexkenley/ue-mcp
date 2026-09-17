@@ -193,7 +193,7 @@ describe("gameplay - set_player_mappable_settings", () => {
   const assetName = "IA_MappableSettings";
   const assetPath = `${TEST_PREFIX}/${assetName}`;
 
-  it("creates settings, reads them back, is idempotent, and rejects an empty mappingName", async () => {
+  it("creates settings, reads them back, is idempotent, and rejects invalid mapping names", async () => {
     await callBridge(bridge, "delete_asset", { assetPath }).catch(() => {});
     const createdAction = await callBridge(bridge, "create_input_action", {
       name: assetName, packagePath: TEST_PREFIX,
@@ -245,6 +245,19 @@ describe("gameplay - set_player_mappable_settings", () => {
     expect(replayResult.displayName).toBe("Jump");
     expect(replayResult.displayCategory).toBe("Movement");
 
+    const updated = await callBridge(bridge, "set_player_mappable_settings", {
+      inputActionPath: assetPath,
+      mappingName: "Jump",
+      displayName: "Leap",
+    });
+    expect(updated.ok, updated.error).toBe(true);
+    const updatedResult = updated.result as Record<string, unknown>;
+    expect(updatedResult.success, String(updatedResult.error)).not.toBe(false);
+    expect(updatedResult.updated).toBe(true);
+    expect(updatedResult.unchanged).toBe(false);
+    expect(updatedResult.displayName).toBe("Leap");
+    expect(updatedResult.displayCategory).toBe("Movement");
+
     const empty = await callBridge(bridge, "set_player_mappable_settings", {
       inputActionPath: assetPath,
       mappingName: "",
@@ -254,5 +267,15 @@ describe("gameplay - set_player_mappable_settings", () => {
     expect(emptyResult.success).toBe(false);
     expect(String(emptyResult.error)).toMatch(/mappingName/i);
     expect(String(emptyResult.error)).toMatch(/non-empty|empty/i);
+
+    const none = await callBridge(bridge, "set_player_mappable_settings", {
+      inputActionPath: assetPath,
+      mappingName: "None",
+    });
+    expect(none.ok, none.error).toBe(true);
+    const noneResult = none.result as Record<string, unknown>;
+    expect(noneResult.success).toBe(false);
+    expect(String(noneResult.error)).toMatch(/mappingName/i);
+    expect(String(noneResult.error)).toMatch(/None/i);
   });
 });
