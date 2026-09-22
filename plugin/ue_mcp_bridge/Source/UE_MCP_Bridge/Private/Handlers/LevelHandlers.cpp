@@ -527,6 +527,18 @@ TSharedPtr<FJsonValue> FLevelHandlers::PlaceActor(const TSharedPtr<FJsonObject>&
 		return MCPError(TEXT("Failed to spawn actor"));
 	}
 
+	// #1119: SpawnActor does not run the editor's volume factory, so native
+	// volumes otherwise have no brush, bounds or collision. Keep any brush
+	// supplied by the class; only initialize a missing one with the native
+	// 200 cm cube. The builder can snap location and resets scale, so restore
+	// the spawned transform before applying the caller's scale below.
+	if (AVolume* Volume = Cast<AVolume>(NewActor); Volume && !Volume->Brush)
+	{
+		const FTransform VolumeTransform = Volume->GetActorTransform();
+		UEMCP::BuildVolumeAsCube(World, Volume, FVector(100.0));
+		Volume->SetActorTransform(VolumeTransform);
+	}
+
 	if (!Label.IsEmpty())
 	{
 		NewActor->SetActorLabel(Label);

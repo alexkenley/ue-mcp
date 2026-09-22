@@ -145,6 +145,16 @@ npm run test:unit
 
 These also run in CI on every PR.
 
+### Volume placement regression
+
+`npm run test:automation -- --filter UE.MCP.Level.PlaceVolume` checks that
+`level(place_actor)` initializes native volume brushes with a 200 cm cube,
+preserves requested location, rotation and scale, and leaves existing custom
+brushes and ordinary actor placement unchanged. It checks polygon geometry,
+bounds and collision body setup in a disposable editor world, then restores
+the original editor world. Run it through the automation harness against
+`tests/ue_mcp/ue_mcp.uproject` after deploying and rebuilding the plugin.
+
 ### Smoke Tests
 
 Smoke tests run against a **live editor** and verify tool functionality end-to-end.
