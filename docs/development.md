@@ -266,6 +266,12 @@ export const myfeatureTool: ToolDef = categoryTool(
 
 2. Register it in `src/index.ts`.
 
+Category handlers that invoke another action in their own category must route
+that call through the active `ToolDef.handler` from `ctx.getToolGraph()`. That
+keeps session-injected actions and the shared timeout, path repair, parameter
+folding, and result projection pipeline. Use the exported base tool only when
+the context has no registry graph accessor, such as a direct unit invocation.
+
 ### C++ Side
 
 1. Create handler files in `plugin/ue_mcp_bridge/Source/UE_MCP_Bridge/Private/Handlers/`
