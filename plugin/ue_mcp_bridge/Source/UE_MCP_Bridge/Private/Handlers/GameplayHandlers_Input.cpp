@@ -51,6 +51,62 @@
 #include "EnhancedInputSubsystemInterface.h"
 #include "ScopedTransaction.h"
 
+namespace ImcEdit_Internal
+{
+	// #1097/#1109: a successful in-memory edit does not establish persistence.
+	// Use the shared checked save, which refuses protected/unmounted/read-only
+	// packages before SavePackage, rather than restoring the old unchecked save.
+	static void FinishEdit(
+		UInputMappingContext* IMC,
+		const TSharedPtr<FJsonObject>& Params,
+		const TSharedPtr<FJsonObject>& Result,
+		bool bChanged)
+	{
+		UPackage* Package = IMC->GetOutermost();
+		if (bChanged && Package) Package->MarkPackageDirty();
+
+		const bool bSave = OptionalBool(Params, TEXT("save"), true);
+		// The inverse must use the same persistence policy. Saving a deferred
+		// edit's rollback would also flush unrelated pending edits in this IMC.
+		const TSharedPtr<FJsonObject>* Rollback = nullptr;
+		const TSharedPtr<FJsonObject>* Payload = nullptr;
+		if (Result->TryGetObjectField(TEXT("rollback"), Rollback) && Rollback->IsValid()
+			&& (*Rollback)->TryGetObjectField(TEXT("payload"), Payload) && Payload->IsValid())
+		{
+			(*Payload)->SetBoolField(TEXT("save"), bSave);
+		}
+
+		bool bSaved = false;
+		FString Reason;
+		if (bSave)
+		{
+			// Save even on an idempotent replay: an earlier save=false call or a
+			// suppressed dirty flag can leave the requested value only in memory.
+			bSaved = SaveAssetPackageChecked(IMC, Reason);
+			MCPNoteSaveOutcome(Result, IMC->GetPathName(), bSaved, Reason);
+		}
+		else
+		{
+			Reason = TEXT("save=false was requested; no package write was attempted. Call asset(save) to persist the context.");
+			if (bChanged && (!Package || !Package->IsDirty()))
+			{
+				// Unreal can suppress MarkPackageDirty during PIE, loading or undo.
+				// Respect that policy and expose the failure instead of overriding
+				// it or promising that save_dirty can discover this changed asset.
+				Reason = TEXT("The context changed in memory, but Unreal did not mark its package dirty. Dirty-package saves will not discover this edit; retry with save=true or explicitly save the context.");
+				Result->SetBoolField(TEXT("success"), false);
+				Result->SetStringField(TEXT("error"), Reason);
+			}
+		}
+
+		Result->SetBoolField(TEXT("saved"), bSaved);
+		Result->SetBoolField(TEXT("persisted"), bSaved);
+		Result->SetBoolField(TEXT("packageDirty"), Package && Package->IsDirty());
+		if (Package) Result->SetStringField(TEXT("packageName"), Package->GetName());
+		if (!bSaved) Result->SetStringField(TEXT("persistError"), Reason);
+	}
+}
+
 
 TSharedPtr<FJsonValue> FGameplayHandlers::CreateInputAction(const TSharedPtr<FJsonObject>& Params)
 {
@@ -249,6 +305,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddImcMapping(const TSharedPtr<FJsonOb
 			Existed->SetStringField(TEXT("imcPath"), IMC->GetPathName());
 			Existed->SetStringField(TEXT("inputAction"), InputAction->GetPathName());
 			Existed->SetStringField(TEXT("key"), KeyName);
+			ImcEdit_Internal::FinishEdit(IMC, Params, Existed, false);
 			return MCPResult(Existed);
 		}
 	}
@@ -259,13 +316,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddImcMapping(const TSharedPtr<FJsonOb
 	NewMapping.Key = Key;
 
 	IMC->MapKey(InputAction, Key);
-
-	// Mark dirty - caller can use asset(save) to persist (#197 fix: SavePackage crash)
-	UPackage* Pkg = IMC->GetOutermost();
-	if (Pkg)
-	{
-		Pkg->MarkPackageDirty();
-	}
 
 	auto Result = MCPSuccess();
 	MCPSetCreated(Result);
@@ -284,6 +334,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddImcMapping(const TSharedPtr<FJsonOb
 	Payload->SetStringField(TEXT("key"), KeyName);
 	MCPSetRollback(Result, TEXT("remove_imc_mapping"), Payload);
 	Result->SetBoolField(TEXT("rollbackLossy"), false);
+	ImcEdit_Internal::FinishEdit(IMC, Params, Result, true);
 
 	return MCPResult(Result);
 }
@@ -645,13 +696,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetMappingModifiers(const TSharedPtr<F
 		Mapping.Triggers = NewTriggers;
 	}
 
-	// Mark dirty - caller can use asset(save) to persist (#197 fix)
-	UPackage* Pkg = IMC->GetOutermost();
-	if (Pkg)
-	{
-		Pkg->MarkPackageDirty();
-	}
-
 	// The same reading, taken off the same two lists after the write. Rebuilt
 	// objects of the same classes carrying the same property values produce the
 	// same string, so a replayed call reports that it moved nothing.
@@ -712,6 +756,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetMappingModifiers(const TSharedPtr<F
 			: TEXT("Neither 'modifiers' nor 'triggers' was passed, so neither list was replaced and there is nothing "
 				   "to undo."));
 	}
+	ImcEdit_Internal::FinishEdit(IMC, Params, Result, bListsChanged);
 	return MCPResult(Result);
 }
 
@@ -760,15 +805,6 @@ namespace ImcEdit_Internal
 		OutError = TEXT("No mapping matched the given inputActionPath/key.");
 		return INDEX_NONE;
 	}
-
-	static bool SaveImc(UInputMappingContext* IMC)
-	{
-		UPackage* Pkg = IMC->GetOutermost();
-		if (!Pkg) return false;
-		// Mark dirty only - caller can use asset(save) to persist (#197 fix)
-		Pkg->MarkPackageDirty();
-		return true;
-	}
 }
 
 
@@ -809,6 +845,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveImcMapping(const TSharedPtr<FJso
 			Noop->SetBoolField(TEXT("rollbackPossible"), false);
 			Noop->SetStringField(TEXT("rollbackNote"),
 				TEXT("No mapping matched, so nothing was removed and there is nothing to restore."));
+			ImcEdit_Internal::FinishEdit(IMC, Params, Noop, false);
 			return MCPResult(Noop);
 		}
 		return MCPError(ResolveError);
@@ -820,8 +857,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveImcMapping(const TSharedPtr<FJso
 	const int32 RemovedModifiers = Removed.Modifiers.Num();
 	const int32 RemovedTriggers = Removed.Triggers.Num();
 	Mappings.RemoveAt(Idx);
-
-	ImcEdit_Internal::SaveImc(IMC);
 
 	auto Result = MCPSuccess();
 	MCPSetUpdated(Result);
@@ -862,6 +897,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveImcMapping(const TSharedPtr<FJso
 			TEXT("The removed mapping had no InputAction on it, and gameplay(add_imc_mapping) requires one, so there "
 				 "is no call that puts an action-less mapping back."));
 	}
+	ImcEdit_Internal::FinishEdit(IMC, Params, Result, true);
 	return MCPResult(Result);
 }
 
@@ -899,8 +935,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetImcMappingKey(const TSharedPtr<FJso
 	const bool bChanged = PrevKey != NewKey;
 	Mappings[Idx].Key = NewKey;
 
-	ImcEdit_Internal::SaveImc(IMC);
-
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("imcPath"), IMC->GetPathName());
 	Result->SetNumberField(TEXT("mappingIndex"), Idx);
@@ -927,6 +961,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetImcMappingKey(const TSharedPtr<FJso
 		Result->SetStringField(TEXT("rollbackNote"),
 			TEXT("The mapping already used this key, so nothing changed and there is nothing to undo."));
 	}
+	ImcEdit_Internal::FinishEdit(IMC, Params, Result, bChanged);
 	return MCPResult(Result);
 }
 
@@ -964,8 +999,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetImcMappingAction(const TSharedPtr<F
 	const bool bChanged = PrevAction != NewAction;
 	Mappings[Idx].Action = NewAction;
 
-	ImcEdit_Internal::SaveImc(IMC);
-
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("imcPath"), IMC->GetPathName());
 	Result->SetNumberField(TEXT("mappingIndex"), Idx);
@@ -994,6 +1027,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetImcMappingAction(const TSharedPtr<F
 				   "newInputActionPath, so there is no call that puts it back to none.")
 			: TEXT("The mapping already used this InputAction, so nothing changed and there is nothing to undo."));
 	}
+	ImcEdit_Internal::FinishEdit(IMC, Params, Result, bChanged);
 	return MCPResult(Result);
 }
 

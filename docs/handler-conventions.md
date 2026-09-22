@@ -2,6 +2,18 @@
 
 How mutating C++ handlers participate in **idempotency** (safe replay) and **rollback** (failure recovery).
 
+## Input mapping persistence
+
+`gameplay(add_imc_mapping)`, `remove_imc_mapping`, `set_imc_mapping_key`,
+`set_imc_mapping_action`, and `set_mapping_modifiers` save their Input Mapping
+Context by default. The `asset(add_input_mapping)` and `remove_input_mapping`
+aliases accept the same optional `save` boolean. `save=false` keeps the edit in
+memory; inspect `saved`, `persisted`, `packageDirty`, and `persistError` before
+relying on it. A requested save that fails reports failure even if the in-memory
+edit succeeded. An unchanged call with `save=true` still saves pending edits,
+including edits from an earlier `save=false` call. Rollback preserves the original
+call's `save` choice, so undoing a deferred edit does not save other pending edits.
+
 ## Why
 
 Flows mutate editor state. When a flow fails partway, the user wants two guarantees:
