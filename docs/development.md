@@ -282,6 +282,26 @@ The plugin source lives in `plugin/ue_mcp_bridge/`. When you modify C++ handler 
 
 For a full editor restart: `editor(action="restart_editor")`
 
+### JSON maps and Linux compiler warnings
+
+UE 5.8 uses shared-string keys in `FJsonObject::Values`; earlier engines use
+`FString`. Bind range-loop entries with `const auto&` so the reference matches
+the map's actual type. When a handler needs `FString` key operations, convert
+inside the body:
+
+```cpp
+for (const auto& JsonEntry : Object->Values)
+{
+    const TPair<FString, TSharedPtr<FJsonValue>> Pair(JsonEntry.Key, JsonEntry.Value);
+    // Use Pair.Key as an FString and Pair.Value as the existing JSON value.
+}
+```
+
+An explicit `FString` pair reference in the loop header binds to a converted
+temporary on UE 5.8. A typed pair by value instead copies the map entry on
+older engines. Both can trigger Clang's `-Wrange-loop-construct`, which the
+Linux toolchain treats as an error. Keep the warning enabled.
+
 ### File-local helpers and the unity build
 
 UBT compiles a module as a **unity build**: several `.cpp` files are concatenated into one translation unit (`Module.UE_MCP_Bridge.2.cpp` and friends). An anonymous namespace is per translation unit, so two handler files can each define a file-local helper of the same name and both compile in isolation. When the grouping puts them in the same blob, the two anonymous namespaces merge and the second definition becomes a redefinition:
