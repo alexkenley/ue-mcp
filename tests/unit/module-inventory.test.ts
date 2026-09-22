@@ -88,6 +88,7 @@ const PER_SESSION: Record<string, string> = {
   "flow/guard.ts": "One guard registry per session; a project's guards do not veto another's calls.",
   "flow/guarded-bridge.ts": "Wraps one session's bridge in that session's guards.",
   "flow/guards.ts": "Builds pipeline guards from what a plugin or a project declared.",
+  "flow/guard-config.ts": "Owns one session's last valid YAML guard declarations, merged from its project and user-global config layers.",
   "flow/guard-schema.ts": "What a guard declaration is, shared by the manifest and ue-mcp.yml.",
   "flow/loader.ts": "Loads each project's own ue-mcp.yml.",
   "flow/git-snapshot.ts": "Snapshots the repository holding one project, through its bridge.",

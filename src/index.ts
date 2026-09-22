@@ -48,7 +48,7 @@ import { startVersionCheck, consumeUpgradeNotice } from "./version-check.js";
 import { buildFlowRegistry } from "./flow/registry.js";
 import { GuardRegistry } from "./flow/guard.js";
 import { assertNoLegacyGuardTasks, buildGuards } from "./flow/guards.js";
-import type { GuardDeclarations } from "./flow/guard-schema.js";
+import { createLiveGuardSource } from "./flow/guard-config.js";
 import { loadFlowConfig } from "./flow/loader.js";
 import { createFlowTool } from "./flow/flow-tool.js";
 import { startFlowHttpServer } from "./flow/http-server.js";
@@ -508,49 +508,22 @@ async function main() {
       flows: load.pluginLoad.flowDefs,
     }).config;
 
-    // Guard options track ue-mcp.yml (#1061). Gated on mtime and size, because
-    // a before hook runs on every call it covers and parsing YAML there would
-    // put a config read on the hot path. An unchanged file costs one stat.
-    const configPath = path.join(load.configDir ?? process.cwd(), "ue-mcp.yml");
-    let cachedStamp: string | null = null;
-    let cachedGuards: GuardDeclarations = {};
-    const liveGuardDeclarations = (): GuardDeclarations => {
-      let stamp: string;
-      try {
-        const st = fs.statSync(configPath);
-        stamp = `${st.mtimeMs}:${st.size}`;
-      } catch {
-        // No project file: plugin-declared guards keep their manifest options.
-        return {};
-      }
-      if (stamp === cachedStamp) return cachedGuards;
-      try {
-        cachedGuards = (readProjectConfig().guards ?? {}) as GuardDeclarations;
-        cachedStamp = stamp;
-      } catch (e) {
-        // A half-written file must not disarm a guard.
-        console.error(
-          `[ue-mcp] ${load.surface.session.name}: ue-mcp.yml changed but could not be re-read, `
-          + `guard options are unchanged: ${e instanceof Error ? e.message : String(e)}`,
-        );
-        cachedStamp = stamp;
-      }
-      return cachedGuards;
-    };
-
     const deps = {
       registry: load.registry!,
       ctx: guardCtx,
       rawBridge: load.surface.session.bridge,
-      liveOptions: (guardName: string, phase: "before" | "after") =>
-        liveGuardDeclarations()[guardName]?.[phase]?.options,
     };
 
     const projectConfig = readProjectConfig();
 
-    const sources: Array<{ label: string; guards: GuardDeclarations }> = [
+    const sources = [
       ...load.pluginLoad.guardsByPlugin.map((g) => ({ label: g.plugin, guards: g.guards })),
-      { label: "ue-mcp.yml", guards: (projectConfig.guards ?? {}) as GuardDeclarations },
+      createLiveGuardSource(load.surface.tools, load.configDir, {
+        tasks: load.pluginLoad.taskDefs,
+        flows: load.pluginLoad.flowDefs,
+      }, (message) => {
+        console.error(`[ue-mcp] ${load.surface.session.name}: ${message}`);
+      }),
     ];
 
     // A task still named like a guard is fatal, whoever declared it: under the
@@ -564,7 +537,7 @@ async function main() {
     let count = 0;
     for (const source of sources) {
       if (Object.keys(source.guards).length === 0) continue;
-      for (const guard of await buildGuards(source.guards, deps, { label: source.label })) {
+      for (const guard of await buildGuards(source.guards, deps, source)) {
         load.surface.session.guards.register(guard);
         count++;
       }
@@ -1074,7 +1047,7 @@ async function main() {
   console.error(`[ue-mcp] ue-mcp.yml loaded - ${Object.keys(initialLoad.config.flows).length} flow(s), ${Object.keys(initialLoad.config.tasks).length} custom task(s)`);
 
   // Config is reloaded on every flow call - edit ue-mcp.yml without restarting.
-  // Guard options are re-read the same way, gated on the file's mtime (#1061).
+  // Guard options track all YAML layers through a separate last-good cache.
   // Resolved from the addressed editor: a flow declared in one project's
   // ue-mcp.yml belongs to that project, and its steps have to dispatch through
   // that project's registry or a step naming an action only that project has

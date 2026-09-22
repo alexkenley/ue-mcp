@@ -71,7 +71,13 @@ Both hooks are optional and independent, so one named guard can hold both halves
 
 `class_path` is a path, resolved from the server's working directory: `guards/PolicyGuard` looks for `guards/PolicyGuard.ts`, `.js`, or an `index` under that name. Nothing enforces a directory, and `guards/` is the convention here only because a guard is not a task and should not sit in `tasks/` next to things that are. A plugin package is the one place a directory IS fixed: a plugin's own tasks resolve from its compiled `dist/tasks/`.
 
-`options` are bound when the guard is built. The call being guarded is layered over them, so a hook reads its configuration and its subject from one object: `method`, `params`, `paths` (the existing files the call will touch, empty for reads) and, for `after`, `result`.
+YAML guard `options` are reloaded before each hook runs when a config file changes. Layers follow the flow configuration order: `~/.ue-mcp/config.yml` (or `UE_MCP_GLOBAL_CONFIG`), the project's `ue-mcp.yml`, `ue-mcp.{UE_MCP_ENV}.yml`, then `ue-mcp.local.yml`. Environment and local overlays apply only while the project file exists. File creation and deletion are tracked too. Plugin guard options remain those declared in the plugin manifest; a YAML guard with the same name is a separate guard and cannot override them.
+
+Removing a guard or one of its hooks from the effective YAML config disables that hook on the next call. Removing a project override may reveal an inherited global declaration instead. Restoring a previously registered hook resumes it. Malformed YAML, invalid guard declarations and file access errors retain the last valid guard configuration and log a warning; startup fails if no valid initial configuration can be read.
+
+Adding guards or hooks, or changing `class_path`, `scope` or `order`, requires restarting ue-mcp. Such changes retain the previous guard configuration until restart and log a warning when a registered YAML hook next runs. A session with no registered YAML hooks only reads guard configuration at startup. Plugin manifest changes also require a restart.
+
+The call being guarded is layered over the options for legacy task hooks, so a hook reads its configuration and its subject from one object: `method`, `params`, `paths` (the existing files the call will touch, empty for reads) and, for `after`, `result`.
 
 A `class_path` that cannot be resolved stops the server at boot, naming the guard and the manifest or config that declared it. With no guard registered the pipeline is a pass-through, so a guard that failed to build would leave the calls it covers ungated while the configuration says they are guarded.
 
