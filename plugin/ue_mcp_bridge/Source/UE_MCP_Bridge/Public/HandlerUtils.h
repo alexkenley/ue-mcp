@@ -1840,6 +1840,36 @@ inline UClass* FindClassByShortName(const FString& ClassName)
 	return MCPResolveClass(ClassName);
 }
 
+/** Resolve a script struct by literal name/path first, then tolerate the C++
+ *  F prefix on a short name or /Script/Module.FName leaf. Qualified names
+ *  stay qualified so another module's struct cannot silently win. */
+inline UScriptStruct* MCPResolveScriptStruct(const FString& Spec)
+{
+	if (Spec.IsEmpty()) return nullptr;
+	const auto Lookup = [](const FString& Name) -> UScriptStruct*
+	{
+		if (Name.Contains(TEXT("/")) || Name.Contains(TEXT(".")))
+		{
+			if (Name.StartsWith(TEXT("/Script/"))) return FindObject<UScriptStruct>(nullptr, *Name);
+			return Cast<UScriptStruct>(MCPLoadAssetObject(Name));
+		}
+		return FindFirstObject<UScriptStruct>(*Name, EFindFirstObjectOptions::NativeFirst);
+	};
+	if (UScriptStruct* Found = Lookup(Spec)) return Found;
+
+	const bool bShortName = !Spec.Contains(TEXT("/")) && !Spec.Contains(TEXT("."));
+	if (bShortName || Spec.StartsWith(TEXT("/Script/")))
+	{
+		const int32 LeafStart = Spec.Find(TEXT("."), ESearchCase::CaseSensitive, ESearchDir::FromEnd) + 1;
+		if (Spec.Len() > LeafStart + 1 && Spec[LeafStart] == TEXT('F'))
+		{
+			if (UScriptStruct* Found = Lookup(Spec.Left(LeafStart) + Spec.Mid(LeafStart + 1))) return Found;
+		}
+	}
+	// Preserve reflect_struct's existing fallback for names registered with F.
+	return bShortName ? Lookup(TEXT("F") + Spec) : nullptr;
+}
+
 /** Get the editor world, or nullptr if not available. */
 inline UWorld* GetEditorWorld()
 {

@@ -274,6 +274,8 @@ export const myfeatureTool: ToolDef = categoryTool(
 
 ## C++ Plugin Development
 
+Native USTRUCTs are registered without the leading `F`: `FTableRowBase` is the `UScriptStruct` named `TableRowBase`, path `/Script/Engine.TableRowBase`. `MCPResolveScriptStruct` in `HandlerUtils.h` is the shared lookup for `reflection(reflect_struct)` and `asset(create_datatable)`. It tries the literal spelling first, then strips one leading `F` from the name, including the leaf of a `/Script/Module.FName` path. There is no module scan. Shared header, not a file-local copy: see "File-local helpers and the unity build" below.
+
 The plugin source lives in `plugin/ue_mcp_bridge/`. When you modify C++ handler code:
 
 1. Edit the source in `plugin/ue_mcp_bridge/`

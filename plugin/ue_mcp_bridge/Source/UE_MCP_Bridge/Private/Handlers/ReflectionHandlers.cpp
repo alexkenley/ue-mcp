@@ -994,28 +994,9 @@ UClass* FReflectionHandlers::FindClass(const FString& ClassName)
 
 UScriptStruct* FReflectionHandlers::FindStruct(const FString& StructName)
 {
-	// Try direct lookup (handles full paths like /Script/ModuleName.StructName)
-	UScriptStruct* Struct = FindObject<UScriptStruct>(nullptr, *StructName);
-	if (Struct)
-	{
-		return Struct;
-	}
-
-	// Short-name lookup via FindFirstObject (UE 5.6+ replacement for the
-	// "any package" FindObject pattern). Tries the caller's spelling first,
-	// then F-prefixed - matches the convention agents typically use ("Vector"
-	// vs "FVector").
-	const TArray<FString> Candidates = { StructName, TEXT("F") + StructName };
-	for (const FString& Candidate : Candidates)
-	{
-		Struct = FindFirstObject<UScriptStruct>(*Candidate, EFindFirstObjectOptions::NativeFirst);
-		if (Struct)
-		{
-			return Struct;
-		}
-	}
-
-	return nullptr;
+	// #1088: one shared resolution order with create_datatable. Literal first,
+	// then one leading F stripped from the name or from the /Script leaf.
+	return MCPResolveScriptStruct(StructName);
 }
 
 UEnum* FReflectionHandlers::FindEnum(const FString& EnumName)
