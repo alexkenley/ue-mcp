@@ -30,6 +30,7 @@ public class UE_MCP_Bridge : ModuleRules
 	// Private/BridgeStateFiles.cpp, Private/BridgeParamEcho.cpp and
 	// Private/Tests/BridgeProtocolTests.cpp: same reason.
 	// Private/Tests/SequencerHandlerTests.cpp: same reason.
+	// Private/Tests/MaterialGraphReadTests.cpp: rescan the expression graph regression.
 	// Private/Handlers/LevelHandlers_InstanceProjection.cpp and
 	// Private/Tests/LevelInstanceProjectionTests.cpp: same reason.
 	// Private/Tests/PackageSaveExtensionTests.cpp: same reason.

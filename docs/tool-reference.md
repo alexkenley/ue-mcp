@@ -2,7 +2,7 @@
 
 This page lists ue-mcp's own category tools and actions. For the official Unreal 5.8 tools that ue-mcp wraps (surfaced inside these same categories), see [Native Tools](native-tools.md).
 
-UE-MCP exposes **<!-- count:tools -->26<!-- /count --> category tools** covering **<!-- count:actions -->1932+<!-- /count --> actions**, plus a `flow` tool for running multi-step YAML workflows. Every category tool takes an `action` parameter that selects the operation, plus action-specific parameters.
+UE-MCP exposes **<!-- count:tools -->26<!-- /count --> category tools** covering **<!-- count:actions -->1933+<!-- /count --> actions**, plus a `flow` tool for running multi-step YAML workflows. Every category tool takes an `action` parameter that selects the operation, plus action-specific parameters.
 
 !!! tip "First call in any session"
     Start with `project(action="get_status")` to check the connection, then `level(action="get_outliner")` or `asset(action="list")` to explore.
@@ -754,7 +754,8 @@ Nothing outside these modes ever answers a dialog by itself. `editor(set_dialog_
 | `add_expression` | Add expression node. Params: `materialPath, expressionType, name?, parameterName?, group?, sortPriority?, defaultValue? (scalar number or {r,g,b,a} for vector params), value? (number for Constant, {r,g,b} for Constant3Vector, {x,y} for Constant2Vector), channels? ({r,g,b,a} bools for ComponentMask), positionX?, positionY? (#318)` |
 | `connect_expressions` | Wire two expressions. Params: `materialPath, sourceExpression, sourceOutput?, targetExpression, targetInput?` |
 | `connect_to_property` | Wire expression to material output. Params: `materialPath, expressionName, outputName?, property` |
-| `list_expressions` | List expression nodes, in the material's own stored order, which is what nodeId indexes into. Params: `materialPath, cursor?, limit?` |
+| `list_expressions` | List expression nodes, in the material's own stored order, which is what nodeId indexes into. Set includeInputs to include each node's input wiring (default false). Params: `materialPath (assetPath or path alias), includeInputs?, cursor?, limit?` |
+| `read_graph` | Read the stored material expression graph without creating an editor graph. Returns the same paged expressions as list_expressions, with inputs carrying inputIndex, inputName, connectedExpressionIndex and connectedOutputIndex, plus root material connections carrying expressionIndex and outputIndex. Params: `materialPath (assetPath or path alias), cursor?, limit?` |
 | `delete_expression` | Remove expression. Params: `materialPath, expressionName` |
 | `list_expression_types` | List available expression types, in the curated order they are grouped in. Params: `cursor?, limit?` |
 | `recompile` | Recompile material. Pass recompileChildren=true to cascade to every MaterialInstanceConstant whose parent chain reaches this material (#421). Params: `materialPath, recompileChildren?` |

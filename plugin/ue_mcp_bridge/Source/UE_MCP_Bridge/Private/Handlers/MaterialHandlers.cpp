@@ -58,6 +58,7 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("set_material_base_color"), &SetMaterialBaseColor);
 	Registry.RegisterHandler(TEXT("add_material_expression"), &AddMaterialExpression);
 	Registry.RegisterHandler(TEXT("list_material_expressions"), &ListMaterialExpressions);
+	Registry.RegisterHandler(TEXT("read_material_graph"), &ReadMaterialGraph);
 	Registry.RegisterHandler(TEXT("list_material_parameters"), &ListMaterialParameters);
 	Registry.RegisterHandler(TEXT("recompile_material"), &RecompileMaterial);
 	Registry.RegisterHandler(TEXT("create_material_instance"), &CreateMaterialInstance);
@@ -1450,22 +1451,54 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddMaterialExpression(const TSharedPtr
 
 TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressions(const TSharedPtr<FJsonObject>& Params)
 {
+	return ListMaterialExpressionsInternal(
+		Params,
+		TEXT("list_material_expressions"),
+		OptionalBool(Params, TEXT("includeInputs"), false),
+		/*bIncludeRootConnections*/ false);
+}
+
+TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterialGraph(const TSharedPtr<FJsonObject>& Params)
+{
+	// #1083/#1115: list_material_expressions omits input wiring, and generic
+	// asset(read_graph) cannot see UMaterial expression graphs unless an editor
+	// graph exists. Read the stored expressions and material property inputs
+	// directly. Do not create, rebuild, Modify, or dirty a UMaterialGraph.
+	return ListMaterialExpressionsInternal(
+		Params,
+		TEXT("read_material_graph"),
+		/*bIncludeInputs*/ true,
+		/*bIncludeRootConnections*/ true);
+}
+
+TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressionsInternal(
+	const TSharedPtr<FJsonObject>& Params,
+	const TCHAR* ActionName,
+	bool bIncludeInputs,
+	bool bIncludeRootConnections)
+{
 	FString MaterialPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("materialPath"), TEXT("path"), MaterialPath)) return Err;
-	if (MaterialPath.IsEmpty())
+	if (auto Err = RequireStringAlt(Params, TEXT("materialPath"), TEXT("path"), MaterialPath))
 	{
-		Params->TryGetStringField(TEXT("assetPath"), MaterialPath);
+		if (Params.IsValid())
+		{
+			Params->TryGetStringField(TEXT("assetPath"), MaterialPath);
+		}
 		if (MaterialPath.IsEmpty())
 		{
-			return MCPError(TEXT("Missing required parameter 'materialPath' (or 'path')"));
+			return Err;
 		}
 	}
 
 	// T3: paged. A production master material carries several hundred nodes.
+	// ActionName is the cursor collection identity, so a list cursor cannot be
+	// replayed against read_material_graph (and the reverse). includeInputs
+	// changes row payload, not which rows are enumerated, so it stays out of
+	// the key and existing list cursors keep working.
 	MCPPagination::FPageRequest Page;
 	if (auto Err = MCPPagination::ReadPageRequest(
 			Params,
-			FString::Printf(TEXT("list_material_expressions|materialPath=%s"), *MaterialPath),
+			FString::Printf(TEXT("%s|materialPath=%s"), ActionName, *MaterialPath),
 			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
 	{
 		return Err;
@@ -1474,11 +1507,31 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressions(const TSharedP
 	UMaterial* Material = LoadMaterialFromPath(MaterialPath);
 	if (!Material)
 	{
+		if (UMaterialInterface* Interface = LoadAssetByPath<UMaterialInterface>(MaterialPath))
+		{
+			if (Cast<UMaterialInstance>(Interface))
+			{
+				return MCPError(TEXT("A MaterialInstance has no expression graph. Read baseMaterialPath for the graph."));
+			}
+		}
 		return MCPError(FString::Printf(TEXT("Failed to load material at '%s'"), *MaterialPath));
 	}
 
-	TArray<MCPPagination::FPageRow> Rows;
 	auto Expressions = Material->GetExpressions();
+	TMap<UMaterialExpression*, int32> IndexByExpression;
+	if (bIncludeInputs || bIncludeRootConnections)
+	{
+		IndexByExpression.Reserve(Expressions.Num());
+		for (int32 i = 0; i < Expressions.Num(); ++i)
+		{
+			if (UMaterialExpression* Expression = Expressions[i])
+			{
+				IndexByExpression.Add(Expression, i);
+			}
+		}
+	}
+
+	TArray<MCPPagination::FPageRow> Rows;
 	for (int32 i = 0; i < Expressions.Num(); i++)
 	{
 		UMaterialExpression* Expression = Expressions[i];
@@ -1502,6 +1555,30 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressions(const TSharedP
 			ExprObj->SetStringField(TEXT("parameterName"), VP->ParameterName.ToString());
 		}
 
+		if (bIncludeInputs)
+		{
+			TArray<TSharedPtr<FJsonValue>> InputsArray;
+			for (int32 InputIdx = 0; ; ++InputIdx)
+			{
+				FExpressionInput* Input = Expression->GetInput(InputIdx);
+				if (!Input) break;
+
+				TSharedPtr<FJsonObject> InputObj = MakeShared<FJsonObject>();
+				InputObj->SetNumberField(TEXT("inputIndex"), InputIdx);
+				InputObj->SetStringField(TEXT("inputName"), Expression->GetInputName(InputIdx).ToString());
+				if (Input->Expression)
+				{
+					if (const int32* ConnIdx = IndexByExpression.Find(Input->Expression))
+					{
+						InputObj->SetNumberField(TEXT("connectedExpressionIndex"), *ConnIdx);
+					}
+					InputObj->SetNumberField(TEXT("connectedOutputIndex"), Input->OutputIndex);
+				}
+				InputsArray.Add(MakeShared<FJsonValueObject>(InputObj));
+			}
+			ExprObj->SetArrayField(TEXT("inputs"), InputsArray);
+		}
+
 		// The expression's OBJECT PATH is the page anchor, not its nodeId:
 		// nodeId is the index into GetExpressions(), which every insertion and
 		// deletion renumbers, and an index is exactly what a cursor must not
@@ -1517,6 +1594,38 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressions(const TSharedP
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("materialPath"), Material->GetPathName());
 	MCPPagination::EmitPage(Page, Rows, TEXT("expressions"), Result);
+
+	if (bIncludeRootConnections)
+	{
+		TSharedPtr<FJsonObject> ConnectionsObj = MakeShared<FJsonObject>();
+		UEnum* PropertyEnum = StaticEnum<EMaterialProperty>();
+		for (int32 PropIdx = 0; PropIdx < MP_MAX; ++PropIdx)
+		{
+			const EMaterialProperty Property = static_cast<EMaterialProperty>(PropIdx);
+			FExpressionInput* Input = Material->GetExpressionInputForProperty(Property);
+			if (!Input || !Input->Expression) continue;
+
+			FString PropertyName;
+			if (PropertyEnum)
+			{
+				PropertyName = PropertyEnum->GetNameStringByValue(static_cast<int64>(Property));
+				PropertyName.RemoveFromStart(TEXT("MP_"));
+			}
+			if (PropertyName.IsEmpty())
+			{
+				PropertyName = FString::FromInt(PropIdx);
+			}
+
+			TSharedPtr<FJsonObject> ConnObj = MakeShared<FJsonObject>();
+			if (const int32* ConnIdx = IndexByExpression.Find(Input->Expression))
+			{
+				ConnObj->SetNumberField(TEXT("expressionIndex"), *ConnIdx);
+			}
+			ConnObj->SetNumberField(TEXT("outputIndex"), Input->OutputIndex);
+			ConnectionsObj->SetObjectField(PropertyName, ConnObj);
+		}
+		Result->SetObjectField(TEXT("connections"), ConnectionsObj);
+	}
 
 	return MCPResult(Result);
 }
