@@ -2,8 +2,8 @@
 // assets that have no category of their own (#1059, raised for Mutable's
 // CustomizableObject).
 //
-// Blueprints and PCG graphs are NOT read here: blueprint(read_graph),
-// blueprint(get_connections) and pcg(read_graph) already own those, address
+// Blueprints, PCG graphs and Materials are NOT read here: blueprint(read_graph),
+// blueprint(get_connections), pcg(read_graph) and material(read_graph) own those, address
 // them in their own terms, and a second answer in a different shape is worse
 // than no answer. Those types are refused with a pointer to the right action.
 //
@@ -19,6 +19,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
+#include "Materials/Material.h"
 #include "UObject/UObjectHash.h"
 
 namespace
@@ -178,6 +179,9 @@ namespace
 	{
 		if (!Asset) return nullptr;
 		if (Asset->IsA<UBlueprint>()) return TEXT("blueprint(read_graph) and blueprint(get_connections)");
+		// A Material's UEdGraph exists only while its editor is open; the
+		// stored expressions are read by material(read_graph).
+		if (Asset->IsA<UMaterial>()) return TEXT("material(read_graph)");
 		const UClass* Class = Asset->GetClass();
 		for (; Class; Class = Class->GetSuperClass())
 		{
@@ -229,10 +233,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadAssetGraph(const TSharedPtr<FJsonObje
 		Empty->SetStringField(TEXT("assetClass"), Asset->GetClass()->GetName());
 		Empty->SetArrayField(TEXT("graphs"), TArray<TSharedPtr<FJsonValue>>());
 		Empty->SetNumberField(TEXT("graphCount"), 0);
-		// States what was searched, not what the asset "has". Material and
-		// PCGGraph keep their editor graph outside both routes, so an empty
-		// answer for those is a limit of this reader rather than a fact about
-		// the asset.
+		// States what was searched, not what the asset "has": a type whose editor
+		// builds its graph holds none until opened.
 		Empty->SetStringField(TEXT("note"), FString::Printf(
 			TEXT("No UEdGraph was reachable from '%s' (a %s). Searched its subobjects and its own graph-typed ")
 			TEXT("properties. A type whose graph is built by its own editor holds none until that editor has ")

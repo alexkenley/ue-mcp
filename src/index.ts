@@ -10,7 +10,7 @@ import { SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS_LEAN, SERVER_INSTRUCTIONS_MICR
 import { resolveContextStrategy, applyLeanContext, buildMicroGateway } from "./lean-context.js";
 import {
   routeEditorCall,
-  effectiveTaskName,
+  callSubject,
   refuseUntargetedInRegistry,
   editorAttribution,
   type RoutedCall,
@@ -728,11 +728,14 @@ async function main() {
       const params = routed.params;
       const action = params.action as string;
       const taskName = `${tool.name}.${action}`;
+      // The action actually run: the gateway's target in micro mode.
+      const subject = callSubject(tool, params);
+      const effectiveTask = subject.taskName;
 
       // Nothing below this line runs at one editor: the gate returns null
       // without classifying, so a single-editor server dispatches exactly as
       // it did before targeting existed.
-      const untargeted = gateUntargeted(effectiveTaskName(tool, params), routed.targeted);
+      const untargeted = gateUntargeted(effectiveTask, routed.targeted);
       if (untargeted) {
         return {
           content: withUpgradeNotice([
@@ -748,7 +751,7 @@ async function main() {
 
       // Actions served in this process never reach the bridge, so the bridge
       // boundary cannot refuse them. Same guard, same decision.
-      const preflight = await guard.check(effectiveTaskName(tool, params), "action");
+      const preflight = await guard.check(effectiveTask, "action");
       if (!preflight.allow) {
         return {
           content: withUpgradeNotice([
@@ -802,9 +805,9 @@ async function main() {
       const refusal = sessions.size > 1
         ? explainMissingAction(
             dispatchUnion,
-            taskName,
+            effectiveTask,
             session.name,
-            sessionRegistry.listRegistered().includes(taskName),
+            sessionRegistry.listRegistered().includes(effectiveTask),
           )
         : null;
       if (refusal) {
@@ -850,8 +853,8 @@ async function main() {
         const result = await withAssetLocks(
           session.guarded,
           lockingCfg,
-          taskName,
-          taskParams,
+          effectiveTask,
+          subject.params,
           () => task.run(),
           session.lockOwnerId,
         );
@@ -876,8 +879,8 @@ async function main() {
         let postRunDecision: GuardDecision | null = null;
         const failedUnderDialog = !result.success
           && !isDialogRefusal(result.data)
-          && !DialogGuard.actionAllowed(effectiveTaskName(tool, params))
-          && (postRunDecision = await guard.check(effectiveTaskName(tool, params), "action")).allow === false;
+          && !DialogGuard.actionAllowed(effectiveTask)
+          && (postRunDecision = await guard.check(effectiveTask, "action")).allow === false;
         if (!result.success && !isDialogRefusal(result.data) && !failedUnderDialog) {
           const msg = result.error?.message ?? `Task ${taskName} failed`;
           return {
@@ -893,13 +896,13 @@ async function main() {
         // An allow-listed read still SAYS a dialog is up. get_status is the
         // first call every client makes, and reporting a healthy editor while
         // the game thread is parked is the one answer it must never give.
-        if (DialogGuard.actionAllowed(effectiveTaskName(tool, params))) {
+        if (DialogGuard.actionAllowed(effectiveTask)) {
           // respond_to_dialog may have just cleared it. Nothing re-probes for
           // an allow-listed bridge method (guardCall returns before check, and
           // observe refuses to clear on a modal-safe reply), so this call came
           // back stamped as blocked and told the caller to make the call it had
           // just made.
-          if (effectiveTaskName(tool, params) === "editor.respond_to_dialog" && result.success) {
+          if (effectiveTask === "editor.respond_to_dialog" && result.success) {
             // refresh, NOT check. check applies the mode, so in interactive it
             // raised a form for whatever prompt this answer surfaced and
             // pressed a button on it, unasked, and then threw the decision
@@ -924,7 +927,7 @@ async function main() {
         // Actions allowed through a modal are exempt: reading the dialog and
         // answering it must not come back refused because of the dialog they
         // are about.
-        if (!DialogGuard.actionAllowed(effectiveTaskName(tool, params))) {
+        if (!DialogGuard.actionAllowed(effectiveTask)) {
           const fromPlugin = isDialogRefusal(result.data)
             ? (result.data as Record<string, unknown>)
             : null;
@@ -936,10 +939,10 @@ async function main() {
             // and the prose all describe what actually happened. Only a call that
             // succeeded and met a dialog anyway has no decision yet.
             const decision = postRunDecision
-              ?? (await guard.check(effectiveTaskName(tool, params), "action"));
+              ?? (await guard.check(effectiveTask, "action"));
             const refusalForReturn = decision.allow === false
               ? decision.refusal
-              : guard.refusal(effectiveTaskName(tool, params), blocking);
+              : guard.refusal(effectiveTask, blocking);
             // A refusal means nothing ran. Anything else means the call had
             // already started when the dialog appeared, so it may have applied
             // part of its work; say so rather than implying it did nothing.
@@ -1016,7 +1019,7 @@ async function main() {
           if (blocking) {
             return {
               content: withUpgradeNotice([
-                { type: "text" as const, text: JSON.stringify(guard.refusal(effectiveTaskName(tool, params), blocking), null, 2) },
+                { type: "text" as const, text: JSON.stringify(guard.refusal(effectiveTask, blocking), null, 2) },
                 ...attribution(session),
               ]),
               isError: true,

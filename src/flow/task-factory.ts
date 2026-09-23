@@ -19,23 +19,17 @@ import { DialogGuard, ensureGuard } from "../dialog-guard.js";
 async function refuseStepIfBlocked(
   ctx: FlowContext,
   taskName: string,
-  options: Record<string, unknown>,
 ): Promise<Record<string, unknown> | null> {
   const session = ctx.session;
   if (!session) return null;
-  // The micro gateway arrives as one task carrying the real category and
-  // method in its options. Asking the allowlist about the wrapper refused
-  // respond_to_dialog, which is the single call that clears the dialog, so the
-  // gateway could never escape one.
-  const subject = taskName === "tools.call"
-    ? `${String(options.category ?? "")}.${String(options.method ?? "")}`
-    : taskName;
+  // A micro gateway call never reaches here as tools.call: the registry
+  // creates the target task instead, so taskName is always the real action.
   // No early return for an allow-listed subject. `check` already exempts them,
   // and it additionally applies the mode to the one allow-listed subject that
   // PRESSES a button, so short-circuiting here let a flow step answer a modal
   // under interactive by walking around the gate rather than through it.
   const guard = await ensureGuard(session);
-  const decision = await guard.check(subject, "action");
+  const decision = await guard.check(taskName, "action");
   return decision.allow ? null : (decision.refusal ?? null);
 }
 
@@ -142,11 +136,7 @@ export function handlerTaskClass(
       // a dialog raised at step 3 was missed by every later step, which
       // includes the editor lifecycle handlers. Checking per step is what
       // makes "any process, at any point" true of flows as well.
-      const refusal = await refuseStepIfBlocked(
-        this.ctx,
-        name,
-        this.options as Record<string, unknown>,
-      );
+      const refusal = await refuseStepIfBlocked(this.ctx, name);
       if (refusal) {
         return { success: false, data: refusal, error: refusalError(name, refusal) };
       }
