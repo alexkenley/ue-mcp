@@ -1806,10 +1806,13 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateDataTable(const TSharedPtr<FJsonObj
 
 	// #1088: FTableRowBase and /Script/Engine.FTableRowBase are the spellings
 	// callers copy from headers; the UScriptStruct is named TableRowBase.
-	UScriptStruct* ScriptStruct = MCPResolveScriptStruct(RowStruct);
+	FString ResolveError;
+	UScriptStruct* ScriptStruct = MCPResolveScriptStruct(RowStruct, &ResolveError);
 	if (!ScriptStruct)
 	{
-		return MCPError(FString::Printf(TEXT("Row struct not found: %s"), *RowStruct));
+		return MCPError(ResolveError.IsEmpty()
+			? FString::Printf(TEXT("Row struct not found: %s"), *RowStruct)
+			: ResolveError);
 	}
 
 	UDataTableFactory* Factory = NewObject<UDataTableFactory>();

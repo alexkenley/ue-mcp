@@ -486,10 +486,13 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ReflectStruct(const TSharedPtr<FJson
 	FString StructName;
 	if (auto Err = RequireString(Params, TEXT("structName"), StructName)) return Err;
 
-	UScriptStruct* Struct = FindStruct(StructName);
+	FString ResolveError;
+	UScriptStruct* Struct = FindStruct(StructName, &ResolveError);
 	if (!Struct)
 	{
-		return MCPError(FString::Printf(TEXT("Struct not found: %s"), *StructName));
+		return MCPError(ResolveError.IsEmpty()
+			? FString::Printf(TEXT("Struct not found: %s"), *StructName)
+			: ResolveError);
 	}
 
 	auto Result = MCPSuccess();
@@ -992,11 +995,11 @@ UClass* FReflectionHandlers::FindClass(const FString& ClassName)
 	return MCPResolveClass(ClassName, /*bAllowLoad*/ false);
 }
 
-UScriptStruct* FReflectionHandlers::FindStruct(const FString& StructName)
+UScriptStruct* FReflectionHandlers::FindStruct(const FString& StructName, FString* OutError)
 {
-	// #1088: one shared resolution order with create_datatable. Literal first,
-	// then one leading F stripped from the name or from the /Script leaf.
-	return MCPResolveScriptStruct(StructName);
+	// #1088: shared resolver with create_datatable. reflect_struct alone keeps
+	// the added-F fallback it has always had, for structs registered with an F.
+	return MCPResolveScriptStruct(StructName, OutError, /*bTryAddedF=*/true);
 }
 
 UEnum* FReflectionHandlers::FindEnum(const FString& EnumName)
