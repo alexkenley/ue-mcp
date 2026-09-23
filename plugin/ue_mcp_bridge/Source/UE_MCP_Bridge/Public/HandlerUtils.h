@@ -1840,6 +1840,61 @@ inline UClass* FindClassByShortName(const FString& ClassName)
 	return MCPResolveClass(ClassName);
 }
 
+/** Resolve a script struct. Qualified names resolve as written, then with one
+ *  leading F stripped from the /Script leaf. Short names try the literal, then
+ *  one F stripped, then one F added (bTryAddedF only). A short spelling shared
+ *  by several loaded structs fails, and OutError lists their qualified paths. */
+inline UScriptStruct* MCPResolveScriptStruct(const FString& Spec, FString* OutError = nullptr, bool bTryAddedF = false)
+{
+	if (OutError) OutError->Reset();
+	if (Spec.IsEmpty()) return nullptr;
+	const bool bShortName = !Spec.Contains(TEXT("/")) && !Spec.Contains(TEXT("."));
+	bool bAmbiguous = false;
+	const auto Lookup = [&](const FString& Name) -> UScriptStruct*
+	{
+		if (!bShortName)
+		{
+			if (Name.StartsWith(TEXT("/Script/"))) return FindObject<UScriptStruct>(nullptr, *Name);
+			return Cast<UScriptStruct>(MCPLoadAssetObject(Name));
+		}
+		const FName ShortName(*Name, FNAME_Find);
+		if (ShortName.IsNone()) return nullptr;
+		TArray<UObject*> Found;
+		StaticFindAllObjectsFast(Found, UScriptStruct::StaticClass(), ShortName);
+		UScriptStruct* Match = nullptr;
+		TArray<FString> Paths;
+		for (UObject* Obj : Found)
+		{
+			if (!IsValid(Obj)) continue;
+			Match = CastChecked<UScriptStruct>(Obj);
+			Paths.AddUnique(Obj->GetPathName());
+		}
+		if (Paths.Num() <= 1) return Match;
+		bAmbiguous = true;
+		if (OutError)
+		{
+			Paths.Sort();
+			*OutError = FString::Printf(
+				TEXT("Struct name '%s' is ambiguous: %d loaded structs are named '%s'. Pass one of these qualified paths instead: %s"),
+				*Spec, Paths.Num(), *Name, *FString::Join(Paths, TEXT(", ")));
+		}
+		return nullptr;
+	};
+	if (UScriptStruct* Found = Lookup(Spec)) return Found;
+	if (bAmbiguous) return nullptr;
+
+	if (bShortName || Spec.StartsWith(TEXT("/Script/")))
+	{
+		const int32 LeafStart = Spec.Find(TEXT("."), ESearchCase::CaseSensitive, ESearchDir::FromEnd) + 1;
+		if (Spec.Len() > LeafStart + 1 && Spec[LeafStart] == TEXT('F'))
+		{
+			if (UScriptStruct* Found = Lookup(Spec.Left(LeafStart) + Spec.Mid(LeafStart + 1))) return Found;
+			if (bAmbiguous) return nullptr;
+		}
+	}
+	return (bShortName && bTryAddedF) ? Lookup(TEXT("F") + Spec) : nullptr;
+}
+
 /** Get the editor world, or nullptr if not available. */
 inline UWorld* GetEditorWorld()
 {
