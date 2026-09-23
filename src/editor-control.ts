@@ -14,6 +14,7 @@ import {
   readEngineState,
   readEngineSnapshot,
   readLogState,
+  modalBlocksGameThread,
   type EngineState,
 } from "./engine-observer.js";
 import { findLiveInstanceRecord, isPidAlive, lockfileIsFromThisLaunch, readBridgeInstanceRecords, resolveBridgeTarget } from "./editor-target.js";
@@ -326,9 +327,14 @@ export async function waitForEditorReady(
     if (logIsCurrent && logState.phase === "crashed") {
       return finish({ ready: false, elapsedSeconds: elapsed(), timeline, reason: "the editor crashed during startup", state: await readEngineState(projectPath ?? null) });
     }
-    if (snapshot?.modal) {
+    if (snapshot?.modal && modalBlocksGameThread(snapshot.modal)) {
       // No bridge yet, so no gate and no press: name the prompt as the reason the
       // launch did not finish. dialogPolicy is how a caller answers one this early.
+      //
+      // Only a prompt the game thread is parked behind ends the wait. A window
+      // the editor raised without AddModalWindow does not stop startup, and
+      // failing a launch that went on to finish is worse than saying nothing
+      // about the window at all (#1118).
       const buttons = (snapshot.modal.buttons ?? []).filter((b) => b !== "");
       const shown = snapshot.modal.message ? `: ${oneLine(snapshot.modal.message)}` : "";
       const offered = buttons.length > 0 ? ` Buttons: ${buttons.join(", ")}.` : "";
@@ -1023,9 +1029,12 @@ function forgetPreviousEditors(): void {
 function blockedStopDetail(state: EngineState): string {
   const modal = state.snapshot?.modal;
   if (!modal) return ` ${state.summary}`;
-  // Named, not handled. The gate reports it in full on the next call.
+  // Named, not handled. The gate reports it in full on the next call. A prompt
+  // that holds nothing is still named here: it did not stop the stop, but it is
+  // an unanswered question and the caller is entitled to see it (#1118).
   const shown = modal.message ? `: ${oneLine(modal.message)}` : "";
-  return ` The editor is showing a modal dialog "${modal.title}"${shown}.`
+  const kind = modalBlocksGameThread(modal) ? "modal dialog" : "non-blocking prompt";
+  return ` The editor is showing a ${kind} "${modal.title}"${shown}.`
     + " Read it with editor(action='list_dialogs')."
 }
 

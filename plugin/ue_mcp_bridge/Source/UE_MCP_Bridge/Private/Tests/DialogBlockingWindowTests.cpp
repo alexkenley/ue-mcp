@@ -1,13 +1,22 @@
-// Regression coverage for #1078: the two directions that cost something. A
-// window hosting docked tabs is not a prompt, and a parented window without
-// them still is - that being the case GetActiveModalWindow misses.
+// Regression coverage for #1078 and #1118.
+//
+// #1078: a window hosting docked tabs is not a prompt, and a parented window
+// without them still is - that being the case GetActiveModalWindow misses.
+//
+// #1118: the two prompt kinds are not interchangeable. Only a modal parks the
+// game thread, and that fact has to survive the whole way to the value the
+// dialog gate reads, because the gate refusing on the other one turned an
+// ordinary editor window into a session-long outage.
 
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Handlers/DialogHandlers.h"
 
+#include "EngineStatusHooks.h"
 #include "Framework/Application/SlateApplication.h"
+#include "MCPEngineStatus.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/SWindow.h"
@@ -92,6 +101,98 @@ bool FMCPDialogBlockingWindowTest::RunTest(const FString& Parameters)
 
 		TestTrue(TEXT("a parented window with no docked tabs still blocks"),
 			FDialogHandlers::IsBlockingWindow(Window));
+
+		// #1118: it blocks in the sense of being a question, and in no other
+		// sense. The game thread is not parked behind it, and the gate that
+		// refuses every call reads exactly this distinction.
+		TestEqual(TEXT("a parented non-modal prompt is not classified as modal"),
+			(int32)FDialogHandlers::ClassifyWindow(Window), (int32)EMCPPromptKind::Parented);
+	}
+
+	// A window on the modal stack is the one kind the engine is parked behind.
+	{
+		const TSharedRef<SWindow> Window = MakeOffscreenWindow(
+			SNew(SButton)[SNew(STextBlock).Text(FText::FromString(TEXT("OK")))],
+			TEXT("Really?"));
+		// SetAsModalWindow is what AddModalWindow sets, and the only thing that
+		// sets it. Calling it directly classifies the window without pushing a
+		// real modal loop the suite would then be stuck inside.
+		Window->SetAsModalWindow();
+
+		TestEqual(TEXT("a modal window is classified as modal"),
+			(int32)FDialogHandlers::ClassifyWindow(Window), (int32)EMCPPromptKind::Modal);
+		TestEqual(TEXT("the wire name says which kind it was"),
+			FString(FDialogHandlers::PromptKindName(EMCPPromptKind::Modal)), FString(TEXT("modalWindow")));
+		TestEqual(TEXT("and which kind the other one is"),
+			FString(FDialogHandlers::PromptKindName(EMCPPromptKind::Parented)), FString(TEXT("parentedWindow")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FMCPDialogGateBlocksOnlyForModalTest,
+	"UE.MCP.Dialog.Gate.OnlyAModalParksTheGameThread",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FMCPDialogGateBlocksOnlyForModalTest::RunTest(const FString& Parameters)
+{
+	// The value the dialog gate in BridgeServer reads before refusing a call.
+	// The classification above is only worth having if it survives the trip
+	// through the status snapshot, which is where the gate looks (#1118).
+	FMCPEngineStatus& Status = FMCPEngineStatus::Get();
+
+	// Restored on every exit path below, so a failure cannot leave the editor
+	// describing a prompt that was never on screen.
+	ON_SCOPE_EXIT
+	{
+		Status.SetModalProvider(FMCPEngineStatusHooks::ModalProvider());
+		Status.CaptureNow();
+	};
+
+	const auto Report = [&Status](bool bBlocks)
+	{
+		Status.SetModalProvider([bBlocks](FString& OutTitle, FString& OutMessage, TArray<FString>& OutButtons, bool& OutBlocksGameThread)
+		{
+			OutTitle = TEXT("Find Results");
+			OutMessage = TEXT("3 results");
+			OutButtons.Reset();
+			OutBlocksGameThread = bBlocks;
+			return true;
+		});
+		Status.CaptureNow();
+	};
+
+	{
+		Report(false);
+		FString Title, Message;
+		TArray<FString> Buttons;
+		bool bBlocks = true;
+		const bool bPresent = Status.GetActiveModal(Title, Message, Buttons, &bBlocks);
+		TestTrue(TEXT("a non-blocking prompt is still reported"), bPresent);
+		TestEqual(TEXT("and named"), Title, FString(TEXT("Find Results")));
+		TestFalse(TEXT("but it does not park the game thread"), bBlocks);
+
+		const TSharedPtr<FJsonObject> Snapshot = Status.Snapshot();
+		const TSharedPtr<FJsonObject>* Modal = nullptr;
+		if (Snapshot.IsValid() && Snapshot->TryGetObjectField(TEXT("modal"), Modal) && Modal)
+		{
+			TestFalse(TEXT("the snapshot says so too, which is what the CLI gate reads"),
+				(*Modal)->GetBoolField(TEXT("blocksGameThread")));
+		}
+		else
+		{
+			AddError(TEXT("the snapshot dropped a prompt the status was reporting"));
+		}
+	}
+
+	{
+		Report(true);
+		FString Title, Message;
+		TArray<FString> Buttons;
+		bool bBlocks = false;
+		TestTrue(TEXT("a modal is reported"), Status.GetActiveModal(Title, Message, Buttons, &bBlocks));
+		TestTrue(TEXT("and it does park the game thread"), bBlocks);
 	}
 
 	return true;
