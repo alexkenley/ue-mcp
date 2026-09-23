@@ -282,6 +282,20 @@ The plugin source lives in `plugin/ue_mcp_bridge/`. When you modify C++ handler 
 
 For a full editor restart: `editor(action="restart_editor")`
 
+### Blueprint graph node flags
+
+Construct persisted Blueprint and animation graph nodes with `RF_Transactional`.
+`UEdGraph::AddNode` does not set this flag. Without it, opening the asset runs a
+transactional repair that dirties the Blueprint and requests another save.
+Use `NewObject<TNode>(Graph, NAME_None, RF_Transactional)`, or
+`NewObject<UEdGraphNode>(Graph, NodeClass, NAME_None, RF_Transactional)` when the
+class is resolved at runtime. The flag makes node edits eligible for editor
+transactions; it does not wrap bridge calls in undo transactions.
+
+The native filter `UE.MCP.Blueprint.TransactionalNodes` exercises all five
+Blueprint construction paths and representative animation handlers, then saves,
+evicts and reloads temporary assets before checking the editor's repair step.
+
 ### File-local helpers and the unity build
 
 UBT compiles a module as a **unity build**: several `.cpp` files are concatenated into one translation unit (`Module.UE_MCP_Bridge.2.cpp` and friends). An anonymous namespace is per translation unit, so two handler files can each define a file-local helper of the same name and both compile in isolation. When the grouping puts them in the same blob, the two anonymous namespaces merge and the second definition becomes a redefinition:
