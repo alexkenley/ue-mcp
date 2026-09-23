@@ -171,6 +171,24 @@ describe("micro calls use the session task registry", () => {
       .rejects.toThrow("has no registered task");
   });
 
+  it("refuses a disabled category through tools.call when no session graph is on the context", async () => {
+    // Startup builds the gateway from the enabled categories but keeps every
+    // category in the registry, so flows can still name a disabled one directly.
+    let ran = 0;
+    const handler = async () => { ran++; return { ok: true }; };
+    const open = categoryTool("open", "Open", { write: { kind: "handler", effect: "mutate", handler } });
+    const locked = categoryTool("locked", "Locked", { write: { kind: "handler", effect: "mutate", handler } });
+    const registry = buildFlowRegistry([buildMicroGateway([open]), open, locked]);
+    const { ctx } = context();
+    expect(ctx.getToolGraph).toBeUndefined();
+    await expect(registry.create("tools.call", ctx, { category: "locked", method: "write", args: {} }))
+      .rejects.toThrow('Unknown category "locked"');
+    expect(ran).toBe(0);
+    await (await registry.create("tools.call", ctx, { category: "open", method: "write", args: {} })).run();
+    await (await registry.create("locked.write", ctx, {})).run();
+    expect(ran).toBe(2);
+  });
+
   it("prepares built-in handler parameters exactly once", async () => {
     let folds = 0;
     const probe = categoryTool("probe", "Probe", {

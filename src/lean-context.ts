@@ -228,6 +228,15 @@ export function resolveMicroCall(tools: ToolDef[], params: Record<string, unknow
   return { taskName: `${category}.${method}`, params: microCallParams(params) };
 }
 
+/** The categories each gateway was built to reach: the enabled set, never a
+ *  category the project's `disable:` list removed. */
+const gatewayTargets = new WeakMap<ToolDef, ToolDef[]>();
+
+/** What `tools.call` may resolve when no session graph is on the context. */
+export function microGatewayTargets(gateway: ToolDef): ToolDef[] | undefined {
+  return gatewayTargets.get(gateway);
+}
+
 export function buildMicroGateway(tools: ToolDef[]): ToolDef {
   const byName = new Map(tools.map((t) => [t.name, t] as const));
   const summaries = tools.map((t) => ({ category: t.name, summary: splitDescription(t.description).summary }));
@@ -315,7 +324,7 @@ export function buildMicroGateway(tools: ToolDef[]): ToolDef {
     },
   };
 
-  return categoryTool(
+  const gateway = categoryTool(
     MICRO_GATEWAY_TOOL,
     "Gateway to every ue-mcp category (micro context mode). Find actions with search, inspect parameters with describe, then invoke with call.",
     actions,
@@ -334,4 +343,6 @@ export function buildMicroGateway(tools: ToolDef[]): ToolDef {
     // as a method argument.
     { nestedParamsKey: "args" },
   );
+  gatewayTargets.set(gateway, tools);
+  return gateway;
 }
