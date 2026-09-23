@@ -5,6 +5,7 @@ import { applyLeanContext } from "../../src/lean-context.js";
 import { actionEnumValues, bp, categoryTool, cloneToolGraph, type ToolDef } from "../../src/types.js";
 import { ALL_TOOLS } from "../../src/tools.js";
 import { unionSurface, type SessionSurface } from "../../src/session-surface.js";
+import { mergeInjectionsIntoTool, type InjectionPlan } from "../../src/plugin/injection.js";
 
 function mixedTool(): ToolDef {
   return categoryTool(
@@ -31,6 +32,16 @@ function mixedTool(): ToolDef {
       nativeOnly: z.string().optional(),
     },
   );
+}
+
+function surface(name: string, tools: ToolDef[]): SessionSurface {
+  return {
+    session: { name } as SessionSurface["session"],
+    tools,
+    disabled: new Set(),
+    pluginRecords: [],
+    knowledgeByCategory: {},
+  };
 }
 
 describe("native tool surface filtering", () => {
@@ -93,14 +104,6 @@ describe("native tool surface filtering", () => {
     const disabled = cloneToolGraph(ALL_TOOLS);
     const enabled = cloneToolGraph(ALL_TOOLS);
     applyNativeToolsConfig(disabled, { enabled: false });
-    const surface = (name: string, tools: ToolDef[]): SessionSurface => ({
-      session: { name } as SessionSurface["session"],
-      tools,
-      disabled: new Set(),
-      pluginRecords: [],
-      knowledgeByCategory: {},
-    });
-
     const union = unionSurface([surface("disabled", disabled), surface("enabled", enabled)]).tools;
     const animation = union.find((tool) => tool.name === "animation")!;
     expect(animation.actions).toHaveProperty("epic_add_actors");
@@ -112,5 +115,29 @@ describe("native tool surface filtering", () => {
       {} as never,
       { category: "animation", method: "epic_add_actors" },
     )).resolves.toMatchObject({ action: "epic_add_actors" });
+  });
+
+  it("restores native actions into the action list, not under a plugin section", () => {
+    const plan: InjectionPlan = {
+      category: "animation",
+      prefix: "myplug",
+      pluginName: "my-plugin",
+      actions: { retarget: { task: "myplug.retarget", description: "Retarget with the plugin" } },
+    };
+    const disabled = cloneToolGraph(ALL_TOOLS);
+    const i = disabled.findIndex((tool) => tool.name === "animation");
+    disabled[i] = mergeInjectionsIntoTool(disabled[i], [plan]).tool;
+    applyNativeToolsConfig(disabled, { enabled: false });
+    const enabled = cloneToolGraph(ALL_TOOLS);
+
+    const union = unionSurface([surface("disabled", disabled), surface("enabled", enabled)]).tools;
+    const description = union.find((tool) => tool.name === "animation")!.description;
+    const pluginSection = description.indexOf("\n\nPlugin actions:\n");
+
+    expect(pluginSection).toBeGreaterThan(0);
+    expect(description.indexOf("- epic_add_actors:")).toBeGreaterThan(0);
+    expect(description.indexOf("- epic_add_actors:")).toBeLessThan(pluginSection);
+    expect(description.slice(pluginSection)).not.toContain("epic_");
+    expect(description.slice(pluginSection)).toContain("- myplug_retarget: Retarget with the plugin");
   });
 });
