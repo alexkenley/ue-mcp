@@ -136,6 +136,20 @@ bool FMCPAssetReadGraphDefersTest::RunTest(const FString& Parameters)
 	Package = nullptr;
 	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
 
+	// A Material's stored expressions belong to material(read_graph).
+	const TSharedPtr<FJsonObject> MaterialResult = ReadGraph(TEXT("/Engine/EngineMaterials/DefaultMaterial"));
+	TestNotNull(TEXT("the material call answered"), MaterialResult.Get());
+	if (MaterialResult.IsValid())
+	{
+		bool bSuccess = true;
+		MaterialResult->TryGetBoolField(TEXT("success"), bSuccess);
+		TestFalse(TEXT("a Material is refused here"), bSuccess);
+
+		FString Error;
+		MaterialResult->TryGetStringField(TEXT("error"), Error);
+		TestTrue(TEXT("and is pointed at material(read_graph)"), Error.Contains(TEXT("material(read_graph)")));
+	}
+
 	return true;
 }
 
@@ -148,7 +162,7 @@ bool FMCPAssetReadGraphNoGraphTest::RunTest(const FString& Parameters)
 {
 	// A graph-less asset is not an error, and the answer must not assert more
 	// than was actually searched.
-	const TSharedPtr<FJsonObject> Result = ReadGraph(TEXT("/Engine/EngineMaterials/DefaultMaterial"));
+	const TSharedPtr<FJsonObject> Result = ReadGraph(TEXT("/Engine/EngineResources/DefaultTexture"));
 	TestNotNull(TEXT("the call answered"), Result.Get());
 	if (!Result.IsValid()) return false;
 
