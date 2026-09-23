@@ -301,6 +301,65 @@ describe("detection does not depend on somebody making a call", () => {
     }
   });
 
+  it("does not gate on a prompt the game thread is not parked behind", async () => {
+    // #1118: the Find results window, an undocked panel, a popped-out asset
+    // editor. The plugin reports them so a quit is never sent at an unanswered
+    // question, and they hold nothing, so every call still has to run. Before
+    // this, one of them refused every action - offline ones included - for as
+    // long as it stayed open, with no button that could clear it.
+    const guard = make({
+      readSnapshot: () => ({
+        modal: { title: "Find Results", message: "3 results", buttons: [], blocksGameThread: false },
+        ageSeconds: 0,
+      }),
+      // The editor agrees there is nothing to answer. The point of the case is
+      // that the snapshot no longer contradicts it.
+      probe: async () => empty,
+    });
+    guard.note(DIALOG);
+    guard.startWatching(20);
+    try {
+      expect(guard.current).toBeNull();
+      expect((await guard.check("project.search_tools", "action")).allow).toBe(true);
+    } finally {
+      guard.stopWatching();
+    }
+  });
+
+  it("still gates on a prompt that says it parks the game thread", async () => {
+    const guard = make({
+      readSnapshot: () => ({
+        modal: { title: "Save Content", message: "m", buttons: ["Cancel"], blocksGameThread: true },
+        ageSeconds: 0,
+      }),
+    });
+    guard.startWatching(20);
+    try {
+      expect(guard.current?.title).toBe("Save Content");
+      expect((await guard.check("project.search_tools", "action")).allow).toBe(false);
+    } finally {
+      guard.stopWatching();
+    }
+  });
+
+  it("believes an older plugin that does not say, because silence is not proof of safety", async () => {
+    // The field arrived with #1118. A plugin without it reports the one modal
+    // field it always had, and the conservative reading is the behaviour every
+    // caller already had.
+    const guard = make({
+      readSnapshot: () => ({
+        modal: { title: "Save Content", message: "m", buttons: ["Cancel"] },
+        ageSeconds: 0,
+      }),
+    });
+    guard.startWatching(20);
+    try {
+      expect(guard.current?.title).toBe("Save Content");
+    } finally {
+      guard.stopWatching();
+    }
+  });
+
   it("treats a snapshot with no modal as clear", async () => {
     const guard = make({ readSnapshot: () => ({ modal: null, ageSeconds: 0 }) });
     guard.note(DIALOG);

@@ -1045,10 +1045,20 @@ export class DialogGuard {
         return;
       }
       this.staleStatus = false;
-      const modal = snap?.modal;
-      const dialog = asDialog(modal);
+      const modal = snap?.modal as { blocksGameThread?: boolean } | null | undefined;
+      // A prompt the game thread is not parked behind holds nothing, so it is
+      // not something to gate on. Treating one as a blocking dialog refused
+      // every call - offline ones included - for as long as an ordinary editor
+      // window stayed open, with no button that could clear it (#1118). An
+      // older plugin omits the field and is believed, which is the behaviour
+      // that existed before it.
+      const blocking = modal != null && modal.blocksGameThread !== false;
+      const dialog = blocking ? asDialog(modal) : null;
       if (dialog) this.note(dialog);
-      else if (modal === null || modal === undefined) this.clear();
+      // Cleared when nothing is holding the editor, which now covers a prompt
+      // that is on screen and blocking nothing. A blocking modal this walk
+      // could not read leaves the previous note standing, as it always did.
+      else if (!blocking) this.clear();
     };
     this.poll = setInterval(read, intervalMs);
     this.poll.unref?.();
