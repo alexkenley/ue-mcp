@@ -126,16 +126,22 @@ export const niagaraTool: ToolDef = categoryTool(
         // through that active handler instead of duplicating part of it here.
         // Contexts built outside the registry (mainly direct unit calls) have
         // no graph accessor, so only those use the exported base tool.
-        const graph = ctx.getToolGraph ? ctx.getToolGraph() : undefined;
-        const dispatchTool = graph === undefined
-          ? niagaraTool
-          : graph.find((tool) => tool.name === "niagara");
+        // A session with no surface built throws; that is reported per op, like
+        // a graph without niagara, rather than failing the whole call.
+        let unavailable = "Niagara is not available in the active tool graph";
+        let dispatchTool: ToolDef | undefined;
+        try {
+          const graph = ctx.getToolGraph ? ctx.getToolGraph() : undefined;
+          dispatchTool = graph === undefined ? niagaraTool : graph.find((tool) => tool.name === "niagara");
+        } catch (e) {
+          unavailable = `${unavailable}: ${(e as Error).message}`;
+        }
         const results: Array<{ action: string; result?: unknown; error?: string }> = [];
         for (let i = 0; i < opsUnknown.length; i++) {
           const op = opsUnknown[i] as { action?: string; params?: Record<string, unknown> } | undefined;
           const action = op?.action;
           if (!action) { results.push({ action: "(missing)", error: `ops[${i}] missing 'action'` }); return { results, stoppedAt: i }; }
-          if (!dispatchTool) { results.push({ action, error: "Niagara is not available in the active tool graph" }); return { results, stoppedAt: i }; }
+          if (!dispatchTool) { results.push({ action, error: unavailable }); return { results, stoppedAt: i }; }
           const spec = dispatchTool.actions[action];
           if (!spec) { results.push({ action, error: `Unknown niagara action '${action}'` }); return { results, stoppedAt: i }; }
           if (action === "batch") { results.push({ action, error: "nested batch not allowed" }); return { results, stoppedAt: i }; }

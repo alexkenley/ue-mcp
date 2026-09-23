@@ -129,6 +129,27 @@ describe("niagara batch dispatch (#1081)", () => {
     expect(bridge.calls).toEqual([]);
   });
 
+  it("reports a session with no tool surface per op instead of rejecting the batch", async () => {
+    const bridge = recordingBridge();
+    const tool = rebuilt();
+    const noSurface = {
+      ...activeContext(bridge, tool),
+      getToolGraph: () => { throw new Error("Editor 'B' has no tool surface built"); },
+    } as ToolContext;
+
+    await expect(tool.handler(noSurface, {
+      action: "batch",
+      ops: [{ action: "get_info", params: { assetPath: "/Game/VFX/NS_Test" } }],
+    })).resolves.toEqual({
+      results: [{
+        action: "get_info",
+        error: "Niagara is not available in the active tool graph: Editor 'B' has no tool surface built",
+      }],
+      stoppedAt: 0,
+    });
+    expect(bridge.calls).toEqual([]);
+  });
+
   it("runs the active category's parameter folding for each operation", async () => {
     const bridge = recordingBridge();
     const tool = categoryTool(
