@@ -832,9 +832,9 @@ async function main() {
       const refusal = sessions.size > 1
         ? explainMissingAction(
             dispatchUnion,
-            taskName,
+            effectiveTask,
             session.name,
-            sessionRegistry.listRegistered().includes(taskName),
+            sessionRegistry.listRegistered().includes(effectiveTask),
           )
         : null;
       if (refusal) {
