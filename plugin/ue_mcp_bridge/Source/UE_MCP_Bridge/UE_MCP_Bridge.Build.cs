@@ -280,3 +280,4 @@ public class UE_MCP_Bridge : ModuleRules
 // Private/Tests/BehaviorTreeAuthoringTests.cpp.
 // Live post-process AnimBP handler automation coverage added.
 // Private/Tests/AnimationSkeletonCreateTests.cpp.
+// Rescan trigger: Private/Tests/NativeStructFPrefixTests.cpp (#1088).
