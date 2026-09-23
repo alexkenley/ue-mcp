@@ -20,7 +20,7 @@ private:
 	static TSharedPtr<FJsonValue> AddMaterialExpression(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ListMaterialExpressions(const TSharedPtr<FJsonObject>& Params);
 	// #1083/#1115: paged expression graph with input wiring and root material
-	// property connections, read from UMaterial expressions directly.
+	// connections, or one node and its sources when expressionIndex is given.
 	static TSharedPtr<FJsonValue> ReadMaterialGraph(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ListMaterialParameters(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> RecompileMaterial(const TSharedPtr<FJsonObject>& Params);

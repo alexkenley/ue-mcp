@@ -128,6 +128,127 @@ UMaterialInstanceConstant* FMaterialHandlers::LoadMaterialInstanceFromPath(const
 
 namespace
 {
+	/** Each expression's slot in GetExpressions(), which nodeId and expressionIndex name. */
+	TMap<UMaterialExpression*, int32> MaterialExpressionIndexMap(TConstArrayView<TObjectPtr<UMaterialExpression>> Expressions)
+	{
+		TMap<UMaterialExpression*, int32> IndexByExpression;
+		IndexByExpression.Reserve(Expressions.Num());
+		for (int32 i = 0; i < Expressions.Num(); ++i)
+		{
+			UMaterialExpression* Expression = Expressions[i];
+			if (Expression && !IndexByExpression.Contains(Expression))
+			{
+				IndexByExpression.Add(Expression, i);
+			}
+		}
+		return IndexByExpression;
+	}
+
+	/** One expression's input pins and their sources. Shared by read, read_graph and list_expressions. */
+	TArray<TSharedPtr<FJsonValue>> MaterialExpressionInputsJson(
+		UMaterialExpression* Expression, const TMap<UMaterialExpression*, int32>& IndexByExpression)
+	{
+		TArray<TSharedPtr<FJsonValue>> InputsArray;
+		for (int32 InputIdx = 0; ; ++InputIdx)
+		{
+			FExpressionInput* Input = Expression->GetInput(InputIdx);
+			if (!Input) break;
+
+			TSharedPtr<FJsonObject> InputObj = MakeShared<FJsonObject>();
+			InputObj->SetNumberField(TEXT("inputIndex"), InputIdx);
+			InputObj->SetStringField(TEXT("inputName"), Expression->GetInputName(InputIdx).ToString());
+			if (Input->Expression)
+			{
+				InputObj->SetStringField(TEXT("connectedExpressionClass"), Input->Expression->GetClass()->GetName());
+				InputObj->SetStringField(TEXT("connectedExpressionDescription"), Input->Expression->GetDescription());
+				InputObj->SetNumberField(TEXT("connectedOutputIndex"), Input->OutputIndex);
+				if (const int32* ConnIdx = IndexByExpression.Find(Input->Expression))
+				{
+					InputObj->SetNumberField(TEXT("connectedExpressionIndex"), *ConnIdx);
+				}
+			}
+			InputsArray.Add(MakeShared<FJsonValueObject>(InputObj));
+		}
+		return InputsArray;
+	}
+
+	/** A material root input: its source expression, or null when disconnected. */
+	TSharedPtr<FJsonValue> MaterialRootConnectionJson(
+		const FExpressionInput& Input, const TMap<UMaterialExpression*, int32>& IndexByExpression)
+	{
+		if (!Input.Expression)
+		{
+			return MakeShared<FJsonValueNull>();
+		}
+		TSharedPtr<FJsonObject> ConnObj = MakeShared<FJsonObject>();
+		ConnObj->SetStringField(TEXT("expressionClass"), Input.Expression->GetClass()->GetName());
+		ConnObj->SetStringField(TEXT("expressionDescription"), Input.Expression->GetDescription());
+		ConnObj->SetNumberField(TEXT("outputIndex"), Input.OutputIndex);
+		if (const int32* ConnIdx = IndexByExpression.Find(Input.Expression))
+		{
+			ConnObj->SetNumberField(TEXT("expressionIndex"), *ConnIdx);
+		}
+		return MakeShared<FJsonValueObject>(ConnObj);
+	}
+
+	/** Every root input the material exposes, keyed by property name without the MP_ prefix. */
+	TSharedPtr<FJsonObject> MaterialRootConnectionsJson(
+		UMaterial* Material, const TMap<UMaterialExpression*, int32>& IndexByExpression)
+	{
+		TSharedPtr<FJsonObject> ConnectionsObj = MakeShared<FJsonObject>();
+		const UEnum* PropertyEnum = StaticEnum<EMaterialProperty>();
+		for (int32 PropIdx = 0; PropIdx < MP_MAX; ++PropIdx)
+		{
+			const EMaterialProperty Property = static_cast<EMaterialProperty>(PropIdx);
+			// The compiler reads MaterialAttributes only when the material opts in.
+			if (Property == MP_MaterialAttributes && !Material->bUseMaterialAttributes) continue;
+			FExpressionInput* Input = Material->GetExpressionInputForProperty(Property);
+			if (!Input) continue;
+
+			FString PropertyName;
+			if (PropertyEnum)
+			{
+				PropertyName = PropertyEnum->GetNameStringByValue(static_cast<int64>(Property));
+				PropertyName.RemoveFromStart(TEXT("MP_"));
+			}
+			if (PropertyName.IsEmpty())
+			{
+				PropertyName = FString::FromInt(PropIdx);
+			}
+			ConnectionsObj->SetField(PropertyName, MaterialRootConnectionJson(*Input, IndexByExpression));
+		}
+		return ConnectionsObj;
+	}
+
+	/** One list_expressions / read_graph row. */
+	TSharedPtr<FJsonObject> MaterialExpressionRowJson(
+		UMaterialExpression* Expression, int32 Index, bool bIncludeInputs,
+		const TMap<UMaterialExpression*, int32>& IndexByExpression)
+	{
+		TSharedPtr<FJsonObject> ExprObj = MakeShared<FJsonObject>();
+		ExprObj->SetStringField(TEXT("nodeId"), FString::FromInt(Index));
+		ExprObj->SetStringField(TEXT("class"), Expression->GetClass()->GetName());
+		ExprObj->SetStringField(TEXT("description"), Expression->GetDescription());
+		ExprObj->SetStringField(TEXT("name"), Expression->Desc);
+		ExprObj->SetNumberField(TEXT("positionX"), Expression->MaterialExpressionEditorX);
+		ExprObj->SetNumberField(TEXT("positionY"), Expression->MaterialExpressionEditorY);
+
+		if (UMaterialExpressionScalarParameter* SP = Cast<UMaterialExpressionScalarParameter>(Expression))
+		{
+			ExprObj->SetStringField(TEXT("parameterName"), SP->ParameterName.ToString());
+		}
+		else if (UMaterialExpressionVectorParameter* VP = Cast<UMaterialExpressionVectorParameter>(Expression))
+		{
+			ExprObj->SetStringField(TEXT("parameterName"), VP->ParameterName.ToString());
+		}
+
+		if (bIncludeInputs)
+		{
+			ExprObj->SetArrayField(TEXT("inputs"), MaterialExpressionInputsJson(Expression, IndexByExpression));
+		}
+		return ExprObj;
+	}
+
 	FString MaterialParameterAssociationToString(EMaterialParameterAssociation Association)
 	{
 		switch (Association)
@@ -761,6 +882,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterial(const TSharedPtr<FJsonObj
 	Result->SetBoolField(TEXT("twoSided"), Material->IsTwoSided());
 
 	// Expressions list with details
+	const TMap<UMaterialExpression*, int32> IndexByExpression = MaterialExpressionIndexMap(Material->GetExpressions());
 	TArray<TSharedPtr<FJsonValue>> ExpressionsArray;
 	int32 Index = 0;
 	for (UMaterialExpression* Expression : Material->GetExpressions())
@@ -821,37 +943,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterial(const TSharedPtr<FJsonObj
 		}
 
 		// Expression-to-expression input connections
-		TArray<TSharedPtr<FJsonValue>> InputsArray;
-		for (int32 InputIdx = 0; ; InputIdx++)
-		{
-			FExpressionInput* Input = Expression->GetInput(InputIdx);
-			if (!Input) break;
-
-			TSharedPtr<FJsonObject> InputObj = MakeShared<FJsonObject>();
-			InputObj->SetNumberField(TEXT("inputIndex"), InputIdx);
-			InputObj->SetStringField(TEXT("inputName"), Expression->GetInputName(InputIdx).ToString());
-
-			if (Input->Expression)
-			{
-				InputObj->SetStringField(TEXT("connectedExpressionClass"), Input->Expression->GetClass()->GetName());
-				InputObj->SetStringField(TEXT("connectedExpressionDescription"), Input->Expression->GetDescription());
-				InputObj->SetNumberField(TEXT("connectedOutputIndex"), Input->OutputIndex);
-
-				// Find index of connected expression
-				int32 ConnIdx = 0;
-				for (UMaterialExpression* Expr : Material->GetExpressions())
-				{
-					if (Expr == Input->Expression)
-					{
-						InputObj->SetNumberField(TEXT("connectedExpressionIndex"), ConnIdx);
-						break;
-					}
-					ConnIdx++;
-				}
-			}
-
-			InputsArray.Add(MakeShared<FJsonValueObject>(InputObj));
-		}
+		const TArray<TSharedPtr<FJsonValue>> InputsArray = MaterialExpressionInputsJson(Expression, IndexByExpression);
 		if (InputsArray.Num() > 0)
 		{
 			ExprObj->SetArrayField(TEXT("inputs"), InputsArray);
@@ -871,27 +963,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterial(const TSharedPtr<FJsonObj
 
 		auto DescribeConnection = [&](const FExpressionInput& Input) -> TSharedPtr<FJsonValue>
 		{
-			if (Input.Expression)
-			{
-				TSharedPtr<FJsonObject> ConnObj = MakeShared<FJsonObject>();
-				ConnObj->SetStringField(TEXT("expressionClass"), Input.Expression->GetClass()->GetName());
-				ConnObj->SetStringField(TEXT("expressionDescription"), Input.Expression->GetDescription());
-				ConnObj->SetNumberField(TEXT("outputIndex"), Input.OutputIndex);
-
-				// Find the expression index
-				int32 ConnIdx = 0;
-				for (UMaterialExpression* Expr : Material->GetExpressions())
-				{
-					if (Expr == Input.Expression)
-					{
-						ConnObj->SetNumberField(TEXT("expressionIndex"), ConnIdx);
-						break;
-					}
-					ConnIdx++;
-				}
-				return MakeShared<FJsonValueObject>(ConnObj);
-			}
-			return MakeShared<FJsonValueNull>();
+			return MaterialRootConnectionJson(Input, IndexByExpression);
 		};
 
 		ConnectionsObj->SetField(TEXT("BaseColor"), DescribeConnection(EditorOnlyData->BaseColor));
@@ -1460,10 +1532,8 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressions(const TSharedP
 
 TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterialGraph(const TSharedPtr<FJsonObject>& Params)
 {
-	// #1083/#1115: list_material_expressions omits input wiring, and generic
-	// asset(read_graph) cannot see UMaterial expression graphs unless an editor
-	// graph exists. Read the stored expressions and material property inputs
-	// directly. Do not create, rebuild, Modify, or dirty a UMaterialGraph.
+	// #1083/#1115: reads stored expressions and root inputs directly.
+	// Never creates, rebuilds, Modifies or dirties a UMaterialGraph.
 	return ListMaterialExpressionsInternal(
 		Params,
 		TEXT("read_material_graph"),
@@ -1478,30 +1548,37 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressionsInternal(
 	bool bIncludeRootConnections)
 {
 	FString MaterialPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("materialPath"), TEXT("path"), MaterialPath))
+	if (Params.IsValid())
 	{
-		if (Params.IsValid())
+		static const TCHAR* const PathKeys[] = { TEXT("materialPath"), TEXT("path"), TEXT("assetPath") };
+		for (const TCHAR* Key : PathKeys)
 		{
-			Params->TryGetStringField(TEXT("assetPath"), MaterialPath);
+			if (Params->TryGetStringField(Key, MaterialPath) && !MaterialPath.IsEmpty()) break;
+			MaterialPath.Reset();
 		}
-		if (MaterialPath.IsEmpty())
+	}
+	if (MaterialPath.IsEmpty())
+	{
+		return MCPError(TEXT("Missing required parameter 'materialPath' (or 'path' or 'assetPath')"));
+	}
+
+	// read_graph only: one node and the sources it reads from, no paging.
+	int32 SingleIndex = INDEX_NONE;
+	const bool bSingle = bIncludeRootConnections && Params->TryGetNumberField(TEXT("expressionIndex"), SingleIndex);
+
+	// T3: paged. A production master material carries several hundred nodes.
+	// ActionName is the cursor identity, so list and read_graph cursors do not
+	// cross. includeInputs changes row payload, not rows, so it stays out of the key.
+	MCPPagination::FPageRequest Page;
+	if (!bSingle)
+	{
+		if (auto Err = MCPPagination::ReadPageRequest(
+				Params,
+				FString::Printf(TEXT("%s|materialPath=%s"), ActionName, *MaterialPath),
+				/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
 		{
 			return Err;
 		}
-	}
-
-	// T3: paged. A production master material carries several hundred nodes.
-	// ActionName is the cursor collection identity, so a list cursor cannot be
-	// replayed against read_material_graph (and the reverse). includeInputs
-	// changes row payload, not which rows are enumerated, so it stays out of
-	// the key and existing list cursors keep working.
-	MCPPagination::FPageRequest Page;
-	if (auto Err = MCPPagination::ReadPageRequest(
-			Params,
-			FString::Printf(TEXT("%s|materialPath=%s"), ActionName, *MaterialPath),
-			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
-	{
-		return Err;
 	}
 
 	UMaterial* Material = LoadMaterialFromPath(MaterialPath);
@@ -1517,18 +1594,50 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressionsInternal(
 		return MCPError(FString::Printf(TEXT("Failed to load material at '%s'"), *MaterialPath));
 	}
 
-	auto Expressions = Material->GetExpressions();
+	const TConstArrayView<TObjectPtr<UMaterialExpression>> Expressions = Material->GetExpressions();
 	TMap<UMaterialExpression*, int32> IndexByExpression;
 	if (bIncludeInputs || bIncludeRootConnections)
 	{
-		IndexByExpression.Reserve(Expressions.Num());
-		for (int32 i = 0; i < Expressions.Num(); ++i)
+		IndexByExpression = MaterialExpressionIndexMap(Expressions);
+	}
+
+	if (bSingle)
+	{
+		if (SingleIndex < 0 || SingleIndex >= Expressions.Num())
 		{
-			if (UMaterialExpression* Expression = Expressions[i])
-			{
-				IndexByExpression.Add(Expression, i);
-			}
+			return MCPError(FString::Printf(
+				TEXT("Expression index %d out of range (0-%d). material(list_expressions) reports each node's index as nodeId."),
+				SingleIndex, Expressions.Num() - 1));
 		}
+		UMaterialExpression* Expression = Expressions[SingleIndex];
+		if (!Expression)
+		{
+			return MCPError(FString::Printf(TEXT("Expression index %d is an empty slot"), SingleIndex));
+		}
+
+		// Each distinct source once, in the order its first input names it.
+		TArray<TSharedPtr<FJsonValue>> Sources;
+		TSet<UMaterialExpression*> Seen;
+		for (int32 InputIdx = 0; ; ++InputIdx)
+		{
+			FExpressionInput* Input = Expression->GetInput(InputIdx);
+			if (!Input) break;
+			UMaterialExpression* Source = Input->Expression;
+			if (!Source || Seen.Contains(Source)) continue;
+			Seen.Add(Source);
+			const int32* SourceIdx = IndexByExpression.Find(Source);
+			if (!SourceIdx) continue;
+			Sources.Add(MakeShared<FJsonValueObject>(
+				MaterialExpressionRowJson(Source, *SourceIdx, /*bIncludeInputs*/ false, IndexByExpression)));
+		}
+
+		auto Result = MCPSuccess();
+		Result->SetStringField(TEXT("materialPath"), Material->GetPathName());
+		Result->SetNumberField(TEXT("expressionIndex"), SingleIndex);
+		Result->SetObjectField(TEXT("expression"),
+			MaterialExpressionRowJson(Expression, SingleIndex, /*bIncludeInputs*/ true, IndexByExpression));
+		Result->SetArrayField(TEXT("sources"), Sources);
+		return MCPResult(Result);
 	}
 
 	TArray<MCPPagination::FPageRow> Rows;
@@ -1537,55 +1646,14 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressionsInternal(
 		UMaterialExpression* Expression = Expressions[i];
 		if (!Expression) continue;
 
-		TSharedPtr<FJsonObject> ExprObj = MakeShared<FJsonObject>();
-		ExprObj->SetStringField(TEXT("nodeId"), FString::FromInt(i));
-		ExprObj->SetStringField(TEXT("class"), Expression->GetClass()->GetName());
-		ExprObj->SetStringField(TEXT("description"), Expression->GetDescription());
-		ExprObj->SetStringField(TEXT("name"), Expression->Desc);
-		ExprObj->SetNumberField(TEXT("positionX"), Expression->MaterialExpressionEditorX);
-		ExprObj->SetNumberField(TEXT("positionY"), Expression->MaterialExpressionEditorY);
-
-		// Include parameter name if applicable
-		if (UMaterialExpressionScalarParameter* SP = Cast<UMaterialExpressionScalarParameter>(Expression))
-		{
-			ExprObj->SetStringField(TEXT("parameterName"), SP->ParameterName.ToString());
-		}
-		else if (UMaterialExpressionVectorParameter* VP = Cast<UMaterialExpressionVectorParameter>(Expression))
-		{
-			ExprObj->SetStringField(TEXT("parameterName"), VP->ParameterName.ToString());
-		}
-
-		if (bIncludeInputs)
-		{
-			TArray<TSharedPtr<FJsonValue>> InputsArray;
-			for (int32 InputIdx = 0; ; ++InputIdx)
-			{
-				FExpressionInput* Input = Expression->GetInput(InputIdx);
-				if (!Input) break;
-
-				TSharedPtr<FJsonObject> InputObj = MakeShared<FJsonObject>();
-				InputObj->SetNumberField(TEXT("inputIndex"), InputIdx);
-				InputObj->SetStringField(TEXT("inputName"), Expression->GetInputName(InputIdx).ToString());
-				if (Input->Expression)
-				{
-					if (const int32* ConnIdx = IndexByExpression.Find(Input->Expression))
-					{
-						InputObj->SetNumberField(TEXT("connectedExpressionIndex"), *ConnIdx);
-					}
-					InputObj->SetNumberField(TEXT("connectedOutputIndex"), Input->OutputIndex);
-				}
-				InputsArray.Add(MakeShared<FJsonValueObject>(InputObj));
-			}
-			ExprObj->SetArrayField(TEXT("inputs"), InputsArray);
-		}
-
 		// The expression's OBJECT PATH is the page anchor, not its nodeId:
 		// nodeId is the index into GetExpressions(), which every insertion and
 		// deletion renumbers, and an index is exactly what a cursor must not
 		// resume on. nodeId is still reported, and is still the addressing
 		// scheme the other material actions take, because it is computed here
 		// over the whole enumeration rather than over the page.
-		Rows.Add({ Expression->GetPathName(), MakeShared<FJsonValueObject>(ExprObj) });
+		Rows.Add({ Expression->GetPathName(), MakeShared<FJsonValueObject>(
+			MaterialExpressionRowJson(Expression, i, bIncludeInputs, IndexByExpression)) });
 	}
 	// GetExpressions() is the material's own stored order, which nodeId indexes
 	// into, so the rows are deliberately NOT sorted: reordering them would
@@ -1597,34 +1665,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressionsInternal(
 
 	if (bIncludeRootConnections)
 	{
-		TSharedPtr<FJsonObject> ConnectionsObj = MakeShared<FJsonObject>();
-		UEnum* PropertyEnum = StaticEnum<EMaterialProperty>();
-		for (int32 PropIdx = 0; PropIdx < MP_MAX; ++PropIdx)
-		{
-			const EMaterialProperty Property = static_cast<EMaterialProperty>(PropIdx);
-			FExpressionInput* Input = Material->GetExpressionInputForProperty(Property);
-			if (!Input || !Input->Expression) continue;
-
-			FString PropertyName;
-			if (PropertyEnum)
-			{
-				PropertyName = PropertyEnum->GetNameStringByValue(static_cast<int64>(Property));
-				PropertyName.RemoveFromStart(TEXT("MP_"));
-			}
-			if (PropertyName.IsEmpty())
-			{
-				PropertyName = FString::FromInt(PropIdx);
-			}
-
-			TSharedPtr<FJsonObject> ConnObj = MakeShared<FJsonObject>();
-			if (const int32* ConnIdx = IndexByExpression.Find(Input->Expression))
-			{
-				ConnObj->SetNumberField(TEXT("expressionIndex"), *ConnIdx);
-			}
-			ConnObj->SetNumberField(TEXT("outputIndex"), Input->OutputIndex);
-			ConnectionsObj->SetObjectField(PropertyName, ConnObj);
-		}
-		Result->SetObjectField(TEXT("connections"), ConnectionsObj);
+		Result->SetObjectField(TEXT("connections"), MaterialRootConnectionsJson(Material, IndexByExpression));
 	}
 
 	return MCPResult(Result);

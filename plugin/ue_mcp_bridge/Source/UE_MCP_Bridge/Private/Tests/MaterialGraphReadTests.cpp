@@ -54,9 +54,10 @@ bool FMaterialGraphReadTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("source without pins has empty inputs"), FirstRows[0]->AsObject()->GetArrayField(TEXT("inputs")).IsEmpty());
 	const auto& Roots = First->GetObjectField(TEXT("connections"));
 	TestEqual(TEXT("root may reference a node outside this page"), Roots->GetObjectField(TEXT("BaseColor"))->GetIntegerField(TEXT("expressionIndex")), 1);
-	TestEqual(TEXT("material attributes root is present"), Roots->GetObjectField(TEXT("MaterialAttributes"))->GetIntegerField(TEXT("expressionIndex")), 1);
+	TestEqual(TEXT("root names its source class like material(read)"), Roots->GetObjectField(TEXT("BaseColor"))->GetStringField(TEXT("expressionClass")), FString(TEXT("MaterialExpressionAdd")));
+	TestFalse(TEXT("material attributes root is ignored while bUseMaterialAttributes is off"), Roots->HasField(TEXT("MaterialAttributes")));
 	TestEqual(TEXT("custom UV root is present"), Roots->GetObjectField(TEXT("CustomizedUVs0"))->GetIntegerField(TEXT("expressionIndex")), 0);
-	TestFalse(TEXT("disconnected roots are omitted"), Roots->HasField(TEXT("Roughness")));
+	TestTrue(TEXT("disconnected roots are null like material(read)"), Roots->HasTypedField<EJson::Null>(TEXT("Roughness")));
 	FString Cursor;
 	if (!TestTrue(TEXT("first page has a cursor"), First->TryGetStringField(TEXT("nextCursor"), Cursor) && !Cursor.IsEmpty())) return false;
 	Request->SetStringField(TEXT("cursor"), Cursor);
@@ -75,9 +76,36 @@ bool FMaterialGraphReadTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("input name"), Inputs[0]->AsObject()->GetStringField(TEXT("inputName")), FString(TEXT("A")));
 	TestEqual(TEXT("source index across page boundary"), Inputs[0]->AsObject()->GetIntegerField(TEXT("connectedExpressionIndex")), 0);
 	TestEqual(TEXT("source output index"), Inputs[0]->AsObject()->GetIntegerField(TEXT("connectedOutputIndex")), 0);
+	TestEqual(TEXT("source class like material(read)"), Inputs[0]->AsObject()->GetStringField(TEXT("connectedExpressionClass")), FString(TEXT("MaterialExpressionConstant")));
 	TestFalse(TEXT("disconnected pin has no source"), Inputs[1]->AsObject()->HasField(TEXT("connectedExpressionIndex")));
 
+	// expressionIndex: one node and its sources, no paging, cursor ignored.
+	Request->SetNumberField(TEXT("expressionIndex"), 1);
+	auto Single = Call(TEXT("read_material_graph"), Request);
+	if (!Single.IsValid() || !TestTrue(TEXT("single node read succeeds"), Single->GetBoolField(TEXT("success")))) return false;
+	TestFalse(TEXT("single node read is not paged"), Single->HasField(TEXT("expressions")));
+	const auto& SingleNode = Single->GetObjectField(TEXT("expression"));
+	TestEqual(TEXT("single node id"), SingleNode->GetStringField(TEXT("nodeId")), FString(TEXT("1")));
+	TestEqual(TEXT("single node inputs"), SingleNode->GetArrayField(TEXT("inputs")).Num(), 2);
+	const auto& Sources = Single->GetArrayField(TEXT("sources"));
+	if (TestEqual(TEXT("one distinct source"), Sources.Num(), 1))
+	{
+		TestEqual(TEXT("source is the constant"), Sources[0]->AsObject()->GetStringField(TEXT("nodeId")), FString(TEXT("0")));
+	}
+	Request->SetNumberField(TEXT("expressionIndex"), 2);
+	auto OutOfRange = Call(TEXT("read_material_graph"), Request);
+	if (!OutOfRange.IsValid()) return false;
+	TestFalse(TEXT("out of range index is refused"), OutOfRange->GetBoolField(TEXT("success")));
+	Request->RemoveField(TEXT("expressionIndex"));
+
+	Material->bUseMaterialAttributes = true;
 	Request->RemoveField(TEXT("cursor"));
+	auto WithAttributes = Call(TEXT("read_material_graph"), Request);
+	if (!WithAttributes.IsValid()) return false;
+	TestEqual(TEXT("material attributes root is reported once enabled"),
+		WithAttributes->GetObjectField(TEXT("connections"))->GetObjectField(TEXT("MaterialAttributes"))->GetIntegerField(TEXT("expressionIndex")), 1);
+	Material->bUseMaterialAttributes = false;
+
 	Request->SetNumberField(TEXT("limit"), 10);
 	auto PlainList = Call(TEXT("list_material_expressions"), Request);
 	if (!PlainList.IsValid()) return false;
