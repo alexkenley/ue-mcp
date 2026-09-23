@@ -109,6 +109,8 @@ namespace ImcEdit_Internal
 				|| (Package && (Package->IsDirty() || UnmarkedEdits().Contains(Package->GetFName())));
 			if (bPending)
 			{
+				// SaveAssetPackageChecked refuses unwritable packages before
+				// SavePackage, which covers the FinalizeFile crash of #197 (#932).
 				bSaved = SaveAssetPackageChecked(IMC, Reason);
 				MCPNoteSaveOutcome(Result, IMC->GetPathName(), bSaved, Reason);
 				if (bSaved && Package) UnmarkedEdits().Remove(Package->GetFName());
