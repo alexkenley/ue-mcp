@@ -215,6 +215,13 @@ describe("gameplay - set_player_mappable_settings", () => {
     expect(createdResult.displayName).toBe("Jump");
     expect(createdResult.displayCategory).toBe("Movement");
     expect(String(createdResult.playerMappableKeySettings)).not.toBe("None");
+    expect(createdResult.saved).toBe(true);
+    expect(createdResult.persisted).toBe(true);
+    expect(createdResult.packageDirty).toBe(false);
+
+    const reloaded = await callBridge(bridge, "force_reload_asset", { assetPath });
+    expect(reloaded.ok, reloaded.error).toBe(true);
+    expect((reloaded.result as Record<string, unknown>).reloaded).toBe(true);
 
     const read = await callBridge(bridge, "read_input_action", { inputActionPath: assetPath });
     expect(read.ok, read.error).toBe(true);
@@ -222,13 +229,12 @@ describe("gameplay - set_player_mappable_settings", () => {
     expect(String(readResult.playerMappableKeySettings)).toBe(String(createdResult.playerMappableKeySettings));
 
     const named = await callBridge(bridge, "get_property", {
-      objectPath: String(createdResult.playerMappableKeySettings),
+      objectPath: String(readResult.playerMappableKeySettings),
       propertyName: "Name",
     });
     expect(named.ok, named.error).toBe(true);
     const namedResult = named.result as Record<string, unknown>;
-    const namedValue = namedResult.value ?? namedResult.Name ?? namedResult.propertyValue ?? namedResult;
-    expect(JSON.stringify(namedValue)).toContain("Jump");
+    expect(namedResult.value).toBe("Jump");
 
     const replay = await callBridge(bridge, "set_player_mappable_settings", {
       inputActionPath: assetPath,
@@ -245,6 +251,23 @@ describe("gameplay - set_player_mappable_settings", () => {
     expect(replayResult.displayName).toBe("Jump");
     expect(replayResult.displayCategory).toBe("Movement");
 
+    const caseOnly = await callBridge(bridge, "set_player_mappable_settings", {
+      inputActionPath: assetPath,
+      mappingName: "jump",
+    });
+    expect(caseOnly.ok, caseOnly.error).toBe(true);
+    const caseResult = caseOnly.result as Record<string, unknown>;
+    expect(caseResult.success).toBe(true);
+    expect(caseResult.unchanged).toBe(false);
+    expect(caseResult.mappingName).toBe("jump");
+    const inverse = caseResult.rollback as { method: string; payload: Record<string, unknown> };
+    expect(inverse.method).toBe("set_player_mappable_settings");
+    expect(inverse.payload.mappingName).toBe("Jump");
+    expect(inverse.payload.save).toBe(true);
+    const undone = await callBridge(bridge, inverse.method, inverse.payload);
+    expect(undone.ok, undone.error).toBe(true);
+    expect((undone.result as Record<string, unknown>).mappingName).toBe("Jump");
+
     const updated = await callBridge(bridge, "set_player_mappable_settings", {
       inputActionPath: assetPath,
       mappingName: "Jump",
@@ -257,6 +280,26 @@ describe("gameplay - set_player_mappable_settings", () => {
     expect(updatedResult.unchanged).toBe(false);
     expect(updatedResult.displayName).toBe("Leap");
     expect(updatedResult.displayCategory).toBe("Movement");
+
+    const deferred = await callBridge(bridge, "set_player_mappable_settings", {
+      inputActionPath: assetPath, mappingName: "Jump", displayName: "Unsaved", save: false,
+    });
+    expect(deferred.ok, deferred.error).toBe(true);
+    const deferredResult = deferred.result as Record<string, unknown>;
+    expect(deferredResult.saved).toBe(false);
+    expect(deferredResult.persisted).toBe(false);
+    expect(deferredResult.packageDirty).toBe(true);
+    const deferredRollback = deferredResult.rollback as { method: string; payload: Record<string, unknown> };
+    expect(deferredRollback.payload.save).toBe(false);
+    expect(deferredResult.rollbackLossy).toBe(true);
+    const restored = await callBridge(bridge, deferredRollback.method, deferredRollback.payload);
+    expect(restored.ok, restored.error).toBe(true);
+    expect((restored.result as Record<string, unknown>).displayName).toBe("Leap");
+    const flushed = await callBridge(bridge, "set_player_mappable_settings", {
+      inputActionPath: assetPath, mappingName: "Jump", displayName: "Leap",
+    });
+    expect(flushed.ok, flushed.error).toBe(true);
+    expect((flushed.result as Record<string, unknown>).saved).toBe(true);
 
     const empty = await callBridge(bridge, "set_player_mappable_settings", {
       inputActionPath: assetPath,

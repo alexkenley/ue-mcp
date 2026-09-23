@@ -65,22 +65,22 @@ namespace ImcEdit_Internal
 	// With save=true, refuse a package that cannot be written before anything
 	// changes, so a failed save never leaves a dirty edit behind (#932).
 	static TSharedPtr<FJsonValue> RefuseUnwritable(
-		UInputMappingContext* IMC,
+		UObject* Asset,
 		const TSharedPtr<FJsonObject>& Params,
 		const TCHAR* Operation)
 	{
 		if (!OptionalBool(Params, TEXT("save"), true)) return nullptr;
-		return MCPAssetWriteBlockedError(IMC, IMC->GetPathName(), Operation);
+		return MCPAssetWriteBlockedError(Asset, Asset->GetPathName(), Operation);
 	}
 
 	// #1097/#1109: a successful in-memory edit does not establish persistence.
 	static void FinishEdit(
-		UInputMappingContext* IMC,
+		UObject* Asset,
 		const TSharedPtr<FJsonObject>& Params,
 		const TSharedPtr<FJsonObject>& Result,
 		bool bChanged)
 	{
-		UPackage* Package = IMC->GetOutermost();
+		UPackage* Package = Asset->GetOutermost();
 		if (bChanged && Package)
 		{
 			Package->MarkPackageDirty();
@@ -112,21 +112,21 @@ namespace ImcEdit_Internal
 			{
 				// SaveAssetPackageChecked refuses unwritable packages before
 				// SavePackage, which covers the FinalizeFile crash of #197 (#932).
-				bSaved = SaveAssetPackageChecked(IMC, Reason);
-				MCPNoteSaveOutcome(Result, IMC->GetPathName(), bSaved, Reason);
+				bSaved = SaveAssetPackageChecked(Asset, Reason);
+				MCPNoteSaveOutcome(Result, Asset->GetPathName(), bSaved, Reason);
 				if (bSaved && Package) UnmarkedEdits().Remove(Package->GetFName());
 			}
 			bPersisted = bSaved || !bPending;
 		}
 		else
 		{
-			Reason = TEXT("save=false was requested; no package write was attempted. Call asset(save) to persist the context.");
+			Reason = TEXT("save=false was requested; no package write was attempted. Call asset(save) to persist the asset.");
 			if (bChanged && (!Package || !Package->IsDirty()))
 			{
 				// Unreal can suppress MarkPackageDirty during PIE, loading or undo.
 				// Respect that policy and expose the failure instead of overriding
 				// it or promising that save_dirty can discover this changed asset.
-				Reason = TEXT("The context changed in memory, but Unreal did not mark its package dirty. Dirty-package saves will not discover this edit; retry with save=true or explicitly save the context.");
+				Reason = TEXT("The asset changed in memory, but Unreal did not mark its package dirty. Dirty-package saves will not discover this edit; retry with save=true or explicitly save the asset.");
 				Result->SetBoolField(TEXT("success"), false);
 				Result->SetStringField(TEXT("error"), Reason);
 			}
@@ -1445,8 +1445,7 @@ namespace InputDepth_Internal
 	}
 
 	/** PlayerMappableKeySettings is protected on UInputAction. Reflection
-	 *  ignores C++ access specifiers, which is how read_input_action and
-	 *  set_player_mappable_settings both reach the Instanced pointer. */
+	 *  ignores C++ access specifiers, so the setter can reach the Instanced pointer. */
 	static FObjectPropertyBase* FindPlayerMappableSettingsProperty(const UInputAction* Action)
 	{
 		if (!Action) return nullptr;
@@ -1718,10 +1717,11 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetPlayerMappableSettings(const TShare
 	const FString PreviousDisplayName = Settings ? Settings->DisplayName.ToString() : FString();
 	const FString PreviousDisplayCategory = Settings ? Settings->DisplayCategory.ToString() : FString();
 
-	const bool bNameUnchanged = Settings && PreviousName == DesiredName;
+	const bool bNameUnchanged = Settings && PreviousName.ToString().Equals(MappingName, ESearchCase::CaseSensitive);
 	const bool bDisplayNameUnchanged = !bHasDisplayName || (Settings && PreviousDisplayName == DisplayName);
 	const bool bDisplayCategoryUnchanged = !bHasDisplayCategory || (Settings && PreviousDisplayCategory == DisplayCategory);
 	const bool bUnchanged = !bCreated && bNameUnchanged && bDisplayNameUnchanged && bDisplayCategoryUnchanged;
+	if (auto Blocked = ImcEdit_Internal::RefuseUnwritable(Action, Params, TEXT("set player-mappable settings"))) return Blocked;
 
 	if (bUnchanged)
 	{
@@ -1732,6 +1732,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetPlayerMappableSettings(const TShare
 		ReportPlayerMappableMetadata(Result, Action, Settings);
 		MCPSetNoRollback(Result,
 			TEXT("The InputAction already carried these player-mappable settings, so nothing changed and there is nothing to undo."));
+		ImcEdit_Internal::FinishEdit(Action, Params, Result, false);
 		return MCPResult(Result);
 	}
 
@@ -1762,8 +1763,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetPlayerMappableSettings(const TShare
 #if WITH_EDITOR
 	Action->PostEditChange();
 #endif
-	Action->MarkPackageDirty();
-
 	auto Result = MCPSuccess();
 	if (bCreated)
 	{
@@ -1777,14 +1776,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetPlayerMappableSettings(const TShare
 	}
 	Result->SetBoolField(TEXT("unchanged"), false);
 	ReportPlayerMappableMetadata(Result, Action, Settings);
-
-	FString SaveReason;
-	if (!SaveAssetPackageChecked(Action, SaveReason))
-	{
-		Transaction.Cancel();
-		return MCPError(FString::Printf(
-			TEXT("Authored player-mappable settings but could not save %s: %s"), *Action->GetPathName(), *SaveReason));
-	}
 
 	if (bCreated)
 	{
@@ -1804,8 +1795,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetPlayerMappableSettings(const TShare
 		if (bHasDisplayName) Payload->SetStringField(TEXT("displayName"), PreviousDisplayName);
 		if (bHasDisplayCategory) Payload->SetStringField(TEXT("displayCategory"), PreviousDisplayCategory);
 		MCPSetRollback(Result, TEXT("set_player_mappable_settings"), Payload);
-		Result->SetBoolField(TEXT("rollbackLossy"), false);
+		// FText::ToString loses string-table/localization identity on rollback.
+		Result->SetBoolField(TEXT("rollbackLossy"), bHasDisplayName || bHasDisplayCategory);
 	}
+	ImcEdit_Internal::FinishEdit(Action, Params, Result, true);
 	return MCPResult(Result);
 }
 
