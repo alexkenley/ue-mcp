@@ -1676,8 +1676,9 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetBlueprintVariableMetadata(const TS
 	};
 	TArray<FPlannedMeta> Planned;
 
-	for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*MetaObj)->Values)
+	for (const auto& JsonEntry : (*MetaObj)->Values)
 	{
+		const TPair<FString, TSharedPtr<FJsonValue>> Pair(JsonEntry.Key, JsonEntry.Value);
 		if (Pair.Key.IsEmpty()) return MCPError(TEXT("metadata carries an empty key."));
 		FPlannedMeta Plan;
 		Plan.Key = FName(*Pair.Key);

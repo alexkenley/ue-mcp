@@ -292,6 +292,10 @@ The plugin source lives in `plugin/ue_mcp_bridge/`. When you modify C++ handler 
 
 For a full editor restart: `editor(action="restart_editor")`
 
+### JSON object range loops
+
+Iterate `FJsonObject::Values` with `const auto&` and convert the key to `FString` inside the body if needed. UE 5.8 changed the key type, so an explicit `TPair<FString, TSharedPtr<FJsonValue>>` loop variable trips Clang's `-Wrange-loop-construct`, an error on Linux. `tests/unit/json-object-range-loops.test.ts` enforces this.
+
 ### Blueprint graph node flags
 
 Construct persisted Blueprint and animation graph nodes with `RF_Transactional`.
