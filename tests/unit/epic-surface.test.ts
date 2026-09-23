@@ -90,6 +90,19 @@ describe("native tool surface filtering", () => {
     expect(Object.keys(animation.schema)).toHaveLength(beforeFields);
   });
 
+  it("names no wrapped engine action anywhere once they are all withheld", () => {
+    const tools = cloneToolGraph(ALL_TOOLS);
+
+    applyNativeToolsConfig(tools, { enabled: false });
+
+    const mentions = tools.flatMap((tool) => [
+      ...[...tool.description.matchAll(/\bepic_[a-z]\w*/g)].map((m) => `${tool.name}: ${m[0]}`),
+      ...Object.entries(tool.actions).flatMap(([name, spec]) =>
+        [...(spec.description ?? "").matchAll(/\bepic_[a-z]\w*/g)].map((m) => `${tool.name}.${name}: ${m[0]}`)),
+    ]);
+    expect(mentions).toEqual([]);
+  });
+
   it("reports categories made entirely of wrapped engine actions for removal", () => {
     const tools = cloneToolGraph(ALL_TOOLS);
 
