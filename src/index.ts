@@ -503,47 +503,43 @@ async function main() {
       getPlugins: () => getPlugins(load.surface.session),
       getToolGraph: (forSession) => getToolGraph(forSession ?? load.surface.session),
     };
-    const readProjectConfig = () => loadFlowConfig(load.surface.tools, load.configDir, {
-      tasks: load.pluginLoad.taskDefs,
-      flows: load.pluginLoad.flowDefs,
-    }).config;
-
     const deps = {
       registry: load.registry!,
       ctx: guardCtx,
       rawBridge: load.surface.session.bridge,
     };
 
-    const projectConfig = readProjectConfig();
-
+    const yamlSource = createLiveGuardSource(load.surface.tools, load.configDir, {
+      tasks: load.pluginLoad.taskDefs,
+      flows: load.pluginLoad.flowDefs,
+    }, (message) => {
+      console.error(`[ue-mcp] ${load.surface.session.name}: ${message}`);
+    });
     const sources = [
       ...load.pluginLoad.guardsByPlugin.map((g) => ({ label: g.plugin, guards: g.guards })),
-      createLiveGuardSource(load.surface.tools, load.configDir, {
-        tasks: load.pluginLoad.taskDefs,
-        flows: load.pluginLoad.flowDefs,
-      }, (message) => {
-        console.error(`[ue-mcp] ${load.surface.session.name}: ${message}`);
-      }),
+      yamlSource,
     ];
 
     // A task still named like a guard is fatal, whoever declared it: under the
     // declaration model nothing discovers it, so it would sit in the config
     // gating nothing.
-    assertNoLegacyGuardTasks(Object.keys(projectConfig.tasks ?? {}), { label: "ue-mcp.yml" });
+    assertNoLegacyGuardTasks(Object.keys(yamlSource.config.tasks ?? {}), yamlSource);
     for (const { plugin, taskNames } of load.pluginLoad.taskNamesByPlugin) {
       assertNoLegacyGuardTasks(taskNames, { label: plugin });
     }
 
-    let count = 0;
+    const built = [];
     for (const source of sources) {
       if (Object.keys(source.guards).length === 0) continue;
       for (const guard of await buildGuards(source.guards, deps, source)) {
-        load.surface.session.guards.register(guard);
-        count++;
+        built.push(guard);
       }
     }
-    if (count > 0) {
-      console.error(`[ue-mcp] ${load.surface.session.name}: ${count} guard(s) registered`);
+    // Publish only after every source has resolved, so retrying a failed build
+    // cannot leave a partial or duplicated guard pipeline behind.
+    for (const guard of built) load.surface.session.guards.register(guard);
+    if (built.length > 0) {
+      console.error(`[ue-mcp] ${load.surface.session.name}: ${built.length} guard(s) registered`);
     }
   };
   for (const load of loads) await buildGuardsFor(load);
@@ -579,9 +575,9 @@ async function main() {
       const load = await buildSessionLoad(session, pkg.version, true);
       applyContextStrategy(load);
       await buildRegistryFor(load);
+      await buildGuardsFor(load);
       perSession.set(session, load);
       surfaces.push(load.surface);
-      await buildGuardsFor(load);
       // The union is what explainMissingAction refuses from, so it has to know
       // about this editor before the first call is routed to it.
       refreshDispatchUnion();

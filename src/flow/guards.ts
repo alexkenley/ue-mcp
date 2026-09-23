@@ -39,10 +39,10 @@ export interface GuardSource {
   /** `ue-mcp.yml`, or a plugin's name. */
   readonly label: string;
   /**
-   * Live options belong to this source only. Null disables a removed hook;
-   * undefined keeps its declared options. Plugin manifests have no resolver.
+   * Live options belong to this source only. Undefined keeps the declared
+   * options. Plugin manifests have no resolver.
    */
-  readonly liveOptions?: (guardName: string, phase: GuardPhase) => Record<string, unknown> | null | undefined;
+  readonly liveOptions?: (guardName: string, phase: GuardPhase) => Record<string, unknown> | undefined;
 }
 
 export interface BuildGuardsDeps {
@@ -136,7 +136,6 @@ async function runHook(
   result?: unknown,
 ): Promise<HookResult> {
   const liveOptions = source.liveOptions?.(guardName, phase);
-  if (liveOptions === null) return {};
   const options = liveOptions ?? hook.options;
   const task = await deps.registry.create(
     hook.class_path,

@@ -32,6 +32,7 @@ beforeEach(() => {
   vi.stubEnv("UE_MCP_GLOBAL_CONFIG", globalFile);
   vi.stubEnv("UE_MCP_ENV", "");
   clock = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => clock);
   seen = [];
   warnings = [];
 });
@@ -85,7 +86,7 @@ async function pipeline(sources: Array<GuardSource & { guards: GuardDeclarations
     for (const guard of await buildGuards(source.guards, deps, source)) guards.register(guard);
   }
   const bridge = new GuardedBridge(raw, guards, () => null);
-  return { invoke: () => bridge.call("spawn_actor", {}), call };
+  return { invoke: () => { clock += 300; return bridge.call("spawn_actor", {}); }, call };
 }
 
 describe("guard config from files", () => {
@@ -104,11 +105,11 @@ describe("guard config from files", () => {
     expect(seen).toEqual([
       { owner: "plugin", version: 0 }, { owner: "yaml", version: 1 },
       { owner: "plugin", version: 0 }, { owner: "yaml", version: 2 },
-      { owner: "plugin", version: 0 },
+      { owner: "plugin", version: 0 }, { owner: "yaml", version: 2 },
     ]);
   });
 
-  it("disables a removed hook, then a removed guard, and resumes restored hooks", async () => {
+  it("keeps removed hooks and guards until restart, and accepts restored options", async () => {
     write(projectFile, config({ owner: "before" }, true));
     const { invoke } = await pipeline([liveSource()]);
     await invoke();
@@ -118,11 +119,11 @@ describe("guard config from files", () => {
     await invoke();
     write(projectFile, config({ owner: "restored" }, true));
     await invoke();
-    expect(seen.map((options) => options.owner)).toEqual(["before", "after", "after", "restored", "after"]);
-    expect(warnings).toEqual([]);
+    expect(seen.map((options) => options.owner)).toEqual(["before", "after", "before", "after", "before", "after", "restored", "after"]);
+    expect(warnings[0]).toContain("restart ue-mcp");
   });
 
-  it("tracks project and global deletion, recreation, and global edits without a project file", async () => {
+  it("keeps the last valid options while project or global layers disappear", async () => {
     write(globalFile, config({ owner: "global" }));
     write(projectFile, config({ owner: "project" }));
     const { invoke } = await pipeline([liveSource()]);
@@ -138,7 +139,7 @@ describe("guard config from files", () => {
     write(projectFile, config({ owner: "project-restored" }));
     await invoke();
     expect(seen.map((options) => options.owner)).toEqual([
-      "project", "global", "global-edited", "global-restored", "project-restored",
+      "project", "project", "project", "project", "project", "project-restored",
     ]);
   });
 
@@ -167,18 +168,17 @@ describe("guard config from files", () => {
     write(envFile, { guards: { policy: { before: { options: { nested: { winner: "env-edited" } } } } } });
     fs.unlinkSync(localFile);
     await invoke();
-    expect(seen.at(-1)).toEqual(expected().policy.before!.options);
-    expect(seen.at(-1)).toMatchObject({ enabled: true, nested: { winner: "env-edited" } });
+    expect(seen.at(-1)).toMatchObject({ enabled: false, nested: { winner: "env" } });
     write(localFile, { guards: { policy: { before: { options: { enabled: false } } } } });
     await invoke();
     expect(seen.at(-1)?.enabled).toBe(false);
+    expect(seen.at(-1)).toEqual(expected().policy.before!.options);
     fs.unlinkSync(projectFile);
     await invoke();
-    expect(seen.at(-1)).toEqual(expected().policy.before!.options);
-    expect(seen.at(-1)).toMatchObject({ enabled: true, nested: { winner: "global" } });
+    expect(seen.at(-1)).toMatchObject({ enabled: false, nested: { winner: "env-edited" } });
   });
 
-  it.each(["global", "project"])("keeps a denying guard on invalid %s YAML, then accepts a valid removal", async (layer) => {
+  it.each(["global", "project"])("keeps a denying guard on invalid %s YAML and removal", async (layer) => {
     const file = layer === "global" ? globalFile : projectFile;
     write(file, config({ deny: true }));
     const { invoke, call } = await pipeline([liveSource()]);
@@ -193,6 +193,9 @@ describe("guard config from files", () => {
     await expect(invoke()).rejects.toThrow("policy denied");
     expect(call).not.toHaveBeenCalled();
     write(file, {});
+    await expect(invoke()).rejects.toThrow("policy denied");
+    expect(call).not.toHaveBeenCalled();
+    write(file, config({ deny: false }));
     await expect(invoke()).resolves.toEqual({ ok: true });
   });
 
@@ -212,34 +215,142 @@ describe("guard config from files", () => {
     await expect(invoke()).rejects.toThrow("policy denied");
     expect(call).not.toHaveBeenCalled();
     blockedRead.mockRestore();
+    clock += 5000;
     await expect(invoke()).resolves.toEqual({ ok: true });
     expect(warnings).toHaveLength(2);
   });
 
-  it("rejects invalid startup config instead of starting without its guard", () => {
-    write(globalFile, "guards: [broken");
+  it("rejects invalid project startup config and names its file", () => {
+    write(projectFile, "guards: [broken");
+    expect(liveSource).toThrow(projectFile);
+    write(projectFile, { guards: { policy: { scope: "writes" } } });
     expect(liveSource).toThrow();
-    write(globalFile, { guards: { policy: { scope: "writes" } } });
     expect(liveSource).toThrow(/a guard needs/);
   });
 
-  it.each(["created", "replaced"])("refuses startup if a config file is %s during the initial read", async (change) => {
+  it.each(["created", "replaced"])("retries startup if a config file is %s during the initial read", async (change) => {
     write(globalFile, {});
     const read = fs.readFileSync;
+    let changed = false;
     const changingRead = vi.spyOn(fs, "readFileSync").mockImplementation((...args: Parameters<typeof read>) => {
       const contents = read(...args);
-      if (args[0] === globalFile) {
+      if (args[0] === globalFile && !changed) {
+        changed = true;
         write(change === "created" ? projectFile : globalFile, config({ deny: true }));
       }
       return contents;
     });
     // The first read observes no guards. Publishing it would leave no hooks
     // registered to notice the guard that appeared while that read was in flight.
-    expect(liveSource).toThrow("Guard config changed while it was being read");
+    const source = liveSource();
     changingRead.mockRestore();
-    const { invoke, call } = await pipeline([liveSource()]);
+    const { invoke, call } = await pipeline([source]);
     await expect(invoke()).rejects.toThrow("policy denied");
     expect(call).not.toHaveBeenCalled();
+  });
+
+  it.each(["malformed", "unreadable", "directory"])("warns and ignores a %s global config at startup", async (kind) => {
+    write(projectFile, config({ deny: true }));
+    if (kind === "directory") fs.mkdirSync(globalFile);
+    else write(globalFile, kind === "malformed" ? "guards: [broken" : config({ deny: false }));
+    if (kind === "unreadable") {
+      const read = fs.readFileSync;
+      vi.spyOn(fs, "readFileSync").mockImplementation((...args: Parameters<typeof read>) => {
+        if (args[0] === globalFile) throw Object.assign(new Error("access denied"), { code: "EACCES" });
+        return read(...args);
+      });
+    }
+    const source = liveSource();
+    expect(source.guards).toEqual(loadFlowConfig([], dir).config.guards);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(globalFile);
+    const { invoke, call } = await pipeline([source]);
+    await expect(invoke()).rejects.toThrow("policy denied");
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("retains options when a broken global layer would reveal a weaker project guard", async () => {
+    write(globalFile, config({ deny: true }));
+    write(projectFile, { guards: { policy: { before: { class_path: "check" } } } });
+    const { invoke, call } = await pipeline([liveSource()]);
+    write(globalFile, "guards: [broken");
+    await expect(invoke()).rejects.toThrow("policy denied");
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("uses the last successful startup snapshot if saves keep racing its reads", async () => {
+    write(globalFile, config({ deny: true }));
+    const read = fs.readFileSync;
+    const changingRead = vi.spyOn(fs, "readFileSync").mockImplementation((...args: Parameters<typeof read>) => {
+      const contents = read(...args);
+      if (args[0] === globalFile) write(globalFile, config({ deny: true }));
+      return contents;
+    });
+    const source = liveSource();
+    changingRead.mockRestore();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("last valid config");
+    const { invoke } = await pipeline([source]);
+    await expect(invoke()).rejects.toThrow("policy denied");
+  });
+
+  it("keeps a startup snapshot when its layer disappears during the read", async () => {
+    write(globalFile, config({ deny: true }));
+    const read = fs.readFileSync;
+    const disappearingRead = vi.spyOn(fs, "readFileSync").mockImplementation((...args: Parameters<typeof read>) => {
+      const contents = read(...args);
+      if (args[0] === globalFile) fs.unlinkSync(globalFile);
+      return contents;
+    });
+    const source = liveSource();
+    disappearingRead.mockRestore();
+    expect(warnings[0]).toContain("disappeared during startup");
+    const { invoke } = await pipeline([source]);
+    await expect(invoke()).rejects.toThrow("policy denied");
+  });
+
+  it.each(["YAML", "guard declaration"])("keeps a startup snapshot when a concurrent edit becomes invalid %s", async (kind) => {
+    write(globalFile, config({ deny: true }));
+    const read = fs.readFileSync;
+    let changed = false;
+    const changingRead = vi.spyOn(fs, "readFileSync").mockImplementation((...args: Parameters<typeof read>) => {
+      const contents = read(...args);
+      if (args[0] === globalFile && !changed) {
+        changed = true;
+        write(globalFile, kind === "YAML" ? "guards: [broken" : { guards: { policy: { scope: "all" } } });
+      }
+      return contents;
+    });
+    const source = liveSource();
+    changingRead.mockRestore();
+    expect(warnings[0]).toContain("last valid config");
+    const { invoke } = await pipeline([source]);
+    await expect(invoke()).rejects.toThrow("policy denied");
+  });
+
+  it("shares metadata polling across hooks and caches unchanged malformed input", () => {
+    write(globalFile, config({ deny: true }, true));
+    const source = liveSource();
+    const stat = vi.spyOn(fs, "statSync");
+    const read = vi.spyOn(fs, "readFileSync");
+    for (let i = 0; i < 20; i++) {
+      source.liveOptions!("policy", "before");
+      source.liveOptions!("policy", "after");
+    }
+    expect(stat).toHaveBeenCalledTimes(2);
+    expect(read).not.toHaveBeenCalled();
+    write(globalFile, "guards: [broken");
+    expect(source.liveOptions!("policy", "before")).toEqual({ deny: true });
+    const reads = read.mock.calls.length;
+    expect(reads).toBeGreaterThan(0);
+    for (let i = 0; i < 20; i++) {
+      clock += 1000;
+      expect(source.liveOptions!("policy", "before")).toEqual({ deny: true });
+    }
+    expect(read).toHaveBeenCalledTimes(reads);
+    expect(warnings).toHaveLength(1);
+    write(globalFile, config({ deny: false }, true));
+    expect(source.liveOptions!("policy", "before")).toEqual({ deny: false });
   });
 
   it.each(["class_path", "scope", "order", "hook", "guard"])("requires restart for a new %s while retaining the last valid options", async (change) => {
