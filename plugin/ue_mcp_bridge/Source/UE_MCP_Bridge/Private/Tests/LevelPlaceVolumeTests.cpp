@@ -15,6 +15,9 @@
 #include "GameFramework/Volume.h"
 #include "Misc/AutomationTest.h"
 #include "Model.h"
+#include "AI/NavigationSystemBase.h"
+#include "NavigationSystem.h"
+#include "NavMesh/NavMeshBoundsVolume.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "UObject/Package.h"
 
@@ -28,20 +31,24 @@ namespace LevelPlaceVolumeTests
 		FVector OriginalPivot = FVector::ZeroVector;
 		FMCPHandlerRegistry Registry;
 
-		explicit FFixture(FAutomationTestBase& InTest) : Test(InTest)
+		explicit FFixture(FAutomationTestBase& InTest, bool bNavigation = false) : Test(InTest)
 		{
 			if (!GEditor) return;
 			OriginalWorld = GEditor->GetEditorWorldContext().World();
 			OriginalPivot = GEditor->GetPivotLocation();
 			const UWorld::InitializationValues Initialization = UWorld::InitializationValues()
 				.InitializeScenes(false).AllowAudioPlayback(false).RequiresHitProxies(false)
-				.CreatePhysicsScene(false).CreateNavigation(false).CreateAISystem(false)
+				.CreatePhysicsScene(false).CreateNavigation(bNavigation).CreateAISystem(false)
 				.ShouldSimulatePhysics(false).EnableTraceCollision(false).SetTransactional(false)
 				.CreateFXSystem(false).CreateWorldPartition(false);
 			World = UWorld::CreateWorld(EWorldType::Editor, false,
 				MakeUniqueObjectName(GetTransientPackage(), UWorld::StaticClass(), TEXT("UEMCP_PlaceVolumeTest")),
 				GetTransientPackage(), true, ERHIFeatureLevel::Num, &Initialization);
 			if (World) GEditor->GetEditorWorldContext().SetCurrentWorld(World);
+			if (World && bNavigation)
+			{
+				FNavigationSystem::AddNavigationSystemToWorld(*World, FNavigationSystemRunMode::EditorMode);
+			}
 			FLevelHandlers::RegisterHandlers(Registry);
 		}
 
@@ -160,6 +167,33 @@ bool FMCPPlaceVolumeOrdinaryActorTest::RunTest(const FString& Parameters)
 	F.CheckTransform(Actor, Requested);
 	TestNull(TEXT("ordinary actor has no brush component"), Actor->FindComponentByClass<UBrushComponent>());
 	TestTrue(TEXT("static mesh shorthand still loads the mesh"), Actor->GetStaticMeshComponent()->GetStaticMesh() != nullptr);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPPlaceVolumeNavBoundsTest,
+	"UE.MCP.Level.PlaceVolume.NavBoundsFollowScale",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FMCPPlaceVolumeNavBoundsTest::RunTest(const FString& Parameters)
+{
+	LevelPlaceVolumeTests::FFixture F(*this, /*bNavigation=*/true);
+	if (!TestNotNull(TEXT("disposable editor world exists"), F.World)) return false;
+	UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(F.World);
+	if (!TestNotNull(TEXT("disposable world has a navigation system"), NavSys)) return false;
+	const FTransform Requested(FRotator::ZeroRotator, FVector(100.0, 200.0, 300.0), FVector(50.0, 50.0, 5.0));
+	ANavMeshBoundsVolume* Volume = Cast<ANavMeshBoundsVolume>(F.Place(TEXT("NavMeshBoundsVolume"), Requested));
+	if (!TestNotNull(TEXT("nav mesh bounds volume was placed"), Volume)) return false;
+	// Pending bounds requests are applied on the navigation system's tick.
+	NavSys->Tick(0.f);
+	const FNavigationBounds* Registered = nullptr;
+	for (const FNavigationBounds& Bounds : NavSys->GetNavigationBounds())
+	{
+		if (Bounds.UniqueID == Volume->GetUniqueID()) { Registered = &Bounds; break; }
+	}
+	if (!TestNotNull(TEXT("volume registered navigation bounds"), Registered)) return false;
+	TestTrue(TEXT("registered nav bounds are valid"), Registered->AreaBox.IsValid != 0);
+	TestTrue(TEXT("registered nav bounds use the scaled extent"), Registered->AreaBox.GetExtent().Equals(FVector(5000.0, 5000.0, 500.0), 1.0));
+	TestTrue(TEXT("registered nav bounds follow requested location"), Registered->AreaBox.GetCenter().Equals(Requested.GetLocation(), 1.0));
 	return true;
 }
 
