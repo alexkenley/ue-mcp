@@ -138,6 +138,7 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// mapping context, the live action value, and the audit.
 	Registry.RegisterHandler(TEXT("read_input_action"), &ReadInputAction);
 	Registry.RegisterHandler(TEXT("set_action_triggers"), &SetActionTriggers);
+	Registry.RegisterHandler(TEXT("set_player_mappable_settings"), &SetPlayerMappableSettings);
 	Registry.RegisterHandler(TEXT("apply_mapping_context"), &ApplyMappingContext);
 	Registry.RegisterHandler(TEXT("remove_mapping_context"), &RemoveMappingContext);
 	Registry.RegisterHandler(TEXT("get_action_value"), &GetActionValue);
