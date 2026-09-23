@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IBridge } from "../../src/bridge.js";
-import { bp, categoryTool, type ToolContext, type ToolDef } from "../../src/types.js";
+import { bp, categoryTool, injectEditorTarget, type ToolContext, type ToolDef } from "../../src/types.js";
 import { niagaraTool } from "../../src/tools/niagara.js";
 
 interface BridgeCall {
@@ -127,6 +127,48 @@ describe("niagara batch dispatch (#1081)", () => {
       stoppedAt: 0,
     });
     expect(bridge.calls).toEqual([]);
+  });
+
+  it("refuses an op that targets a different editor than the batch runs on", async () => {
+    const bridge = recordingBridge({ ok: true });
+    const tool = rebuilt();
+    injectEditorTarget(tool, ["A", "B"]);
+    const sessionA = { name: "A" } as ToolContext["session"];
+    const sessionB = { name: "B" } as ToolContext["session"];
+    const ctx = {
+      ...activeContext(bridge, tool),
+      session: sessionA,
+      sessions: {
+        resolve: (t: unknown) => {
+          if (t === "A") return sessionA;
+          if (t === "B") return sessionB;
+          throw new Error(`No editor session named '${String(t)}'`);
+        },
+      },
+    } as unknown as ToolContext;
+
+    const out = await tool.handler(ctx, {
+      action: "batch",
+      ops: [
+        { action: "get_info", params: { assetPath: "/Game/VFX/One", editor: "A" } },
+        { action: "get_info", params: { assetPath: "/Game/VFX/Two", editor: "B" } },
+        { action: "get_info", params: { assetPath: "/Game/VFX/Three" } },
+      ],
+    });
+
+    expect(out).toEqual({
+      results: [
+        { action: "get_info", result: { ok: true } },
+        {
+          action: "get_info",
+          error: "ops[1] targets editor 'B', but a batch runs on one editor ('A'). Put 'editor' on the batch call, or split the batch per editor.",
+        },
+      ],
+      stoppedAt: 1,
+    });
+    expect(bridge.calls).toEqual([
+      { method: "get_niagara_info", params: { assetPath: "/Game/VFX/One" }, timeoutMs: undefined },
+    ]);
   });
 
   it("reports a session with no tool surface per op instead of rejecting the batch", async () => {

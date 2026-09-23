@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { categoryTool, bp, type ToolDef } from "../types.js";
+import { categoryTool, bp, EDITOR_TARGET_PARAM, type ToolContext, type ToolDef } from "../types.js";
 import { Vec3, Rotator } from "../schemas.js";
 import { PAGINATION_SCHEMA, paged } from "../pagination.js";
 import { actions as epicActions, schema as epicSchema } from "./epic/niagara.generated.js";
@@ -66,6 +66,16 @@ function coerceModuleInputValue(value: unknown): string | undefined {
   }
 
   return scalar(value);
+}
+
+/** Whether a batch op's `editor` names the session the batch itself runs on. */
+function targetsSession(ctx: ToolContext, target: unknown): boolean {
+  if (!ctx.sessions || !ctx.session) return false;
+  try {
+    return ctx.sessions.resolve(target) === ctx.session;
+  } catch {
+    return false;
+  }
 }
 
 export const niagaraTool: ToolDef = categoryTool(
@@ -145,6 +155,17 @@ export const niagaraTool: ToolDef = categoryTool(
           const spec = dispatchTool.actions[action];
           if (!spec) { results.push({ action, error: `Unknown niagara action '${action}'` }); return { results, stoppedAt: i }; }
           if (action === "batch") { results.push({ action, error: "nested batch not allowed" }); return { results, stoppedAt: i }; }
+          // A batch runs on one editor. An op naming another would be stripped
+          // and silently run here, so refuse it unless it names this one.
+          const opTarget = dispatchTool.injectedEditorParam ? op.params?.[EDITOR_TARGET_PARAM] : undefined;
+          if (opTarget !== undefined && opTarget !== "" && !targetsSession(ctx, opTarget)) {
+            results.push({
+              action,
+              error: `ops[${i}] targets editor '${String(opTarget)}', but a batch runs on one editor`
+                + `${ctx.session ? ` ('${ctx.session.name}')` : ""}. Put 'editor' on the batch call, or split the batch per editor.`,
+            });
+            return { results, stoppedAt: i };
+          }
           try {
             const subParams = { ...(op.params ?? {}), action } as Record<string, unknown>;
             // The batch's own budget covers every op that names none of its own.
