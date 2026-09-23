@@ -117,19 +117,23 @@ bool FMCPNativeStructFPrefixTest::RunTest(const FString& Parameters)
 		MCPResolveScriptStruct(QualifiedFPrefixed) == TableRow);
 	TestNull(TEXT("a qualified miss does not fall back to another module"),
 		MCPResolveScriptStruct(TEXT("/Script/NoSuchModule1088.FTableRowBase")));
-	// Probe structs are transient and marked as garbage on every exit path.
+	// Probe structs are rooted so the GC run by delete_asset cannot free them
+	// mid-test, then unrooted and marked as garbage on every exit path.
 	const FString ProbeId = FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	TArray<UObject*> Probes;
 	ON_SCOPE_EXIT
 	{
 		for (UObject* Probe : Probes)
 		{
-			if (IsValid(Probe)) Probe->MarkAsGarbage();
+			if (!IsValid(Probe)) continue;
+			Probe->RemoveFromRoot();
+			Probe->MarkAsGarbage();
 		}
 	};
 	auto MakeProbe = [&Probes](UObject* Outer, const FString& Name) -> UScriptStruct*
 	{
 		UScriptStruct* Probe = NewObject<UScriptStruct>(Outer, FName(*Name), RF_Transient);
+		Probe->AddToRoot();
 		Probes.Add(Probe);
 		return Probe;
 	};
@@ -145,6 +149,7 @@ bool FMCPNativeStructFPrefixTest::RunTest(const FString& Parameters)
 	UPackage* OtherOuter = CreatePackage(*(TEXT("/Temp/UEMCPStructProbe_") + ProbeId));
 	if (!TestNotNull(TEXT("second probe outer is created"), OtherOuter)) return false;
 	OtherOuter->SetFlags(RF_Transient);
+	OtherOuter->AddToRoot();
 	Probes.Add(OtherOuter);
 	UScriptStruct* AmbiguousA = MakeProbe(GetTransientPackage(), AmbiguousName);
 	UScriptStruct* AmbiguousB = MakeProbe(OtherOuter, AmbiguousName);
@@ -273,6 +278,7 @@ bool FMCPNativeStructFPrefixTest::RunTest(const FString& Parameters)
 	const TSharedPtr<FJsonValue> CreatedAddedF = CreateTable(AddedFName);
 	TestFalse(TEXT("create_datatable does not add an F to the row struct name"), StructPrefixResponseSucceeded(CreatedAddedF));
 
+	AmbiguousB->RemoveFromRoot();
 	AmbiguousB->MarkAsGarbage();
 	TestTrue(TEXT("a garbage struct no longer counts toward ambiguity"),
 		MCPResolveScriptStruct(AmbiguousName) == AmbiguousA);
