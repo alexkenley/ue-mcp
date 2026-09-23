@@ -24,6 +24,7 @@
 #include "Misc/Guid.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "UObject/Package.h"
 
 namespace MCPNativeStructPrefixTests
@@ -116,11 +117,56 @@ bool FMCPNativeStructFPrefixTest::RunTest(const FString& Parameters)
 		MCPResolveScriptStruct(QualifiedFPrefixed) == TableRow);
 	TestNull(TEXT("a qualified miss does not fall back to another module"),
 		MCPResolveScriptStruct(TEXT("/Script/NoSuchModule1088.FTableRowBase")));
-	const FString LiteralName = TEXT("FPrefixProbe_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
-	UScriptStruct* Literal = NewObject<UScriptStruct>(GetTransientPackage(), FName(*LiteralName), RF_Transient);
-	NewObject<UScriptStruct>(GetTransientPackage(), FName(*LiteralName.RightChop(1)), RF_Transient);
+	// Probe structs are transient and marked as garbage on every exit path.
+	const FString ProbeId = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	TArray<UObject*> Probes;
+	ON_SCOPE_EXIT
+	{
+		for (UObject* Probe : Probes)
+		{
+			if (IsValid(Probe)) Probe->MarkAsGarbage();
+		}
+	};
+	auto MakeProbe = [&Probes](UObject* Outer, const FString& Name) -> UScriptStruct*
+	{
+		UScriptStruct* Probe = NewObject<UScriptStruct>(Outer, FName(*Name), RF_Transient);
+		Probes.Add(Probe);
+		return Probe;
+	};
+
+	const FString LiteralName = TEXT("FPrefixProbe_") + ProbeId;
+	UScriptStruct* Literal = MakeProbe(GetTransientPackage(), LiteralName);
+	MakeProbe(GetTransientPackage(), LiteralName.RightChop(1));
 	TestTrue(TEXT("an existing F-prefixed name wins over its stripped counterpart"),
 		MCPResolveScriptStruct(LiteralName) == Literal);
+
+	// One short name, two outers: the resolver must refuse to pick.
+	const FString AmbiguousName = TEXT("AmbiguousProbe_") + ProbeId;
+	UPackage* OtherOuter = CreatePackage(*(TEXT("/Temp/UEMCPStructProbe_") + ProbeId));
+	if (!TestNotNull(TEXT("second probe outer is created"), OtherOuter)) return false;
+	OtherOuter->SetFlags(RF_Transient);
+	Probes.Add(OtherOuter);
+	UScriptStruct* AmbiguousA = MakeProbe(GetTransientPackage(), AmbiguousName);
+	UScriptStruct* AmbiguousB = MakeProbe(OtherOuter, AmbiguousName);
+	{
+		FString Error;
+		TestNull(TEXT("an ambiguous short name does not resolve"), MCPResolveScriptStruct(AmbiguousName, &Error));
+		TestTrue(TEXT("the ambiguity error says so"), Error.Contains(TEXT("ambiguous")));
+		TestTrue(TEXT("and lists the first candidate"), Error.Contains(AmbiguousA->GetPathName()));
+		TestTrue(TEXT("and lists the second candidate"), Error.Contains(AmbiguousB->GetPathName()));
+
+		FString StrippedError;
+		TestNull(TEXT("an ambiguous F-stripped name does not resolve"),
+			MCPResolveScriptStruct(TEXT("F") + AmbiguousName, &StrippedError));
+		TestTrue(TEXT("and reports the ambiguity"), StrippedError.Contains(AmbiguousB->GetPathName()));
+	}
+
+	// Adding an F is reflect_struct's fallback only; create_datatable never had it.
+	const FString AddedFName = TEXT("AddedFProbe_") + ProbeId;
+	UScriptStruct* AddedF = MakeProbe(GetTransientPackage(), TEXT("F") + AddedFName);
+	TestNull(TEXT("an F is not added by default"), MCPResolveScriptStruct(AddedFName));
+	TestTrue(TEXT("an F is added when the caller opts in"),
+		MCPResolveScriptStruct(AddedFName, nullptr, /*bTryAddedF=*/true) == AddedF);
 
 	TestTrue(TEXT("Vector wins by exact name before any F is added"),
 		MCPResolveScriptStruct(TEXT("Vector")) == VectorStruct);
@@ -164,6 +210,11 @@ bool FMCPNativeStructFPrefixTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("and the error names the requested struct"),
 		StructPrefixResponseString(ReflectMiss, TEXT("error")).Contains(TEXT("FNoSuchNativeStruct1088")));
 
+	const TSharedPtr<FJsonValue> ReflectAmbiguous = Reflect(*AmbiguousName);
+	TestFalse(TEXT("reflect_struct refuses an ambiguous short name"), StructPrefixResponseSucceeded(ReflectAmbiguous));
+	TestTrue(TEXT("and returns the qualified candidates"),
+		StructPrefixResponseString(ReflectAmbiguous, TEXT("error")).Contains(AmbiguousB->GetPathName()));
+
 	const FScopedNativeStructPrefixMount Mount;
 	FMCPHandlerRegistry AssetRegistry;
 	FAssetHandlers::RegisterHandlers(AssetRegistry);
@@ -172,39 +223,59 @@ bool FMCPNativeStructFPrefixTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+	if (!TestTrue(TEXT("delete_asset is registered"), AssetRegistry.HasHandler(TEXT("delete_asset"))))
+	{
+		return false;
+	}
+
+	auto CreateTable = [&](const FString& RowName) -> TSharedPtr<FJsonValue>
+	{
+		TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("name"), FString::Printf(TEXT("DT_UEMCP_FPrefix_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+		Params->SetStringField(TEXT("rowStruct"), RowName);
+		Params->SetStringField(TEXT("packagePath"), Mount.RootPath.LeftChop(1));
+		Params->SetStringField(TEXT("onConflict"), TEXT("error"));
+		return AssetRegistry.ExecuteHandler(TEXT("create_datatable"), Params);
+	};
+
 	for (const FString& RowName : { FString(TEXT("FTableRowBase")), QualifiedFPrefixed })
 	{
-		const FString TableName = FString::Printf(TEXT("DT_UEMCP_FPrefix_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits));
-		FString CreatedPath;
-
+		const TSharedPtr<FJsonValue> Created = CreateTable(RowName);
+		if (!TestTrue(
+				FString::Printf(TEXT("create_datatable accepts %s (%s)"), *RowName, *StructPrefixResponseString(Created, TEXT("error"))),
+				StructPrefixResponseSucceeded(Created)))
 		{
-			TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
-			Params->SetStringField(TEXT("name"), TableName);
-			Params->SetStringField(TEXT("rowStruct"), RowName);
-			Params->SetStringField(TEXT("packagePath"), Mount.RootPath.LeftChop(1));
-			Params->SetStringField(TEXT("onConflict"), TEXT("error"));
-
-			const TSharedPtr<FJsonValue> Created = AssetRegistry.ExecuteHandler(TEXT("create_datatable"), Params);
-			if (!TestTrue(
-					FString::Printf(TEXT("create_datatable accepts FTableRowBase (%s)"), *StructPrefixResponseString(Created, TEXT("error"))),
-					StructPrefixResponseSucceeded(Created)))
-			{
-				return false;
-			}
-			TestEqual(TEXT("and stores the registered row struct name"),
-				StructPrefixResponseString(Created, TEXT("rowStruct")), FString(TEXT("TableRowBase")));
-			CreatedPath = StructPrefixResponseString(Created, TEXT("assetPath"));
-			if (CreatedPath.IsEmpty()) CreatedPath = StructPrefixResponseString(Created, TEXT("path"));
+			return false;
 		}
+		TestEqual(TEXT("and stores the registered row struct name"),
+			StructPrefixResponseString(Created, TEXT("rowStruct")), FString(TEXT("TableRowBase")));
 
-		if (!CreatedPath.IsEmpty() && AssetRegistry.HasHandler(TEXT("delete_asset")))
+		// The asset must be removed before the mount comes down.
+		const FString CreatedPath = StructPrefixResponseString(Created, TEXT("assetPath"));
+		if (!TestFalse(TEXT("create_datatable reports assetPath"), CreatedPath.IsEmpty())) return false;
+		TSharedPtr<FJsonObject> DeleteParams = MakeShared<FJsonObject>();
+		DeleteParams->SetStringField(TEXT("assetPath"), CreatedPath);
+		DeleteParams->SetBoolField(TEXT("force"), true);
+		const TSharedPtr<FJsonValue> Deleted = AssetRegistry.ExecuteHandler(TEXT("delete_asset"), DeleteParams);
+		if (!TestTrue(
+				FString::Printf(TEXT("created DataTable is deleted (%s)"), *StructPrefixResponseString(Deleted, TEXT("error"))),
+				StructPrefixResponseSucceeded(Deleted)))
 		{
-			TSharedPtr<FJsonObject> DeleteParams = MakeShared<FJsonObject>();
-			DeleteParams->SetStringField(TEXT("assetPath"), CreatedPath);
-			DeleteParams->SetBoolField(TEXT("force"), true);
-			TestTrue(TEXT("created DataTable is deleted"), StructPrefixResponseSucceeded(AssetRegistry.ExecuteHandler(TEXT("delete_asset"), DeleteParams)));
+			return false;
 		}
 	}
+
+	const TSharedPtr<FJsonValue> CreatedAmbiguous = CreateTable(AmbiguousName);
+	TestFalse(TEXT("create_datatable refuses an ambiguous row struct"), StructPrefixResponseSucceeded(CreatedAmbiguous));
+	TestTrue(TEXT("and returns the qualified candidates"),
+		StructPrefixResponseString(CreatedAmbiguous, TEXT("error")).Contains(AmbiguousA->GetPathName()));
+
+	const TSharedPtr<FJsonValue> CreatedAddedF = CreateTable(AddedFName);
+	TestFalse(TEXT("create_datatable does not add an F to the row struct name"), StructPrefixResponseSucceeded(CreatedAddedF));
+
+	AmbiguousB->MarkAsGarbage();
+	TestTrue(TEXT("a garbage struct no longer counts toward ambiguity"),
+		MCPResolveScriptStruct(AmbiguousName) == AmbiguousA);
 
 	return true;
 }
