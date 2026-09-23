@@ -89,6 +89,7 @@ public class UE_MCP_Bridge : ModuleRules
 	// Private/Tests/LevelWorldPartitionSettingsTests.cpp (#985): same reason.
 	// Private/Handlers/EditorHandlers_OpenEditors.cpp and
 	// Private/Tests/OpenAssetEditorTests.cpp (#1112): same reason.
+	// Private/Tests/BlueprintTransactionalNodeTests.cpp (#1086): same reason.
 	public UE_MCP_Bridge(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
@@ -279,3 +280,4 @@ public class UE_MCP_Bridge : ModuleRules
 // Private/Tests/BehaviorTreeAuthoringTests.cpp.
 // Live post-process AnimBP handler automation coverage added.
 // Private/Tests/AnimationSkeletonCreateTests.cpp.
+// Rescan trigger: Private/Tests/NativeStructFPrefixTests.cpp (#1088).

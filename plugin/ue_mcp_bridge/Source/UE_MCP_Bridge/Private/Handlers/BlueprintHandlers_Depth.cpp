@@ -175,7 +175,7 @@ static UK2Node_EditablePinBase* FindOutputOwner(UEdGraph* Graph, EGraphKind Kind
 	}
 	if (!bCreate) return nullptr;
 
-	UK2Node_FunctionResult* NewResult = NewObject<UK2Node_FunctionResult>(Graph);
+	UK2Node_FunctionResult* NewResult = NewObject<UK2Node_FunctionResult>(Graph, NAME_None, RF_Transactional);
 	Graph->Modify();
 	Graph->AddNode(NewResult, false, false);
 	NewResult->CreateNewGuid();
@@ -2278,7 +2278,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddCustomEvent(const TSharedPtr<FJson
 	}
 
 	// ── nothing above this line creates anything ──
-	UK2Node_CustomEvent* Event = NewObject<UK2Node_CustomEvent>(Graph);
+	UK2Node_CustomEvent* Event = NewObject<UK2Node_CustomEvent>(Graph, NAME_None, RF_Transactional);
 	Event->CustomFunctionName = FName(*EventName);
 	Event->bCallInEditor = bCallInEditor;
 	Event->bIsEditable = true;
