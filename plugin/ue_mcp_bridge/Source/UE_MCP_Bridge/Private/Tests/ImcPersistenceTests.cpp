@@ -328,11 +328,12 @@ bool FMCPImcPersistenceFailureTest::RunTest(const FString& Parameters)
 	const auto Failed = F.Run(TEXT("add_imc_mapping"), F.AddParams());
 	F.Field(Failed, TEXT("success"), false);
 	F.Field(Failed, TEXT("saved"), false);
-	F.Field(Failed, TEXT("persisted"), false);
-	F.Field(Failed, TEXT("packageDirty"), true);
 	FString Reason;
-	TestTrue(TEXT("save refusal names read-only file"), Failed->TryGetStringField(TEXT("persistError"), Reason) && Reason.Contains(TEXT("read-only")));
-	TestTrue(TEXT("unsaved mutation retains its rollback"), Failed->HasField(TEXT("rollback")));
+	TestTrue(TEXT("refusal names read-only file"), Failed->TryGetStringField(TEXT("error"), Reason) && Reason.Contains(TEXT("read-only")));
+	TestFalse(TEXT("refused call has nothing to roll back"), Failed->HasField(TEXT("rollback")));
+	TestEqual(TEXT("refused add left the context unchanged in memory"), F.Context->GetMappings().Num(), 0);
+	TestFalse(TEXT("refused add left the package clean"), F.Context->GetOutermost()->IsDirty());
+
 	Files.SetReadOnly(*F.ContextFile, false);
 	if (!F.Reload(0)) return false;
 	TestEqual(TEXT("failed save did not alter the disk baseline"), F.Context->GetMappings().Num(), 0);

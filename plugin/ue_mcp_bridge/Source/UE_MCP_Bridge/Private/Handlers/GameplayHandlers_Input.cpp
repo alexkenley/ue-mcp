@@ -53,6 +53,17 @@
 
 namespace ImcEdit_Internal
 {
+	// With save=true, refuse a package that cannot be written before anything
+	// changes, so a failed save never leaves a dirty edit behind (#932).
+	static TSharedPtr<FJsonValue> RefuseUnwritable(
+		UInputMappingContext* IMC,
+		const TSharedPtr<FJsonObject>& Params,
+		const TCHAR* Operation)
+	{
+		if (!OptionalBool(Params, TEXT("save"), true)) return nullptr;
+		return MCPAssetWriteBlockedError(IMC, IMC->GetPathName(), Operation);
+	}
+
 	// #1097/#1109: a successful in-memory edit does not establish persistence.
 	// Use the shared checked save, which refuses protected/unmounted/read-only
 	// packages before SavePackage, rather than restoring the old unchecked save.
@@ -310,6 +321,8 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddImcMapping(const TSharedPtr<FJsonOb
 		}
 	}
 
+	if (auto Blocked = ImcEdit_Internal::RefuseUnwritable(IMC, Params, TEXT("add a mapping to this Input Mapping Context"))) return Blocked;
+
 	// Create the mapping and add it
 	FEnhancedActionKeyMapping NewMapping;
 	NewMapping.Action = InputAction;
@@ -368,6 +381,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetMappingModifiers(const TSharedPtr<F
 	}
 
 	FEnhancedActionKeyMapping& Mapping = Mappings[MappingIndex];
+
+	// The lists are rebuilt even when the result compares equal, so the check
+	// cannot wait for the unchanged verdict.
+	if (auto Blocked = ImcEdit_Internal::RefuseUnwritable(IMC, Params, TEXT("set modifiers or triggers on this Input Mapping Context"))) return Blocked;
 
 	// Both instanced lists as one comparable string: every object's class path
 	// followed by every one of its property values, exported. Class paths alone
@@ -851,6 +868,8 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveImcMapping(const TSharedPtr<FJso
 		return MCPError(ResolveError);
 	}
 
+	if (auto Blocked = ImcEdit_Internal::RefuseUnwritable(IMC, Params, TEXT("remove a mapping from this Input Mapping Context"))) return Blocked;
+
 	TArray<FEnhancedActionKeyMapping>& Mappings = const_cast<TArray<FEnhancedActionKeyMapping>&>(IMC->GetMappings());
 	const FEnhancedActionKeyMapping Removed = Mappings[Idx];
 	// Read before the removal: what add_imc_mapping cannot put back.
@@ -933,6 +952,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetImcMappingKey(const TSharedPtr<FJso
 	TArray<FEnhancedActionKeyMapping>& Mappings = const_cast<TArray<FEnhancedActionKeyMapping>&>(IMC->GetMappings());
 	const FKey PrevKey = Mappings[Idx].Key;
 	const bool bChanged = PrevKey != NewKey;
+	if (bChanged)
+	{
+		if (auto Blocked = ImcEdit_Internal::RefuseUnwritable(IMC, Params, TEXT("rebind this Input Mapping Context mapping"))) return Blocked;
+	}
 	Mappings[Idx].Key = NewKey;
 
 	auto Result = MCPSuccess();
@@ -997,6 +1020,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetImcMappingAction(const TSharedPtr<F
 	TArray<FEnhancedActionKeyMapping>& Mappings = const_cast<TArray<FEnhancedActionKeyMapping>&>(IMC->GetMappings());
 	const UInputAction* PrevAction = Mappings[Idx].Action;
 	const bool bChanged = PrevAction != NewAction;
+	if (bChanged)
+	{
+		if (auto Blocked = ImcEdit_Internal::RefuseUnwritable(IMC, Params, TEXT("retarget this Input Mapping Context mapping"))) return Blocked;
+	}
 	Mappings[Idx].Action = NewAction;
 
 	auto Result = MCPSuccess();
