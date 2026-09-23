@@ -53,6 +53,14 @@
 
 namespace ImcEdit_Internal
 {
+	// Packages holding an IMC edit that Unreal refused to mark dirty (PIE,
+	// loading, undo). A no-op call with save=true still owes them a write.
+	static TSet<FName>& UnmarkedEdits()
+	{
+		static TSet<FName> Packages;
+		return Packages;
+	}
+
 	// With save=true, refuse a package that cannot be written before anything
 	// changes, so a failed save never leaves a dirty edit behind (#932).
 	static TSharedPtr<FJsonValue> RefuseUnwritable(
@@ -65,8 +73,6 @@ namespace ImcEdit_Internal
 	}
 
 	// #1097/#1109: a successful in-memory edit does not establish persistence.
-	// Use the shared checked save, which refuses protected/unmounted/read-only
-	// packages before SavePackage, rather than restoring the old unchecked save.
 	static void FinishEdit(
 		UInputMappingContext* IMC,
 		const TSharedPtr<FJsonObject>& Params,
@@ -74,7 +80,11 @@ namespace ImcEdit_Internal
 		bool bChanged)
 	{
 		UPackage* Package = IMC->GetOutermost();
-		if (bChanged && Package) Package->MarkPackageDirty();
+		if (bChanged && Package)
+		{
+			Package->MarkPackageDirty();
+			if (!Package->IsDirty()) UnmarkedEdits().Add(Package->GetFName());
+		}
 
 		const bool bSave = OptionalBool(Params, TEXT("save"), true);
 		// The inverse must use the same persistence policy. Saving a deferred
@@ -88,13 +98,22 @@ namespace ImcEdit_Internal
 		}
 
 		bool bSaved = false;
+		bool bPersisted = false;
 		FString Reason;
 		if (bSave)
 		{
-			// Save even on an idempotent replay: an earlier save=false call or a
-			// suppressed dirty flag can leave the requested value only in memory.
-			bSaved = SaveAssetPackageChecked(IMC, Reason);
-			MCPNoteSaveOutcome(Result, IMC->GetPathName(), bSaved, Reason);
+			// A no-op writes only when an earlier edit is still pending: a dirty
+			// package, or one whose dirty flag was suppressed. A clean one already
+			// matches disk.
+			const bool bPending = bChanged
+				|| (Package && (Package->IsDirty() || UnmarkedEdits().Contains(Package->GetFName())));
+			if (bPending)
+			{
+				bSaved = SaveAssetPackageChecked(IMC, Reason);
+				MCPNoteSaveOutcome(Result, IMC->GetPathName(), bSaved, Reason);
+				if (bSaved && Package) UnmarkedEdits().Remove(Package->GetFName());
+			}
+			bPersisted = bSaved || !bPending;
 		}
 		else
 		{
@@ -111,10 +130,10 @@ namespace ImcEdit_Internal
 		}
 
 		Result->SetBoolField(TEXT("saved"), bSaved);
-		Result->SetBoolField(TEXT("persisted"), bSaved);
+		Result->SetBoolField(TEXT("persisted"), bPersisted);
 		Result->SetBoolField(TEXT("packageDirty"), Package && Package->IsDirty());
 		if (Package) Result->SetStringField(TEXT("packageName"), Package->GetName());
-		if (!bSaved) Result->SetStringField(TEXT("persistError"), Reason);
+		if (!bPersisted) Result->SetStringField(TEXT("persistError"), Reason);
 	}
 }
 

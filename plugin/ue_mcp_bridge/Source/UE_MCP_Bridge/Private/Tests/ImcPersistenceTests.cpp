@@ -334,6 +334,15 @@ bool FMCPImcPersistenceFailureTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("refused add left the context unchanged in memory"), F.Context->GetMappings().Num(), 0);
 	TestFalse(TEXT("refused add left the package clean"), F.Context->GetOutermost()->IsDirty());
 
+	// A no-op on a clean package has nothing to write, so read-only is no obstacle.
+	auto Absent = F.AddParams();
+	Absent->SetBoolField(TEXT("save"), true);
+	const auto Noop = F.Run(TEXT("remove_imc_mapping"), Absent);
+	F.Field(Noop, TEXT("alreadyDeleted"), true);
+	F.Field(Noop, TEXT("success"), true);
+	F.Field(Noop, TEXT("saved"), false);
+	F.Field(Noop, TEXT("persisted"), true);
+	F.Field(Noop, TEXT("packageDirty"), false);
 	Files.SetReadOnly(*F.ContextFile, false);
 	if (!F.Reload(0)) return false;
 	TestEqual(TEXT("failed save did not alter the disk baseline"), F.Context->GetMappings().Num(), 0);
