@@ -141,6 +141,8 @@ export const niagaraTool: ToolDef = categoryTool(
           if (action === "batch") { results.push({ action, error: "nested batch not allowed" }); return { results, stoppedAt: i }; }
           try {
             const subParams = { ...(op.params ?? {}), action } as Record<string, unknown>;
+            // The batch's own budget covers every op that names none of its own.
+            if (subParams.timeoutMs === undefined && ctx.callTimeoutMs !== undefined) subParams.timeoutMs = ctx.callTimeoutMs;
             const result = await dispatchTool.handler(ctx, subParams);
             results.push({ action, result });
           } catch (e) {

@@ -64,6 +64,25 @@ describe("niagara batch dispatch (#1081)", () => {
     expect(direct).toMatchObject({ kept: 1, pathsRepaired: expect.any(Object) });
   });
 
+  it("hands the batch's timeoutMs to every bridge op that names none of its own", async () => {
+    const tool = rebuilt();
+    const bridge = recordingBridge();
+
+    await tool.handler(activeContext(bridge, tool), {
+      action: "batch",
+      timeoutMs: 120_000,
+      ops: [
+        { action: "compile", params: { systemPath: "/Game/VFX/NS_Test" } },
+        { action: "get_info", params: { assetPath: "/Game/VFX/NS_Test", timeoutMs: 30_000 } },
+      ],
+    });
+
+    expect(bridge.calls.map((c) => [c.method, c.timeoutMs])).toEqual([
+      ["compile_niagara_system", 120_000],
+      ["get_niagara_info", 30_000],
+    ]);
+  });
+
   it("dispatches actions injected into the active session graph", async () => {
     const bridge = recordingBridge({ session: true });
     const tool = rebuilt({
