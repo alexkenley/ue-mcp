@@ -41,6 +41,8 @@ npm run build          # UE C++ plugin build (requires editor closed)
 
 `npx tsc` emits the TypeScript server into `dist/`. `npm run build` is the C++ plugin build that runs Unreal's build tool against the test project and requires the editor to be closed first.
 
+For mesh edge connectivity, use `FMeshDescription::GetEdgeConnectedTriangleIDs`, as UV island inspection does. It returns an array view without copying triangle IDs; `GetEdgeConnectedTriangles` is deprecated.
+
 The build script only ever builds the `ue_mcpEditor` target against the bundled `tests/ue_mcp/ue_mcp.uproject`, and it refuses to start if that resolves anywhere else. It also passes `-NoEngineChanges`, so Unreal itself aborts the build and prints the offending file list if the build would overwrite a file that already exists under the engine tree. That is what keeps a test build from invalidating the outputs of a shared source engine you use for other work.
 
 Engine selection order is `UE_MCP_TEST_ENGINE_ROOT`, then `UE_BUILD_TOOL_PATH`, then the default install locations. A pinned root that has no build tool is an error rather than a silent fallback to an engine you did not ask for.
