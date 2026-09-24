@@ -35,7 +35,7 @@ The interactive setup will:
 4. Enable required UE plugins (Niagara, PCG, GAS, etc.)
 5. Detect and configure your MCP client (Claude Code, Claude Desktop, Cursor, Codex)
 
-Restart the editor once after setup to load the bridge plugin. To update later: `npx ue-mcp update`
+Restart the editor once after setup to load the bridge plugin. To update later, run `npx ue-mcp update` from the project directory. It updates the npm package, redeploys the C++ plugin and rebuilds it.
 
 Then talk to your AI in plain English:
 
