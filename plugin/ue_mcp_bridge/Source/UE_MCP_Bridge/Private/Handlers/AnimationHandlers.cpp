@@ -4,6 +4,7 @@
 #include "HandlerPagination.h"
 #include "HandlerAssetCreate.h"
 #include "HandlerJsonProperty.h"
+#include "HandlerAnimNotify.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
@@ -855,10 +856,20 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimMontage(const TSharedPtr<FJso
 		if (NotifyEvent.Notify)
 		{
 			NotifyObj->SetStringField(TEXT("class"), NotifyEvent.Notify->GetClass()->GetName());
+			NotifyObj->SetStringField(TEXT("objectPath"), NotifyEvent.Notify->GetPathName());
+			NotifyObj->SetObjectField(TEXT("properties"), MCPAnimNotify::EditableProperties(NotifyEvent.Notify));
+		}
+		// objectPath is the placed instance, editable in place with editor(set_property).
+		if (NotifyEvent.NotifyStateClass)
+		{
+			NotifyObj->SetStringField(TEXT("notifyStateClass"), NotifyEvent.NotifyStateClass->GetClass()->GetName());
+			NotifyObj->SetStringField(TEXT("objectPath"), NotifyEvent.NotifyStateClass->GetPathName());
+			NotifyObj->SetObjectField(TEXT("properties"), MCPAnimNotify::EditableProperties(NotifyEvent.NotifyStateClass));
 		}
 		NotifiesArray.Add(MakeShared<FJsonValueObject>(NotifyObj));
 	}
 	Result->SetArrayField(TEXT("notifies"), NotifiesArray);
+	Result->SetArrayField(TEXT("notifyStates"), MCPAnimNotify::ListNotifyStates(Montage));
 
 	// Slot anim tracks
 	TArray<TSharedPtr<FJsonValue>> SlotTracksArray;

@@ -47,6 +47,7 @@
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
 #include "HandlerJsonProperty.h"
+#include "HandlerAnimNotify.h"
 
 #include "Animation/AnimBlueprint.h"
 #include "Animation/AnimMontage.h"
@@ -894,26 +895,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveAnimCurve(const TSharedPtr<FJso
 // effects had no route through the bridge at all.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Every notify STATE on the asset, reported the way add_notify_state takes them. */
-static TArray<TSharedPtr<FJsonValue>> MCPAnimDepthListNotifyStates(UAnimSequenceBase* Asset)
-{
-	TArray<TSharedPtr<FJsonValue>> Out;
-	if (!Asset) return Out;
-	for (const FAnimNotifyEvent& Event : Asset->Notifies)
-	{
-		if (!Event.NotifyStateClass) continue;
-		TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-		O->SetStringField(TEXT("notifyName"), Event.NotifyName.ToString());
-		O->SetStringField(TEXT("notifyStateClass"), Event.NotifyStateClass->GetClass()->GetName());
-		O->SetStringField(TEXT("objectPath"), Event.NotifyStateClass->GetPathName());
-		O->SetNumberField(TEXT("triggerTime"), Event.GetTriggerTime());
-		O->SetNumberField(TEXT("duration"), Event.GetDuration());
-		O->SetNumberField(TEXT("endTime"), Event.GetEndTriggerTime());
-		Out.Add(MakeShared<FJsonValueObject>(O));
-	}
-	return Out;
-}
-
 TSharedPtr<FJsonValue> FAnimationHandlers::AddNotifyState(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
@@ -995,7 +976,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddNotifyState(const TSharedPtr<FJson
 		Existed->SetStringField(TEXT("notifyStateClass"), StateClass->GetName());
 		Existed->SetNumberField(TEXT("triggerTime"), ClampedStart);
 		Existed->SetNumberField(TEXT("duration"), ClampedDuration);
-		Existed->SetArrayField(TEXT("notifyStates"), MCPAnimDepthListNotifyStates(AnimAsset));
+		Existed->SetArrayField(TEXT("notifyStates"), MCPAnimNotify::ListNotifyStates(AnimAsset));
 		TSharedPtr<FJsonObject> ExistedPayload = MakeShared<FJsonObject>();
 		ExistedPayload->SetStringField(TEXT("assetPath"), AssetPath);
 		ExistedPayload->SetStringField(TEXT("notifyName"), NotifyName);
@@ -1079,7 +1060,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddNotifyState(const TSharedPtr<FJson
 	Result->SetNumberField(TEXT("duration"), ClampedDuration);
 	Result->SetNumberField(TEXT("endTime"), ClampedStart + ClampedDuration);
 	Result->SetBoolField(TEXT("branchingPoint"), bBranchingPoint);
-	Result->SetArrayField(TEXT("notifyStates"), MCPAnimDepthListNotifyStates(AnimAsset));
+	Result->SetArrayField(TEXT("notifyStates"), MCPAnimNotify::ListNotifyStates(AnimAsset));
 	Result->SetStringField(TEXT("note"),
 		TEXT("Further fields on the spawned state object are plain UPROPERTYs: write them with editor(set_property) at the returned objectPath."));
 
@@ -1158,7 +1139,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveNotifyState(const TSharedPtr<FJ
 		Noop->SetStringField(TEXT("assetPath"), AssetPath);
 		Noop->SetStringField(TEXT("notifyName"), NotifyName);
 		Noop->SetStringField(TEXT("notifyStateClass"), StateClassName);
-		Noop->SetArrayField(TEXT("notifyStates"), MCPAnimDepthListNotifyStates(AnimAsset));
+		Noop->SetArrayField(TEXT("notifyStates"), MCPAnimNotify::ListNotifyStates(AnimAsset));
 		Noop->SetStringField(TEXT("note"), TEXT("No notify state matched; nothing was removed. Point notifies are removed with animation(remove_notify)."));
 		return MCPResult(Noop);
 	}
@@ -1175,7 +1156,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveNotifyState(const TSharedPtr<FJ
 	Result->SetStringField(TEXT("assetPath"), AssetPath);
 	Result->SetArrayField(TEXT("removed"), Removed);
 	Result->SetNumberField(TEXT("removedCount"), Removed.Num());
-	Result->SetArrayField(TEXT("notifyStates"), MCPAnimDepthListNotifyStates(AnimAsset));
+	Result->SetArrayField(TEXT("notifyStates"), MCPAnimNotify::ListNotifyStates(AnimAsset));
 
 	// The inverse restores the first one removed, with default property values.
 	const TSharedPtr<FJsonObject> First = Removed[0]->AsObject();

@@ -360,7 +360,7 @@ export const animationTool: ToolDef = categoryTool(
   "Animation assets, skeletons, montages, blendspaces, anim blueprints, physics assets.",
   {
     read_anim_blueprint:  bp("read", "Read AnimBP structure. Params: assetPath", "read_anim_blueprint"),
-    read_montage:         bp("read", "Read montage. Params: assetPath", "read_anim_montage", (p) => ({ assetPath: p.assetPath })),
+    read_montage:         bp("read", "Read montage: sections, slot tracks and notifies. Each notify and notify state carries objectPath (the placed instance) and properties (its editable reflected properties as export text), so an existing one can be edited in place with editor(set_property, objectPath, propertyName, value). notifyStates lists the windowed notifies the way add_notify_state reports them. Params: assetPath", "read_anim_montage", (p) => ({ assetPath: p.assetPath })),
     read_sequence:        bp("read", "Read anim sequence. Params: assetPath", "read_anim_sequence", (p) => ({ assetPath: p.assetPath })),
     scan_animation_tracks: bp("read", "Scan AnimSequence bone-track counts. Params: directory?, recursive?, assetPaths?, skeletonPath?, targetTrackCount?, includeTrackNames?", "scan_animation_tracks"),
     read_blendspace:      bp("read", "Read blendspace. Params: assetPath", "read_blendspace", (p) => ({ assetPath: p.assetPath })),
