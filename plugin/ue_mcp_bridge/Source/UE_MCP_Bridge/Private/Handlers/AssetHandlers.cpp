@@ -2648,6 +2648,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAsset(const TSharedPtr<FJsonObject>& 
 		Result->SetBoolField(TEXT("wasDirty"), bWasDirty);
 
 		bool bSuccess = false;
+		FMCPSaveDiagnostics SaveDiagnostics;
 		if (bForce)
 		{
 			UObject* Asset = LoadAssetByPath<UObject>(AssetPath);
@@ -2679,6 +2680,14 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAsset(const TSharedPtr<FJsonObject>& 
 			}
 		}
 		Result->SetBoolField(TEXT("success"), bSuccess);
+		if (!bSuccess)
+		{
+			// The engine's own sentence, and for an illegal reference the object
+			// and property that hold it (#1120).
+			MCPAttachSaveDiagnostics(Result, SaveDiagnostics);
+			const FString EngineReason = SaveDiagnostics.GetReason();
+			if (!EngineReason.IsEmpty()) Result->SetStringField(TEXT("error"), EngineReason);
+		}
 
 		// A clean package had nothing to flush. Without force the save was a
 		// no-op and says so; with force the file was rewritten anyway, which is
@@ -2779,6 +2788,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAllDirty(const TSharedPtr<FJsonObject
 		if (Package && Package->IsDirty()) TargetNames.AddUnique(Package->GetName());
 	}
 
+	FMCPSaveDiagnostics SaveDiagnostics;
 	const bool bOk = UEditorLoadingAndSavingUtils::SaveDirtyPackages(bSaveMapPackages, bSaveContentPackages);
 
 	TArray<TSharedPtr<FJsonValue>> Written;
@@ -2808,6 +2818,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAllDirty(const TSharedPtr<FJsonObject
 	if (StillDirty.Num() > 0)
 	{
 		Result->SetStringField(TEXT("note"), TEXT("Some packages are still dirty after the save. Retry those with asset(save, path=..., force=true)."));
+		MCPAttachSaveDiagnostics(Result, SaveDiagnostics);
 	}
 	Result->SetBoolField(TEXT("rollbackPossible"), false);
 	Result->SetStringField(TEXT("rollbackNote"),
