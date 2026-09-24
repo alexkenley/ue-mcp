@@ -77,7 +77,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadControlRigGraph(const TSharedPtr<
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UBlueprint* Blueprint = Cast<UBlueprint>(LoadedAsset);
 	if (!Blueprint)
 	{

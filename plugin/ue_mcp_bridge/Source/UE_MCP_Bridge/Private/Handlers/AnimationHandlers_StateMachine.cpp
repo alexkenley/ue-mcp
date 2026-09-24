@@ -306,7 +306,7 @@ static bool AddPoseSearchAnimationAsset(UPoseSearchDatabase* Database, UObject* 
 
 static UAnimBlueprint* LoadAnimBP(const FString& Path)
 {
-	return LoadObject<UAnimBlueprint>(nullptr, *Path);
+	return LoadAssetByPath<UAnimBlueprint>(Path);
 }
 
 
@@ -788,7 +788,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetStateAnimation(const TSharedPtr<FJ
 	}
 
 	// Load the animation asset
-	UAnimationAsset* AnimAsset = LoadObject<UAnimationAsset>(nullptr, *AnimAssetPath);
+	UAnimationAsset* AnimAsset = LoadAssetByPath<UAnimationAsset>(AnimAssetPath);
 	if (!AnimAsset)
 	{
 		return MCPError(FString::Printf(TEXT("Animation asset not found: %s"), *AnimAssetPath));
@@ -1508,7 +1508,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateIKRig(const TSharedPtr<FJsonObj
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
 	// Load the skeletal mesh to get the skeleton
-	USkeletalMesh* SkelMesh = LoadObject<USkeletalMesh>(nullptr, *SkeletalMeshPath);
+	USkeletalMesh* SkelMesh = LoadAssetByPath<USkeletalMesh>(SkeletalMeshPath);
 	if (!SkelMesh)
 	{
 		return MCPError(FString::Printf(TEXT("Failed to load SkeletalMesh at '%s'"), *SkeletalMeshPath));
@@ -1634,7 +1634,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadIKRig(const TSharedPtr<FJsonObjec
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UIKRigDefinition* IKRig = Cast<UIKRigDefinition>(LoadedAsset);
 	if (!IKRig)
 	{
@@ -1847,10 +1847,10 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateIKRetargeter(const TSharedPtr<F
 
 	UIKRigDefinition* SourceRig = SourceRigPath.IsEmpty()
 		? nullptr
-		: LoadObject<UIKRigDefinition>(nullptr, *SourceRigPath);
+		: LoadAssetByPath<UIKRigDefinition>(SourceRigPath);
 	UIKRigDefinition* TargetRig = TargetRigPath.IsEmpty()
 		? nullptr
-		: LoadObject<UIKRigDefinition>(nullptr, *TargetRigPath);
+		: LoadAssetByPath<UIKRigDefinition>(TargetRigPath);
 	if (!SourceRigPath.IsEmpty() && !SourceRig)
 	{
 		UEditorAssetLibrary::DeleteAsset(NewAsset->GetPathName());
@@ -1907,7 +1907,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateIKRetargeter(const TSharedPtr<F
 	auto SetRigProperty = [&](const FString& PropName, const FString& Path) -> FString
 	{
 		if (Path.IsEmpty()) return TEXT("");
-		UObject* Rig = LoadObject<UObject>(nullptr, *Path);
+		UObject* Rig = MCPLoadAssetObject(Path);
 		if (!Rig) return FString::Printf(TEXT("IKRig not found: %s"), *Path);
 		FProperty* Prop = NewAsset->GetClass()->FindPropertyByName(FName(*PropName));
 		if (!Prop) return FString::Printf(TEXT("Property not found: %s"), *PropName);
@@ -1948,7 +1948,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateIKRetargeter(const TSharedPtr<F
 #endif
 				if (!SourceRigPath.IsEmpty())
 				{
-					if (UIKRigDefinition* SrcRig = Cast<UIKRigDefinition>(LoadObject<UObject>(nullptr, *SourceRigPath)))
+					if (UIKRigDefinition* SrcRig = Cast<UIKRigDefinition>(MCPLoadAssetObject(SourceRigPath)))
 					{
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
 						Controller->AssignIKRigToAllOps(ERetargetSourceOrTarget::Source, SrcRig);
@@ -1959,7 +1959,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateIKRetargeter(const TSharedPtr<F
 				}
 				if (!TargetRigPath.IsEmpty())
 				{
-					if (UIKRigDefinition* TgtRig = Cast<UIKRigDefinition>(LoadObject<UObject>(nullptr, *TargetRigPath)))
+					if (UIKRigDefinition* TgtRig = Cast<UIKRigDefinition>(MCPLoadAssetObject(TargetRigPath)))
 					{
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
 						Controller->AssignIKRigToAllOps(ERetargetSourceOrTarget::Target, TgtRig);
@@ -2020,7 +2020,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadIKRetargeter(const TSharedPtr<FJs
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
-	UIKRetargeter* Retargeter = Cast<UIKRetargeter>(LoadObject<UObject>(nullptr, *AssetPath));
+	UIKRetargeter* Retargeter = Cast<UIKRetargeter>(MCPLoadAssetObject(AssetPath));
 	if (!Retargeter)
 	{
 		return MCPError(FString::Printf(TEXT("IKRetargeter not found: %s"), *AssetPath));
@@ -2193,13 +2193,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreatePoseSearchDatabase(const TShare
 	bool bSchemaCreated = false;
 	if (!SchemaPath.IsEmpty())
 	{
-		Schema = Cast<UPoseSearchSchema>(UEditorAssetLibrary::LoadAsset(SchemaPath));
+		Schema = Cast<UPoseSearchSchema>(MCPLoadAssetObject(SchemaPath));
 		if (!Schema) return MCPError(FString::Printf(TEXT("Schema not found: %s"), *SchemaPath));
 	}
 	else if (!SkeletonPath.IsEmpty())
 	{
 		ResolvedSchemaPath = PackagePath + TEXT("/") + Name + TEXT("_Schema");
-		Schema = Cast<UPoseSearchSchema>(UEditorAssetLibrary::LoadAsset(ResolvedSchemaPath));
+		Schema = Cast<UPoseSearchSchema>(MCPLoadAssetObject(ResolvedSchemaPath));
 		if (!Schema)
 		{
 			// Same authoring routine animation(create_pose_search_schema) runs,
@@ -2211,7 +2211,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreatePoseSearchDatabase(const TShare
 			SchemaParams->SetStringField(TEXT("skeletonPath"), SkeletonPath);
 			SchemaParams->SetStringField(TEXT("onConflict"), TEXT("skip"));
 			TSharedPtr<FJsonValue> SchemaResult = CreatePoseSearchSchema(SchemaParams);
-			Schema = Cast<UPoseSearchSchema>(UEditorAssetLibrary::LoadAsset(ResolvedSchemaPath));
+			Schema = Cast<UPoseSearchSchema>(MCPLoadAssetObject(ResolvedSchemaPath));
 			if (!Schema) return SchemaResult;
 			bSchemaCreated = true;
 		}
@@ -2267,10 +2267,10 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchSchema(const TSharedPtr<
 	FString SchemaPath;
 	if (auto Err = RequireString(Params, TEXT("schemaPath"), SchemaPath)) return Err;
 
-	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(UEditorAssetLibrary::LoadAsset(AssetPath));
+	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(MCPLoadAssetObject(AssetPath));
 	if (!Database) return MCPError(FString::Printf(TEXT("PoseSearchDatabase not found: %s"), *AssetPath));
 
-	UPoseSearchSchema* Schema = Cast<UPoseSearchSchema>(UEditorAssetLibrary::LoadAsset(SchemaPath));
+	UPoseSearchSchema* Schema = Cast<UPoseSearchSchema>(MCPLoadAssetObject(SchemaPath));
 	if (!Schema) return MCPError(FString::Printf(TEXT("Schema not found: %s"), *SchemaPath));
 	// #833: assigning a schema that cannot index converts a database that was
 	// merely empty into one the editor reports as invalid.
@@ -2310,10 +2310,10 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSequence(const TSharedPt
 	FString SequencePath;
 	if (auto Err = RequireString(Params, TEXT("sequencePath"), SequencePath)) return Err;
 
-	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(UEditorAssetLibrary::LoadAsset(AssetPath));
+	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(MCPLoadAssetObject(AssetPath));
 	if (!Database) return MCPError(FString::Printf(TEXT("PoseSearchDatabase not found: %s"), *AssetPath));
 
-	UObject* AnimAsset = UEditorAssetLibrary::LoadAsset(SequencePath);
+	UObject* AnimAsset = MCPLoadAssetObject(SequencePath);
 	if (!AnimAsset) return MCPError(FString::Printf(TEXT("Animation asset not found: %s"), *SequencePath));
 
 	// PoseSearch accepts AnimSequence, AnimComposite, AnimMontage, BlendSpace, MultiAnimAsset.
@@ -2386,7 +2386,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchClips(const TSharedPtr<F
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
 
-	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(UEditorAssetLibrary::LoadAsset(AssetPath));
+	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(MCPLoadAssetObject(AssetPath));
 	if (!Database) return MCPError(FString::Printf(TEXT("PoseSearchDatabase not found: %s"), *AssetPath));
 
 	const TArray<TSharedPtr<FJsonValue>>* Clips = nullptr;
@@ -2433,7 +2433,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchClips(const TSharedPtr<F
 			return MCPError(TEXT("Each clip must be an object or an animation asset path string"));
 		}
 
-		UObject* AnimAsset = UEditorAssetLibrary::LoadAsset(ClipPath);
+		UObject* AnimAsset = MCPLoadAssetObject(ClipPath);
 		if (!AnimAsset) return MCPError(FString::Printf(TEXT("Animation asset not found: %s"), *ClipPath));
 		if (!AnimAsset->IsA<UAnimSequenceBase>() && !AnimAsset->IsA<UBlendSpace>())
 		{
@@ -2506,7 +2506,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BuildPoseSearchIndex(const TSharedPtr
 	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
 	const bool bWait = OptionalBool(Params, TEXT("wait"), true);
 
-	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(UEditorAssetLibrary::LoadAsset(AssetPath));
+	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(MCPLoadAssetObject(AssetPath));
 	if (!Database) return MCPError(FString::Printf(TEXT("PoseSearchDatabase not found: %s"), *AssetPath));
 	if (!Database->Schema) return MCPError(TEXT("Database has no Schema set - call set_pose_search_schema first"));
 	if (GetPoseSearchAnimationAssetCount(Database) == 0) return MCPError(TEXT("Database has no animation assets - call add_pose_search_sequence first"));
@@ -2550,7 +2550,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadPoseSearchDatabase(const TSharedP
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
 
-	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(UEditorAssetLibrary::LoadAsset(AssetPath));
+	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(MCPLoadAssetObject(AssetPath));
 	if (!Database) return MCPError(FString::Printf(TEXT("PoseSearchDatabase not found: %s"), *AssetPath));
 
 	TSharedPtr<FJsonObject> Res = MCPSuccess();
@@ -2639,9 +2639,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetIKRigMesh(const TSharedPtr<FJsonOb
 	FString MeshPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("meshPath"), TEXT("skeletalMesh"), MeshPath)) return Err;
 
-	UIKRigDefinition* IKRig = LoadObject<UIKRigDefinition>(nullptr, *RigPath);
+	UIKRigDefinition* IKRig = LoadAssetByPath<UIKRigDefinition>(RigPath);
 	if (!IKRig) return MCPError(FString::Printf(TEXT("IKRig not found: %s"), *RigPath));
-	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, *MeshPath);
+	USkeletalMesh* Mesh = LoadAssetByPath<USkeletalMesh>(MeshPath);
 	if (!Mesh) return MCPError(FString::Printf(TEXT("SkeletalMesh not found: %s"), *MeshPath));
 
 	UIKRigController* Controller = UIKRigController::GetController(IKRig);
@@ -2704,9 +2704,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetIKRetargeterRig(const TSharedPtr<F
 		return MCPError(TEXT("'side' must be 'source' or 'target'"));
 	}
 
-	UIKRetargeter* Retargeter = LoadObject<UIKRetargeter>(nullptr, *RetargeterPath);
+	UIKRetargeter* Retargeter = LoadAssetByPath<UIKRetargeter>(RetargeterPath);
 	if (!Retargeter) return MCPError(FString::Printf(TEXT("IKRetargeter not found: %s"), *RetargeterPath));
-	UIKRigDefinition* IKRig = LoadObject<UIKRigDefinition>(nullptr, *RigPath);
+	UIKRigDefinition* IKRig = LoadAssetByPath<UIKRigDefinition>(RigPath);
 	if (!IKRig) return MCPError(FString::Printf(TEXT("IKRig not found: %s"), *RigPath));
 
 	UIKRetargeterController* Controller = UIKRetargeterController::GetController(Retargeter);
@@ -2839,7 +2839,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AutoAlignRetargetPose(const TSharedPt
 		return MCPError(TEXT("'side' must be 'source' or 'target'"));
 	}
 
-	UIKRetargeter* Retargeter = LoadObject<UIKRetargeter>(nullptr, *RetargeterPath);
+	UIKRetargeter* Retargeter = LoadAssetByPath<UIKRetargeter>(RetargeterPath);
 	if (!Retargeter) return MCPError(FString::Printf(TEXT("IKRetargeter not found: %s"), *RetargeterPath));
 	UIKRetargeterController* Controller = UIKRetargeterController::GetController(Retargeter);
 	if (!Controller) return MCPError(TEXT("IKRetargeterController unavailable"));
@@ -2911,7 +2911,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ResetRetargetPose(const TSharedPtr<FJ
 		return MCPError(TEXT("'side' must be 'source' or 'target'"));
 	}
 
-	UIKRetargeter* Retargeter = LoadObject<UIKRetargeter>(nullptr, *RetargeterPath);
+	UIKRetargeter* Retargeter = LoadAssetByPath<UIKRetargeter>(RetargeterPath);
 	if (!Retargeter) return MCPError(FString::Printf(TEXT("IKRetargeter not found: %s"), *RetargeterPath));
 	UIKRetargeterController* Controller = UIKRetargeterController::GetController(Retargeter);
 	if (!Controller) return MCPError(TEXT("IKRetargeterController unavailable"));
@@ -2980,11 +2980,11 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BatchRetargetAnimations(const TShared
 	if (auto Err = RequireString(Params, TEXT("sourceMesh"), SourceMeshPath)) return Err;
 	if (auto Err = RequireString(Params, TEXT("targetMesh"), TargetMeshPath)) return Err;
 
-	UIKRetargeter* Retargeter = LoadObject<UIKRetargeter>(nullptr, *RetargeterPath);
+	UIKRetargeter* Retargeter = LoadAssetByPath<UIKRetargeter>(RetargeterPath);
 	if (!Retargeter) return MCPError(FString::Printf(TEXT("IKRetargeter not found: %s"), *RetargeterPath));
-	USkeletalMesh* SourceMesh = LoadObject<USkeletalMesh>(nullptr, *SourceMeshPath);
+	USkeletalMesh* SourceMesh = LoadAssetByPath<USkeletalMesh>(SourceMeshPath);
 	if (!SourceMesh) return MCPError(FString::Printf(TEXT("Source mesh not found: %s"), *SourceMeshPath));
-	USkeletalMesh* TargetMesh = LoadObject<USkeletalMesh>(nullptr, *TargetMeshPath);
+	USkeletalMesh* TargetMesh = LoadAssetByPath<USkeletalMesh>(TargetMeshPath);
 	if (!TargetMesh) return MCPError(FString::Printf(TEXT("Target mesh not found: %s"), *TargetMeshPath));
 	if (SourceMesh == TargetMesh) return MCPError(TEXT("sourceMesh and targetMesh must be different"));
 	if (OptionalBool(Params, TEXT("overwrite"), false))
@@ -3067,7 +3067,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BatchRetargetAnimations(const TShared
 		{
 			return MCPError(FString::Printf(TEXT("Cannot create a retargeted asset beside protected source path: %s"), *P));
 		}
-		UAnimSequence* Anim = LoadObject<UAnimSequence>(nullptr, *P);
+		UAnimSequence* Anim = LoadAssetByPath<UAnimSequence>(P);
 		if (!Anim)
 		{
 			return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *P));
