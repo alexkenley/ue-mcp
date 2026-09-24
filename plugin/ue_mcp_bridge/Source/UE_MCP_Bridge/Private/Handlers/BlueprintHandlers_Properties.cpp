@@ -739,11 +739,11 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddFunctionParameter(const TSharedPtr
 		}
 	}
 
-	FEdGraphPinType PinType = MakePinType(ParamType);
-
-	if (PinType.PinCategory == NAME_None)
+	FEdGraphPinType PinType;
+	FString TypeError;
+	if (!ParsePinTypeSpec(ParamType, PinType, TypeError))
 	{
-		return MCPError(FString::Printf(TEXT("Unrecognized parameter type: '%s'. Use a known type (Bool, Int, Float, String, Name, Text, Byte, Object, Vector, Rotator, Transform, GameplayTag, etc.) or a full class/struct path."), *ParamType));
+		return MCPError(FString::Printf(TEXT("Unrecognized parameter type: %s"), *TypeError));
 	}
 
 	if (bIsOutput)
