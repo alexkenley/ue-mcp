@@ -351,6 +351,7 @@ describe("handler conventions", () => {
       "grant_ability", "revoke_ability",
       "add_eqs_generator", "add_eqs_test", "remove_eqs_test",
       "remove_eqs_option", "reorder_eqs_tests",
+      "add_loose_gameplay_tag", "remove_loose_gameplay_tag",
     ];
     const byAction = new Map(rows.map((r) => [r.action, r]));
     const offenders: string[] = [];
