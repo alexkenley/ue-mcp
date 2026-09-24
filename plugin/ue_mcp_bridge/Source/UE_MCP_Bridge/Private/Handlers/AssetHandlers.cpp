@@ -2107,6 +2107,73 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAssetBatch(const TSharedPtr<FJsonOb
 	return MCPResult(Result);
 }
 
+// RenameAssets moves each entry into a package of its own, so any other
+// top-level object in a multi-object package stays at the old path, and the
+// moved object can then hold an illegal reference to it (#1137). Returns the
+// refusal to send when a batch would do that, or nullptr when it would not.
+// World packages are skipped: the rename manager migrates their satellites.
+static TSharedPtr<FJsonValue> MCPRefuseSplitPackages(const TArray<FAssetRenameData>& Batch, const TCHAR* Action)
+{
+	TSet<UObject*> Moving;
+	TArray<UPackage*> Packages;
+	for (const FAssetRenameData& Data : Batch)
+	{
+		UObject* Asset = Data.Asset.Get();
+		if (!Asset) continue;
+		Moving.Add(Asset);
+		Packages.AddUnique(Asset->GetOutermost());
+	}
+
+	static const FName MetaDataClassName(TEXT("MetaData"));
+	static const FName PackageMetaDataClassName(TEXT("PackageMetaData"));
+
+	TArray<TSharedPtr<FJsonValue>> SplitPackages;
+	TArray<FString> LeftNames;
+	for (UPackage* Package : Packages)
+	{
+		if (!Package || UWorld::FindWorldInPackage(Package)) continue;
+
+		TArray<UObject*> TopLevel;
+		GetObjectsWithPackage(Package, TopLevel, /*bIncludeNestedObjects=*/false);
+		TArray<TSharedPtr<FJsonValue>> Left;
+		for (UObject* Obj : TopLevel)
+		{
+			if (!IsValid(Obj) || Moving.Contains(Obj)) continue;
+			if (Obj->HasAnyFlags(RF_Transient | RF_ClassDefaultObject)) continue;
+			// Generated classes travel with their Blueprint; redirectors and
+			// package metadata are not content.
+			if (Obj->IsA<UClass>() || Obj->IsA<UObjectRedirector>()) continue;
+			const FName ClassName = Obj->GetClass()->GetFName();
+			if (ClassName == MetaDataClassName || ClassName == PackageMetaDataClassName) continue;
+
+			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetStringField(TEXT("objectPath"), Obj->GetPathName());
+			Entry->SetStringField(TEXT("class"), Obj->GetClass()->GetName());
+			Entry->SetBoolField(TEXT("isAsset"), Obj->IsAsset());
+			Left.Add(MakeShared<FJsonValueObject>(Entry));
+			LeftNames.Add(Obj->GetPathName());
+		}
+		if (Left.Num() == 0) continue;
+
+		TSharedPtr<FJsonObject> PackageEntry = MakeShared<FJsonObject>();
+		PackageEntry->SetStringField(TEXT("package"), Package->GetName());
+		PackageEntry->SetArrayField(TEXT("objectsLeftBehind"), Left);
+		SplitPackages.Add(MakeShared<FJsonValueObject>(PackageEntry));
+	}
+	if (SplitPackages.Num() == 0) return nullptr;
+
+	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetBoolField(TEXT("success"), false);
+	Body->SetStringField(TEXT("error"), FString::Printf(
+		TEXT("Refusing %s: %d package(s) hold objects this move does not cover, and they would stay at the old path while the rest moves: %s. ")
+		TEXT("Nothing was changed. Name every one of them in a single asset(bulk_rename) batch so they move together, ")
+		TEXT("or move the package's objects out first. A private object (isAsset=false) cannot be moved on its own: clear the reference to it before moving."),
+		Action, SplitPackages.Num(), *FString::Join(LeftNames, TEXT(", "))));
+	Body->SetStringField(TEXT("reason"), TEXT("package_objects_left_behind"));
+	Body->SetArrayField(TEXT("splitPackages"), SplitPackages);
+	return MakeShared<FJsonValueObject>(Body);
+}
+
 // ─── #128 item 6 - bulk_rename_assets ───────────────────────────────
 // Scene-referenced assets are expensive to rename one-by-one because each
 // individual rename forces a redirector-fixup / level-reference-update
@@ -2232,6 +2299,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::BulkRename(const TSharedPtr<FJsonObject>&
 	{
 		return MCPError(TEXT("No valid renames to process"));
 	}
+
+	if (auto Refusal = MCPRefuseSplitPackages(BatchRenames, TEXT("bulk_rename"))) return Refusal;
 
 	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
 	IAssetTools& AssetTools = AssetToolsModule.Get();
@@ -3115,6 +3184,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::MoveFolder(const TSharedPtr<FJsonObject>&
 	{
 		return MCPError(TEXT("Failed to load any assets for renaming"));
 	}
+
+	if (auto Refusal = MCPRefuseSplitPackages(BatchRenames, TEXT("move_folder"))) return Refusal;
 
 	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
 	IAssetTools& AssetTools = AssetToolsModule.Get();
