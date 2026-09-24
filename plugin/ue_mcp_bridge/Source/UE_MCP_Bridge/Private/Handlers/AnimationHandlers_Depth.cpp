@@ -48,6 +48,7 @@
 #include "HandlerUtils.h"
 #include "HandlerJsonProperty.h"
 #include "HandlerAnimNotify.h"
+#include "HandlerAnimStateGraph.h"
 
 #include "Animation/AnimBlueprint.h"
 #include "Animation/AnimMontage.h"
@@ -166,74 +167,10 @@ static TArray<FString> MCPAnimDepthListStates(UAnimationStateMachineGraph* SMGra
 	return Names;
 }
 
-/**
- * Remove one state-like node and the graph it owns.
- *
- * UAnimStateNodeBase::DestroyNode() also disposes of the bound graph, but what
- * it does with it is not visible from the header, and a bound graph left in the
- * blueprint after its node is gone makes the next compile assert on a graph
- * with no owning node. So the sequence is explicit: break the links, detach the
- * bound graph from the node, drop the node, then remove the graph through
- * FBlueprintEditorUtils, which is the call that unregisters it from the
- * blueprint's graph lists. A transition may SHARE its rule graph with another
- * transition, and removing a shared graph would break the sibling, so that case
- * leaves the graph in place and the caller is told.
- */
-static void MCPAnimDepthRemoveStateLikeNode(
-	UBlueprint* BP,
-	UEdGraph* OwningGraph,
-	UAnimStateNodeBase* Node,
-	bool& bOutBoundGraphKeptBecauseShared)
-{
-	bOutBoundGraphKeptBecauseShared = false;
-	if (!Node || !OwningGraph) return;
-
-	UEdGraph* Bound = Node->GetBoundGraph();
-	if (UAnimStateTransitionNode* Transition = Cast<UAnimStateTransitionNode>(Node))
-	{
-		if (Bound && Transition->IsBoundGraphShared())
-		{
-			bOutBoundGraphKeptBecauseShared = true;
-			Bound = nullptr;
-		}
-	}
-
-	Node->BreakAllNodeLinks();
-	Node->ClearBoundGraph();
-	OwningGraph->RemoveNode(Node);
-
-	if (Bound)
-	{
-		FBlueprintEditorUtils::RemoveGraph(BP, Bound, EGraphRemoveFlags::MarkTransient);
-	}
-}
-
 static void MCPAnimDepthCompileAndSave(UBlueprint* BP)
 {
 	FKismetEditorUtilities::CompileBlueprint(BP);
 	SaveAssetPackage(BP);
-}
-
-/** A transition described the way add_transition / read_state_machine report it. */
-static TSharedPtr<FJsonObject> MCPAnimDepthDescribeTransition(UAnimStateTransitionNode* T)
-{
-	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
-	if (!T) return O;
-	O->SetStringField(TEXT("transitionGuid"), T->NodeGuid.ToString());
-	if (UAnimStateNodeBase* Prev = T->GetPreviousState())
-	{
-		O->SetStringField(TEXT("fromState"), Prev->GetStateName());
-	}
-	if (UAnimStateNodeBase* Next = T->GetNextState())
-	{
-		O->SetStringField(TEXT("toState"), Next->GetStateName());
-	}
-	if (T->BoundGraph)
-	{
-		O->SetStringField(TEXT("boundGraph"), T->BoundGraph->GetName());
-	}
-	O->SetNumberField(TEXT("blendDuration"), T->CrossfadeDuration);
-	return O;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -420,35 +357,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveState(const TSharedPtr<FJsonObj
 		return MCPResult(Noop);
 	}
 
-	// Was this the entry state? Removing it silently would leave the machine
-	// with no initial state, which is the failure this file exists to stop.
-	bool bWasEntryState = false;
-	if (SMGraph->EntryNode)
-	{
-		if (UEdGraphNode* Current = SMGraph->EntryNode->GetOutputNode())
-		{
-			bWasEntryState = (Current == State);
-		}
-	}
-
-	// Every transition touching the state has to go with it: a transition whose
-	// endpoint no longer exists fails the blueprint compile.
-	TArray<UAnimStateTransitionNode*> Transitions;
-	State->GetTransitionList(Transitions);
-
-	TArray<TSharedPtr<FJsonValue>> RemovedTransitions;
-	int32 SharedRuleGraphsKept = 0;
-	for (UAnimStateTransitionNode* T : Transitions)
-	{
-		if (!T) continue;
-		RemovedTransitions.Add(MakeShared<FJsonValueObject>(MCPAnimDepthDescribeTransition(T)));
-		bool bShared = false;
-		MCPAnimDepthRemoveStateLikeNode(AnimBP, SMGraph, T, bShared);
-		if (bShared) SharedRuleGraphsKept++;
-	}
-
-	bool bStateGraphShared = false;
-	MCPAnimDepthRemoveStateLikeNode(AnimBP, SMGraph, State, bStateGraphShared);
+	// Every transition touching the state goes with it; blueprint(delete_node)
+	// shares this teardown.
+	const MCPAnimStateGraph::FStateTeardown Teardown =
+		MCPAnimStateGraph::RemoveStateWithTransitions(AnimBP, SMGraph, State);
+	const TArray<TSharedPtr<FJsonValue>>& RemovedTransitions = Teardown.RemovedTransitions;
+	const int32 SharedRuleGraphsKept = Teardown.SharedRuleGraphsKept;
+	const bool bWasEntryState = Teardown.bWasEntryState;
 
 	MCPAnimDepthCompileAndSave(AnimBP);
 
@@ -566,13 +481,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveTransition(const TSharedPtr<FJs
 	FString FirstFrom, FirstTo;
 	for (UAnimStateTransitionNode* T : Matches)
 	{
-		TSharedPtr<FJsonObject> Described = MCPAnimDepthDescribeTransition(T);
+		TSharedPtr<FJsonObject> Described = MCPAnimStateGraph::DescribeTransition(T);
 		if (FirstFrom.IsEmpty()) Described->TryGetStringField(TEXT("fromState"), FirstFrom);
 		if (FirstTo.IsEmpty()) Described->TryGetStringField(TEXT("toState"), FirstTo);
 		Removed.Add(MakeShared<FJsonValueObject>(Described));
 
 		bool bShared = false;
-		MCPAnimDepthRemoveStateLikeNode(AnimBP, SMGraph, T, bShared);
+		MCPAnimStateGraph::RemoveStateLikeNode(AnimBP, SMGraph, T, bShared);
 		if (bShared) SharedRuleGraphsKept++;
 	}
 
@@ -656,7 +571,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveStateMachine(const TSharedPtr<F
 		{
 			if (!Node->IsA<UAnimStateTransitionNode>()) continue;
 			bool bShared = false;
-			MCPAnimDepthRemoveStateLikeNode(AnimBP, SMGraph, Node, bShared);
+			MCPAnimStateGraph::RemoveStateLikeNode(AnimBP, SMGraph, Node, bShared);
 			if (bShared) SharedRuleGraphsKept++;
 			RemovedTransitions++;
 		}
@@ -664,7 +579,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveStateMachine(const TSharedPtr<F
 		{
 			if (Node->IsA<UAnimStateTransitionNode>()) continue;
 			bool bShared = false;
-			MCPAnimDepthRemoveStateLikeNode(AnimBP, SMGraph, Node, bShared);
+			MCPAnimStateGraph::RemoveStateLikeNode(AnimBP, SMGraph, Node, bShared);
 			RemovedStates++;
 		}
 	}

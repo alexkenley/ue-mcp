@@ -106,6 +106,8 @@ void FBlueprintHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("list_overridable_functions"), &ListOverridableFunctions);
 	Registry.RegisterHandler(TEXT("connect_pins"), &ConnectPins);
 	Registry.RegisterHandler(TEXT("delete_node"), &DeleteNode);
+	Registry.RegisterHandler(TEXT("refresh_node"), &RefreshNode);
+	Registry.RegisterHandler(TEXT("disconnect_pins"), &DisconnectPins);
 	Registry.RegisterHandler(TEXT("set_node_property"), &SetNodeProperty);
 	Registry.RegisterHandler(TEXT("list_blueprint_graphs"), &ListGraphs);
 	Registry.RegisterHandler(TEXT("resolve_blueprint_graph"), &ResolveGraph);
