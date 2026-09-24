@@ -36,4 +36,51 @@ bool FReflectionCreateTagRefusesInvalidTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FReflectionListStructsTest,
+	"UE.MCP.Reflection.ListStructs.FiltersByPackageAndName",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FReflectionListStructsTest::RunTest(const FString& Parameters)
+{
+	FMCPHandlerRegistry Registry;
+	FReflectionHandlers::RegisterHandlers(Registry);
+
+	// #1088: a bare module name resolves to /Script/<Module>, and the row
+	// carries both the registered name and the F-prefixed C++ name.
+	TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+	Params->SetStringField(TEXT("package"), TEXT("Engine"));
+	Params->SetStringField(TEXT("filter"), TEXT("FTableRowBase"));
+	const TSharedPtr<FJsonValue> Response = Registry.ExecuteHandler(TEXT("list_structs"), Params);
+	if (!TestTrue(TEXT("list_structs returns an object"), Response.IsValid() && Response->Type == EJson::Object))
+	{
+		return false;
+	}
+	const TSharedPtr<FJsonObject> Object = Response->AsObject();
+	TestTrue(TEXT("list_structs succeeds"), Object->GetBoolField(TEXT("success")));
+
+	const TArray<TSharedPtr<FJsonValue>>* Structs = nullptr;
+	if (!TestTrue(TEXT("rows come back under structs"), Object->TryGetArrayField(TEXT("structs"), Structs) && Structs))
+	{
+		return false;
+	}
+
+	bool bFound = false;
+	for (const TSharedPtr<FJsonValue>& Value : *Structs)
+	{
+		const TSharedPtr<FJsonObject> Row = Value->AsObject();
+		TestEqual(TEXT("every row is in /Script/Engine"), Row->GetStringField(TEXT("package")), FString(TEXT("/Script/Engine")));
+		if (Row->GetStringField(TEXT("path")) == TEXT("/Script/Engine.TableRowBase"))
+		{
+			bFound = true;
+			TestEqual(TEXT("name is the registered spelling"), Row->GetStringField(TEXT("name")), FString(TEXT("TableRowBase")));
+			TestEqual(TEXT("cppName carries the F prefix"), Row->GetStringField(TEXT("cppName")), FString(TEXT("FTableRowBase")));
+			TestTrue(TEXT("TableRowBase is a table row"), Row->GetBoolField(TEXT("tableRow")));
+		}
+	}
+	TestTrue(TEXT("FTableRowBase is found through its F-prefixed name"), bFound);
+
+	return true;
+}
+
 #endif

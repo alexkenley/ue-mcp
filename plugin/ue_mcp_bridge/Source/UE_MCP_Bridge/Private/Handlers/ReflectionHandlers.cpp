@@ -8,7 +8,9 @@
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 #include "Engine/Engine.h"
+#include "Engine/DataTable.h"
 #include "Engine/UserDefinedEnum.h"
+#include "UObject/Package.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Kismet2/EnumEditorUtils.h"
@@ -38,6 +40,7 @@ void FReflectionHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("reflect_struct"), &ReflectStruct);
 	Registry.RegisterHandler(TEXT("reflect_enum"), &ReflectEnum);
 	Registry.RegisterHandler(TEXT("list_classes"), &ListClasses);
+	Registry.RegisterHandler(TEXT("list_structs"), &ListStructs);
 	Registry.RegisterHandler(TEXT("list_gameplay_tags"), &ListGameplayTags);
 	Registry.RegisterHandler(TEXT("create_gameplay_tag"), &CreateGameplayTag);
 	Registry.RegisterHandler(TEXT("create_enum"), &CreateEnum);
@@ -657,6 +660,78 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ListClasses(const TSharedPtr<FJsonOb
 		MCPPagination::EmitPage(Page, Rows, TEXT("classes"), Result);
 	}
 
+	return MCPResult(Result);
+}
+
+TSharedPtr<FJsonValue> FReflectionHandlers::ListStructs(const TSharedPtr<FJsonObject>& Params)
+{
+	// package takes a /Script/<Module> or content path, or a bare module name.
+	FString PackageFilter = OptionalString(Params, TEXT("package")).TrimStartAndEnd();
+	const FString NameFilter = OptionalString(Params, TEXT("filter")).TrimStartAndEnd();
+	PackageFilter.RemoveFromEnd(TEXT("/"));
+	if (!PackageFilter.IsEmpty() && !PackageFilter.StartsWith(TEXT("/")))
+	{
+		PackageFilter = TEXT("/Script/") + PackageFilter;
+	}
+
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("list_structs|package=%s|filter=%s"), *PackageFilter, *NameFilter),
+			/*DefaultLimit*/ 200, /*MaxLimit*/ 5000, Page))
+	{
+		return Err;
+	}
+
+	UPackage* TransientPackage = GetTransientPackage();
+	TArray<MCPPagination::FPageRow> Rows;
+	for (TObjectIterator<UScriptStruct> It; It; ++It)
+	{
+		UScriptStruct* Struct = *It;
+		if (!Struct) continue;
+		UPackage* Package = Struct->GetOutermost();
+		if (!Package || Package == TransientPackage) continue;
+
+		const FString PackageName = Package->GetName();
+		// Exact package, or anything under a content folder.
+		if (!PackageFilter.IsEmpty()
+			&& !PackageName.Equals(PackageFilter, ESearchCase::IgnoreCase)
+			&& !PackageName.StartsWith(PackageFilter + TEXT("/"), ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+
+		const FString Name = Struct->GetName();
+		const FString CppName = Struct->GetStructCPPName();
+		if (!NameFilter.IsEmpty()
+			&& !Name.Contains(NameFilter, ESearchCase::IgnoreCase)
+			&& !CppName.Contains(NameFilter, ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+
+		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+		// name is the registered spelling; cppName carries the F prefix.
+		Row->SetStringField(TEXT("name"), Name);
+		Row->SetStringField(TEXT("cppName"), CppName);
+		Row->SetStringField(TEXT("path"), Struct->GetPathName());
+		Row->SetStringField(TEXT("package"), PackageName);
+		if (const UStruct* Super = Struct->GetSuperStruct())
+		{
+			Row->SetStringField(TEXT("parent"), Super->GetName());
+		}
+		Row->SetBoolField(TEXT("native"), Package->HasAnyPackageFlags(PKG_CompiledIn));
+		Row->SetBoolField(TEXT("tableRow"), Struct->IsChildOf(FTableRowBase::StaticStruct()));
+		Rows.Add({ Struct->GetPathName(), MakeShared<FJsonValueObject>(Row) });
+	}
+	// Object hash order is not stable, so sort before paging.
+	Rows.Sort([](const MCPPagination::FPageRow& A, const MCPPagination::FPageRow& B)
+		{ return A.Id < B.Id; });
+
+	auto Result = MCPSuccess();
+	if (!PackageFilter.IsEmpty()) Result->SetStringField(TEXT("package"), PackageFilter);
+	if (!NameFilter.IsEmpty()) Result->SetStringField(TEXT("filter"), NameFilter);
+	MCPPagination::EmitPage(Page, Rows, TEXT("structs"), Result);
 	return MCPResult(Result);
 }
 
