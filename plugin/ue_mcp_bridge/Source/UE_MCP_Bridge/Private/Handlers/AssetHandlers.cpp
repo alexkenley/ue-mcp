@@ -286,6 +286,8 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// #595: Chaos cloth read/write.
 	Registry.RegisterHandler(TEXT("read_cloth_data"), &ReadClothData);
 	Registry.RegisterHandler(TEXT("set_cloth_config"), &SetClothConfig);
+	Registry.RegisterHandler(TEXT("bind_cloth_to_section"), &BindClothToSection);
+	Registry.RegisterHandler(TEXT("unbind_cloth_from_section"), &UnbindClothFromSection);
 	Registry.RegisterHandler(TEXT("get_primary_asset_ids"), &GetPrimaryAssetIds);
 
 	// v1.0.0-rc.2 - #155 (asset gaps)
