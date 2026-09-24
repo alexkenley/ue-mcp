@@ -167,6 +167,7 @@ export const levelTool: ToolDef = categoryTool(
         dryRun: p.dryRun, maxSpawn: p.maxSpawn, transactionLabel: p.transactionLabel,
       }),
     },
+    set_component_skeletal_mesh: bp("mutate", "Swap the mesh on a skinned mesh component of an actor that is already placed, through SetSkinnedAssetAndUpdate. Writing SkeletalMeshAsset or SkinnedAsset as a raw property leaves the pose buffers sized for the old skeleton and crashes the editor on the next pose evaluation, so set_property, set_actor_property and set_component_property route those names through the same setter. Returns previousValue, value, materialSlotCount and materialSlotNames (slot layouts differ per mesh). One undo transaction; the level is dirtied and NOT saved. Params: actorLabel OR actorPath, skeletalMesh (path, or null to clear), componentName? (default the first skinned mesh component), world? (editor|pie), pieInstance? (#1099)", "set_component_skeletal_mesh", (p) => ({ actorLabel: p.actorLabel, actorPath: p.actorPath, componentName: p.componentName, skeletalMesh: p.skeletalMesh, world: p.world, pieInstance: p.pieInstance })),
     set_component_materials: {
       kind: "bridge",
       effect: "mutate",
@@ -345,7 +346,7 @@ export const levelTool: ToolDef = categoryTool(
     allowSubtractive: z.boolean().optional().describe("convert_brushes_to_static_mesh: opt in to converting subtractive brushes, which have no surface of their own"),
     includeVolumes: z.boolean().optional().describe("convert_brushes_to_static_mesh: opt in to converting volume brushes, which are collision rather than visible geometry"),
     // Component material overrides (#946) and transient verification actors (#956)
-    materials: z.array(z.string()).optional().describe("spawn_skeletal_mesh_actor / set_component_materials: per-slot material paths; index is the slot. In set_component_materials a null or empty entry clears that slot's override (#946)"),
+    materials: z.array(z.string().nullable()).optional().describe("spawn_skeletal_mesh_actor / set_component_materials: per-slot material paths; index is the slot. In set_component_materials a null or empty entry clears that slot's override, and in spawn_skeletal_mesh_actor it leaves that slot alone (#946/#1099)"),
     clearOverrides: z.boolean().optional().describe("set_component_materials: drop every component override so the mesh asset's own slots show through (#946)"),
     initialize: z.string().optional().describe("spawn_transient_actor: none | construction (default) | beginPlay. The editor world has not begun play, so nothing runs InitializeComponent or BeginPlay unless you ask for it (#956)"),
     hideFromOutliner: z.boolean().optional().describe("spawn_transient_actor: keep the actor out of the World Outliner (default false, so you can see what was made)"),
@@ -356,7 +357,7 @@ export const levelTool: ToolDef = categoryTool(
     enabled: z.boolean().optional().describe("set_nanite_settings: enable Nanite (default true) (#696)"),
     positionPrecision: z.number().optional().describe("set_nanite_settings: Nanite position precision (#696)"),
     outputPath: z.string().optional().describe("export_actor_fbx: output .fbx path (#637)"),
-    skeletalMesh: z.string().optional().describe("spawn_skeletal_mesh_actor: USkeletalMesh path (#679)"),
+    skeletalMesh: z.string().nullable().optional().describe("spawn_skeletal_mesh_actor / set_component_skeletal_mesh: USkeletalMesh path. set_component_skeletal_mesh takes null to clear the mesh (#679/#1099)"),
     animSequence: z.string().optional().describe("spawn_skeletal_mesh_actor: single-node preview animation (#679)"),
     loop: z.boolean().optional().describe("spawn_skeletal_mesh_actor: loop the preview animation (#679)"),
     onConflict: z.string().optional().describe("spawn_skeletal_mesh_actor: label conflict policy (skip|error)"),

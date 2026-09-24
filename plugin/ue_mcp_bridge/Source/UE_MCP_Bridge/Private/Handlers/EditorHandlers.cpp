@@ -2,6 +2,7 @@
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
 #include "HandlerPagination.h"
+#include "HandlerSkinnedAsset.h"
 
 #include "MessageLogModule.h"
 #include "IMessageLogListing.h"
@@ -988,6 +989,50 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetProperty(const TSharedPtr<FJsonObject
 	if (!MCPJsonProperty::ResolveDottedPath(Asset, PropertyName, Property, PropertyValue, LeafOwner, ResolvePropertyErr))
 	{
 		return MCPError(ResolvePropertyErr);
+	}
+
+	// A skinned mesh's mesh pointer goes through the engine setter (#1099).
+	if (MCPSkinnedAsset::IsMeshProperty(Property))
+	{
+		USkinnedMeshComponent* SkinnedComp = Cast<USkinnedMeshComponent>(LeafOwner);
+		if (!SkinnedComp)
+		{
+			return MCPError(FString::Printf(
+				TEXT("'%s' is a skinned mesh component's mesh and can only be set on the component itself. Use level(set_component_skeletal_mesh) for a placed actor."),
+				*PropertyName));
+		}
+		Asset->Modify();
+		FString PreviousMesh;
+		FString MeshErr;
+		if (!MCPSkinnedAsset::AssignFromJson(SkinnedComp, ValueJsonRef, PreviousMesh, MeshErr))
+		{
+			return MCPError(FString::Printf(TEXT("Failed to set '%s': %s"), *PropertyName, *MeshErr));
+		}
+		Asset->MarkPackageDirty();
+		const bool bSaveMesh = OptionalBool(Params, TEXT("save"), true);
+		if (bSaveMesh)
+		{
+			UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty=*/true);
+		}
+
+		auto MeshResult = MCPSuccess();
+		MeshResult->SetStringField(TEXT("path"), AssetPath);
+		MeshResult->SetStringField(TEXT("resolvedPath"), Asset->GetPathName());
+		MeshResult->SetStringField(TEXT("resolvedKind"), ResolvedKind);
+		MeshResult->SetStringField(TEXT("propertyName"), PropertyName);
+		MeshResult->SetStringField(TEXT("type"), Property->GetCPPType());
+		MeshResult->SetBoolField(TEXT("saved"), bSaveMesh);
+		MCPSkinnedAsset::Report(MeshResult, SkinnedComp, PreviousMesh);
+		MeshResult->SetBoolField(TEXT("changeDetected"), true);
+		MCPSetUpdated(MeshResult);
+
+		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+		Payload->SetStringField(TEXT("objectPath"), AssetPath);
+		Payload->SetStringField(TEXT("propertyName"), PropertyName);
+		Payload->SetStringField(TEXT("value"), PreviousMesh.IsEmpty() ? FString(TEXT("None")) : PreviousMesh);
+		Payload->SetBoolField(TEXT("save"), bSaveMesh);
+		MCPSetRollback(MeshResult, TEXT("set_property"), Payload);
+		return MCPResult(MeshResult);
 	}
 
 	// Capture what is about to be overwritten. This is the only value an
