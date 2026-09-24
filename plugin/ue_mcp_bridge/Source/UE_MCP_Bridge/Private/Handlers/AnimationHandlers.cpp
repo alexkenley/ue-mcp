@@ -160,6 +160,7 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("list_control_rig_variables"), &ListControlRigVariables);
 	Registry.RegisterHandler(TEXT("read_control_rig_graph"), &ReadControlRigGraph);
 	Registry.RegisterHandler(TEXT("read_control_rig_hierarchy"), &ReadControlRigHierarchy);
+	Registry.RegisterHandler(TEXT("create_control_rig"), &CreateControlRig);
 	Registry.RegisterHandler(TEXT("begin_control_rig_edit"), &BeginControlRigEdit);
 	Registry.RegisterHandler(TEXT("read_control_rig_edit"), &ReadControlRigEdit);
 	Registry.RegisterHandler(TEXT("capture_control_rig_pose"), &CaptureControlRigPose);
