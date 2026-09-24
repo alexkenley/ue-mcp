@@ -1348,6 +1348,7 @@ Nothing outside these modes ever answers a dialog by itself. `editor(set_dialog_
 | `set_node_settings` | Set node params. Pass a settings object of {propertyPath: value} (dotted paths and nested structs supported), or propertyName + propertyValue for a single write. Reports previousProperties and rolls back to them. Params: `assetPath, nodeName, settings OR propertyName+propertyValue` |
 | `set_static_mesh_spawner_meshes` | Populate weighted MeshEntries on a PCGStaticMeshSpawner node (#145). Params: `assetPath, nodeName, entries=[{mesh, weight?}], replace? (default true)` |
 | `remove_node` | Remove node. Params: `assetPath, nodeName` |
+| `unwrap_instance_nodes` | Give instance nodes (UPCGSettingsInstance wrappers, read-only in the PCG editor's details panel) their own settings object, keeping every value and edge. Settings from a shared asset are copied into the node. Nodes that already own their settings are left alone. Params: `assetPath, nodeName? (default: every node in the graph)` |
 | `execute` | Regenerate PCG. Params: `actorLabel OR actorPath, seed? (writes the component Seed before generating) (#983)` |
 | `force_regenerate` | Force a stuck PCG component to regenerate (clears graph ref, re-sets, cleanup+generate). Params: `actorLabel OR actorPath (#146/#983)` |
 | `cleanup` | Cleanup a PCG component (remove spawned content). Params: `actorLabel OR actorPath, removeComponents? (default true) (#146)` |
