@@ -10,6 +10,9 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
+#include "Materials/MaterialFunction.h"
+#include "Materials/MaterialExpressionFunctionInput.h"
+#include "Materials/MaterialExpressionFunctionOutput.h"
 #include "StaticParameterSet.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Materials/MaterialExpressionConstant.h"
@@ -124,6 +127,116 @@ UMaterial* FMaterialHandlers::LoadMaterialFromPath(const FString& AssetPath)
 UMaterialInstanceConstant* FMaterialHandlers::LoadMaterialInstanceFromPath(const FString& AssetPath)
 {
 	return LoadAssetByPath<UMaterialInstanceConstant>(AssetPath);
+}
+
+UObject* FMaterialGraphTarget::GetAsset() const
+{
+	if (Material) return Material;
+	return Function;
+}
+
+FString FMaterialGraphTarget::GetPathName() const
+{
+	const UObject* Asset = GetAsset();
+	return Asset ? Asset->GetPathName() : FString();
+}
+
+const TCHAR* FMaterialGraphTarget::GetPathKey() const
+{
+	return Function ? TEXT("functionPath") : TEXT("materialPath");
+}
+
+TConstArrayView<TObjectPtr<UMaterialExpression>> FMaterialGraphTarget::GetExpressions() const
+{
+	if (Material) return Material->GetExpressions();
+	if (Function) return Function->GetExpressions();
+	return TConstArrayView<TObjectPtr<UMaterialExpression>>();
+}
+
+void FMaterialGraphTarget::PreEdit() const
+{
+	if (Material) Material->PreEditChange(nullptr);
+	else if (Function) Function->Modify();
+}
+
+void FMaterialGraphTarget::PostEdit() const
+{
+	if (Material)
+	{
+		Material->PostEditChange();
+	}
+	else if (Function)
+	{
+		Function->MarkPackageDirty();
+		UMaterialEditingLibrary::UpdateMaterialFunction(Function, nullptr);
+	}
+}
+
+void FMaterialGraphTarget::CancelEdit() const
+{
+	// Balances Material->PreEditChange; a function's PreEdit only called Modify.
+	if (Material) Material->PostEditChange();
+}
+
+TSharedPtr<FJsonValue> FMaterialHandlers::ResolveMaterialGraphTarget(const TSharedPtr<FJsonObject>& Params, FMaterialGraphTarget& OutTarget)
+{
+	OutTarget = FMaterialGraphTarget();
+
+	FString FunctionPath = OptionalString(Params, TEXT("functionPath"));
+	if (FunctionPath.IsEmpty()) FunctionPath = OptionalString(Params, TEXT("materialFunctionPath"));
+	if (!FunctionPath.IsEmpty())
+	{
+		OutTarget.Function = LoadAssetByPath<UMaterialFunction>(FunctionPath);
+		if (!OutTarget.Function) return MCPAssetLoadError(FunctionPath, TEXT("MaterialFunction"));
+		return nullptr;
+	}
+
+	FString MaterialPath = OptionalString(Params, TEXT("materialPath"));
+	if (MaterialPath.IsEmpty()) MaterialPath = OptionalString(Params, TEXT("path"));
+	if (MaterialPath.IsEmpty()) MaterialPath = OptionalString(Params, TEXT("assetPath"));
+	if (MaterialPath.IsEmpty())
+	{
+		return MCPError(TEXT("Missing required parameter 'materialPath' (or 'path'), or 'functionPath' for a MaterialFunction"));
+	}
+
+	UObject* Asset = MCPLoadAssetObject(MaterialPath);
+	OutTarget.Material = Cast<UMaterial>(Asset);
+	if (!OutTarget.Material) OutTarget.Function = Cast<UMaterialFunction>(Asset);
+	if (!OutTarget.Material && !OutTarget.Function)
+	{
+		return Asset
+			? MCPAssetWrongTypeError(MaterialPath, Asset, TEXT("Material or MaterialFunction"))
+			: MCPAssetNotFoundError(MaterialPath, TEXT("Material"));
+	}
+	return nullptr;
+}
+
+UClass* FMaterialHandlers::ResolveExpressionClass(const FString& ExpressionType)
+{
+	FString Type = ExpressionType;
+	Type.TrimStartAndEndInline();
+	if (Type.IsEmpty()) return nullptr;
+
+	auto Accept = [](UClass* Cls) -> UClass*
+	{
+		return (Cls && Cls->IsChildOf(UMaterialExpression::StaticClass())) ? Cls : nullptr;
+	};
+
+	// A full object path names the class directly.
+	if (Type.Contains(TEXT(".")) || Type.StartsWith(TEXT("/")))
+	{
+		return Accept(FindObject<UClass>(nullptr, *Type));
+	}
+
+	// UClass objects are named without the U prefix: MaterialExpressionMultiply.
+	FString ClassName = Type;
+	if (ClassName.StartsWith(TEXT("UMaterialExpression"))) ClassName.RightChopInline(1);
+	if (!ClassName.StartsWith(TEXT("MaterialExpression"))) ClassName = TEXT("MaterialExpression") + ClassName;
+
+	if (UClass* Engine = Accept(FindObject<UClass>(nullptr, *(TEXT("/Script/Engine.") + ClassName)))) return Engine;
+	// Expressions from other modules (Landscape, plugins) are found by name.
+	if (UClass* Anywhere = Accept(FindFirstObject<UClass>(*ClassName, EFindFirstObjectOptions::ExactClass))) return Anywhere;
+	return Accept(FindFirstObject<UClass>(*Type, EFindFirstObjectOptions::ExactClass));
 }
 
 namespace
@@ -1276,37 +1389,8 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddMaterialExpression(const TSharedPtr
 		return MCPError(FString::Printf(TEXT("Failed to load material at '%s'"), *MaterialPath));
 	}
 
-	// Resolve short expression type names: "Multiply" -> "UMaterialExpressionMultiply"
-	FString ClassName = ExpressionType;
-	if (!ClassName.StartsWith(TEXT("MaterialExpression")) && !ClassName.StartsWith(TEXT("UMaterialExpression")))
-	{
-		ClassName = TEXT("UMaterialExpression") + ClassName;
-	}
-	else if (!ClassName.StartsWith(TEXT("U")))
-	{
-		ClassName = TEXT("U") + ClassName;
-	}
-
-	// Find the expression class
-	UClass* ExpressionClass = FindFirstObject<UClass>(*ClassName, EFindFirstObjectOptions::ExactClass);
+	UClass* ExpressionClass = ResolveExpressionClass(ExpressionType);
 	if (!ExpressionClass)
-	{
-		// Try with /Script/Engine prefix
-		FString FullPath = FString::Printf(TEXT("/Script/Engine.%s"), *ClassName.Mid(1)); // strip U prefix for path
-		ExpressionClass = FindObject<UClass>(nullptr, *FullPath);
-	}
-	if (!ExpressionClass)
-	{
-		// Try original name as-is (user may have passed the full class name)
-		ExpressionClass = FindFirstObject<UClass>(*ExpressionType, EFindFirstObjectOptions::ExactClass);
-		if (!ExpressionClass)
-		{
-			FString WithU = TEXT("U") + ExpressionType;
-			ExpressionClass = FindFirstObject<UClass>(*WithU, EFindFirstObjectOptions::ExactClass);
-		}
-	}
-
-	if (!ExpressionClass || !ExpressionClass->IsChildOf(UMaterialExpression::StaticClass()))
 	{
 		return MCPError(FString::Printf(TEXT("Unknown expression type: '%s'"), *ExpressionType));
 	}
@@ -2654,33 +2738,20 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialStaticSwitch(const TSharedP
 
 TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJsonObject>& Params)
 {
-	FString MaterialPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("materialPath"), TEXT("path"), MaterialPath)) return Err;
-	if (MaterialPath.IsEmpty())
-	{
-		Params->TryGetStringField(TEXT("assetPath"), MaterialPath);
-		if (MaterialPath.IsEmpty())
-		{
-			return MCPError(TEXT("Missing required parameter 'materialPath' (or 'path')"));
-		}
-	}
-
 	int32 ExpressionIndex = -1;
 	if (!Params->TryGetNumberField(TEXT("expressionIndex"), ExpressionIndex))
 	{
 		// Name the call that produces the index rather than only the key that is
 		// missing: this action has no name-based address, so a caller who does
 		// not already hold an index has nowhere to go from "missing parameter".
-		return MCPError(TEXT("Missing required parameter 'expressionIndex'. This action addresses nodes by POSITION in the material's expression list and has no name form; material(list_expressions) reports that list in the same order, and add_expression returns the new node's index as nodeId."));
+		return MCPError(TEXT("Missing required parameter 'expressionIndex'. This action addresses nodes by POSITION in the material's expression list and has no name form; material(list_expressions) reports that list in the same order (list_function_expressions for a MaterialFunction), and add_expression returns the new node's index as nodeId."));
 	}
 
-	UMaterial* Material = LoadMaterialFromPath(MaterialPath);
-	if (!Material)
-	{
-		return MCPError(FString::Printf(TEXT("Failed to load material at '%s'"), *MaterialPath));
-	}
+	// #1138: a MaterialFunction graph (functionPath) is edited the same way.
+	FMaterialGraphTarget Target;
+	if (auto Err = ResolveMaterialGraphTarget(Params, Target)) return Err;
 
-	auto Expressions = Material->GetExpressions();
+	auto Expressions = Target.GetExpressions();
 
 	if (ExpressionIndex < 0 || ExpressionIndex >= Expressions.Num())
 	{
@@ -2693,7 +2764,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 		return MCPError(TEXT("Expression at given index is null"));
 	}
 
-	Material->PreEditChange(nullptr);
+	Target.PreEdit();
 
 	FString ExpressionClass = Expression->GetClass()->GetName();
 	bool bValueSet = false;
@@ -2857,7 +2928,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 			}
 			else
 			{
-				Material->PostEditChange();
+				Target.CancelEdit();
 				return MCPError(FString::Printf(TEXT("Failed to load texture at '%s'"), *TexturePath));
 			}
 		}
@@ -2947,7 +3018,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 					}
 					else if (!Params->TryGetStringField(TEXT("value"), ValueStr))
 					{
-						Material->PostEditChange();
+						Target.CancelEdit();
 						return MCPError(FString::Printf(TEXT("Found property '%s' on expression '%s' but no 'value' parameter provided"), *PropertyName, *ExpressionClass));
 					}
 				}
@@ -2982,7 +3053,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 				}
 				else
 				{
-					Material->PostEditChange();
+					Target.CancelEdit();
 					return MCPError(FString::Printf(TEXT("ImportText failed for property '%s' on expression '%s' with value '%s'"), *PropertyName, *ExpressionClass, *ValueStr));
 				}
 			}
@@ -2997,7 +3068,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 						PropNames.Add(PropIt->GetName());
 					}
 				}
-				Material->PostEditChange();
+				Target.CancelEdit();
 				return MCPError(FString::Printf(TEXT("Property '%s' not found on expression '%s'. Editable properties: [%s]"),
 					*PropertyName, *ExpressionClass, *FString::Join(PropNames, TEXT(", "))));
 			}
@@ -3006,11 +3077,11 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 
 	if (!bValueSet)
 	{
-		Material->PostEditChange();
+		Target.CancelEdit();
 		return MCPError(FString::Printf(TEXT("Could not set value on expression of type '%s'. For known types provide standard value params; for arbitrary expressions pass 'propertyName' + 'value'."), *ExpressionClass));
 	}
 
-	Material->PostEditChange();
+	Target.PostEdit();
 
 	// #979: the value was written in memory and the package only marked dirty,
 	// so a caller who then asked something else to save it could be told the
@@ -3018,8 +3089,8 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 	// them the whole truth. Persist here, and report whether that worked
 	// alongside the value that was written either way.
 	MCPSetUpdated(Result);
-	Result->SetBoolField(TEXT("saved"), SaveAssetPackage(Material));
-	Result->SetStringField(TEXT("materialPath"), Material->GetPathName());
+	Result->SetBoolField(TEXT("saved"), SaveAssetPackage(Target.GetAsset()));
+	Result->SetStringField(Target.GetPathKey(), Target.GetPathName());
 	Result->SetNumberField(TEXT("expressionIndex"), ExpressionIndex);
 	Result->SetStringField(TEXT("expressionClass"), ExpressionClass);
 
@@ -3028,7 +3099,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 		// Rollback: the same call with the values read off the node a moment ago.
 		// Addressed by expressionIndex, the same key this call was given, so the
 		// replay lands on the same node as long as the expression list is intact.
-		RollbackPayload->SetStringField(TEXT("materialPath"), Material->GetPathName());
+		RollbackPayload->SetStringField(Target.GetPathKey(), Target.GetPathName());
 		RollbackPayload->SetNumberField(TEXT("expressionIndex"), ExpressionIndex);
 		MCPSetRollback(Result, TEXT("set_expression_value"), RollbackPayload);
 		// Not lossy: the value written back is the one read off this node a
@@ -3051,10 +3122,16 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 }
 UMaterialExpression* FMaterialHandlers::FindExpressionByName(UMaterial* Material, const FString& ExpressionName)
 {
-	if (!Material || ExpressionName.IsEmpty()) return nullptr;
+	if (!Material) return nullptr;
+	return FindExpressionInList(Material->GetExpressions(), ExpressionName);
+}
+
+UMaterialExpression* FMaterialHandlers::FindExpressionInList(TConstArrayView<TObjectPtr<UMaterialExpression>> Expressions, const FString& ExpressionName)
+{
+	if (ExpressionName.IsEmpty()) return nullptr;
 
 	// Try matching by description first (most specific)
-	for (UMaterialExpression* Expression : Material->GetExpressions())
+	for (UMaterialExpression* Expression : Expressions)
 	{
 		if (Expression && Expression->GetDescription() == ExpressionName)
 		{
@@ -3069,7 +3146,7 @@ UMaterialExpression* FMaterialHandlers::FindExpressionByName(UMaterial* Material
 		NameWithPrefix = TEXT("MaterialExpression") + ExpressionName;
 	}
 
-	for (UMaterialExpression* Expression : Material->GetExpressions())
+	for (UMaterialExpression* Expression : Expressions)
 	{
 		if (!Expression) continue;
 		FString ClassName = Expression->GetClass()->GetName();
@@ -3079,10 +3156,21 @@ UMaterialExpression* FMaterialHandlers::FindExpressionByName(UMaterial* Material
 		}
 	}
 
-	// Try matching by parameter name for parameter expressions
-	for (UMaterialExpression* Expression : Material->GetExpressions())
+	// Try matching by parameter name for parameter expressions, then by a
+	// function input or output name
+	for (UMaterialExpression* Expression : Expressions)
 	{
 		if (!Expression) continue;
+		if (const UMaterialExpressionFunctionInput* In = Cast<UMaterialExpressionFunctionInput>(Expression))
+		{
+			if (In->InputName.ToString() == ExpressionName) return Expression;
+			continue;
+		}
+		if (const UMaterialExpressionFunctionOutput* Out = Cast<UMaterialExpressionFunctionOutput>(Expression))
+		{
+			if (Out->OutputName.ToString() == ExpressionName) return Expression;
+			continue;
+		}
 		if (UMaterialExpressionScalarParameter* ScalarParam = Cast<UMaterialExpressionScalarParameter>(Expression))
 		{
 			if (ScalarParam->ParameterName.ToString() == ExpressionName)
@@ -3103,7 +3191,6 @@ UMaterialExpression* FMaterialHandlers::FindExpressionByName(UMaterial* Material
 	if (ExpressionName.IsNumeric())
 	{
 		int32 Idx = FCString::Atoi(*ExpressionName);
-		auto Expressions = Material->GetExpressions();
 		if (Idx >= 0 && Idx < Expressions.Num())
 		{
 			return Expressions[Idx];
@@ -3115,7 +3202,7 @@ UMaterialExpression* FMaterialHandlers::FindExpressionByName(UMaterial* Material
 	// read those back via read_material_graph then pass them to delete; the
 	// previous code only matched class names or descriptions so the lookup
 	// failed and delete_expression cheerfully reported alreadyDeleted=true.
-	for (UMaterialExpression* Expression : Material->GetExpressions())
+	for (UMaterialExpression* Expression : Expressions)
 	{
 		if (Expression && Expression->GetName() == ExpressionName)
 		{
@@ -3320,21 +3407,18 @@ namespace
 // output type. Omit 'code' (and 'inputs') to read the current node state.
 TSharedPtr<FJsonValue> FMaterialHandlers::SetCustomExpression(const TSharedPtr<FJsonObject>& Params)
 {
-	FString MaterialPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("materialPath"), TEXT("path"), MaterialPath)) return Err;
-	if (MaterialPath.IsEmpty()) Params->TryGetStringField(TEXT("assetPath"), MaterialPath);
-	if (MaterialPath.IsEmpty()) return MCPError(TEXT("Missing required parameter 'materialPath'"));
+	// #1138: functionPath targets a Custom node inside a MaterialFunction.
+	FMaterialGraphTarget Target;
+	if (auto Err = ResolveMaterialGraphTarget(Params, Target)) return Err;
+	const FString MaterialPath = Target.GetPathName();
 
 	int32 ExpressionIndex = -1;
 	if (!Params->TryGetNumberField(TEXT("expressionIndex"), ExpressionIndex))
 	{
-		return MCPError(TEXT("Missing required parameter 'expressionIndex' (index from list_expressions)"));
+		return MCPError(TEXT("Missing required parameter 'expressionIndex' (index from list_expressions, or list_function_expressions for a MaterialFunction)"));
 	}
 
-	UMaterial* Material = LoadMaterialFromPath(MaterialPath);
-	if (!Material) return MCPError(FString::Printf(TEXT("Failed to load material at '%s'"), *MaterialPath));
-
-	auto Expressions = Material->GetExpressions();
+	auto Expressions = Target.GetExpressions();
 	if (ExpressionIndex < 0 || ExpressionIndex >= Expressions.Num())
 	{
 		return MCPError(FString::Printf(TEXT("Expression index %d out of range (0-%d)"), ExpressionIndex, Expressions.Num() - 1));
@@ -3383,7 +3467,6 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetCustomExpression(const TSharedPtr<F
 	FString Code;
 	if (Params->TryGetStringField(TEXT("code"), Code) && Code != PreviousCode)
 	{
-		Material->PreEditChange(nullptr);
 		Custom->Code = Code;
 		bChanged = true;
 	}
@@ -3436,15 +3519,15 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetCustomExpression(const TSharedPtr<F
 	if (bChanged)
 	{
 		Custom->PostEditChange();
-		Material->PostEditChange();
-		Material->MarkPackageDirty();
-		SaveAssetPackage(Material);
+		Target.PostEdit();
+		Target.GetAsset()->MarkPackageDirty();
+		SaveAssetPackage(Target.GetAsset());
 	}
 
 	auto Result = MCPSuccess();
 	if (bChanged) MCPSetUpdated(Result);
 	else Result->SetBoolField(TEXT("unchanged"), true);
-	Result->SetStringField(TEXT("materialPath"), MaterialPath);
+	Result->SetStringField(Target.GetPathKey(), MaterialPath);
 	Result->SetNumberField(TEXT("expressionIndex"), ExpressionIndex);
 	Result->SetStringField(TEXT("code"), Custom->Code);
 	Result->SetStringField(TEXT("description"), Custom->Description);
@@ -3461,7 +3544,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetCustomExpression(const TSharedPtr<F
 		// Rollback: write the node back the way it was found. Every field this
 		// handler can set is a plain value it read before overwriting.
 		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
-		Payload->SetStringField(TEXT("materialPath"), MaterialPath);
+		Payload->SetStringField(Target.GetPathKey(), MaterialPath);
 		Payload->SetNumberField(TEXT("expressionIndex"), ExpressionIndex);
 		Payload->SetStringField(TEXT("code"), PreviousCode);
 		Payload->SetStringField(TEXT("description"), PreviousDescription);

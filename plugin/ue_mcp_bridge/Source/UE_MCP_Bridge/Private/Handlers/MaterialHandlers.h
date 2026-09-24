@@ -3,6 +3,32 @@
 #include "CoreMinimal.h"
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
+#include "UObject/ObjectPtr.h"
+#include "Containers/ArrayView.h"
+
+class UObject;
+class UMaterial;
+class UMaterialFunction;
+class UMaterialExpression;
+
+/** A Material or a MaterialFunction whose expression graph a handler edits.
+ *  Exactly one of the two pointers is set once resolved (#1138). */
+struct FMaterialGraphTarget
+{
+	UMaterial* Material = nullptr;
+	UMaterialFunction* Function = nullptr;
+
+	UObject* GetAsset() const;
+	FString GetPathName() const;
+	/** The parameter that names this asset: materialPath or functionPath. */
+	const TCHAR* GetPathKey() const;
+	TConstArrayView<TObjectPtr<UMaterialExpression>> GetExpressions() const;
+	void PreEdit() const;
+	/** A material recompiles; a function propagates to every material using it. */
+	void PostEdit() const;
+	/** Close a PreEdit that changed nothing. */
+	void CancelEdit() const;
+};
 
 class FMaterialHandlers
 {
@@ -67,6 +93,19 @@ private:
 
 	// Helper to find an expression by name (description or class) within a material
 	static UMaterialExpression* FindExpressionByName(UMaterial* Material, const FString& ExpressionName);
+	// Same lookup over any expression list, e.g. a MaterialFunction's. Also
+	// matches FunctionInput/FunctionOutput names.
+	static UMaterialExpression* FindExpressionInList(TConstArrayView<TObjectPtr<UMaterialExpression>> Expressions, const FString& ExpressionName);
+
+	// Resolve the graph an expression edit targets: functionPath (or
+	// materialFunctionPath) names a UMaterialFunction; materialPath, path or
+	// assetPath names a UMaterial, or a UMaterialFunction. Returns an error
+	// response on failure, nullptr on success.
+	static TSharedPtr<FJsonValue> ResolveMaterialGraphTarget(const TSharedPtr<FJsonObject>& Params, FMaterialGraphTarget& OutTarget);
+
+	// Expression class from a short name ("Multiply"), a class name
+	// ("MaterialExpressionMultiply"), a U-prefixed name or a /Script path.
+	static UClass* ResolveExpressionClass(const FString& ExpressionType);
 
 	// Shared paged expression walk for list_material_expressions and
 	// read_material_graph. ActionName is the cursor collection identity.
@@ -103,6 +142,8 @@ private:
 	static TSharedPtr<FJsonValue> AddMaterialFunctionExpression(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ConnectMaterialFunctionExpressions(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ListMaterialFunctionExpressions(const TSharedPtr<FJsonObject>& Params);
+	// #1138: delete_material_expression's MaterialFunction branch.
+	static TSharedPtr<FJsonValue> DeleteFunctionExpression(UMaterialFunction* Function, UMaterialExpression* Expression, const FString& ExpressionName);
 
 	// Runtime Virtual Textures, in MaterialHandlers_RVT.cpp. Every SETTING on
 	// a URuntimeVirtualTexture, on its component and on a landscape's virtual
