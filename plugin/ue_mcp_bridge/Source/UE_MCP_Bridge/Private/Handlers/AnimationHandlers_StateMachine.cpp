@@ -589,6 +589,26 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddTransition(const TSharedPtr<FJsonO
 	FString ToState;
 	if (auto Err = RequireString(Params, TEXT("toState"), ToState)) return Err;
 
+	// Optional blend settings, written the same way set_transition_blend writes them.
+	double BlendDuration = 0.0;
+	const bool bHasBlendDuration = Params->TryGetNumberField(TEXT("blendDuration"), BlendDuration);
+	if (bHasBlendDuration && BlendDuration < 0.0)
+	{
+		return MCPError(FString::Printf(TEXT("blendDuration must be >= 0 (got %g)"), BlendDuration));
+	}
+	FString BlendLogic;
+	const bool bHasBlendLogic = Params->TryGetStringField(TEXT("blendLogic"), BlendLogic);
+	const bool bInertialization = bHasBlendLogic && BlendLogic.Equals(TEXT("Inertialization"), ESearchCase::IgnoreCase);
+	if (bHasBlendLogic && !bInertialization && !BlendLogic.Equals(TEXT("Standard"), ESearchCase::IgnoreCase))
+	{
+		return MCPError(FString::Printf(TEXT("blendLogic must be 'Standard' or 'Inertialization' (got '%s')"), *BlendLogic));
+	}
+	auto LogicName = [](ETransitionLogicType::Type Logic) -> const TCHAR*
+	{
+		return Logic == ETransitionLogicType::TLT_Inertialization ? TEXT("Inertialization")
+			: (Logic == ETransitionLogicType::TLT_Custom ? TEXT("Custom") : TEXT("Standard"));
+	};
+
 	UAnimBlueprint* AnimBP = LoadAnimBP(AssetPath);
 	if (!AnimBP)
 	{
@@ -634,6 +654,20 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddTransition(const TSharedPtr<FJsonO
 					ExistedRes->SetStringField(TEXT("stateMachineName"), SMName);
 					ExistedRes->SetStringField(TEXT("fromState"), FromState);
 					ExistedRes->SetStringField(TEXT("toState"), ToState);
+					ExistedRes->SetStringField(TEXT("transitionGuid"), ExistingTrans->NodeGuid.ToString());
+					ExistedRes->SetNumberField(TEXT("blendDuration"), ExistingTrans->CrossfadeDuration);
+					ExistedRes->SetStringField(TEXT("blendLogic"), LogicName(ExistingTrans->LogicType));
+					// An existing transition is not rewritten here; blend changes go through set_transition_blend.
+					const bool bDurationDiffers = bHasBlendDuration
+						&& !FMath::IsNearlyEqual(static_cast<double>(ExistingTrans->CrossfadeDuration), BlendDuration);
+					const bool bLogicDiffers = bHasBlendLogic
+						&& (bInertialization != (ExistingTrans->LogicType == ETransitionLogicType::TLT_Inertialization)
+							|| ExistingTrans->LogicType == ETransitionLogicType::TLT_Custom);
+					if (bDurationDiffers || bLogicDiffers)
+					{
+						ExistedRes->SetStringField(TEXT("warning"),
+							TEXT("The transition already existed and was left as it is, so the requested blendDuration/blendLogic were not applied. Use set_transition_blend to change them."));
+					}
 					return MCPResult(ExistedRes);
 				}
 			}
@@ -666,6 +700,23 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddTransition(const TSharedPtr<FJsonO
 		TransOut->MakeLinkTo(ToIn);
 	}
 
+	if (bHasBlendDuration)
+	{
+		TransNode->CrossfadeDuration = static_cast<float>(BlendDuration);
+	}
+	if (bHasBlendLogic)
+	{
+		if (bInertialization)
+		{
+			TransNode->BlendMode = EAlphaBlendOption::Linear;
+			TransNode->LogicType = ETransitionLogicType::TLT_Inertialization;
+		}
+		else
+		{
+			TransNode->LogicType = ETransitionLogicType::TLT_StandardBlend;
+		}
+	}
+
 	CompileAndSave(AnimBP);
 
 	auto Result = MCPSuccess();
@@ -674,6 +725,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddTransition(const TSharedPtr<FJsonO
 	Result->SetStringField(TEXT("stateMachineName"), SMName);
 	Result->SetStringField(TEXT("fromState"), FromState);
 	Result->SetStringField(TEXT("toState"), ToState);
+	// Read back from the node so the caller sees the effective values, defaults included.
+	Result->SetNumberField(TEXT("blendDuration"), TransNode->CrossfadeDuration);
+	Result->SetStringField(TEXT("blendLogic"), LogicName(TransNode->LogicType));
 	// #630: expose the transition node's stable GUID so callers can address it
 	// by handle (from/to state names are ambiguous when multiple transitions
 	// share endpoints).
