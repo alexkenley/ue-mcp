@@ -199,6 +199,7 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("import_static_mesh"), &ImportStaticMesh);
 	Registry.RegisterHandler(TEXT("import_skeletal_mesh"), &ImportSkeletalMesh);
 	Registry.RegisterHandler(TEXT("import_animation"), &ImportAnimation);
+	Registry.RegisterHandler(TEXT("import_file"), &ImportFile);
 
 	// Texture handlers
 	Registry.RegisterHandler(TEXT("import_texture"), &ImportTexture);

@@ -12,6 +12,7 @@
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
 #include "AssetImportTask.h"
+#include "Factories/Factory.h"
 #include "Factories/FbxFactory.h"
 #include "Factories/FbxImportUI.h"
 #include "Factories/FbxStaticMeshImportData.h"
@@ -745,6 +746,128 @@ TSharedPtr<FJsonValue> FAssetHandlers::ImportAnimation(const TSharedPtr<FJsonObj
 	if (ImportedPaths.Num() == 0)
 	{
 		Result->SetStringField(TEXT("error"), TEXT("Import task completed but no assets were produced"));
+	}
+
+	EmitImportedAssetsRollback(Result, ImportedPaths);
+
+	return MCPResult(Result);
+}
+
+// #1096: one import path for any factory, including ones a third-party plugin
+// ships. The factory class is resolved at runtime, so no module dependency.
+// factoryProperties is how a caller turns off a factory's own options dialog,
+// which unattended mode would otherwise cancel along with the import.
+TSharedPtr<FJsonValue> FAssetHandlers::ImportFile(const TSharedPtr<FJsonObject>& Params)
+{
+	FString FileName;
+	if (auto Err = RequireStringAlt(Params, TEXT("filename"), TEXT("filePath"), FileName)) return Err;
+
+	FString DestinationPath;
+	if (auto Err = RequireStringAlt(Params, TEXT("destinationPath"), TEXT("packagePath"), DestinationPath)) return Err;
+	DestinationPath.RemoveFromEnd(TEXT("/"));
+	if (MCPIsProtectedAssetPath(DestinationPath)) return MCPProtectedPathError(DestinationPath);
+
+	if (!FPaths::FileExists(FileName))
+	{
+		return MCPError(FString::Printf(TEXT("File not found: %s"), *FileName));
+	}
+
+	UFactory* Factory = nullptr;
+	const FString FactoryClassSpec = OptionalString(Params, TEXT("factoryClass"));
+	if (!FactoryClassSpec.IsEmpty())
+	{
+		UClass* FactoryClass = MCPResolveClassOfType(FactoryClassSpec, UFactory::StaticClass());
+		if (!FactoryClass) return MCPClassNotFoundError(FactoryClassSpec, TEXT("factoryClass"));
+		if (auto Err = MCPCheckClassUsable(FactoryClassSpec, FactoryClass, UFactory::StaticClass())) return Err;
+
+		Factory = NewObject<UFactory>(GetTransientPackage(), FactoryClass);
+		if (!Factory->bEditorImport)
+		{
+			return MCPError(FString::Printf(
+				TEXT("%s is not an import factory (bEditorImport is false), so it cannot read a source file."),
+				*FactoryClass->GetName()));
+		}
+
+		// Refused here rather than handed to AssetTools, which would fall back
+		// to another factory and report that one's result as this one's.
+		TArray<FString> Extensions;
+		Factory->GetSupportedFileExtensions(Extensions);
+		const FString Ext = FPaths::GetExtension(FileName);
+		bool bExtensionSupported = Extensions.Num() == 0;
+		for (const FString& Candidate : Extensions)
+		{
+			if (Candidate.Equals(Ext, ESearchCase::IgnoreCase)) { bExtensionSupported = true; break; }
+		}
+		if (!bExtensionSupported)
+		{
+			return MCPError(FString::Printf(TEXT("%s does not import .%s files. It accepts: %s"),
+				*FactoryClass->GetName(), *Ext, *FString::Join(Extensions, TEXT(", "))));
+		}
+	}
+	FGCRootScope FactoryRoot(Factory);
+
+	TArray<TSharedPtr<FJsonValue>> AppliedProperties;
+	const TSharedPtr<FJsonObject>* FactoryProperties = nullptr;
+	if (Params->TryGetObjectField(TEXT("factoryProperties"), FactoryProperties) && FactoryProperties)
+	{
+		if (!Factory)
+		{
+			return MCPError(TEXT("factoryProperties needs factoryClass: without a named factory there is no object to set them on."));
+		}
+		TArray<UObject*> Targets;
+		Targets.Add(Factory);
+		FString PropertiesError;
+		if (!MCPApplyImportSettings(Targets, *FactoryProperties, AppliedProperties, PropertiesError))
+		{
+			return MCPError(PropertiesError);
+		}
+	}
+
+	UAssetImportTask* Task = NewObject<UAssetImportTask>();
+	FGCRootScope TaskRoot(Task);
+	Task->bAutomated = OptionalBool(Params, TEXT("automated"), true);
+	Task->bReplaceExisting = OptionalBool(Params, TEXT("replaceExisting"), true);
+	Task->bSave = OptionalBool(Params, TEXT("save"), false);
+	Task->Filename = FileName;
+	Task->DestinationPath = DestinationPath;
+	Task->Factory = Factory; // null lets AssetTools pick by extension
+
+	FString AssetName;
+	if (!Params->TryGetStringField(TEXT("assetName"), AssetName))
+	{
+		Params->TryGetStringField(TEXT("name"), AssetName);
+	}
+	if (!AssetName.IsEmpty())
+	{
+		Task->DestinationName = AssetName;
+	}
+
+	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
+	TArray<UAssetImportTask*> Tasks;
+	Tasks.Add(Task);
+	AssetToolsModule.Get().ImportAssetTasks(Tasks);
+
+	TArray<TSharedPtr<FJsonValue>> ImportedPaths;
+	for (UObject* ImportedObj : Task->GetObjects())
+	{
+		if (ImportedObj) ImportedPaths.Add(MakeShared<FJsonValueString>(ImportedObj->GetPathName()));
+	}
+
+	auto Result = MCPSuccess();
+	if (ImportedPaths.Num() > 0) { MCPSetCreated(Result); }
+	Result->SetStringField(TEXT("filename"), FileName);
+	Result->SetStringField(TEXT("destinationPath"), DestinationPath);
+	Result->SetStringField(TEXT("factoryClass"), Factory ? Factory->GetClass()->GetPathName() : TEXT("auto"));
+	if (AppliedProperties.Num() > 0) Result->SetArrayField(TEXT("factoryPropertiesApplied"), AppliedProperties);
+	Result->SetArrayField(TEXT("importedAssets"), ImportedPaths);
+	Result->SetNumberField(TEXT("importedCount"), ImportedPaths.Num());
+	Result->SetBoolField(TEXT("success"), ImportedPaths.Num() > 0);
+	if (ImportedPaths.Num() == 0)
+	{
+		Result->SetStringField(TEXT("error"),
+			TEXT("Import task completed but no assets were produced. A factory that raises its own options dialog is cancelled in ")
+			TEXT("unattended mode: set the property that makes it use the supplied options through factoryProperties. ")
+			TEXT("The output log carries the factory's reason."));
 	}
 
 	EmitImportedAssetsRollback(Result, ImportedPaths);

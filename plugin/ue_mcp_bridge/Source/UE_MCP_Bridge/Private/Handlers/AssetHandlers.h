@@ -118,6 +118,8 @@ private:
 	static TSharedPtr<FJsonValue> ReadClothData(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetClothConfig(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ImportAnimation(const TSharedPtr<FJsonObject>& Params);
+	// #1096: any source file through a chosen UFactory, unattended.
+	static TSharedPtr<FJsonValue> ImportFile(const TSharedPtr<FJsonObject>& Params);
 
 	// Mesh material handlers
 	static TSharedPtr<FJsonValue> SetMeshMaterial(const TSharedPtr<FJsonObject>& Params);
