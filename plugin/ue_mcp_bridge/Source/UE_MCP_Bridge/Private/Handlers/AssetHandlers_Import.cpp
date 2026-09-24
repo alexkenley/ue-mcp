@@ -209,6 +209,75 @@ namespace
 			ImportedPaths.Num()));
 	}
 
+	/** Write every field of Settings onto the first target that has a property
+	 *  by that name. Keys are UPROPERTY names or dotted paths; a bool may drop
+	 *  its "b" prefix (snapToClosestFrameBoundary). Any key that matches nothing,
+	 *  or any value that does not convert, fails the whole call before import. */
+	bool MCPApplyImportSettings(
+		const TArray<UObject*>& Targets,
+		const TSharedPtr<FJsonObject>& Settings,
+		TArray<TSharedPtr<FJsonValue>>& OutApplied,
+		FString& OutError)
+	{
+		if (!Settings.IsValid()) return true;
+		for (const auto& Pair : Settings->Values)
+		{
+			// The key type is not FString on every supported engine.
+			const FString Key(*Pair.Key);
+			TArray<FString> Names;
+			Names.Add(Key);
+			if (!Key.Contains(TEXT(".")) && !Key.StartsWith(TEXT("b"), ESearchCase::CaseSensitive))
+			{
+				Names.Add(TEXT("b") + Key);
+			}
+
+			bool bApplied = false;
+			for (UObject* Target : Targets)
+			{
+				if (!Target || bApplied) continue;
+				for (const FString& Name : Names)
+				{
+					FProperty* Prop = nullptr;
+					void* ValueAddr = nullptr;
+					UObject* LeafOwner = nullptr;
+					FString ResolveError;
+					if (!MCPJsonProperty::ResolveDottedPath(Target, Name, Prop, ValueAddr, LeafOwner, ResolveError)) continue;
+					// The prefixed spelling only stands in for a bool.
+					if (Name != Key && !CastField<FBoolProperty>(Prop)) continue;
+
+					FString SetError;
+					if (!MCPJsonProperty::SetJsonOnProperty(Prop, ValueAddr, Pair.Value, SetError))
+					{
+						OutError = FString::Printf(TEXT("Setting '%s' on %s failed: %s"),
+							*Key, *Target->GetClass()->GetName(), *SetError);
+						return false;
+					}
+					TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+					Entry->SetStringField(TEXT("key"), Key);
+					Entry->SetStringField(TEXT("property"), Name);
+					Entry->SetStringField(TEXT("target"), Target->GetClass()->GetName());
+					OutApplied.Add(MakeShared<FJsonValueObject>(Entry));
+					bApplied = true;
+					break;
+				}
+			}
+
+			if (!bApplied)
+			{
+				TArray<FString> ClassNames;
+				for (UObject* Target : Targets)
+				{
+					if (Target) ClassNames.Add(Target->GetClass()->GetName());
+				}
+				OutError = FString::Printf(
+					TEXT("Unknown setting '%s': no property by that name on %s. Keys are UPROPERTY names or dotted paths (reflection(reflect_class) lists them). Nothing was imported."),
+					*Key, *FString::Join(ClassNames, TEXT(" or ")));
+				return false;
+			}
+		}
+		return true;
+	}
+
 	/** What a set_curvetable_keys replay does NOT carry back.
 	 *
 	 *  CurveKeysToJson emits time, value, interpMode and the two tangents.
@@ -607,6 +676,23 @@ TSharedPtr<FJsonValue> FAssetHandlers::ImportAnimation(const TSharedPtr<FJsonObj
 		ImportUI->AnimSequenceImportData->bRemoveRedundantKeys = bRemoveRedundantKeys;
 	}
 
+	// importSettings reaches every FbxAnimSequenceImportData field first, then
+	// FbxImportUI itself (#1134).
+	TArray<TSharedPtr<FJsonValue>> AppliedSettings;
+	const TSharedPtr<FJsonObject>* ImportSettings = nullptr;
+	if (Params->TryGetObjectField(TEXT("importSettings"), ImportSettings) && ImportSettings)
+	{
+		UObject* AnimData = ImportUI->AnimSequenceImportData;
+		TArray<UObject*> Targets;
+		Targets.Add(AnimData);
+		Targets.Add(ImportUI);
+		FString SettingsError;
+		if (!MCPApplyImportSettings(Targets, *ImportSettings, AppliedSettings, SettingsError))
+		{
+			return MCPError(SettingsError);
+		}
+	}
+
 	FbxFactory->ImportUI = ImportUI;
 
 	UAssetImportTask* Task = NewObject<UAssetImportTask>();
@@ -652,6 +738,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::ImportAnimation(const TSharedPtr<FJsonObj
 	Result->SetStringField(TEXT("filename"), FileName);
 	Result->SetStringField(TEXT("skeletonPath"), SkeletonPath);
 	Result->SetStringField(TEXT("destinationPath"), DestinationPath);
+	if (AppliedSettings.Num() > 0) Result->SetArrayField(TEXT("importSettingsApplied"), AppliedSettings);
 	Result->SetArrayField(TEXT("importedAssets"), ImportedPaths);
 	Result->SetNumberField(TEXT("importedCount"), ImportedPaths.Num());
 	Result->SetBoolField(TEXT("success"), ImportedPaths.Num() > 0);
