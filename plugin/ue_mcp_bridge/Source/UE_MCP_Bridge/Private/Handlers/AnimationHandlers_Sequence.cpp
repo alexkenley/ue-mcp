@@ -13,6 +13,7 @@
 #include "AnimationModifiersAssetUserData.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimSequenceBase.h"
+#include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "Animation/AnimComposite.h"
 #include "Animation/AnimData/IAnimationDataModel.h"
 #include "Animation/AnimCurveTypes.h"
