@@ -857,6 +857,8 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetComponentTree(const TSharedPtr<FJsonOb
 
 	const bool bIncludeProperties = OptionalBool(Params, TEXT("includeProperties"));
 	const FString PropertyFilter = OptionalString(Params, TEXT("componentClass"));
+	// #1113: address one component by instance name (case-insensitive).
+	const FString ComponentNameFilter = OptionalString(Params, TEXT("componentName"));
 
 	TArray<UActorComponent*> Components;
 	Actor->GetComponents(Components);
@@ -866,6 +868,7 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetComponentTree(const TSharedPtr<FJsonOb
 	{
 		if (!Comp) continue;
 		if (!PropertyFilter.IsEmpty() && !Comp->GetClass()->GetName().Contains(PropertyFilter, ESearchCase::IgnoreCase)) continue;
+		if (!ComponentNameFilter.IsEmpty() && !Comp->GetName().Equals(ComponentNameFilter, ESearchCase::IgnoreCase)) continue;
 
 		TSharedPtr<FJsonObject> C = MakeShared<FJsonObject>();
 		C->SetStringField(TEXT("name"), Comp->GetName());
@@ -2639,8 +2642,15 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetActorMaterial(const TSharedPtr<FJsonOb
 }
 TSharedPtr<FJsonValue> FLevelHandlers::GetActorsByClass(const TSharedPtr<FJsonObject>& Params)
 {
-	FString ClassName;
-	if (auto Err = RequireString(Params, TEXT("className"), ClassName)) return Err;
+	// #1113: labelPrefix is a case-sensitive prefix over the editor label, and
+	// with it className may be omitted to match every actor class.
+	const FString LabelPrefix = OptionalString(Params, TEXT("labelPrefix"));
+	FString ClassName = OptionalString(Params, TEXT("className"));
+	if (ClassName.IsEmpty() && LabelPrefix.IsEmpty())
+	{
+		return MCPError(TEXT("Pass className, labelPrefix, or both"));
+	}
+	if (ClassName.IsEmpty()) ClassName = TEXT("Actor");
 
 	FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));
 	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
@@ -2670,6 +2680,7 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetActorsByClass(const TSharedPtr<FJsonOb
 	{
 		AActor* A = *It;
 		if (!A) continue;
+		if (!LabelPrefix.IsEmpty() && !A->GetActorLabel().StartsWith(LabelPrefix, ESearchCase::CaseSensitive)) continue;
 		FString CName = A->GetClass()->GetName();
 		const bool bMatch = TargetClass
 			? A->GetClass()->IsChildOf(TargetClass)
