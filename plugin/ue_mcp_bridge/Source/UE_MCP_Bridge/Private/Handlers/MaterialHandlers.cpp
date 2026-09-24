@@ -11,6 +11,10 @@
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialFunction.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
+#include "Components/PrimitiveComponent.h"
 #include "Materials/MaterialExpressionFunctionInput.h"
 #include "Materials/MaterialExpressionFunctionOutput.h"
 #include "StaticParameterSet.h"
@@ -67,6 +71,7 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("create_material_instance"), &CreateMaterialInstance);
 	Registry.RegisterHandler(TEXT("set_material_parameter"), &SetMaterialParameter);
 	Registry.RegisterHandler(TEXT("read_material_instance"), &ReadMaterialInstance);
+	Registry.RegisterHandler(TEXT("read_material_parameter_collection"), &ReadMaterialParameterCollection);
 	Registry.RegisterHandler(TEXT("set_material_instance_parent"), &SetMaterialInstanceParent);
 	Registry.RegisterHandler(TEXT("batch_set_material_instances"), &BatchSetInstances);
 	Registry.RegisterHandler(TEXT("clear_material_instance_parameters"), &ClearMaterialInstanceParameters);
@@ -763,6 +768,78 @@ namespace
 			Result->SetObjectField(TEXT("overrideCounts"), MaterialInstanceOverrideCounts(Constant));
 			Result->SetNumberField(TEXT("overrideCount"), CountTotalMaterialInstanceOverrides(Constant));
 		}
+	}
+
+	/** Material, then each parent up to the base UMaterial. */
+	TArray<TSharedPtr<FJsonValue>> MaterialParentChainToJson(UMaterialInterface* Material)
+	{
+		TArray<TSharedPtr<FJsonValue>> Chain;
+		TSet<UMaterialInterface*> Seen;
+		for (UMaterialInterface* Link = Material; Link && !Seen.Contains(Link); )
+		{
+			Seen.Add(Link);
+			TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+			Obj->SetStringField(TEXT("name"), Link->GetName());
+			Obj->SetStringField(TEXT("path"), Link->GetPathName());
+			Obj->SetStringField(TEXT("class"), Link->GetClass()->GetName());
+			Chain.Add(MakeShared<FJsonValueObject>(Obj));
+			UMaterialInstance* AsInstance = Cast<UMaterialInstance>(Link);
+			Link = AsInstance ? AsInstance->Parent.Get() : nullptr;
+		}
+		return Chain;
+	}
+
+	/** Everything read_material_instance reports about one material, asset or runtime. */
+	void WriteMaterialInstanceRead(TSharedPtr<FJsonObject> Result, UMaterialInterface* Material)
+	{
+		UMaterialInstance* Instance = Cast<UMaterialInstance>(Material);
+		if (UMaterialInstanceConstant* Constant = Cast<UMaterialInstanceConstant>(Material))
+		{
+			SetMaterialInstanceSummaryFields(Result, Constant);
+			Result->SetStringField(TEXT("assetType"), Constant->GetClass()->GetName());
+		}
+		else
+		{
+			SetMaterialInterfaceIdentityFields(Result, Material);
+		}
+		Result->SetBoolField(TEXT("isInstance"), Instance != nullptr);
+		Result->SetBoolField(TEXT("isDynamic"), Material->IsA<UMaterialInstanceDynamic>());
+		Result->SetBoolField(TEXT("isTransient"), Material->HasAnyFlags(RF_Transient) || Material->GetOutermost() == GetTransientPackage());
+		Result->SetArrayField(TEXT("parentChain"), MaterialParentChainToJson(Material));
+
+		TArray<TSharedPtr<FJsonValue>> ScalarOverrides;
+		TArray<TSharedPtr<FJsonValue>> VectorOverrides;
+		TArray<TSharedPtr<FJsonValue>> TextureOverrides;
+		if (Instance)
+		{
+			for (const FScalarParameterValue& Parameter : Instance->ScalarParameterValues)
+			{
+				TSharedPtr<FJsonObject> Obj = MaterialParameterInfoToJson(Parameter.ParameterInfo);
+				Obj->SetNumberField(TEXT("value"), Parameter.ParameterValue);
+				Obj->SetStringField(TEXT("expressionGuid"), Parameter.ExpressionGUID.ToString(EGuidFormats::DigitsWithHyphens));
+				ScalarOverrides.Add(MakeShared<FJsonValueObject>(Obj));
+			}
+			for (const FVectorParameterValue& Parameter : Instance->VectorParameterValues)
+			{
+				TSharedPtr<FJsonObject> Obj = MaterialParameterInfoToJson(Parameter.ParameterInfo);
+				Obj->SetObjectField(TEXT("value"), LinearColorToJson(Parameter.ParameterValue));
+				Obj->SetStringField(TEXT("expressionGuid"), Parameter.ExpressionGUID.ToString(EGuidFormats::DigitsWithHyphens));
+				VectorOverrides.Add(MakeShared<FJsonValueObject>(Obj));
+			}
+			for (const FTextureParameterValue& Parameter : Instance->TextureParameterValues)
+			{
+				TSharedPtr<FJsonObject> Obj = MaterialParameterInfoToJson(Parameter.ParameterInfo);
+				Obj->SetStringField(TEXT("value"), Parameter.ParameterValue ? Parameter.ParameterValue->GetPathName() : FString());
+				Obj->SetStringField(TEXT("expressionGuid"), Parameter.ExpressionGUID.ToString(EGuidFormats::DigitsWithHyphens));
+				TextureOverrides.Add(MakeShared<FJsonValueObject>(Obj));
+			}
+		}
+		Result->SetArrayField(TEXT("scalarOverrides"), ScalarOverrides);
+		Result->SetArrayField(TEXT("vectorOverrides"), VectorOverrides);
+		Result->SetArrayField(TEXT("textureOverrides"), TextureOverrides);
+		Result->SetArrayField(TEXT("staticSwitches"), MaterialStaticSwitchesToJson(Material));
+		// Effective values: what the material renders with, override or inherited.
+		AddMaterialInterfaceParameters(Result, Material);
 	}
 }
 
@@ -2234,48 +2311,167 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialParameter(const TSharedPtr<
 
 TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterialInstance(const TSharedPtr<FJsonObject>& Params)
 {
-	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	FString AssetPath = OptionalString(Params, TEXT("assetPath"));
+	if (AssetPath.IsEmpty()) AssetPath = OptionalString(Params, TEXT("path"));
 
-	UMaterialInstanceConstant* Instance = LoadMaterialInstanceFromPath(AssetPath);
-	if (!Instance)
+	// #1114: a material on a placed component, including a transient
+	// MaterialInstanceDynamic created at runtime in PIE.
+	if (AssetPath.IsEmpty() && (Params->HasField(TEXT("actorLabel")) || Params->HasField(TEXT("actorPath"))))
 	{
-		return MCPError(FString::Printf(TEXT("Failed to load MaterialInstanceConstant at '%s'"), *AssetPath));
+		return ReadComponentMaterial(Params);
+	}
+	if (AssetPath.IsEmpty())
+	{
+		return MCPError(TEXT("Missing required parameter 'assetPath' (or 'path'). To read a material on a placed component, pass actorLabel or actorPath with componentName?, slotIndex? or slotName?, and world? (editor|pie|auto)."));
 	}
 
-	TArray<TSharedPtr<FJsonValue>> ScalarOverrides;
-	for (const FScalarParameterValue& Parameter : Instance->ScalarParameterValues)
+	UMaterialInterface* Material = LoadAssetByPath<UMaterialInterface>(AssetPath);
+	if (!Cast<UMaterialInstance>(Material))
 	{
-		TSharedPtr<FJsonObject> Obj = MaterialParameterInfoToJson(Parameter.ParameterInfo);
-		Obj->SetNumberField(TEXT("value"), Parameter.ParameterValue);
-		Obj->SetStringField(TEXT("expressionGuid"), Parameter.ExpressionGUID.ToString(EGuidFormats::DigitsWithHyphens));
-		ScalarOverrides.Add(MakeShared<FJsonValueObject>(Obj));
-	}
-
-	TArray<TSharedPtr<FJsonValue>> VectorOverrides;
-	for (const FVectorParameterValue& Parameter : Instance->VectorParameterValues)
-	{
-		TSharedPtr<FJsonObject> Obj = MaterialParameterInfoToJson(Parameter.ParameterInfo);
-		Obj->SetObjectField(TEXT("value"), LinearColorToJson(Parameter.ParameterValue));
-		Obj->SetStringField(TEXT("expressionGuid"), Parameter.ExpressionGUID.ToString(EGuidFormats::DigitsWithHyphens));
-		VectorOverrides.Add(MakeShared<FJsonValueObject>(Obj));
-	}
-
-	TArray<TSharedPtr<FJsonValue>> TextureOverrides;
-	for (const FTextureParameterValue& Parameter : Instance->TextureParameterValues)
-	{
-		TSharedPtr<FJsonObject> Obj = MaterialParameterInfoToJson(Parameter.ParameterInfo);
-		Obj->SetStringField(TEXT("value"), Parameter.ParameterValue ? Parameter.ParameterValue->GetPathName() : FString());
-		Obj->SetStringField(TEXT("expressionGuid"), Parameter.ExpressionGUID.ToString(EGuidFormats::DigitsWithHyphens));
-		TextureOverrides.Add(MakeShared<FJsonValueObject>(Obj));
+		return MCPAssetLoadError(AssetPath, TEXT("MaterialInstance"));
 	}
 
 	auto Result = MCPSuccess();
-	SetMaterialInstanceSummaryFields(Result, Instance);
-	Result->SetArrayField(TEXT("scalarOverrides"), ScalarOverrides);
-	Result->SetArrayField(TEXT("vectorOverrides"), VectorOverrides);
-	Result->SetArrayField(TEXT("textureOverrides"), TextureOverrides);
-	Result->SetArrayField(TEXT("staticSwitches"), MaterialStaticSwitchesToJson(Instance));
+	WriteMaterialInstanceRead(Result, Material);
+	return MCPResult(Result);
+}
+
+TSharedPtr<FJsonValue> FMaterialHandlers::ReadComponentMaterial(const TSharedPtr<FJsonObject>& Params)
+{
+	const FString Scope = OptionalString(Params, TEXT("world"), TEXT("auto"));
+	UWorld* World = ResolveWorldFromParams(Params, TEXT("auto"));
+	if (!World)
+	{
+		return MCPError(FString::Printf(TEXT("No %s world is available. Start PIE first, or pass world=editor."), *Scope));
+	}
+	const bool bIsPlayWorld = World->WorldType == EWorldType::PIE || World->WorldType == EWorldType::Game;
+
+	FMCPActorSelector Selector;
+	Selector.Match = EMCPActorMatch::LabelOrName;
+	Selector.WorldLabel = bIsPlayWorld ? TEXT("PIE") : TEXT("editor");
+	TSharedPtr<FJsonValue> ActorError;
+	AActor* Actor = MCPResolveActor(World, Params, ActorError, Selector);
+	if (!Actor) return ActorError;
+
+	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
+	TArray<UPrimitiveComponent*> Components;
+	Actor->GetComponents<UPrimitiveComponent>(Components);
+	UPrimitiveComponent* Component = nullptr;
+	TArray<FString> Candidates;
+	for (UPrimitiveComponent* Candidate : Components)
+	{
+		if (!Candidate || Candidate->GetNumMaterials() == 0) continue;
+		Candidates.Add(Candidate->GetName());
+		if (!Component && (ComponentName.IsEmpty() || Candidate->GetName() == ComponentName)) Component = Candidate;
+	}
+	if (!Component)
+	{
+		return MCPError(FString::Printf(TEXT("%s on actor '%s'. Components with material slots: [%s]"),
+			ComponentName.IsEmpty() ? TEXT("No component with material slots") : *FString::Printf(TEXT("No component named '%s' with material slots"), *ComponentName),
+			*Actor->GetActorLabel(), *FString::Join(Candidates, TEXT(", "))));
+	}
+
+	const TArray<FName> SlotNames = Component->GetMaterialSlotNames();
+	int32 SlotIndex = OptionalInt(Params, TEXT("slotIndex"), 0);
+	const FString SlotName = OptionalString(Params, TEXT("slotName"));
+	if (!SlotName.IsEmpty())
+	{
+		SlotIndex = Component->GetMaterialIndex(FName(*SlotName));
+		if (SlotIndex == INDEX_NONE)
+		{
+			TArray<FString> Names;
+			for (const FName& Name : SlotNames) Names.Add(Name.ToString());
+			return MCPError(FString::Printf(TEXT("No material slot '%s' on %s. Slots: [%s]"), *SlotName, *Component->GetName(), *FString::Join(Names, TEXT(", "))));
+		}
+	}
+	const int32 NumMaterials = Component->GetNumMaterials();
+	if (SlotIndex < 0 || SlotIndex >= NumMaterials)
+	{
+		return MCPError(FString::Printf(TEXT("slotIndex %d out of range for %s (0-%d)"), SlotIndex, *Component->GetName(), NumMaterials - 1));
+	}
+
+	UMaterialInterface* Material = Component->GetMaterial(SlotIndex);
+	if (!Material)
+	{
+		return MCPError(FString::Printf(TEXT("Slot %d of %s holds no material"), SlotIndex, *Component->GetName()));
+	}
+
+	auto Result = MCPSuccess();
+	Result->SetStringField(TEXT("world"), bIsPlayWorld ? TEXT("pie") : TEXT("editor"));
+	Result->SetStringField(TEXT("actorLabel"), Actor->GetActorLabel());
+	Result->SetStringField(TEXT("actorPath"), Actor->GetPathName());
+	Result->SetStringField(TEXT("componentName"), Component->GetName());
+	Result->SetStringField(TEXT("componentClass"), Component->GetClass()->GetName());
+	Result->SetNumberField(TEXT("slotIndex"), SlotIndex);
+	if (SlotNames.IsValidIndex(SlotIndex)) Result->SetStringField(TEXT("slotName"), SlotNames[SlotIndex].ToString());
+	WriteMaterialInstanceRead(Result, Material);
+	return MCPResult(Result);
+}
+
+// #1116: a MaterialParameterCollection's stored defaults and, for a world,
+// the live values the materials in that world actually sample.
+TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterialParameterCollection(const TSharedPtr<FJsonObject>& Params)
+{
+	FString AssetPath;
+	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	UMaterialParameterCollection* Collection = LoadAssetByPath<UMaterialParameterCollection>(AssetPath);
+	if (!Collection) return MCPAssetLoadError(AssetPath, TEXT("MaterialParameterCollection"));
+
+	const FString Scope = OptionalString(Params, TEXT("world"));
+	UWorld* World = nullptr;
+	if (!Scope.IsEmpty())
+	{
+		World = ResolveWorldFromParams(Params, TEXT("editor"));
+		if (!World)
+		{
+			return MCPError(FString::Printf(TEXT("No %s world is available. Start PIE first, or pass world=editor."), *Scope));
+		}
+	}
+	UMaterialParameterCollectionInstance* Live = World ? World->GetParameterCollectionInstance(Collection) : nullptr;
+
+	TArray<TSharedPtr<FJsonValue>> Scalars;
+	for (const FCollectionScalarParameter& Parameter : Collection->ScalarParameters)
+	{
+		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+		Obj->SetStringField(TEXT("name"), Parameter.ParameterName.ToString());
+		Obj->SetStringField(TEXT("id"), Parameter.Id.ToString(EGuidFormats::DigitsWithHyphens));
+		Obj->SetNumberField(TEXT("defaultValue"), Parameter.DefaultValue);
+		float Value = 0.0f;
+		if (Live && Live->GetScalarParameterValue(Parameter.ParameterName, Value))
+		{
+			Obj->SetNumberField(TEXT("liveValue"), Value);
+			Obj->SetBoolField(TEXT("differsFromDefault"), Value != Parameter.DefaultValue);
+		}
+		Scalars.Add(MakeShared<FJsonValueObject>(Obj));
+	}
+
+	TArray<TSharedPtr<FJsonValue>> Vectors;
+	for (const FCollectionVectorParameter& Parameter : Collection->VectorParameters)
+	{
+		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+		Obj->SetStringField(TEXT("name"), Parameter.ParameterName.ToString());
+		Obj->SetStringField(TEXT("id"), Parameter.Id.ToString(EGuidFormats::DigitsWithHyphens));
+		Obj->SetObjectField(TEXT("defaultValue"), LinearColorToJson(Parameter.DefaultValue));
+		FLinearColor Value;
+		if (Live && Live->GetVectorParameterValue(Parameter.ParameterName, Value))
+		{
+			Obj->SetObjectField(TEXT("liveValue"), LinearColorToJson(Value));
+			Obj->SetBoolField(TEXT("differsFromDefault"), !Value.Equals(Parameter.DefaultValue, 0.0f));
+		}
+		Vectors.Add(MakeShared<FJsonValueObject>(Obj));
+	}
+
+	auto Result = MCPSuccess();
+	Result->SetStringField(TEXT("name"), Collection->GetName());
+	Result->SetStringField(TEXT("path"), Collection->GetPathName());
+	Result->SetArrayField(TEXT("scalarParameters"), Scalars);
+	Result->SetArrayField(TEXT("vectorParameters"), Vectors);
+	if (World)
+	{
+		const bool bIsPlayWorld = World->WorldType == EWorldType::PIE || World->WorldType == EWorldType::Game;
+		Result->SetStringField(TEXT("world"), bIsPlayWorld ? TEXT("pie") : TEXT("editor"));
+		Result->SetBoolField(TEXT("liveInstanceFound"), Live != nullptr);
+	}
 	return MCPResult(Result);
 }
 

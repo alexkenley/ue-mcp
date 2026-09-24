@@ -53,6 +53,11 @@ private:
 	static TSharedPtr<FJsonValue> CreateMaterialInstance(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetMaterialParameter(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ReadMaterialInstance(const TSharedPtr<FJsonObject>& Params);
+	// #1114: read_material_instance for a material on a placed component, in
+	// the editor or PIE world (runtime MaterialInstanceDynamic included).
+	static TSharedPtr<FJsonValue> ReadComponentMaterial(const TSharedPtr<FJsonObject>& Params);
+	// #1116: MPC defaults, plus live values from a world's collection instance.
+	static TSharedPtr<FJsonValue> ReadMaterialParameterCollection(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetMaterialInstanceParent(const TSharedPtr<FJsonObject>& Params);
 	// #594 batch reparent + reassign params across many Material Instances
 	static TSharedPtr<FJsonValue> BatchSetInstances(const TSharedPtr<FJsonObject>& Params);
