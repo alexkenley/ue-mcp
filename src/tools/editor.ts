@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { categoryTool, bp, directive, type ToolDef, type ToolContext } from "../types.js";
-import { startEditor, stopEditor, restartEditor, buildProject, resolveOwnedEditor, clientAdvertisesElicitation, resolveDialogMode } from "../editor-control.js";
+import { startEditor, stopEditor, restartEditor, buildProject, resolveOwnedEditor, connectedEditorOf, clientAdvertisesElicitation, resolveDialogMode } from "../editor-control.js";
 import { readEngineState, withBridgeSnapshot, type EngineSnapshot } from "../engine-observer.js";
 import { progressRenderingNote } from "../client-quirks.js";
 import { pushWorkaround, workaroundCount } from "../workaround-tracker.js";
@@ -89,7 +89,7 @@ export const editorTool: ToolDef = categoryTool(
       effect: "mutate",
       description: "Close Unreal Editor gracefully (asks the editor to quit itself via the bridge; never an OS kill). Acts only on the editor for the loaded project, resolved from the port lockfile that editor published at <project>/Saved/UE_MCP_Bridge/port.json. With no lockfile there is no port to aim at and the call refuses, naming the file it checked, rather than probing a default port that another project's editor could answer on (#819). With no editor of this project running there is nothing to quit, and the call fails saying so, with alreadyStopped=true marking that reason apart from a running editor that cannot be reached or refuses on unsaved work. A flow that stops the editor before building sets ignore_failure: true on the stop step. With more than one editor of this project open it closes the one the lockfile names and reports the rest under remainingInstances, so plain success never has to be read as 'no editor of this project is running' (#1072). Unsaved work: the quit is sent and the EDITOR decides. It refuses inside the engine and names every dirty package without scheduling a close, so nothing is lost and no quit is left pending; save them with editor(save_dirty), or close the editor yourself and answer its save prompt by hand. There is deliberately no flag that discards. This action has no dialog behaviour of its own: a modal blocks it exactly as it blocks every other action, refused by the same gate with the same fields. Read the dialog with editor(list_dialogs) and answer it with editor(respond_to_dialog). Params: none",
       handler: async (ctx: ToolContext) => {
-        return stopEditor(ctx.project.projectDir ?? undefined);
+        return stopEditor(ctx.project.projectDir ?? undefined, { connected: connectedEditorOf(ctx.bridge) });
       },
     },
     restart_editor: {
@@ -425,7 +425,11 @@ export const editorTool: ToolDef = categoryTool(
         // not perform at all, so the two actions gave opposite answers about
         // one editor. They now ask the same question. A refusal here means the
         // same thing it means there, in the same words.
-        const ownership = await resolveOwnedEditor(ctx.project.projectDir ?? null, ctx.project.projectPath ?? null);
+        const ownership = await resolveOwnedEditor(
+          ctx.project.projectDir ?? null,
+          ctx.project.projectPath ?? null,
+          connectedEditorOf(ctx.bridge),
+        );
         if (!ownership.owned) {
           // The description promises this action and stop_editor can never
           // disagree about one editor, and that covers the verdict as well as
