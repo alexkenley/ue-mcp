@@ -974,7 +974,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ConnectPins(const TSharedPtr<FJsonObj
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
 
-	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
+	FString GraphName = ReadGraphNameOrSelector(Params, TEXT("EventGraph"));
 
 	FString SourceNodeId;
 	if (auto Err = RequireStringAlt(Params, TEXT("sourceNodeId"), TEXT("sourceNode"), SourceNodeId)) return Err;
@@ -1269,7 +1269,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObje
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
 
-	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
+	FString GraphName = ReadGraphNameOrSelector(Params, TEXT("EventGraph"));
 
 	FString NodeId;
 	if (auto Err = RequireStringAlt(Params, TEXT("nodeId"), TEXT("nodeName"), NodeId)) return Err;
@@ -1636,7 +1636,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RefreshNode(const TSharedPtr<FJsonObj
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
 
-	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
+	FString GraphName = ReadGraphNameOrSelector(Params, TEXT("EventGraph"));
 
 	FString NodeId;
 	if (auto Err = RequireStringAlt(Params, TEXT("nodeId"), TEXT("nodeName"), NodeId)) return Err;
@@ -1781,7 +1781,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DisconnectPins(const TSharedPtr<FJson
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
 
-	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
+	FString GraphName = ReadGraphNameOrSelector(Params, TEXT("EventGraph"));
 
 	FString NodeId;
 	if (auto Err = RequireStringAlt(Params, TEXT("nodeId"), TEXT("nodeName"), NodeId)) return Err;
