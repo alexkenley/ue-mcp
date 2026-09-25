@@ -17,7 +17,7 @@ describe("animation handlers load assets through the shared resolver (#1108)", (
   it("reports notify duration and track on read_sequence", () => {
     const source = animationSources.find((s) => s.name === "AnimationHandlers_Sequence.cpp")!.source;
     const body = source.slice(
-      source.indexOf("FAnimationHandlers::ReadAnimSequence("),
+      source.indexOf("// read_anim_sequence"),
       source.indexOf("// scan_animation_tracks"),
     );
     expect(body).toContain("MCPLoadAssetObject(AssetPath)");
