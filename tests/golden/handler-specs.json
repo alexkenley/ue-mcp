@@ -1,5 +1,5 @@
 {
-  "handlerCount": 845,
+  "handlerCount": 855,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -6341,6 +6341,176 @@
         }
       ]
     },
+    "create_niagara_emitter": {
+      "category": "niagara",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Emitter asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new emitter (default /Game/VFX)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        },
+        {
+          "name": "templatePath",
+          "type": "string",
+          "required": false,
+          "description": "Emitter asset to copy as the starting point (default: the empty emitter with the standard modules and a sprite renderer)"
+        },
+        {
+          "name": "inherit",
+          "type": "boolean",
+          "required": false,
+          "description": "Make a child that tracks templatePath instead of a copy (default false)"
+        }
+      ]
+    },
+    "create_niagara_module_from_hlsl": {
+      "category": "niagara",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Module script asset name"
+        },
+        {
+          "name": "hlsl",
+          "type": "string",
+          "required": true,
+          "description": "Body of the module's CustomHLSL node; its pins are parsed from it"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new module (default /Game/VFX/Modules)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        },
+        {
+          "name": "inputs",
+          "type": "array",
+          "required": false,
+          "description": "Requested inputs, counted back as requestedInputs; the pins come from the HLSL body",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Pin name"
+            },
+            {
+              "name": "type",
+              "type": "string",
+              "required": false,
+              "description": "HLSL type (default float)"
+            }
+          ]
+        },
+        {
+          "name": "outputs",
+          "type": "array",
+          "required": false,
+          "description": "Requested outputs, counted back as requestedOutputs; the pins come from the HLSL body",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Pin name"
+            },
+            {
+              "name": "type",
+              "type": "string",
+              "required": false,
+              "description": "HLSL type (default float)"
+            }
+          ]
+        }
+      ],
+      "contractExempt": "Creates and saves a module script under the contract values; nothing it reads fails first"
+    },
+    "create_niagara_system": {
+      "category": "niagara",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "System asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new system (default /Game/VFX)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        }
+      ],
+      "contractExempt": "Creates and saves a system under the contract values; nothing it reads fails first"
+    },
+    "create_niagara_system_from_spec": {
+      "category": "niagara",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "System asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new system (default /Game/VFX)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        },
+        {
+          "name": "emitters",
+          "type": "array",
+          "required": false,
+          "description": "Emitters to add; one that does not load is skipped",
+          "items": "object",
+          "fields": [
+            {
+              "name": "path",
+              "type": "string",
+              "required": true,
+              "description": "NiagaraEmitter asset path, e.g. /Game/VFX/E_Fire"
+            }
+          ]
+        }
+      ],
+      "contractExempt": "Creates and saves a system under the contract values; nothing it reads fails first"
+    },
     "create_pcg_graph": {
       "category": "pcg",
       "params": [
@@ -6551,6 +6721,72 @@
           "description": "skip (default) returns an existing asset; error refuses"
         }
       ]
+    },
+    "create_scratch_module": {
+      "category": "niagara",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Module script asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new module (default /Game/VFX)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        },
+        {
+          "name": "inputs",
+          "type": "array",
+          "required": false,
+          "description": "Inputs declared on a pass-through CustomHLSL node",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Pin name"
+            },
+            {
+              "name": "type",
+              "type": "string",
+              "required": false,
+              "description": "HLSL type (default float)"
+            }
+          ]
+        },
+        {
+          "name": "outputs",
+          "type": "array",
+          "required": false,
+          "description": "Outputs declared on a pass-through CustomHLSL node",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Pin name"
+            },
+            {
+              "name": "type",
+              "type": "string",
+              "required": false,
+              "description": "HLSL type (default float)"
+            }
+          ]
+        }
+      ],
+      "contractExempt": "Creates and saves a module script under the contract values; nothing it reads fails first"
     },
     "create_sequence": {
       "category": "animation",
@@ -10200,6 +10436,60 @@
           "type": "number",
           "required": false,
           "description": "Emitter handle index, used when emitterName is omitted"
+        }
+      ]
+    },
+    "get_niagara_custom_hlsl": {
+      "category": "niagara",
+      "params": [
+        {
+          "name": "scriptPath",
+          "type": "string",
+          "required": false,
+          "description": "NiagaraScript asset holding the CustomHLSL node"
+        },
+        {
+          "name": "systemPath",
+          "type": "string",
+          "required": false,
+          "description": "NiagaraSystem whose emitter stack holds the CustomHLSL node"
+        },
+        {
+          "name": "stackContext",
+          "type": "string",
+          "required": false,
+          "description": "Stack of the addressed system graph: ParticleSpawn|ParticleUpdate|EmitterSpawn|EmitterUpdate (default ParticleUpdate)"
+        },
+        {
+          "name": "emitterName",
+          "type": "string",
+          "required": false,
+          "description": "Emitter handle name. Omit to address the emitter by emitterIndex"
+        },
+        {
+          "name": "emitterIndex",
+          "type": "number",
+          "required": false,
+          "description": "Emitter handle index, used when emitterName is omitted"
+        },
+        {
+          "name": "nodeIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Only this CustomHLSL node (default: every one in the graph)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "scriptPath"
+            ],
+            [
+              "systemPath"
+            ]
+          ]
         }
       ]
     },
@@ -15281,6 +15571,36 @@
           "type": "string",
           "required": false,
           "description": "Only this ZoneGraphData actor, by full object path"
+        }
+      ]
+    },
+    "reactivate_niagara": {
+      "category": "niagara",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Editor label of the actor holding the NiagaraComponent; a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
         }
       ]
     },
@@ -22520,6 +22840,66 @@
         }
       ]
     },
+    "set_niagara_custom_hlsl": {
+      "category": "niagara",
+      "params": [
+        {
+          "name": "hlsl",
+          "type": "string",
+          "required": true,
+          "description": "The new HLSL body"
+        },
+        {
+          "name": "scriptPath",
+          "type": "string",
+          "required": false,
+          "description": "NiagaraScript asset holding the CustomHLSL node"
+        },
+        {
+          "name": "systemPath",
+          "type": "string",
+          "required": false,
+          "description": "NiagaraSystem whose emitter stack holds the CustomHLSL node"
+        },
+        {
+          "name": "stackContext",
+          "type": "string",
+          "required": false,
+          "description": "Stack of the addressed system graph: ParticleSpawn|ParticleUpdate|EmitterSpawn|EmitterUpdate (default ParticleUpdate)"
+        },
+        {
+          "name": "emitterName",
+          "type": "string",
+          "required": false,
+          "description": "Emitter handle name. Omit to address the emitter by emitterIndex"
+        },
+        {
+          "name": "emitterIndex",
+          "type": "number",
+          "required": false,
+          "description": "Emitter handle index, used when emitterName is omitted"
+        },
+        {
+          "name": "nodeIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Which CustomHLSL node when the graph has several (default 0)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "scriptPath"
+            ],
+            [
+              "systemPath"
+            ]
+          ]
+        }
+      ]
+    },
     "set_niagara_dynamic_input": {
       "category": "niagara",
       "params": [
@@ -22605,6 +22985,132 @@
           "type": "number",
           "required": false,
           "description": "Emitter handle index, used when emitterName is omitted"
+        }
+      ]
+    },
+    "set_niagara_module_input": {
+      "category": "niagara",
+      "params": [
+        {
+          "name": "systemPath",
+          "type": "string",
+          "required": true,
+          "description": "NiagaraSystem asset path"
+        },
+        {
+          "name": "moduleName",
+          "type": "string",
+          "required": true,
+          "description": "Name of the module function call node"
+        },
+        {
+          "name": "inputName",
+          "type": "string",
+          "required": true,
+          "description": "Module input pin name"
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": true,
+          "description": "A scalar, [x,y,z], {x,y,z[,w]} or {r,g,b[,a]} (alpha defaults to 1); a gapped object, an empty array or a non-finite number is refused"
+        },
+        {
+          "name": "emitterName",
+          "type": "string",
+          "required": false,
+          "description": "Emitter handle name. Omit to address the emitter by emitterIndex"
+        },
+        {
+          "name": "emitterIndex",
+          "type": "number",
+          "required": false,
+          "description": "Emitter handle index, used when emitterName is omitted"
+        },
+        {
+          "name": "stackContext",
+          "type": "string",
+          "required": false,
+          "description": "ParticleSpawn|ParticleUpdate|EmitterSpawn|EmitterUpdate|all (default all)"
+        }
+      ]
+    },
+    "set_niagara_parameter": {
+      "category": "niagara",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Editor label of the actor holding the NiagaraComponent; a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        },
+        {
+          "name": "parameterName",
+          "type": "string",
+          "required": true,
+          "description": "User parameter name"
+        },
+        {
+          "name": "parameterType",
+          "type": "string",
+          "required": false,
+          "description": "float (default) | vector | bool | int"
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": false,
+          "description": "The value of a float, int or bool parameter"
+        },
+        {
+          "name": "valueX",
+          "type": "number",
+          "required": false,
+          "description": "X component of a vector parameter"
+        },
+        {
+          "name": "valueY",
+          "type": "number",
+          "required": false,
+          "description": "Y component of a vector parameter"
+        },
+        {
+          "name": "valueZ",
+          "type": "number",
+          "required": false,
+          "description": "Z component of a vector parameter"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        },
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "value"
+            ],
+            [
+              "valueX",
+              "valueY",
+              "valueZ"
+            ]
+          ]
         }
       ]
     },

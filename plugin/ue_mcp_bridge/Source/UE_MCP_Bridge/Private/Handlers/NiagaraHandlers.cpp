@@ -99,10 +99,9 @@ void FNiagaraHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 
 	// #1057: a handler registered with a spec declares its parameters here and
 	// nowhere else; the TS surface is generated from a recording of these.
-	// Unspecified: the create actions, which the contract test would see create
-	// an asset; reactivate, set_niagara_parameter and the custom HLSL pair,
-	// whose parameters are a required choice a spec cannot express yet; and
-	// set_niagara_module_input, whose TS mapper converts its value.
+	// The create actions other than create_niagara_emitter are contract-exempt:
+	// their values would create an asset before anything failed. The emitter's
+	// templatePath fails to load first.
 	using EType = EMCPParamType;
 	auto SystemPathParam = []()
 	{
@@ -152,6 +151,33 @@ void FNiagaraHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	{
 		return MCPParam::Optional(TEXT("rotation"), EType::Rotator, TEXT("World rotation {pitch,yaw,roll}"));
 	};
+	auto NameParam = [](const TCHAR* Description)
+	{
+		return MCPParam::Required(TEXT("name"), EType::String, Description);
+	};
+	auto PackagePathParam = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("packagePath"), EType::String, Description);
+	};
+	auto OnConflictParam = []()
+	{
+		return MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the asset exists: skip (default, report it) | error"));
+	};
+	auto PinListParam = [](const TCHAR* Name, const TCHAR* Description)
+	{
+		return MCPParam::Optional(Name, EType::Array, Description).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("name"), EType::String, TEXT("Pin name")),
+			MCPParam::OptionalField(TEXT("type"), EType::String, TEXT("HLSL type (default float)")),
+		});
+	};
+	const FMCPParamSpec ActorLabelParam = MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Editor label of the actor holding the NiagaraComponent; a label naming several actors is refused"));
+	const FMCPParamSpec ActorPathParam = MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path; the unambiguous selector"));
+	const FMCPSpecRules ActorChoice = MCPSpec::ExactlyOne({ { TEXT("actorLabel") }, { TEXT("actorPath") } });
+	// The custom HLSL pair address a graph by script asset, or by system + stack.
+	const FMCPParamSpec HlslScriptPathParam = MCPParam::Optional(TEXT("scriptPath"), EType::String, TEXT("NiagaraScript asset holding the CustomHLSL node"));
+	const FMCPParamSpec HlslSystemPathParam = MCPParam::Optional(TEXT("systemPath"), EType::String, TEXT("NiagaraSystem whose emitter stack holds the CustomHLSL node"));
+	const FMCPParamSpec HlslStackContextParam = MCPParam::Optional(TEXT("stackContext"), EType::String, TEXT("Stack of the addressed system graph: ParticleSpawn|ParticleUpdate|EmitterSpawn|EmitterUpdate (default ParticleUpdate)"));
+	const FMCPSpecRules HlslGraphChoice = MCPSpec::ExactlyOne({ { TEXT("scriptPath") }, { TEXT("systemPath") } });
 
 	Registry.RegisterHandler(TEXT("list_niagara_systems"), &ListNiagaraSystems, {
 		CursorParam(),
@@ -162,14 +188,25 @@ void FNiagaraHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		CursorParam(),
 		LimitParam(),
 	});
-	Registry.RegisterHandler(TEXT("create_niagara_system"), &CreateNiagaraSystem);
+	Registry.RegisterHandler(TEXT("create_niagara_system"), &CreateNiagaraSystem, {
+		NameParam(TEXT("System asset name")),
+		PackagePathParam(TEXT("Folder for the new system (default /Game/VFX)")),
+		OnConflictParam(),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a system under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("get_niagara_info"), &GetNiagaraInfo, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("NiagaraSystem asset path")).Alias(TEXT("path")),
 	});
 	Registry.RegisterHandler(TEXT("list_emitters_in_system"), &ListEmittersInSystem, {
 		SystemPathParam(),
 	});
-	Registry.RegisterHandler(TEXT("create_niagara_emitter"), &CreateNiagaraEmitter);
+	// The contract values' templatePath fails to load before anything is created.
+	Registry.RegisterHandler(TEXT("create_niagara_emitter"), &CreateNiagaraEmitter, {
+		NameParam(TEXT("Emitter asset name")),
+		PackagePathParam(TEXT("Folder for the new emitter (default /Game/VFX)")),
+		OnConflictParam(),
+		MCPParam::Optional(TEXT("templatePath"), EType::String, TEXT("Emitter asset to copy as the starting point (default: the empty emitter with the standard modules and a sprite renderer)")),
+		MCPParam::Optional(TEXT("inherit"), EType::Boolean, TEXT("Make a child that tracks templatePath instead of a copy (default false)")),
+	});
 	Registry.RegisterHandler(TEXT("spawn_niagara_at_location"), &SpawnNiagaraAtLocation, {
 		SystemPathParam(),
 		LocationParam(),
@@ -187,8 +224,19 @@ void FNiagaraHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		LabelParam(),
 		MCPParam::Optional(TEXT("activate"), EType::Boolean, TEXT("Activate the system on spawn (default true) (#537)")),
 	});
-	Registry.RegisterHandler(TEXT("reactivate_niagara"), &ReactivateNiagara);
-	Registry.RegisterHandler(TEXT("set_niagara_parameter"), &SetNiagaraParameter);
+	Registry.RegisterHandler(TEXT("reactivate_niagara"), &ReactivateNiagara, {
+		ActorLabelParam, ActorPathParam,
+	}, ActorChoice);
+	// Called once per branch of each choice by the contract test; the actor lookup fails first.
+	Registry.RegisterHandler(TEXT("set_niagara_parameter"), &SetNiagaraParameter, {
+		ActorLabelParam, ActorPathParam,
+		MCPParam::Required(TEXT("parameterName"), EType::String, TEXT("User parameter name")),
+		MCPParam::Optional(TEXT("parameterType"), EType::String, TEXT("float (default) | vector | bool | int")),
+		MCPParam::Optional(TEXT("value"), EType::Any, TEXT("The value of a float, int or bool parameter")),
+		MCPParam::Optional(TEXT("valueX"), EType::Number, TEXT("X component of a vector parameter")),
+		MCPParam::Optional(TEXT("valueY"), EType::Number, TEXT("Y component of a vector parameter")),
+		MCPParam::Optional(TEXT("valueZ"), EType::Number, TEXT("Z component of a vector parameter")),
+	}, ActorChoice.ExactlyOne({ { TEXT("value") }, { TEXT("valueX"), TEXT("valueY"), TEXT("valueZ") } }));
 	Registry.RegisterHandler(TEXT("add_emitter_to_system"), &AddEmitterToSystem, {
 		SystemPathParam(),
 		MCPParam::Required(TEXT("emitterPath"), EType::String, TEXT("NiagaraEmitter asset to add")),
@@ -232,7 +280,14 @@ void FNiagaraHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("inspect_data_interface"), &InspectDataInterface, {
 		SystemPathParam(),
 	});
-	Registry.RegisterHandler(TEXT("create_niagara_system_from_spec"), &CreateNiagaraSystemFromSpec);
+	Registry.RegisterHandler(TEXT("create_niagara_system_from_spec"), &CreateNiagaraSystemFromSpec, {
+		NameParam(TEXT("System asset name")),
+		PackagePathParam(TEXT("Folder for the new system (default /Game/VFX)")),
+		OnConflictParam(),
+		MCPParam::Optional(TEXT("emitters"), EType::Array, TEXT("Emitters to add; one that does not load is skipped")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("path"), EType::String, TEXT("NiagaraEmitter asset path, e.g. /Game/VFX/E_Fire")),
+		}),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a system under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("get_niagara_compiled_hlsl"), &GetCompiledHLSL, {
 		SystemPathParam(),
 		EmitterNameParam(),
@@ -250,7 +305,15 @@ void FNiagaraHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		StackFilterParam(),
 		ModuleFilterParam(),
 	});
-	Registry.RegisterHandler(TEXT("set_niagara_module_input"), &SetModuleInput);
+	Registry.RegisterHandler(TEXT("set_niagara_module_input"), &SetModuleInput, {
+		SystemPathParam(),
+		ModuleNameParam(),
+		MCPParam::Required(TEXT("inputName"), EType::String, TEXT("Module input pin name")),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("A scalar, [x,y,z], {x,y,z[,w]} or {r,g,b[,a]} (alpha defaults to 1); a gapped object, an empty array or a non-finite number is refused")),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+		StackFilterParam(),
+	});
 	Registry.RegisterHandler(TEXT("add_niagara_module"), &AddModule, {
 		SystemPathParam(),
 		MCPParam::Required(TEXT("moduleScript"), EType::String, TEXT("Stock module script path, e.g. /Niagara/Modules/Emitter/SpawnRate")),
@@ -309,8 +372,20 @@ void FNiagaraHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		EmitterNameParam(),
 		EmitterIndexParam(),
 	});
-	Registry.RegisterHandler(TEXT("get_niagara_custom_hlsl"), &GetCustomHlsl);
-	Registry.RegisterHandler(TEXT("set_niagara_custom_hlsl"), &SetCustomHlsl);
+	// Called once per branch by the contract test; the script or system load fails first.
+	Registry.RegisterHandler(TEXT("get_niagara_custom_hlsl"), &GetCustomHlsl, {
+		HlslScriptPathParam, HlslSystemPathParam, HlslStackContextParam,
+		EmitterNameParam(),
+		EmitterIndexParam(),
+		MCPParam::Optional(TEXT("nodeIndex"), EType::Integer, TEXT("Only this CustomHLSL node (default: every one in the graph)")),
+	}, HlslGraphChoice);
+	Registry.RegisterHandler(TEXT("set_niagara_custom_hlsl"), &SetCustomHlsl, {
+		MCPParam::Required(TEXT("hlsl"), EType::String, TEXT("The new HLSL body")),
+		HlslScriptPathParam, HlslSystemPathParam, HlslStackContextParam,
+		EmitterNameParam(),
+		EmitterIndexParam(),
+		MCPParam::Optional(TEXT("nodeIndex"), EType::Integer, TEXT("Which CustomHLSL node when the graph has several (default 0)")),
+	}, HlslGraphChoice);
 	Registry.RegisterHandler(TEXT("remove_niagara_module"), &RemoveModule, {
 		SystemPathParam(),
 		StackContextParam(),
@@ -350,9 +425,22 @@ void FNiagaraHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		EmitterIndexParam(),
 		StackFilterParam(),
 	});
-	Registry.RegisterHandler(TEXT("create_niagara_module_from_hlsl"), &CreateModuleFromHlsl);
+	Registry.RegisterHandler(TEXT("create_niagara_module_from_hlsl"), &CreateModuleFromHlsl, {
+		NameParam(TEXT("Module script asset name")),
+		MCPParam::Required(TEXT("hlsl"), EType::String, TEXT("Body of the module's CustomHLSL node; its pins are parsed from it")),
+		PackagePathParam(TEXT("Folder for the new module (default /Game/VFX/Modules)")),
+		OnConflictParam(),
+		PinListParam(TEXT("inputs"), TEXT("Requested inputs, counted back as requestedInputs; the pins come from the HLSL body")),
+		PinListParam(TEXT("outputs"), TEXT("Requested outputs, counted back as requestedOutputs; the pins come from the HLSL body")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a module script under the contract values; nothing it reads fails first")));
 	// #185: Create an empty scratch-pad-style module
-	Registry.RegisterHandler(TEXT("create_scratch_module"), &CreateScratchModule);
+	Registry.RegisterHandler(TEXT("create_scratch_module"), &CreateScratchModule, {
+		NameParam(TEXT("Module script asset name")),
+		PackagePathParam(TEXT("Folder for the new module (default /Game/VFX)")),
+		OnConflictParam(),
+		PinListParam(TEXT("inputs"), TEXT("Inputs declared on a pass-through CustomHLSL node")),
+		PinListParam(TEXT("outputs"), TEXT("Outputs declared on a pass-through CustomHLSL node")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a module script under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("compile_niagara_system"), &CompileSystem, {
 		SystemPathParam(),
 		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Recompile even when nothing looks dirty (default true)")),
@@ -546,6 +634,8 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::CreateNiagaraEmitter(const TSharedPtr<F
 
 	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/VFX"));
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	const FString TemplatePath = OptionalString(Params, TEXT("templatePath"));
+	const bool bInherit = OptionalBool(Params, TEXT("inherit"), false);
 
 	UClass* EmitterClass = FindObject<UClass>(nullptr, TEXT("/Script/Niagara.NiagaraEmitter"));
 	if (!EmitterClass)
@@ -570,8 +660,7 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::CreateNiagaraEmitter(const TSharedPtr<F
 	// does. The factory's copy path is the same one the content browser's
 	// "create from template" uses.
 	TStrongObjectPtr<UNiagaraEmitter> TemplateGuard;
-	const FString TemplatePath = OptionalString(Params, TEXT("templatePath"));
-	if (TemplatePath.IsEmpty() && OptionalBool(Params, TEXT("inherit"), false))
+	if (TemplatePath.IsEmpty() && bInherit)
 	{
 		return MCPError(TEXT("inherit=true needs a templatePath - there is nothing to inherit from otherwise."));
 	}
@@ -595,7 +684,7 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::CreateNiagaraEmitter(const TSharedPtr<F
 		// Copy rather than inherit: an inherited emitter tracks the template and
 		// refuses local edits to inherited modules, which is not what a caller
 		// asking for a starting point wants, and is not reversible from here.
-		Factory->bUseInheritance = OptionalBool(Params, TEXT("inherit"), false);
+		Factory->bUseInheritance = bInherit;
 	}
 
 	auto Created = MCPCreateAssetIdempotent<UObject>(Name, PackagePath, OnConflict, TEXT("NiagaraEmitter"), EmitterClass, Factory);
@@ -828,6 +917,8 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::SetNiagaraParameter(const TSharedPtr<FJ
 	if (auto Err = RequireString(Params, TEXT("parameterName"), ParameterName)) return Err;
 
 	FString ParameterType = OptionalString(Params, TEXT("parameterType"), TEXT("float"));
+	// Read by the branch parameterType selects, after the actor lookup.
+	MCPReadParamsAhead(Params, { TEXT("value"), TEXT("valueX"), TEXT("valueY"), TEXT("valueZ") });
 
 	REQUIRE_EDITOR_WORLD(World);
 
@@ -2136,9 +2227,142 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::ListModuleInputs(const TSharedPtr<FJson
 #endif
 }
 
+/**
+ * set_niagara_module_input's value as the text its parsers read: a scalar as
+ * written, [x,y,z] and {x,y,z[,w]} / {r,g,b[,a]} as comma-separated components
+ * ({r,g,b} gains an opaque alpha). A shape an input cannot parse is refused here
+ * rather than stringified, since an unparsable value used to fall through to a
+ * raw pin-default write that reported success.
+ */
+static TSharedPtr<FJsonValue> NiagaraModuleInputValueText(const TSharedPtr<FJsonObject>& Params, FString& OutText)
+{
+	const TSharedPtr<FJsonValue> Raw = TryGetParam(Params, TEXT("value"));
+	if (!Raw.IsValid() || Raw->Type == EJson::None || Raw->Type == EJson::Null)
+	{
+		return MCPError(TEXT("Missing required parameter 'value'"));
+	}
+
+	auto NumberText = [](double D)
+	{
+		FString Text = FString::Printf(TEXT("%.15g"), D);
+		if (FCString::Atod(*Text) != D) Text = FString::Printf(TEXT("%.17g"), D);
+		return Text;
+	};
+	// One scalar component. False for a non-scalar; a non-finite number is refused.
+	auto Scalar = [&NumberText](const TSharedPtr<FJsonValue>& V, FString& Out, TSharedPtr<FJsonValue>& OutError) -> bool
+	{
+		switch (V.IsValid() ? V->Type : EJson::None)
+		{
+		case EJson::Number:
+		{
+			const double D = V->AsNumber();
+			if (!FMath::IsFinite(D))
+			{
+				OutError = MCPError(TEXT("value must be a finite number"));
+				return false;
+			}
+			Out = NumberText(D);
+			return true;
+		}
+		case EJson::Boolean:
+			Out = V->AsBool() ? TEXT("true") : TEXT("false");
+			return true;
+		case EJson::String:
+			Out = V->AsString();
+			return true;
+		default:
+			return false;
+		}
+	};
+
+	TSharedPtr<FJsonValue> Error;
+	if (Raw->Type == EJson::Array)
+	{
+		const TArray<TSharedPtr<FJsonValue>>& Items = Raw->AsArray();
+		if (Items.Num() == 0)
+		{
+			return MCPError(TEXT("value must not be an empty array"));
+		}
+		TArray<FString> Parts;
+		for (const TSharedPtr<FJsonValue>& Item : Items)
+		{
+			FString Part;
+			if (!Scalar(Item, Part, Error))
+			{
+				return Error.IsValid() ? Error : MCPError(TEXT("array values must contain only numbers, booleans or strings"));
+			}
+			Parts.Add(Part);
+		}
+		OutText = FString::Join(Parts, TEXT(","));
+		return nullptr;
+	}
+
+	if (Raw->Type == EJson::Object)
+	{
+		const TSharedPtr<FJsonObject> Obj = Raw->AsObject();
+		static const TCHAR* const Orders[2][4] = { { TEXT("x"), TEXT("y"), TEXT("z"), TEXT("w") }, { TEXT("r"), TEXT("g"), TEXT("b"), TEXT("a") } };
+		for (int32 OrderIndex = 0; OrderIndex < 2; ++OrderIndex)
+		{
+			TArray<FString> Numeric;
+			for (const TCHAR* Key : Orders[OrderIndex])
+			{
+				const TSharedPtr<FJsonValue> Field = Obj.IsValid() ? Obj->TryGetField(Key) : nullptr;
+				if (Field.IsValid() && Field->Type == EJson::Number) Numeric.Add(Key);
+			}
+			if (Numeric.Num() < 2 || !Obj.IsValid() || Numeric.Num() != Obj->Values.Num()) continue;
+			// The present keys must be a prefix of the canonical order: {x,y,w}
+			// would otherwise write w into z.
+			for (int32 i = 0; i < Numeric.Num(); ++i)
+			{
+				if (Numeric[i] != Orders[OrderIndex][i])
+				{
+					return MCPError(FString::Printf(
+						TEXT("object value has a gap (%s); components must be contiguous from %s"),
+						*FString::Join(Numeric, TEXT(",")), Orders[OrderIndex][0]));
+				}
+			}
+			TArray<FString> Parts;
+			for (const FString& Key : Numeric)
+			{
+				FString Part;
+				if (!Scalar(Obj->TryGetField(Key), Part, Error)) return Error;
+				Parts.Add(Part);
+			}
+			// Colour and Vec4 inputs need four components; {r,g,b} is the shape callers type.
+			if (OrderIndex == 1 && Parts.Num() == 3) Parts.Add(TEXT("1"));
+			OutText = FString::Join(Parts, TEXT(","));
+			return nullptr;
+		}
+		return MCPError(TEXT("object values are only accepted as {x,y,z[,w]} or {r,g,b[,a]}; pass other types as a string the input's type can parse"));
+	}
+
+	if (!Scalar(Raw, OutText, Error))
+	{
+		return Error.IsValid() ? Error : MCPError(TEXT("value must be a scalar, an array of scalars, {x,y,z[,w]} or {r,g,b[,a]}"));
+	}
+	if (OutText.IsEmpty())
+	{
+		return MCPError(TEXT("Missing required parameter 'value'"));
+	}
+	return nullptr;
+}
+
 TSharedPtr<FJsonValue> FNiagaraHandlers::SetModuleInput(const TSharedPtr<FJsonObject>& Params)
 {
+	FString SystemPath;
+	if (auto Err = RequireString(Params, TEXT("systemPath"), SystemPath)) return Err;
+	FString ModuleName;
+	if (auto Err = RequireString(Params, TEXT("moduleName"), ModuleName)) return Err;
+	FString InputName;
+	if (auto Err = RequireString(Params, TEXT("inputName"), InputName)) return Err;
+	FString EmitterName = OptionalString(Params, TEXT("emitterName"), TEXT(""));
+	int32 EmitterIndex = OptionalInt(Params, TEXT("emitterIndex"), 0);
+	FString StackContext = OptionalString(Params, TEXT("stackContext"), TEXT("all"));
+	FString Value;
+	if (auto Err = NiagaraModuleInputValueText(Params, Value)) return Err;
+
 #if !UE_MCP_HAS_5_5_API
+	(void)EmitterIndex;
 	// FNiagaraStackGraphUtilities::GetStackFunctionInputs and
 	// FNiagaraStackFunctionInputBinder are declared but not exported in 5.4, and no reflected API stands in for them.
 	TSharedPtr<FJsonObject> Unsupported = MakeShared<FJsonObject>();
@@ -2147,17 +2371,6 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::SetModuleInput(const TSharedPtr<FJsonOb
 	Unsupported->SetStringField(TEXT("error"), TEXT("niagara module input actions require Unreal Engine 5.5 or newer: the NiagaraEditor stack API they read and write through is not exported in 5.4."));
 	return MCPResult(Unsupported);
 #else
-	FString SystemPath;
-	if (auto Err = RequireString(Params, TEXT("systemPath"), SystemPath)) return Err;
-	FString ModuleName;
-	if (auto Err = RequireString(Params, TEXT("moduleName"), ModuleName)) return Err;
-	FString InputName;
-	if (auto Err = RequireString(Params, TEXT("inputName"), InputName)) return Err;
-	FString Value;
-	if (auto Err = RequireString(Params, TEXT("value"), Value)) return Err;
-	FString EmitterName = OptionalString(Params, TEXT("emitterName"), TEXT(""));
-	int32 EmitterIndex = OptionalInt(Params, TEXT("emitterIndex"), 0);
-	FString StackContext = OptionalString(Params, TEXT("stackContext"), TEXT("all"));
 
 	UNiagaraSystem* System = Cast<UNiagaraSystem>(UEditorAssetLibrary::LoadAsset(SystemPath));
 	if (!System) return MCPError(FString::Printf(TEXT("System not found: %s"), *SystemPath));
