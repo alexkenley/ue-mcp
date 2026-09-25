@@ -329,6 +329,114 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "create_attribute_set": {
+    "category": "gas",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Blueprint name"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Content folder (default /Game/GAS/Attributes)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip (default, returns the existing asset) or error when the asset already exists"
+      }
+    ],
+    "contractExempt": "Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"
+  },
+  "create_gameplay_ability": {
+    "category": "gas",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Blueprint name"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Content folder (default /Game/GAS/Abilities)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip (default, returns the existing asset) or error when the asset already exists"
+      }
+    ],
+    "contractExempt": "Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"
+  },
+  "create_gameplay_cue": {
+    "category": "gas",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Blueprint name"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Content folder (default /Game/GAS/Cues)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip (default, returns the existing asset) or error when the asset already exists"
+      },
+      {
+        "name": "cueType",
+        "type": "string",
+        "required": false,
+        "description": "Static (default, GameplayCueNotify_Static) | Actor (GameplayCueNotify_Actor)"
+      }
+    ],
+    "contractExempt": "Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"
+  },
+  "create_gameplay_effect": {
+    "category": "gas",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Blueprint name"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Content folder (default /Game/GAS/Effects)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip (default, returns the existing asset) or error when the asset already exists"
+      },
+      {
+        "name": "durationPolicy",
+        "type": "string",
+        "required": false,
+        "description": "Echoed back as durationPolicy (default Instant); it is not written onto the effect"
+      }
+    ],
+    "contractExempt": "Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"
+  },
   "delete_gas_snapshot": {
     "category": "gas",
     "params": [
@@ -993,6 +1101,10 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   capture_gas_state: "Params: actorLabel?, actorPath?, snapshotId?, compareWith?, registerOwnerSets?, world?",
   clear_ability_input: "Params: actorLabel?, actorPath?, abilityClass, world?",
   compare_gas_states: "Params: beforeId?, beforeSnapshot?, afterId?, afterSnapshot?",
+  create_attribute_set: "Params: name, packagePath?, onConflict?",
+  create_gameplay_ability: "Params: name, packagePath?, onConflict?",
+  create_gameplay_cue: "Params: name, packagePath?, onConflict?, cueType?",
+  create_gameplay_effect: "Params: name, packagePath?, onConflict?, durationPolicy?",
   delete_gas_snapshot: "Params: snapshotId",
   get_active_effects: "Params: actorLabel?, actorPath?, world?",
   get_asc_state: "Params: actorLabel?, actorPath?, world?",
@@ -1041,7 +1153,9 @@ export const schema: Record<string, z.ZodType> = {
   componentName: z.string().optional().describe("Name of the AbilitySystemComponent (default AbilitySystemComp) (add_ability_system_component). AbilitySystemComponent to wire (default: the first one) (set_asc_defaults)"),
   count: z.number().int().optional().describe("References to add, at least 1 (default 1) (add_loose_gameplay_tag). References to remove, at least 1 (default 1) (remove_loose_gameplay_tag)"),
   cueTag: z.string().optional().describe("Registered GameplayCue tag, under the GameplayCue root (add_effect_cue). GameplayCue tag to unlink. May be one that is no longer registered (remove_effect_cue)"),
+  cueType: z.string().optional().describe("Static (default, GameplayCueNotify_Static) | Actor (GameplayCueNotify_Actor)"),
   directory: z.string().optional().describe("Content path to scan (default /Game)"),
+  durationPolicy: z.string().optional().describe("Echoed back as durationPolicy (default Instant); it is not written onto the effect"),
   effectClass: z.string().optional().describe("Alias for effectPath (add_effect_cue, remove_effect_cue, validate_cue_coverage). GameplayEffect content path or class name (apply_effect). GameplayEffect content path or class name. Removes every active effect of that class (remove_effect)"),
   effectHandle: z.string().optional().describe("Active-effect handle apply_effect reported. Removes exactly that effect"),
   effectPath: z.string().optional().describe("GameplayEffect Blueprint asset path (add_effect_cue, remove_effect_cue, set_effect_modifier). Alias for effectClass (apply_effect, remove_effect). Audit this one GameplayEffect instead of scanning (validate_cue_coverage)"),
@@ -1055,7 +1169,10 @@ export const schema: Record<string, z.ZodType> = {
   maxEffects: z.number().int().optional().describe("Cap on effect classes scanned (default 500, max 5000)"),
   maxLevel: z.number().optional().describe("Highest effect level this cue covers"),
   minLevel: z.number().optional().describe("Lowest effect level this cue covers, used to normalise the magnitude"),
+  name: z.string().optional().describe("Blueprint name"),
+  onConflict: z.string().optional().describe("skip (default, returns the existing asset) or error when the asset already exists"),
   operation: z.string().optional().describe("Additive (default) | Multiplicative | Division | Override"),
+  packagePath: z.string().optional().describe("Content folder (default /Game/GAS/Attributes) (create_attribute_set). Content folder (default /Game/GAS/Abilities) (create_gameplay_ability). Content folder (default /Game/GAS/Cues) (create_gameplay_cue). Content folder (default /Game/GAS/Effects) (create_gameplay_effect)"),
   probeClamping: z.boolean().optional().describe("Measure an existing clamp by driving the set's own PreAttributeChange. Needs a live registered set (default false)"),
   registerOwnerSets: z.boolean().optional().describe("Register the actor's own attribute sets on its ASC when it has none, the way BeginPlay would (default true)"),
   setByCaller: z.record(z.unknown()).optional().describe("SetByCaller magnitudes keyed by gameplay tag or name"),

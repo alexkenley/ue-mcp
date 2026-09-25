@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { categoryTool, bp, type ToolDef } from "../types.js";
+import { categoryTool, type ToolDef } from "../types.js";
 import { actions as epicActions, schema as epicSchema } from "./epic/gas.generated.js";
 import { specBp, schema as specSchema } from "./specs/gas.generated.js";
 
@@ -8,13 +7,13 @@ export const gasTool: ToolDef = categoryTool(
   "Gameplay Ability System: abilities, effects, attribute sets, cues.",
   {
     add_asc:             specBp("mutate", "Add AbilitySystemComponent.", "add_ability_system_component"),
-    create_attribute_set: bp("mutate", "Create AttributeSet BP. Params: name, packagePath?", "create_attribute_set"),
+    create_attribute_set: specBp("mutate", "Create AttributeSet BP.", "create_attribute_set"),
     add_attribute:       specBp("mutate", "Add attribute to set.", "add_attribute"),
-    create_ability:      bp("mutate", "Create GameplayAbility BP. Params: name, packagePath?, parentClass?", "create_gameplay_ability"),
+    create_ability:      specBp("mutate", "Create GameplayAbility BP.", "create_gameplay_ability"),
     set_ability_tags:    specBp("mutate", "Set tags on ability. Each container passed is written whole, so the inverse is this same call carrying the tags that were in it; containers you do not pass are left alone and are not in the record. unchanged=true means the tags a written container ended up holding are the same set it already held, compared both ways, not merely that the caller passed nothing.", "set_ability_tags"),
-    create_effect:       bp("mutate", "Create GameplayEffect BP. Params: name, packagePath?, durationPolicy?", "create_gameplay_effect"),
+    create_effect:       specBp("mutate", "Create GameplayEffect BP.", "create_gameplay_effect"),
     set_effect_modifier: specBp("mutate", "Add or update a modifier on a GameplayEffect, matched on attribute + operation. Overwriting an existing static magnitude rolls back to the value it held, qualified as SetName.Attribute so the inverse cannot land on another set's same-named attribute, and marked lossy because it comes back as a plain ScalableFloat constant. A magnitude that CHANGES WITH EFFECT LEVEL gets no record: it is probed at levels 1, 2 and 10, and one that moves is curve-table-backed, so writing a single constant would destroy the binding. APPENDING a new modifier has no inverse either, because no action removes a modifier from an effect; the response says rollbackPossible=false rather than offering a magnitude of zero as an undo.", "set_effect_modifier"),
-    create_cue:          bp("mutate", "Create GameplayCue. Params: name, packagePath?, cueType?", "create_gameplay_cue"),
+    create_cue:          specBp("mutate", "Create GameplayCue.", "create_gameplay_cue"),
     get_info:            specBp("read", "Inspect GAS setup.", "get_gas_info"),
     set_asc_defaults:    specBp("mutate", "Wire an AttributeSet onto a Blueprint's ASC component (DefaultStartingData) so attributes exist at runtime. Idempotent: a set already wired reports existed. No inverse - nothing removes an entry from DefaultStartingData, and removing the whole component would undo more than this did, so the response says rollbackPossible=false. Run add_ability_system_component first.", "set_asc_defaults"),
     apply_effect:        specBp("mutate", "Apply a GameplayEffect to a live actor's ASC (agnostic stat/damage stimulus - uses the game's own effect). A duration or infinite effect comes back with an effectHandle and rolls back through gas(remove_effect) on that handle. When the effect STACKS - its StackingType is not None and one of its class was already on the ASC - no new active effect is created, the existing handle comes back with a higher stackCount, and the record removes exactly one stack so the stacks that predate the call survive (reported as stackedOntoExisting, marked lossy because the duration refresh does not come back). an instant effect executes into the attribute base values, leaves no handle, and says so through rollbackPossible=false. An effect the ASC refuses reports unchanged=true rather than a bare success. Pass actorLabel or actorPath.", "apply_effect"),
@@ -72,17 +71,7 @@ export const gasTool: ToolDef = categoryTool(
   {
     ...epicSchema,
     // #1057: every key a spec'd handler declares, generated from its C++
-    // registration. A key listed again below is shared with hand-written
-    // actions, and tests/unit/handler-specs.test.ts holds the two to one type.
+    // registration.
     ...specSchema,
-    name: z.string().optional(),
-    packagePath: z.string().optional(),
-    // Read by the create_* handlers in this category and undeclared until now,
-    // so a caller asking to be told about a collision had the parameter
-    // stripped and got the silent "skip" default instead.
-    onConflict: z.string().optional().describe("create_attribute_set / create_ability / create_effect / create_cue: skip (default, returns the existing asset) or error when the asset already exists"),
-    parentClass: z.string().optional(),
-    durationPolicy: z.string().optional(),
-    cueType: z.string().optional(),
   },
 );

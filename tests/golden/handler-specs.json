@@ -1,5 +1,5 @@
 {
-  "handlerCount": 841,
+  "handlerCount": 836,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -4545,30 +4545,6 @@
         }
       ]
     },
-    "chooser_create": {
-      "category": "chooser",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "New ChooserTable asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "When the table exists: skip (default, report it) | error"
-        }
-      ],
-      "contractExempt": "Creates and saves a ChooserTable under the contract values; nothing it reads fails first"
-    },
     "chooser_delete_row": {
       "category": "chooser",
       "params": [
@@ -5700,6 +5676,30 @@
         }
       ]
     },
+    "create_attribute_set": {
+      "category": "gas",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Blueprint name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Content folder (default /Game/GAS/Attributes)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default, returns the existing asset) or error when the asset already exists"
+        }
+      ],
+      "contractExempt": "Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"
+    },
     "create_behavior_tree": {
       "category": "gameplay",
       "params": [
@@ -5847,79 +5847,6 @@
         }
       ]
     },
-    "create_blueprint": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": false,
-          "description": "Full destination, e.g. /Game/Blueprints/BP_Example. A .uasset suffix, an object suffix and backslashes are normalized away",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": false,
-          "description": "Asset name; with packagePath, the same destination as assetPath"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder, used with name"
-        },
-        {
-          "name": "parentClass",
-          "type": "string",
-          "required": false,
-          "description": "Parent class: short name or full path (default Actor)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) reports the existing entry; error refuses"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "assetPath"
-            ],
-            [
-              "name",
-              "packagePath"
-            ]
-          ]
-        }
-      ]
-    },
-    "create_blueprint_interface": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Full destination of the new Blueprint Interface",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) reports the existing entry; error refuses"
-        }
-      ],
-      "contractExempt": "Creates and saves an interface at the contract path; nothing it reads fails first"
-    },
     "create_control_rig": {
       "category": "animation",
       "params": [
@@ -6051,36 +5978,6 @@
         }
       ]
     },
-    "create_enum": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Enum asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Folder for the new enum (default /Game)"
-        },
-        {
-          "name": "entries",
-          "type": "array",
-          "required": false,
-          "description": "Entries to seed: strings, or {name, displayName?} objects"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "When the enum exists: skip (default, report it) | error"
-        }
-      ],
-      "contractExempt": "Creates and saves an enum asset under the contract values; nothing it reads fails first"
-    },
     "create_foliage_type": {
       "category": "foliage",
       "params": [
@@ -6188,23 +6085,89 @@
         }
       ]
     },
-    "create_gameplay_tag": {
-      "category": "reflection",
+    "create_gameplay_ability": {
+      "category": "gas",
       "params": [
         {
-          "name": "tag",
+          "name": "name",
           "type": "string",
           "required": true,
-          "description": "Gameplay tag to create, e.g. Ability.Fire"
+          "description": "Blueprint name"
         },
         {
-          "name": "comment",
+          "name": "packagePath",
           "type": "string",
           "required": false,
-          "description": "Developer comment stored with the tag"
+          "description": "Content folder (default /Game/GAS/Abilities)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default, returns the existing asset) or error when the asset already exists"
         }
       ],
-      "contractExempt": "Writes the tag into Config/DefaultGameplayTags.ini under the contract values unless the tag check refuses it first"
+      "contractExempt": "Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"
+    },
+    "create_gameplay_cue": {
+      "category": "gas",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Blueprint name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Content folder (default /Game/GAS/Cues)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default, returns the existing asset) or error when the asset already exists"
+        },
+        {
+          "name": "cueType",
+          "type": "string",
+          "required": false,
+          "description": "Static (default, GameplayCueNotify_Static) | Actor (GameplayCueNotify_Actor)"
+        }
+      ],
+      "contractExempt": "Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"
+    },
+    "create_gameplay_effect": {
+      "category": "gas",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Blueprint name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Content folder (default /Game/GAS/Effects)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default, returns the existing asset) or error when the asset already exists"
+        },
+        {
+          "name": "durationPolicy",
+          "type": "string",
+          "required": false,
+          "description": "Echoed back as durationPolicy (default Instant); it is not written onto the effect"
+        }
+      ],
+      "contractExempt": "Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"
     },
     "create_hud": {
       "category": "gameplay",
@@ -6977,19 +6940,9 @@
         }
       ]
     },
-    "demo_cleanup": {
-      "category": "demo",
-      "params": [],
-      "contractExempt": "Takes no parameters and acts unconditionally: switches levels and deletes the demo scene"
-    },
     "demo_get_steps": {
       "category": "demo",
       "params": []
-    },
-    "demo_go_home": {
-      "category": "demo",
-      "params": [],
-      "contractExempt": "Takes no parameters and acts unconditionally: creates the home level if missing and opens it"
     },
     "demo_step": {
       "category": "demo",
@@ -7134,38 +7087,6 @@
           "type": "boolean",
           "required": false,
           "description": "Force a synchronous rescan first, which evicts pending-kill ghosts"
-        }
-      ]
-    },
-    "diff_blueprint": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Base Blueprint (A)",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "otherPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint to compare against (B)"
-        },
-        {
-          "name": "fromRevision",
-          "type": "string",
-          "required": false,
-          "description": "Reserved for source-control revision diffing, which is not implemented; passing it is refused"
-        },
-        {
-          "name": "toRevision",
-          "type": "string",
-          "required": false,
-          "description": "Reserved for source-control revision diffing, which is not implemented; passing it is refused"
         }
       ]
     },
@@ -18700,29 +18621,6 @@
           "type": "string",
           "required": true,
           "description": "Graph name to resolve"
-        }
-      ]
-    },
-    "resolve_collision_profile": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "profileName",
-          "type": "string",
-          "required": true,
-          "description": "Collision profile to resolve, e.g. Pawn, BlockAll, or one the project defined"
-        },
-        {
-          "name": "channel",
-          "type": "string",
-          "required": false,
-          "description": "Narrow the answer to one collision channel: its configured name, the C++ enumerator, or the container index"
-        },
-        {
-          "name": "includeAllChannels",
-          "type": "boolean",
-          "required": false,
-          "description": "Include the unused GameTraceChannel slots (default false)"
         }
       ]
     },
