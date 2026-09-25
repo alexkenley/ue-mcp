@@ -683,6 +683,13 @@ namespace
 
 TSharedPtr<FJsonValue> FAnimationHandlers::ConfigureIKRetargeter(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read ahead on every engine: the retargeter loads before the rest is read,
+	// and the older-engine refusal reads nothing else (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("retargeterPath"), TEXT("sourceRig"), TEXT("targetRig"), TEXT("sourcePreviewMesh"),
+		TEXT("targetPreviewMesh"), TEXT("ensureDefaultOps"), TEXT("autoMapMode"), TEXT("forceRemap"),
+		TEXT("chainMappings"), TEXT("ops"), TEXT("pose"),
+	});
 #if !UE_MCP_HAS_5_8_API
 	auto Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), false);

@@ -2062,6 +2062,11 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BeginControlRigEdit(const TSharedPtr<
 
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadControlRigEdit(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read ahead on every engine: the session resolves before the rest is read,
+	// and the older-engine refusal reads nothing else (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("sequencePath"), TEXT("bindingTag"), TEXT("controlNames"), TEXT("frame"), TEXT("frames"), TEXT("space"),
+	});
 #if !UE_MCP_HAS_5_8_API
 	return ControlRigSequencerUnsupported();
 #else
@@ -2288,6 +2293,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadControlRigEdit(const TSharedPtr<F
 
 TSharedPtr<FJsonValue> FAnimationHandlers::CaptureControlRigPose(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read ahead on every engine: the session resolves before the rest is read,
+	// and the older-engine refusal reads nothing else (#1057).
+	MCPReadParamsAhead(Params, { TEXT("sequencePath"), TEXT("bindingTag"), TEXT("controlNames") });
 #if !UE_MCP_HAS_5_8_API
 	return ControlRigSequencerUnsupported();
 #else

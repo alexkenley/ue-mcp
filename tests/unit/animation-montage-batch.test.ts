@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { animationTool } from "../../src/tools/animation.js";
 import type { ToolContext } from "../../src/types.js";
@@ -22,14 +23,24 @@ describe("animation.author_montages_batch", () => {
     }]);
 
     expect(valid.success).toBe(true);
+    // Each item's fields come from the C++ spec (#1057): name and
+    // animSequencePath are required, and a nested section or notify is
+    // validated by the handler, which fails that item's stage by name.
     expect(animationTool.schema.items.safeParse([{
       name: "AM_Invalid",
-      animSequencePath: "/Game/Animations/ANIM_Attack",
-      notifies: [{ notifyName: "Damage", triggerTime: -1 }],
+      notifies: [{ notifyName: "Damage", triggerTime: 0.35 }],
     }]).success).toBe(false);
+
+    // create_montage treats every onConflict but "error" as skip, so the batch
+    // refuses anything else per item rather than skipping silently.
+    const source = readFileSync(new URL(
+      "../../plugin/ue_mcp_bridge/Source/UE_MCP_Bridge/Private/Handlers/AnimationHandlers.cpp",
+      import.meta.url,
+    ), "utf8");
+    expect(source).toContain('if (ItemOnConflict != TEXT("skip") && ItemOnConflict != TEXT("error"))');
   });
 
-  it("forwards only the items array to the native batch handler", async () => {
+  it("forwards the bag as sent, under its C++ spec (#1057)", async () => {
     const call = vi.fn().mockResolvedValue({ success: true });
     const ctx = { bridge: { call } } as unknown as ToolContext;
     const items = [{
@@ -37,10 +48,10 @@ describe("animation.author_montages_batch", () => {
       animSequencePath: "/Game/Animations/ANIM_Attack",
     }];
 
+    expect(animationTool.actions.author_montages_batch.mapParams).toBeUndefined();
     await animationTool.handler(ctx, {
       action: "author_montages_batch",
       items,
-      assetPath: "/Game/ShouldNotLeak",
     });
 
     expect(call).toHaveBeenCalledWith(

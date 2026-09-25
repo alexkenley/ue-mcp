@@ -464,18 +464,20 @@ FVector ReadBlendPosition(const TSharedPtr<FJsonObject>& Params)
 		(*PositionObject)->TryGetNumberField(TEXT("z"), Z);
 		return FVector(X, Y, Z);
 	}
-	return FVector(
-		OptionalNumber(Params, TEXT("blendX"), 0.0),
-		OptionalNumber(Params, TEXT("blendY"), 0.0),
-		OptionalNumber(Params, TEXT("blendZ"), 0.0));
+	return FVector::ZeroVector;
 }
 }
 
 
 TSharedPtr<FJsonValue> FAnimationHandlers::SamplePose(const TSharedPtr<FJsonObject>& Params)
 {
+	// Everything but the asset is read after it resolves (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("assetPath"), TEXT("boneNames"), TEXT("frames"), TEXT("times"), TEXT("space"),
+		TEXT("skeletalMeshPath"), TEXT("incorporateRootMotion"), TEXT("blendPosition"),
+	});
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FPoseEvaluationTarget Target;
 	if (auto Err = ResolvePoseEvaluationTarget(AssetPath, Target)) return Err;
@@ -580,8 +582,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SamplePose(const TSharedPtr<FJsonObje
 
 TSharedPtr<FJsonValue> FAnimationHandlers::MeasureNaturalSpeed(const TSharedPtr<FJsonObject>& Params)
 {
+	// Everything after footBones is read once the asset resolves (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("assetPath"), TEXT("footBones"), TEXT("contactThreshold"), TEXT("skeletalMeshPath"),
+		TEXT("frames"), TEXT("times"), TEXT("blendPosition"),
+	});
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	TArray<FName> FootBones;
 	{

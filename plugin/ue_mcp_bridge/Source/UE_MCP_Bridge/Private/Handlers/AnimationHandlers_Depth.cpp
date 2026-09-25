@@ -1110,8 +1110,11 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveNotifyState(const TSharedPtr<FJ
 // ─────────────────────────────────────────────────────────────────────────────
 TSharedPtr<FJsonValue> FAnimationHandlers::SetSyncMarkers(const TSharedPtr<FJsonObject>& Params)
 {
+	// The markers are validated against the clip length, so they are read after
+	// the load; every declared key is read ahead of it (#1057).
+	MCPReadParamsAhead(Params, { TEXT("assetPath"), TEXT("markers"), TEXT("removeMarkers"), TEXT("markerMode") });
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UAnimSequence* AnimSeq = LoadAssetByPath<UAnimSequence>(AssetPath);
 	if (!AnimSeq)

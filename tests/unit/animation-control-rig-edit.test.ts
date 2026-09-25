@@ -497,8 +497,23 @@ describe("animation Control Rig edit workflow", () => {
     const call = vi.fn().mockResolvedValue({ success: true });
     const ctx = { bridge: { call } } as unknown as ToolContext;
 
-    await animationTool.handler(ctx, {
-      action: "begin_control_rig_edit",
+    // Spec'd (#1057): begin, read and capture forward the bag as sent, and the
+    // spec is the contract. apply stays hand-authored and maps its own keys.
+    for (const action of ["begin_control_rig_edit", "read_control_rig_edit", "capture_control_rig_pose"] as const) {
+      expect(animationTool.actions[action].mapParams, action).toBeUndefined();
+    }
+    expect(handlerSpecs.begin_control_rig_edit.params.map((p) => p.name)).toEqual([
+      "sequencePath", "skeletalMeshPath", "sourceAnimationPath", "rigMode", "controlRigPath", "layered",
+      "startFrame", "endFrame", "displayRate", "bindingTag", "onConflict",
+    ]);
+    expect(handlerSpecs.read_control_rig_edit.params.map((p) => p.name)).toEqual([
+      "sequencePath", "bindingTag", "controlNames", "frame", "frames", "space",
+    ]);
+    expect(handlerSpecs.capture_control_rig_pose.params.map((p) => p.name)).toEqual([
+      "sequencePath", "bindingTag", "controlNames",
+    ]);
+
+    const begin = {
       sequencePath: "/Game/MCP/LS_Wave_Edit",
       skeletalMeshPath: "/Game/Characters/Mannequins/Meshes/SKM_Manny",
       sourceAnimationPath: "/Game/Characters/Mannequins/Animations/ABP_Manny/MM_Unarmed_Idle_Ready",
@@ -510,51 +525,27 @@ describe("animation Control Rig edit workflow", () => {
       displayRate: 30,
       bindingTag: "mcp.manny.wave",
       onConflict: "skip",
-      assetPath: "/Game/ShouldNotLeak",
-    });
-    expect(call).toHaveBeenLastCalledWith("begin_control_rig_edit", {
-      sequencePath: "/Game/MCP/LS_Wave_Edit",
-      skeletalMeshPath: "/Game/Characters/Mannequins/Meshes/SKM_Manny",
-      sourceAnimationPath: "/Game/Characters/Mannequins/Animations/ABP_Manny/MM_Unarmed_Idle_Ready",
-      rigMode: "asset",
-      controlRigPath: "/Game/Characters/Mannequins/Rigs/CR_Mannequin_Body",
-      layered: true,
-      startFrame: 0,
-      endFrame: 60,
-      displayRate: 30,
-      bindingTag: "mcp.manny.wave",
-      onConflict: "skip",
-    }, undefined);
+    };
+    await animationTool.handler(ctx, { action: "begin_control_rig_edit", ...begin });
+    expect(call).toHaveBeenLastCalledWith("begin_control_rig_edit", begin, undefined);
 
-    await animationTool.handler(ctx, {
-      action: "read_control_rig_edit",
+    const read = {
       sequencePath: "/Game/MCP/LS_Wave_Edit",
       bindingTag: "mcp.manny.wave",
       controlNames: ["hand_r_ctrl", "foot_l_ctrl"],
       frames: [0, 12, 30],
       space: "global",
-      sourceAnimationPath: "/Game/ShouldNotLeak",
-    });
-    expect(call).toHaveBeenLastCalledWith("read_control_rig_edit", {
-      sequencePath: "/Game/MCP/LS_Wave_Edit",
-      bindingTag: "mcp.manny.wave",
-      controlNames: ["hand_r_ctrl", "foot_l_ctrl"],
-      frames: [0, 12, 30],
-      space: "global",
-    }, undefined);
+    };
+    await animationTool.handler(ctx, { action: "read_control_rig_edit", ...read });
+    expect(call).toHaveBeenLastCalledWith("read_control_rig_edit", read, undefined);
 
-    await animationTool.handler(ctx, {
-      action: "capture_control_rig_pose",
+    const capture = {
       sequencePath: "/Game/MCP/LS_Wave_Edit",
       bindingTag: "mcp.manny.wave",
       controlNames: ["hand_r_ctrl", "foot_l_ctrl"],
-      frames: [999],
-    });
-    expect(call).toHaveBeenLastCalledWith("capture_control_rig_pose", {
-      sequencePath: "/Game/MCP/LS_Wave_Edit",
-      bindingTag: "mcp.manny.wave",
-      controlNames: ["hand_r_ctrl", "foot_l_ctrl"],
-    }, undefined);
+    };
+    await animationTool.handler(ctx, { action: "capture_control_rig_pose", ...capture });
+    expect(call).toHaveBeenLastCalledWith("capture_control_rig_pose", capture, undefined);
 
     const operations = [{
       op: "set",

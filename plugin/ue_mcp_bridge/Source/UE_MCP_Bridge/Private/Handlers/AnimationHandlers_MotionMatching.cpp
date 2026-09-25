@@ -282,13 +282,19 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreatePoseSearchSchema(const TSharedP
 
 TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSchemaPoseChannel(const TSharedPtr<FJsonObject>& Params)
 {
+	// assetPath is an alias the registry resolves to schemaPath (#1057).
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("schemaPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("schemaPath"), AssetPath)) return Err;
+	// Read before anything can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* Bones = nullptr;
+	const bool bHasBones = TryGetArrayParam(Params, TEXT("bones"), Bones) && Bones && Bones->Num() > 0;
+	double ChannelWeight = 0.0;
+	const bool bHasChannelWeight = TryGetNumberParam(Params, TEXT("weight"), ChannelWeight);
+
 	UPoseSearchSchema* Schema = LoadAssetByPath<UPoseSearchSchema>(AssetPath);
 	if (!Schema) return MCPError(FString::Printf(TEXT("PoseSearchSchema not found: %s"), *AssetPath));
 
-	const TArray<TSharedPtr<FJsonValue>>* Bones = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("bones"), Bones) || !Bones || Bones->Num() == 0)
+	if (!bHasBones)
 	{
 		return MCPError(TEXT("Missing 'bones' (array of {bone, flags?:[velocity,position,rotation,phase], weight?})"));
 	}
@@ -322,8 +328,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSchemaPoseChannel(const 
 	}
 
 	Schema->Modify();
-	double ChannelWeight = 0.0;
-	const bool bHasChannelWeight = TryGetNumberParam(Params, TEXT("weight"), ChannelWeight);
 
 #if UE_MCP_HAS_5_5_API
 	UPoseSearchFeatureChannel_Pose* Channel = NewObject<UPoseSearchFeatureChannel_Pose>(Schema, NAME_None, RF_Transactional);
@@ -515,6 +519,8 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateMirrorDataTable(const TSharedPt
 	FString SkeletonPath;
 	if (auto Err = RequireString(Params, TEXT("skeletonPath"), SkeletonPath)) return Err;
 	const FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/MotionMatching"));
+	// Read before the load can fail (#1057).
+	MCPReadParamsAhead(Params, { TEXT("expressions"), TEXT("mirrorAxis"), TEXT("mirrorRootMotion"), TEXT("onConflict") });
 
 	USkeleton* Skeleton = LoadAssetByPath<USkeleton>(SkeletonPath);
 	if (!Skeleton) return MCPError(FString::Printf(TEXT("Skeleton not found: %s"), *SkeletonPath));

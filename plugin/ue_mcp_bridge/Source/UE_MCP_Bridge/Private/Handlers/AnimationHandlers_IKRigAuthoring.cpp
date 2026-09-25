@@ -184,6 +184,12 @@ static bool GoalNameIsSafe(const FString& Name)
 
 TSharedPtr<FJsonValue> FAnimationHandlers::ConfigureIKRig(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read ahead on every engine: a bad value stops the parse at the first key,
+	// and the older-engine refusal reads nothing else (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("rigPath"), TEXT("autoSetup"), TEXT("retargetRoot"), TEXT("rootMotionBone"),
+		TEXT("chains"), TEXT("fullBodyIK"), TEXT("exclusions"),
+	});
 #if !UE_MCP_HAS_5_8_API
 	return UE_MCP_IKRigAuthoring::Error(
 		TEXT("unsupported_engine_version"),

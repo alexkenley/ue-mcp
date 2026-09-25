@@ -1,5 +1,5 @@
 {
-  "handlerCount": 855,
+  "handlerCount": 858,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -184,6 +184,58 @@
           "type": "string",
           "required": false,
           "description": "Enum name or path for keyType=Enum"
+        }
+      ]
+    },
+    "add_blend_sample": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "BlendSpace or BlendSpace1D asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "animation",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence to add as a sample"
+        },
+        {
+          "name": "position",
+          "type": "object",
+          "required": false,
+          "description": "Sample position on the blendspace axes; wins over flat x and y",
+          "fields": [
+            {
+              "name": "x",
+              "type": "number",
+              "required": false,
+              "description": "Horizontal axis value"
+            },
+            {
+              "name": "y",
+              "type": "number",
+              "required": false,
+              "description": "Vertical axis value"
+            }
+          ]
+        },
+        {
+          "name": "x",
+          "type": "number",
+          "required": false,
+          "description": "Horizontal axis value when position is omitted (default 0)"
+        },
+        {
+          "name": "y",
+          "type": "number",
+          "required": false,
+          "description": "Vertical axis value when position is omitted (default 0)"
         }
       ]
     },
@@ -1613,6 +1665,32 @@
           "type": "boolean",
           "required": false,
           "description": "Splice into the pose chain feeding the Output Pose (default true)"
+        }
+      ]
+    },
+    "add_pose_search_schema_pose_channel": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "schemaPath",
+          "type": "string",
+          "required": true,
+          "description": "PoseSearchSchema to add the channel to",
+          "aliases": [
+            "assetPath"
+          ]
+        },
+        {
+          "name": "bones",
+          "type": "array",
+          "required": true,
+          "description": "Sampled bones, each a bone name (position only) or {bone, flags?: velocity | position | rotation | phase, weight?}"
+        },
+        {
+          "name": "weight",
+          "type": "number",
+          "required": false,
+          "description": "Channel weight"
         }
       ]
     },
@@ -3758,6 +3836,94 @@
         }
       ]
     },
+    "author_montages_batch": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "items",
+          "type": "array",
+          "required": true,
+          "description": "Montages to author, each reported on its own",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "AnimMontage asset name"
+            },
+            {
+              "name": "animSequencePath",
+              "type": "string",
+              "required": true,
+              "description": "AnimSequence the montage plays"
+            },
+            {
+              "name": "packagePath",
+              "type": "string",
+              "required": false,
+              "description": "Destination folder (default /Game/Animations)"
+            },
+            {
+              "name": "onConflict",
+              "type": "string",
+              "required": false,
+              "description": "skip (default) | error; any other value fails the item"
+            },
+            {
+              "name": "slotName",
+              "type": "string",
+              "required": false,
+              "description": "Slot name to write onto the track"
+            },
+            {
+              "name": "trackIndex",
+              "type": "integer",
+              "required": false,
+              "description": "Slot track index (default 0)"
+            },
+            {
+              "name": "rateScale",
+              "type": "number",
+              "required": false,
+              "description": "Playback rate scale"
+            },
+            {
+              "name": "blendIn",
+              "type": "number",
+              "required": false,
+              "description": "Blend-in time in seconds"
+            },
+            {
+              "name": "blendOut",
+              "type": "number",
+              "required": false,
+              "description": "Blend-out time in seconds"
+            },
+            {
+              "name": "sequenceLength",
+              "type": "number",
+              "required": false,
+              "description": "Montage length in seconds"
+            },
+            {
+              "name": "sections",
+              "type": "array",
+              "required": false,
+              "description": "Sections as [{sectionName, startTime?, linkedSection?}]",
+              "items": "object"
+            },
+            {
+              "name": "notifies",
+              "type": "array",
+              "required": false,
+              "description": "Notifies as [{notifyName, triggerTime, notifyClass?, properties?}]",
+              "items": "object"
+            }
+          ]
+        }
+      ]
+    },
     "auto_align_retarget_pose": {
       "category": "animation",
       "params": [
@@ -3878,6 +4044,48 @@
       ],
       "contractExempt": "5.8 only: before 5.8 the handler is a stub that reads nothing, and on 5.8 it bakes and saves a new AnimSequence"
     },
+    "bake_keyframes_batch": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "tracks",
+          "type": "array",
+          "required": true,
+          "description": "Per-bone key arrays; a missing track is created",
+          "items": "object",
+          "fields": [
+            {
+              "name": "bone",
+              "type": "string",
+              "required": true,
+              "description": "Bone whose track to replace"
+            },
+            {
+              "name": "keyframes",
+              "type": "array",
+              "required": true,
+              "description": "One key per frame as {location?, rotation? {x, y, z, w}, scale?}",
+              "items": "object"
+            }
+          ]
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the asset after baking (default true)"
+        }
+      ]
+    },
     "bake_root_motion_from_bone": {
       "category": "animation",
       "params": [
@@ -3914,6 +4122,70 @@
           "type": "string",
           "required": false,
           "description": "linear (default) | per_frame"
+        }
+      ]
+    },
+    "batch_retarget_animations": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "retargeterPath",
+          "type": "string",
+          "required": true,
+          "description": "IKRetargeter to bake through",
+          "aliases": [
+            "assetPath"
+          ]
+        },
+        {
+          "name": "sourceMesh",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh the source animations play on"
+        },
+        {
+          "name": "targetMesh",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh to retarget onto"
+        },
+        {
+          "name": "animPaths",
+          "type": "array",
+          "required": true,
+          "description": "AnimSequences to bake, without duplicates",
+          "items": "string"
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default beside each source)"
+        },
+        {
+          "name": "prefix",
+          "type": "string",
+          "required": false,
+          "description": "Output name prefix"
+        },
+        {
+          "name": "suffix",
+          "type": "string",
+          "required": false,
+          "description": "Output name suffix (default _Retargeted)"
+        },
+        {
+          "name": "overwrite",
+          "type": "boolean",
+          "required": false,
+          "description": "Overwriting is not supported; omit or pass false",
+          "literal": false
+        },
+        {
+          "name": "requireCompleteMapping",
+          "type": "boolean",
+          "required": false,
+          "description": "Refuse when any target chain is unmapped (default false)"
         }
       ]
     },
@@ -4080,6 +4352,78 @@
           "items": "object"
         }
       ]
+    },
+    "begin_control_rig_edit": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "sequencePath",
+          "type": "string",
+          "required": true,
+          "description": "LevelSequence to create, or to reuse with onConflict=skip"
+        },
+        {
+          "name": "skeletalMeshPath",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh the session binds"
+        },
+        {
+          "name": "sourceAnimationPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence to bake into the rig"
+        },
+        {
+          "name": "rigMode",
+          "type": "string",
+          "required": false,
+          "description": "fk (default) | asset. Use asset with the verified baseline controlRigPath; use fk only when generated raw FK controls are the intended editing surface"
+        },
+        {
+          "name": "controlRigPath",
+          "type": "string",
+          "required": false,
+          "description": "The verified baseline ControlRigBlueprint for this character; required when rigMode=asset. Create and validate the rig first when the character has none"
+        },
+        {
+          "name": "layered",
+          "type": "boolean",
+          "required": false,
+          "description": "Keep the source animation track active under the Control Rig layer (default false)"
+        },
+        {
+          "name": "startFrame",
+          "type": "integer",
+          "required": false,
+          "description": "Inclusive edit range start frame (default 0)"
+        },
+        {
+          "name": "endFrame",
+          "type": "integer",
+          "required": false,
+          "description": "Exclusive edit range end frame (default the source length)"
+        },
+        {
+          "name": "displayRate",
+          "type": "number",
+          "required": false,
+          "description": "LevelSequence display rate in frames per second (default the source rate)"
+        },
+        {
+          "name": "bindingTag",
+          "type": "string",
+          "required": false,
+          "description": "Stable natural key the later calls address (default derived from the mesh name)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip returns the existing session, error (default) refuses; an existing session is never modified"
+        }
+      ],
+      "contractExempt": "5.8 only: before 5.8 the handler is a stub that reads nothing, and on 5.8 it creates and saves a LevelSequence"
     },
     "begin_skeleton_edit": {
       "category": "animation",
@@ -4342,6 +4686,30 @@
           "type": "string",
           "required": false,
           "description": "The skeletal mesh whose one open session to address, when sessionTag is omitted"
+        }
+      ]
+    },
+    "capture_control_rig_pose": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "sequencePath",
+          "type": "string",
+          "required": true,
+          "description": "LevelSequence holding the Control Rig edit session"
+        },
+        {
+          "name": "bindingTag",
+          "type": "string",
+          "required": true,
+          "description": "Edit-session natural key from begin_control_rig_edit"
+        },
+        {
+          "name": "controlNames",
+          "type": "array",
+          "required": false,
+          "description": "Live controls to capture (default the current Control Rig selection)",
+          "items": "string"
         }
       ]
     },
@@ -5079,6 +5447,325 @@
         }
       ]
     },
+    "configure_ik_retargeter": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "retargeterPath",
+          "type": "string",
+          "required": true,
+          "description": "Existing IKRetargeter to configure"
+        },
+        {
+          "name": "sourceRig",
+          "type": "string",
+          "required": false,
+          "description": "Source IKRigDefinition to assign"
+        },
+        {
+          "name": "targetRig",
+          "type": "string",
+          "required": false,
+          "description": "Target IKRigDefinition to assign"
+        },
+        {
+          "name": "sourcePreviewMesh",
+          "type": "string",
+          "required": false,
+          "description": "Source preview SkeletalMesh"
+        },
+        {
+          "name": "targetPreviewMesh",
+          "type": "string",
+          "required": false,
+          "description": "Target preview SkeletalMesh"
+        },
+        {
+          "name": "ensureDefaultOps",
+          "type": "boolean",
+          "required": false,
+          "description": "Ensure the complete default op stack (default true)"
+        },
+        {
+          "name": "autoMapMode",
+          "type": "string",
+          "required": false,
+          "description": "Native chain auto-map: exact | fuzzy | clear"
+        },
+        {
+          "name": "forceRemap",
+          "type": "boolean",
+          "required": false,
+          "description": "Replace existing mappings during auto-map (default false)"
+        },
+        {
+          "name": "chainMappings",
+          "type": "array",
+          "required": false,
+          "description": "Explicit target-to-source chain overrides, at most 10000",
+          "items": "object",
+          "fields": [
+            {
+              "name": "targetChain",
+              "type": "string",
+              "required": true,
+              "description": "Target chain to map"
+            },
+            {
+              "name": "sourceChain",
+              "type": "any",
+              "required": false,
+              "description": "Source chain name; null or omitted clears the mapping"
+            }
+          ]
+        },
+        {
+          "name": "ops",
+          "type": "array",
+          "required": false,
+          "description": "Per-op writes, at most 64. settings writes properties on the op's own settings struct, and chainSettings merges per-chain FK properties into the named chain rather than replacing the list",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": false,
+              "description": "Op to write, by name"
+            },
+            {
+              "name": "index",
+              "type": "integer",
+              "required": false,
+              "description": "Op to write, by stack index, when name is omitted"
+            },
+            {
+              "name": "enabled",
+              "type": "boolean",
+              "required": false,
+              "description": "Enable or disable the op"
+            },
+            {
+              "name": "settings",
+              "type": "object",
+              "required": false,
+              "description": "Properties on the op's settings struct, e.g. RootMotionSource"
+            },
+            {
+              "name": "chainSettings",
+              "type": "array",
+              "required": false,
+              "description": "Per-chain properties as [{chain, ...}], e.g. RotationMode",
+              "items": "object"
+            }
+          ]
+        },
+        {
+          "name": "pose",
+          "type": "object",
+          "required": false,
+          "description": "Named source or target retarget pose to author",
+          "fields": [
+            {
+              "name": "side",
+              "type": "string",
+              "required": true,
+              "description": "source | target"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Retarget pose name"
+            },
+            {
+              "name": "create",
+              "type": "boolean",
+              "required": false,
+              "description": "Create the pose (default false)"
+            },
+            {
+              "name": "reset",
+              "type": "boolean",
+              "required": false,
+              "description": "Reset the pose first, which whole-pose auto-align requires on an existing pose"
+            },
+            {
+              "name": "autoAlign",
+              "type": "string",
+              "required": false,
+              "description": "chain_to_chain | mesh_to_mesh | local_axes | global_axes; needs both preview meshes"
+            },
+            {
+              "name": "bones",
+              "type": "array",
+              "required": false,
+              "description": "Bones to auto-align; omitted aligns every bone, which replaces the pose",
+              "items": "string"
+            },
+            {
+              "name": "rotationOffsets",
+              "type": "array",
+              "required": false,
+              "description": "Offsets as [{bone, rotationQuaternion {x, y, z, w}}], normalized",
+              "items": "object"
+            },
+            {
+              "name": "rootOffsetZ",
+              "type": "number",
+              "required": false,
+              "description": "Root height offset; exclusive with snapBoneToGround"
+            },
+            {
+              "name": "snapBoneToGround",
+              "type": "string",
+              "required": false,
+              "description": "Bone to snap to the ground; exclusive with rootOffsetZ"
+            }
+          ]
+        }
+      ]
+    },
+    "configure_ik_rig": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "rigPath",
+          "type": "string",
+          "required": true,
+          "description": "Existing IKRigDefinition to configure"
+        },
+        {
+          "name": "autoSetup",
+          "type": "string",
+          "required": false,
+          "description": "Native setup pass: retarget | full_body, which installs the retarget definition and then Full Body IK"
+        },
+        {
+          "name": "retargetRoot",
+          "type": "string",
+          "required": false,
+          "description": "Retarget root bone"
+        },
+        {
+          "name": "rootMotionBone",
+          "type": "string",
+          "required": false,
+          "description": "Root-motion bone"
+        },
+        {
+          "name": "chains",
+          "type": "array",
+          "required": false,
+          "description": "Retarget chains to upsert, at most 256",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Retarget chain name"
+            },
+            {
+              "name": "startBone",
+              "type": "string",
+              "required": true,
+              "description": "First bone of the chain"
+            },
+            {
+              "name": "endBone",
+              "type": "string",
+              "required": true,
+              "description": "Last bone of the chain"
+            },
+            {
+              "name": "goal",
+              "type": "string",
+              "required": false,
+              "description": "IK goal the chain drives"
+            }
+          ]
+        },
+        {
+          "name": "fullBodyIK",
+          "type": "object",
+          "required": false,
+          "description": "Full Body IK solver and its desired goals",
+          "fields": [
+            {
+              "name": "solverIndex",
+              "type": "integer",
+              "required": false,
+              "description": "Full Body IK solver to edit (default the first)"
+            },
+            {
+              "name": "rootBone",
+              "type": "string",
+              "required": true,
+              "description": "Solver root bone"
+            },
+            {
+              "name": "enabled",
+              "type": "boolean",
+              "required": false,
+              "description": "Enable or disable the solver"
+            },
+            {
+              "name": "goals",
+              "type": "array",
+              "required": true,
+              "description": "Up to 256 goals as {name, bone, positionAlpha?, rotationAlpha?, chainDepth?, strengthAlpha?, pullChainAlpha?, pinRotation?}; alphas are in [0, 1]",
+              "items": "object"
+            }
+          ]
+        },
+        {
+          "name": "exclusions",
+          "type": "array",
+          "required": false,
+          "description": "Per-bone solver exclusions, at most 2048",
+          "items": "object",
+          "fields": [
+            {
+              "name": "bone",
+              "type": "string",
+              "required": true,
+              "description": "Bone to exclude or include"
+            },
+            {
+              "name": "excluded",
+              "type": "boolean",
+              "required": true,
+              "description": "Whether the solver excludes the bone"
+            }
+          ]
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "autoSetup"
+            ],
+            [
+              "retargetRoot"
+            ],
+            [
+              "rootMotionBone"
+            ],
+            [
+              "chains"
+            ],
+            [
+              "fullBodyIK"
+            ],
+            [
+              "exclusions"
+            ]
+          ]
+        }
+      ]
+    },
     "configure_net_cull_distance": {
       "category": "networking",
       "params": [
@@ -5676,54 +6363,6 @@
         }
       ]
     },
-    "create_attenuation": {
-      "category": "audio",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "SoundAttenuation asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Audio/Attenuation)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
-        },
-        {
-          "name": "settings",
-          "type": "object",
-          "required": false,
-          "description": "FSoundAttenuationSettings as JSON, applied before the shortcuts"
-        },
-        {
-          "name": "falloffDistance",
-          "type": "number",
-          "required": false,
-          "description": "Falloff distance; also turns volume attenuation on"
-        },
-        {
-          "name": "spatialize",
-          "type": "boolean",
-          "required": false,
-          "description": "bSpatialize"
-        },
-        {
-          "name": "enableOcclusion",
-          "type": "boolean",
-          "required": false,
-          "description": "bEnableOcclusion"
-        }
-      ],
-      "contractExempt": "Creates and saves a SoundAttenuation asset named by the contract values"
-    },
     "create_behavior_tree": {
       "category": "gameplay",
       "params": [
@@ -5871,54 +6510,6 @@
         }
       ]
     },
-    "create_concurrency": {
-      "category": "audio",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "SoundConcurrency asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Audio/Concurrency)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
-        },
-        {
-          "name": "maxCount",
-          "type": "integer",
-          "required": false,
-          "description": "Most concurrent voices"
-        },
-        {
-          "name": "limitToOwner",
-          "type": "boolean",
-          "required": false,
-          "description": "Count voices per owning actor"
-        },
-        {
-          "name": "volumeScale",
-          "type": "number",
-          "required": false,
-          "description": "Volume scale applied to each new voice"
-        },
-        {
-          "name": "resolutionRule",
-          "type": "string",
-          "required": false,
-          "description": "EMaxConcurrentResolutionRule name, e.g. StopFarthestThenOldest"
-        }
-      ],
-      "contractExempt": "Creates and saves a SoundConcurrency asset named by the contract values"
-    },
     "create_control_rig": {
       "category": "animation",
       "params": [
@@ -5951,41 +6542,6 @@
           "type": "string",
           "required": false,
           "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
-        }
-      ]
-    },
-    "create_cpp_class": {
-      "category": "project",
-      "params": [
-        {
-          "name": "className",
-          "type": "string",
-          "required": true,
-          "description": "Class name without its prefix; the parent decides A or U"
-        },
-        {
-          "name": "parentClass",
-          "type": "string",
-          "required": false,
-          "description": "Parent class as a short name (Actor) or /Script/<Module>.<Class> path (default UObject)"
-        },
-        {
-          "name": "moduleName",
-          "type": "string",
-          "required": false,
-          "description": "Project module to add it to (default the first; list_project_modules names them)"
-        },
-        {
-          "name": "classDomain",
-          "type": "string",
-          "required": false,
-          "description": "public | private | classes (default public)"
-        },
-        {
-          "name": "subPath",
-          "type": "string",
-          "required": false,
-          "description": "Folder under the domain folder, e.g. Gameplay/Abilities (default its root)"
         }
       ]
     },
@@ -6215,6 +6771,116 @@
         }
       ]
     },
+    "create_ik_retargeter": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "IKRetargeter asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game)"
+        },
+        {
+          "name": "sourceRig",
+          "type": "string",
+          "required": false,
+          "description": "Source IKRigDefinition to assign"
+        },
+        {
+          "name": "targetRig",
+          "type": "string",
+          "required": false,
+          "description": "Target IKRigDefinition to assign"
+        },
+        {
+          "name": "autoMapChains",
+          "type": "boolean",
+          "required": false,
+          "description": "Assign the rigs to every op and auto-map chains (default true)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns an existing asset untouched, error refuses"
+        }
+      ],
+      "contractExempt": "It creates the IKRetargeter before any input can fail, and before 5.8 an unresolved rig is only a warning"
+    },
+    "create_ik_rig": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "IKRigDefinition asset name"
+        },
+        {
+          "name": "skeletalMeshPath",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh the rig is built on"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game)"
+        },
+        {
+          "name": "retargetRoot",
+          "type": "string",
+          "required": false,
+          "description": "Retarget root bone"
+        },
+        {
+          "name": "chains",
+          "type": "array",
+          "required": false,
+          "description": "Retarget chains to add",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Retarget chain name"
+            },
+            {
+              "name": "startBone",
+              "type": "string",
+              "required": true,
+              "description": "First bone of the chain"
+            },
+            {
+              "name": "endBone",
+              "type": "string",
+              "required": true,
+              "description": "Last bone of the chain"
+            },
+            {
+              "name": "goal",
+              "type": "string",
+              "required": false,
+              "description": "IK goal the chain drives"
+            }
+          ]
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns an existing asset untouched, error refuses"
+        }
+      ]
+    },
     "create_landscape": {
       "category": "landscape",
       "params": [
@@ -6308,41 +6974,73 @@
         }
       ]
     },
-    "create_metasound_source": {
-      "category": "audio",
+    "create_mirror_data_table": {
+      "category": "animation",
       "params": [
         {
           "name": "name",
           "type": "string",
           "required": true,
-          "description": "MetaSoundSource asset name"
+          "description": "MirrorDataTable asset name"
+        },
+        {
+          "name": "skeletonPath",
+          "type": "string",
+          "required": true,
+          "description": "USkeleton the table mirrors"
         },
         {
           "name": "packagePath",
           "type": "string",
           "required": false,
-          "description": "Destination folder (default /Game/Audio/MetaSounds)"
+          "description": "Destination folder (default /Game/MotionMatching)"
+        },
+        {
+          "name": "expressions",
+          "type": "array",
+          "required": false,
+          "description": "Find/replace rules that derive the bone pairs (default the mannequin _l/_r suffix swap)",
+          "items": "object",
+          "fields": [
+            {
+              "name": "find",
+              "type": "string",
+              "required": true,
+              "description": "Bone-name fragment to match"
+            },
+            {
+              "name": "replace",
+              "type": "string",
+              "required": true,
+              "description": "Replacement fragment"
+            },
+            {
+              "name": "method",
+              "type": "string",
+              "required": false,
+              "description": "suffix (default) | prefix | regex"
+            }
+          ]
+        },
+        {
+          "name": "mirrorAxis",
+          "type": "string",
+          "required": false,
+          "description": "X (default) | Y | Z"
+        },
+        {
+          "name": "mirrorRootMotion",
+          "type": "boolean",
+          "required": false,
+          "description": "Mirror root motion (default true)"
         },
         {
           "name": "onConflict",
           "type": "string",
           "required": false,
-          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
-        },
-        {
-          "name": "format",
-          "type": "string",
-          "required": false,
-          "description": "Output format: mono | stereo (default mono)"
-        },
-        {
-          "name": "oneShot",
-          "type": "boolean",
-          "required": false,
-          "description": "Declare the one-shot interface (default true)"
+          "description": "skip (default) returns an existing asset untouched, error refuses"
         }
-      ],
-      "contractExempt": "Creates and saves a MetaSoundSource asset named by the contract values"
+      ]
     },
     "create_pcg_graph": {
       "category": "pcg",
@@ -6448,6 +7146,37 @@
           "description": "skip (default) returns an existing asset untouched, error refuses"
         }
       ]
+    },
+    "create_pose_search_normalization_set": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "PoseSearchNormalizationSet asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/MotionMatching)"
+        },
+        {
+          "name": "databases",
+          "type": "array",
+          "required": false,
+          "description": "PoseSearchDatabases to normalize together",
+          "items": "string"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns an existing asset untouched, error refuses"
+        }
+      ],
+      "contractExempt": "Nothing it reads can fail before the asset is created"
     },
     "create_pose_search_schema": {
       "category": "animation",
@@ -6625,135 +7354,6 @@
         }
       ]
     },
-    "create_sound_class": {
-      "category": "audio",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "SoundClass asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Audio/SoundClasses)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
-        },
-        {
-          "name": "properties",
-          "type": "object",
-          "required": false,
-          "description": "FSoundClassProperties as JSON: Volume, Pitch, bIsUISound, ..."
-        },
-        {
-          "name": "parentPath",
-          "type": "string",
-          "required": false,
-          "description": "Parent SoundClass (default none)"
-        }
-      ],
-      "contractExempt": "Creates and saves a SoundClass asset named by the contract values"
-    },
-    "create_sound_cue": {
-      "category": "audio",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "SoundCue asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Audio/SoundCues)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
-        }
-      ],
-      "contractExempt": "Creates and saves a SoundCue asset named by the contract values"
-    },
-    "create_sound_mix": {
-      "category": "audio",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "SoundMix asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Audio/SoundMixes)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
-        },
-        {
-          "name": "fadeInTime",
-          "type": "number",
-          "required": false,
-          "description": "Fade-in time in seconds"
-        },
-        {
-          "name": "fadeOutTime",
-          "type": "number",
-          "required": false,
-          "description": "Fade-out time in seconds"
-        },
-        {
-          "name": "adjusters",
-          "type": "array",
-          "required": false,
-          "description": "Per-SoundClass adjustments; an entry whose class does not load is skipped",
-          "items": "object",
-          "fields": [
-            {
-              "name": "soundClassPath",
-              "type": "string",
-              "required": true,
-              "description": "SoundClass asset the adjustment applies to"
-            },
-            {
-              "name": "volumeAdjuster",
-              "type": "number",
-              "required": false,
-              "description": "Volume multiplier (default 1)"
-            },
-            {
-              "name": "pitchAdjuster",
-              "type": "number",
-              "required": false,
-              "description": "Pitch multiplier (default 1)"
-            },
-            {
-              "name": "applyToChildren",
-              "type": "boolean",
-              "required": false,
-              "description": "Apply to child sound classes (default false)"
-            }
-          ]
-        }
-      ],
-      "contractExempt": "Creates and saves a SoundMix asset named by the contract values"
-    },
     "create_state_machine": {
       "category": "animation",
       "params": [
@@ -6779,54 +7379,6 @@
           "description": "Graph to add it to (default AnimGraph)"
         }
       ]
-    },
-    "create_submix": {
-      "category": "audio",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "SoundSubmix asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Audio/Submixes)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
-        },
-        {
-          "name": "parentPath",
-          "type": "string",
-          "required": false,
-          "description": "Parent submix (default none)"
-        },
-        {
-          "name": "outputVolume",
-          "type": "number",
-          "required": false,
-          "description": "Output volume"
-        },
-        {
-          "name": "wetLevel",
-          "type": "number",
-          "required": false,
-          "description": "Wet level"
-        },
-        {
-          "name": "dryLevel",
-          "type": "number",
-          "required": false,
-          "description": "Dry level"
-        }
-      ],
-      "contractExempt": "Creates and saves a SoundSubmix asset named by the contract values"
     },
     "create_subobject": {
       "category": "asset",
@@ -7326,23 +7878,6 @@
         }
       ]
     },
-    "disable_plugin": {
-      "category": "project",
-      "params": [
-        {
-          "name": "pluginName",
-          "type": "string",
-          "required": true,
-          "description": "Plugin name as its .uplugin spells it, any case"
-        },
-        {
-          "name": "removeReference",
-          "type": "boolean",
-          "required": false,
-          "description": "Delete the .uproject entry instead of writing an explicit disable (default false)"
-        }
-      ]
-    },
     "disconnect_graph_pins": {
       "category": "asset",
       "params": [
@@ -7580,6 +8115,101 @@
         }
       ]
     },
+    "edit_curve_metadata": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "skeletonPath",
+          "type": "string",
+          "required": true,
+          "description": "USkeleton whose curve metadata to edit"
+        },
+        {
+          "name": "add",
+          "type": "array",
+          "required": false,
+          "description": "Curve names to add",
+          "items": "string"
+        },
+        {
+          "name": "remove",
+          "type": "array",
+          "required": false,
+          "description": "Curve names to remove",
+          "items": "string",
+          "orTypes": [
+            "boolean"
+          ]
+        },
+        {
+          "name": "rename",
+          "type": "array",
+          "required": false,
+          "description": "Curve renames",
+          "items": "object",
+          "fields": [
+            {
+              "name": "from",
+              "type": "string",
+              "required": true,
+              "description": "Current curve name"
+            },
+            {
+              "name": "to",
+              "type": "string",
+              "required": true,
+              "description": "New curve name"
+            }
+          ]
+        },
+        {
+          "name": "flags",
+          "type": "array",
+          "required": false,
+          "description": "Flag writes; each sets material, morphTarget or both",
+          "items": "object",
+          "fields": [
+            {
+              "name": "curve",
+              "type": "string",
+              "required": true,
+              "description": "Curve to flag"
+            },
+            {
+              "name": "material",
+              "type": "boolean",
+              "required": false,
+              "description": "Drive a material parameter"
+            },
+            {
+              "name": "morphTarget",
+              "type": "boolean",
+              "required": false,
+              "description": "Drive a morph target"
+            }
+          ]
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "add"
+            ],
+            [
+              "remove"
+            ],
+            [
+              "rename"
+            ],
+            [
+              "flags"
+            ]
+          ]
+        }
+      ]
+    },
     "edit_graph_parameters": {
       "category": "blueprint",
       "params": [
@@ -7802,17 +8432,6 @@
         }
       ]
     },
-    "enable_plugin": {
-      "category": "project",
-      "params": [
-        {
-          "name": "pluginName",
-          "type": "string",
-          "required": true,
-          "description": "Plugin name as its .uplugin spells it, any case"
-        }
-      ]
-    },
     "end_profile_region": {
       "category": "editor",
       "params": [
@@ -7823,38 +8442,6 @@
           "description": "Name the region was opened under"
         }
       ]
-    },
-    "epic_describe_toolset": {
-      "category": "epic",
-      "params": [
-        {
-          "name": "toolset",
-          "type": "string",
-          "required": true,
-          "description": "Qualified toolset name from epic_list_toolsets, e.g. GASToolsets.AttributeSetToolset"
-        }
-      ]
-    },
-    "epic_list_toolsets": {
-      "category": "epic",
-      "params": [
-        {
-          "name": "nameFilter",
-          "type": "string",
-          "required": false,
-          "description": "Case-sensitive substring of the qualified toolset name"
-        },
-        {
-          "name": "includeSchemas",
-          "type": "boolean",
-          "required": false,
-          "description": "Return each tool with its input and output schemas instead of its name (default false)"
-        }
-      ]
-    },
-    "epic_status": {
-      "category": "epic",
-      "params": []
     },
     "export_actor_fbx": {
       "category": "level",
@@ -8256,63 +8843,13 @@
       "category": "fab",
       "params": []
     },
-    "fab_clear_cache": {
-      "category": "fab",
-      "params": [],
-      "contractExempt": "Takes no parameters and deletes the Fab download cache when called"
-    },
-    "fab_import_file": {
-      "category": "fab",
-      "params": [
-        {
-          "name": "source",
-          "type": "string",
-          "required": true,
-          "description": "Absolute path of the source file on disk",
-          "aliases": [
-            "sourceFile"
-          ]
-        },
-        {
-          "name": "destination",
-          "type": "string",
-          "required": true,
-          "description": "Destination content path, e.g. /Game/Fab/Imported",
-          "aliases": [
-            "destPath"
-          ]
-        }
-      ]
-    },
     "fab_list_cached": {
       "category": "fab",
       "params": []
     },
-    "fab_login": {
-      "category": "fab",
-      "params": [],
-      "contractExempt": "Takes no parameters and opens the EOS account-portal login flow when called"
-    },
-    "fab_logout": {
-      "category": "fab",
-      "params": [],
-      "contractExempt": "Takes no parameters and clears the stored Fab credentials when called"
-    },
     "fab_status": {
       "category": "fab",
       "params": []
-    },
-    "fab_sync_library": {
-      "category": "fab",
-      "params": [
-        {
-          "name": "batchSize",
-          "type": "integer",
-          "required": false,
-          "description": "Library items to pull per sync request (default the plugin's own)"
-        }
-      ],
-      "contractExempt": "Queues a Fab library sync whatever the batch size"
     },
     "fill_datatable_from_json": {
       "category": "asset",
@@ -11218,50 +11755,6 @@
         }
       ]
     },
-    "import_audio": {
-      "category": "audio",
-      "params": [
-        {
-          "name": "filePath",
-          "type": "string",
-          "required": true,
-          "description": "WAV, OGG or FLAC file on disk",
-          "aliases": [
-            "filename"
-          ]
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": false,
-          "description": "Asset name (default the file's base name)",
-          "aliases": [
-            "assetName"
-          ]
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Audio)",
-          "aliases": [
-            "destinationPath"
-          ]
-        },
-        {
-          "name": "looping",
-          "type": "boolean",
-          "required": false,
-          "description": "Set bLooping on the imported SoundWave (omit to keep the importer's value)"
-        },
-        {
-          "name": "replaceExisting",
-          "type": "boolean",
-          "required": false,
-          "description": "Replace an existing asset of that name (default true)"
-        }
-      ]
-    },
     "import_curvetable": {
       "category": "asset",
       "params": [
@@ -13924,18 +14417,6 @@
         }
       ]
     },
-    "live_coding_compile": {
-      "category": "project",
-      "params": [
-        {
-          "name": "wait",
-          "type": "boolean",
-          "required": false,
-          "description": "Block until the compile finishes (default false returns in_progress)"
-        }
-      ],
-      "contractExempt": "Starts a Live Coding compile of the running editor whatever it is sent"
-    },
     "live_coding_status": {
       "category": "project",
       "params": []
@@ -13963,6 +14444,79 @@
           "type": "integer",
           "required": false,
           "description": "One render section (omit to measure the whole LOD)"
+        }
+      ]
+    },
+    "measure_natural_speed": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence or BlendSpace asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "footBones",
+          "type": "array",
+          "required": true,
+          "description": "Foot bones to track, e.g. [foot_l, foot_r]",
+          "items": "string"
+        },
+        {
+          "name": "contactThreshold",
+          "type": "number",
+          "required": false,
+          "description": "Height in cm below which a foot counts as planted (default derived from the clip's lowest foot height)"
+        },
+        {
+          "name": "skeletalMeshPath",
+          "type": "string",
+          "required": false,
+          "description": "Evaluate with this SkeletalMesh's proportions"
+        },
+        {
+          "name": "frames",
+          "type": "array",
+          "required": false,
+          "description": "Frames to sample; pass this or times, not both (default every sampled key)",
+          "items": "number"
+        },
+        {
+          "name": "times",
+          "type": "array",
+          "required": false,
+          "description": "Sample times in seconds; pass this or frames, not both",
+          "items": "number"
+        },
+        {
+          "name": "blendPosition",
+          "type": "object",
+          "required": false,
+          "description": "BlendSpace blend input, in the blendspace's own axis units (BlendSpace only)",
+          "fields": [
+            {
+              "name": "x",
+              "type": "number",
+              "required": false,
+              "description": "First axis value (default 0)"
+            },
+            {
+              "name": "y",
+              "type": "number",
+              "required": false,
+              "description": "Second axis value (default 0)"
+            },
+            {
+              "name": "z",
+              "type": "number",
+              "required": false,
+              "description": "Third axis value (default 0)"
+            }
+          ]
         }
       ]
     },
@@ -14084,104 +14638,6 @@
           "description": "Node class major version (default 1)"
         }
       ]
-    },
-    "metasound_author": {
-      "category": "audio",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "MetaSoundSource asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Audio/MetaSounds)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
-        },
-        {
-          "name": "format",
-          "type": "string",
-          "required": false,
-          "description": "Output format: mono | stereo (default mono)"
-        },
-        {
-          "name": "oneShot",
-          "type": "boolean",
-          "required": false,
-          "description": "Declare the one-shot interface (default true)"
-        },
-        {
-          "name": "inputs",
-          "type": "array",
-          "required": false,
-          "description": "Graph inputs to add",
-          "items": "object",
-          "fields": [
-            {
-              "name": "name",
-              "type": "string",
-              "required": true,
-              "description": "Graph input name"
-            },
-            {
-              "name": "dataType",
-              "type": "string",
-              "required": true,
-              "description": "MetaSound data type: Float, Int32, Bool, String, Trigger, Audio, Time, ..."
-            },
-            {
-              "name": "default",
-              "type": "any",
-              "required": false,
-              "description": "Literal default for the input"
-            }
-          ]
-        },
-        {
-          "name": "outputs",
-          "type": "array",
-          "required": false,
-          "description": "Graph outputs to add",
-          "items": "object",
-          "fields": [
-            {
-              "name": "name",
-              "type": "string",
-              "required": true,
-              "description": "Graph output name"
-            },
-            {
-              "name": "dataType",
-              "type": "string",
-              "required": true,
-              "description": "MetaSound data type"
-            }
-          ]
-        },
-        {
-          "name": "nodes",
-          "type": "array",
-          "required": false,
-          "description": "Nodes to add, each {id, class, namespace?, variant?, majorVersion?, inputs?: {vertex: value}}; id is the local name connections use, namespace defaults to UE and majorVersion to 1",
-          "items": "object"
-        },
-        {
-          "name": "connections",
-          "type": "array",
-          "required": false,
-          "description": "Edges, each {from, to}. Endpoints are 'nodeId:vertex', or the heads 'input:<name>', 'output:<name>' and 'audioOut:<channel>'",
-          "items": "object"
-        }
-      ],
-      "contractExempt": "Creates and saves a MetaSoundSource asset named by the contract values"
     },
     "metasound_build": {
       "category": "audio",
@@ -15304,6 +15760,298 @@
         }
       ]
     },
+    "populate_blendspace": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "BlendSpace or BlendSpace1D asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "axis",
+          "type": "object",
+          "required": false,
+          "description": "Axis params for axisIndex (default axis 0)",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": false,
+              "description": "Axis display name"
+            },
+            {
+              "name": "min",
+              "type": "number",
+              "required": false,
+              "description": "Axis minimum"
+            },
+            {
+              "name": "max",
+              "type": "number",
+              "required": false,
+              "description": "Axis maximum"
+            },
+            {
+              "name": "gridNum",
+              "type": "integer",
+              "required": false,
+              "description": "Grid divisions"
+            }
+          ]
+        },
+        {
+          "name": "axisIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Axis the axis object applies to (default 0)"
+        },
+        {
+          "name": "blendspaceAxes",
+          "type": "array",
+          "required": false,
+          "description": "Per-axis params, in axis order",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": false,
+              "description": "Axis display name"
+            },
+            {
+              "name": "min",
+              "type": "number",
+              "required": false,
+              "description": "Axis minimum"
+            },
+            {
+              "name": "max",
+              "type": "number",
+              "required": false,
+              "description": "Axis maximum"
+            },
+            {
+              "name": "gridNum",
+              "type": "integer",
+              "required": false,
+              "description": "Grid divisions"
+            }
+          ]
+        },
+        {
+          "name": "axisHorizontal",
+          "type": "string",
+          "required": false,
+          "description": "Horizontal axis name"
+        },
+        {
+          "name": "horizontalMin",
+          "type": "number",
+          "required": false,
+          "description": "Horizontal axis minimum"
+        },
+        {
+          "name": "horizontalMax",
+          "type": "number",
+          "required": false,
+          "description": "Horizontal axis maximum"
+        },
+        {
+          "name": "gridNumHorizontal",
+          "type": "integer",
+          "required": false,
+          "description": "Horizontal axis grid divisions"
+        },
+        {
+          "name": "axisVertical",
+          "type": "string",
+          "required": false,
+          "description": "Vertical axis name; ignored on a BlendSpace1D"
+        },
+        {
+          "name": "verticalMin",
+          "type": "number",
+          "required": false,
+          "description": "Vertical axis minimum; ignored on a BlendSpace1D"
+        },
+        {
+          "name": "verticalMax",
+          "type": "number",
+          "required": false,
+          "description": "Vertical axis maximum; ignored on a BlendSpace1D"
+        },
+        {
+          "name": "gridNumVertical",
+          "type": "integer",
+          "required": false,
+          "description": "Vertical axis grid divisions; ignored on a BlendSpace1D"
+        },
+        {
+          "name": "samples",
+          "type": "array",
+          "required": false,
+          "description": "Samples to add as [{animationPath, x, y?}]; an unloadable animation is reported under failed",
+          "items": "object"
+        },
+        {
+          "name": "clearExisting",
+          "type": "boolean",
+          "required": false,
+          "description": "Clear the existing samples first (default true)"
+        }
+      ]
+    },
+    "populate_blendspace_1d": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "BlendSpace or BlendSpace1D asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "axis",
+          "type": "object",
+          "required": false,
+          "description": "Axis params for axisIndex (default axis 0)",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": false,
+              "description": "Axis display name"
+            },
+            {
+              "name": "min",
+              "type": "number",
+              "required": false,
+              "description": "Axis minimum"
+            },
+            {
+              "name": "max",
+              "type": "number",
+              "required": false,
+              "description": "Axis maximum"
+            },
+            {
+              "name": "gridNum",
+              "type": "integer",
+              "required": false,
+              "description": "Grid divisions"
+            }
+          ]
+        },
+        {
+          "name": "axisIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Axis the axis object applies to (default 0)"
+        },
+        {
+          "name": "blendspaceAxes",
+          "type": "array",
+          "required": false,
+          "description": "Per-axis params, in axis order",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": false,
+              "description": "Axis display name"
+            },
+            {
+              "name": "min",
+              "type": "number",
+              "required": false,
+              "description": "Axis minimum"
+            },
+            {
+              "name": "max",
+              "type": "number",
+              "required": false,
+              "description": "Axis maximum"
+            },
+            {
+              "name": "gridNum",
+              "type": "integer",
+              "required": false,
+              "description": "Grid divisions"
+            }
+          ]
+        },
+        {
+          "name": "axisHorizontal",
+          "type": "string",
+          "required": false,
+          "description": "Horizontal axis name"
+        },
+        {
+          "name": "horizontalMin",
+          "type": "number",
+          "required": false,
+          "description": "Horizontal axis minimum"
+        },
+        {
+          "name": "horizontalMax",
+          "type": "number",
+          "required": false,
+          "description": "Horizontal axis maximum"
+        },
+        {
+          "name": "gridNumHorizontal",
+          "type": "integer",
+          "required": false,
+          "description": "Horizontal axis grid divisions"
+        },
+        {
+          "name": "axisVertical",
+          "type": "string",
+          "required": false,
+          "description": "Vertical axis name; ignored on a BlendSpace1D"
+        },
+        {
+          "name": "verticalMin",
+          "type": "number",
+          "required": false,
+          "description": "Vertical axis minimum; ignored on a BlendSpace1D"
+        },
+        {
+          "name": "verticalMax",
+          "type": "number",
+          "required": false,
+          "description": "Vertical axis maximum; ignored on a BlendSpace1D"
+        },
+        {
+          "name": "gridNumVertical",
+          "type": "integer",
+          "required": false,
+          "description": "Vertical axis grid divisions; ignored on a BlendSpace1D"
+        },
+        {
+          "name": "samples",
+          "type": "array",
+          "required": false,
+          "description": "Samples to add as [{animationPath, x, y?}]; an unloadable animation is reported under failed",
+          "items": "object"
+        },
+        {
+          "name": "clearExisting",
+          "type": "boolean",
+          "required": false,
+          "description": "Clear the existing samples first (default true)"
+        }
+      ]
+    },
     "preview_animation": {
       "category": "animation",
       "params": [
@@ -15993,6 +16741,49 @@
           "type": "string",
           "required": true,
           "description": "SCS or inherited component name"
+        }
+      ]
+    },
+    "read_control_rig_edit": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "sequencePath",
+          "type": "string",
+          "required": true,
+          "description": "LevelSequence holding the Control Rig edit session"
+        },
+        {
+          "name": "bindingTag",
+          "type": "string",
+          "required": true,
+          "description": "Edit-session natural key from begin_control_rig_edit"
+        },
+        {
+          "name": "controlNames",
+          "type": "array",
+          "required": false,
+          "description": "Controls to read (default every readable control)",
+          "items": "string"
+        },
+        {
+          "name": "frame",
+          "type": "number",
+          "required": false,
+          "description": "One frame to sample, an integer; combines with frames"
+        },
+        {
+          "name": "frames",
+          "type": "array",
+          "required": false,
+          "description": "Integer frames to sample (default the first and last frame of the range)",
+          "items": "number"
+        },
+        {
+          "name": "space",
+          "type": "string",
+          "required": false,
+          "description": "local (default) | component | global, where global is an alias for component"
         }
       ]
     },
@@ -16901,6 +17692,53 @@
           "type": "boolean",
           "required": false,
           "description": "Also break the links holding orphaned pins alive, which removes those pins"
+        }
+      ]
+    },
+    "register_compatible_skeleton": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "skeletonPath",
+          "type": "string",
+          "required": true,
+          "description": "USkeleton that gains or loses the compatible entries"
+        },
+        {
+          "name": "compatibleSkeletonPath",
+          "type": "string",
+          "required": false,
+          "description": "Skeleton to mark compatible"
+        },
+        {
+          "name": "compatibleSkeletonPaths",
+          "type": "array",
+          "required": false,
+          "description": "Several skeletons at once; wins over compatibleSkeletonPath",
+          "items": "string"
+        },
+        {
+          "name": "remove",
+          "type": "array",
+          "required": false,
+          "description": "true to unregister instead of register (default false)",
+          "items": "string",
+          "orTypes": [
+            "boolean"
+          ]
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "compatibleSkeletonPath"
+            ],
+            [
+              "compatibleSkeletonPaths"
+            ]
+          ]
         }
       ]
     },
@@ -19471,6 +20309,85 @@
         }
       ]
     },
+    "sample_pose": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence or BlendSpace asset path; a montage is refused",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "boneNames",
+          "type": "array",
+          "required": false,
+          "description": "Bones to return (default every bone)",
+          "items": "string"
+        },
+        {
+          "name": "frames",
+          "type": "array",
+          "required": false,
+          "description": "Frames to sample; pass this or times, not both (default every sampled key)",
+          "items": "number"
+        },
+        {
+          "name": "times",
+          "type": "array",
+          "required": false,
+          "description": "Sample times in seconds; pass this or frames, not both",
+          "items": "number"
+        },
+        {
+          "name": "space",
+          "type": "string",
+          "required": false,
+          "description": "component (default) | local | world, which resolves to component on an asset"
+        },
+        {
+          "name": "skeletalMeshPath",
+          "type": "string",
+          "required": false,
+          "description": "Evaluate with this SkeletalMesh's proportions"
+        },
+        {
+          "name": "incorporateRootMotion",
+          "type": "boolean",
+          "required": false,
+          "description": "Fold the clip's root motion into the pose (default true)"
+        },
+        {
+          "name": "blendPosition",
+          "type": "object",
+          "required": false,
+          "description": "BlendSpace blend input, in the blendspace's own axis units (BlendSpace only)",
+          "fields": [
+            {
+              "name": "x",
+              "type": "number",
+              "required": false,
+              "description": "First axis value (default 0)"
+            },
+            {
+              "name": "y",
+              "type": "number",
+              "required": false,
+              "description": "Second axis value (default 0)"
+            },
+            {
+              "name": "z",
+              "type": "number",
+              "required": false,
+              "description": "Third axis value (default 0)"
+            }
+          ]
+        }
+      ]
+    },
     "save_all_dirty": {
       "category": "asset",
       "params": [
@@ -20473,6 +21390,59 @@
         }
       ]
     },
+    "set_anim_curve_keys": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "curveName",
+          "type": "string",
+          "required": true,
+          "description": "Float curve to write; a missing curve is added"
+        },
+        {
+          "name": "keys",
+          "type": "array",
+          "required": true,
+          "description": "Keys that replace the curve's own",
+          "items": "object",
+          "fields": [
+            {
+              "name": "time",
+              "type": "number",
+              "required": true,
+              "description": "Key time in seconds"
+            },
+            {
+              "name": "value",
+              "type": "number",
+              "required": true,
+              "description": "Key value"
+            },
+            {
+              "name": "interp",
+              "type": "string",
+              "required": false,
+              "description": "linear | constant | cubic (default the call's interpolation)"
+            }
+          ]
+        },
+        {
+          "name": "interpolation",
+          "type": "string",
+          "required": false,
+          "description": "Interpolation of keys without their own interp: linear (default) | constant | cubic"
+        }
+      ]
+    },
     "set_asc_defaults": {
       "category": "gas",
       "params": [
@@ -20635,6 +21605,83 @@
         }
       ]
     },
+    "set_blend_sample": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "BlendSpace or BlendSpace1D asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "sampleIndex",
+          "type": "integer",
+          "required": true,
+          "description": "Sample to edit, as read_blendspace lists it"
+        },
+        {
+          "name": "position",
+          "type": "object",
+          "required": false,
+          "description": "New sample position; wins over flat x and y, and an omitted axis keeps its value",
+          "fields": [
+            {
+              "name": "x",
+              "type": "number",
+              "required": false,
+              "description": "Horizontal axis value"
+            },
+            {
+              "name": "y",
+              "type": "number",
+              "required": false,
+              "description": "Vertical axis value"
+            }
+          ]
+        },
+        {
+          "name": "x",
+          "type": "number",
+          "required": false,
+          "description": "New horizontal axis value when position is omitted"
+        },
+        {
+          "name": "y",
+          "type": "number",
+          "required": false,
+          "description": "New vertical axis value when position is omitted"
+        },
+        {
+          "name": "animation",
+          "type": "string",
+          "required": false,
+          "description": "AnimSequence to swap into the sample"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "position"
+            ],
+            [
+              "x"
+            ],
+            [
+              "y"
+            ],
+            [
+              "animation"
+            ]
+          ]
+        }
+      ]
+    },
     "set_blueprint_component_property": {
       "category": "blueprint",
       "params": [
@@ -20696,6 +21743,122 @@
           "type": "string",
           "required": false,
           "description": "The function owning a local variable; omit for a member variable"
+        }
+      ]
+    },
+    "set_bone_keyframes": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "boneName",
+          "type": "string",
+          "required": true,
+          "description": "Bone whose track to replace; a missing track is created"
+        },
+        {
+          "name": "keyframes",
+          "type": "array",
+          "required": true,
+          "description": "One key per frame, in order; an omitted channel keeps the reference pose",
+          "items": "object",
+          "fields": [
+            {
+              "name": "location",
+              "type": "vec3",
+              "required": false,
+              "description": "Bone-local translation"
+            },
+            {
+              "name": "rotation",
+              "type": "object",
+              "required": false,
+              "description": "Bone-local rotation as a quaternion {x, y, z, w}"
+            },
+            {
+              "name": "scale",
+              "type": "vec3",
+              "required": false,
+              "description": "Bone-local scale"
+            }
+          ]
+        }
+      ]
+    },
+    "set_bone_retargeting": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "skeletonPath",
+          "type": "string",
+          "required": true,
+          "description": "USkeleton whose bone tree to edit"
+        },
+        {
+          "name": "mode",
+          "type": "string",
+          "required": false,
+          "description": "Animation | Skeleton | AnimationScaled | AnimationRelative | OrientAndScale"
+        },
+        {
+          "name": "bones",
+          "type": "array",
+          "required": false,
+          "description": "Bone names to set (default every bone)"
+        },
+        {
+          "name": "bone",
+          "type": "string",
+          "required": false,
+          "description": "A single bone, when bones is omitted"
+        },
+        {
+          "name": "includeChildren",
+          "type": "boolean",
+          "required": false,
+          "description": "Apply recursively down the bone tree (default false)"
+        },
+        {
+          "name": "restore",
+          "type": "array",
+          "required": false,
+          "description": "Per-bone modes to put back, which is how this action's rollback replays; wins over mode",
+          "items": "object",
+          "fields": [
+            {
+              "name": "bone",
+              "type": "string",
+              "required": true,
+              "description": "Bone to restore"
+            },
+            {
+              "name": "mode",
+              "type": "string",
+              "required": true,
+              "description": "Mode to restore it to"
+            }
+          ]
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "mode"
+            ],
+            [
+              "restore"
+            ]
+          ]
         }
       ]
     },
@@ -23078,6 +24241,32 @@
         }
       ]
     },
+    "set_pose_search_clips": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "PoseSearchDatabase asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "clips",
+          "type": "array",
+          "required": true,
+          "description": "Clips, each an animation asset path or {sequencePath (or asset, assetPath, animationPath), mirror?: original | mirrored | both, disableReselection?, sampleStart?, sampleEnd?, enabled?}"
+        },
+        {
+          "name": "clearExisting",
+          "type": "boolean",
+          "required": false,
+          "description": "Replace the clip list rather than append to it (default true)"
+        }
+      ]
+    },
     "set_pose_search_database_settings": {
       "category": "animation",
       "params": [
@@ -23255,44 +24444,6 @@
           "type": "boolean",
           "required": false,
           "description": "Save the package to disk after the write (default true; false leaves it dirty)"
-        }
-      ]
-    },
-    "set_property_replicated": {
-      "category": "networking",
-      "params": [
-        {
-          "name": "blueprintPath",
-          "type": "string",
-          "required": true,
-          "description": "Actor Blueprint asset path"
-        },
-        {
-          "name": "variableName",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint variable name",
-          "aliases": [
-            "propertyName"
-          ]
-        },
-        {
-          "name": "replicationType",
-          "type": "string",
-          "required": false,
-          "description": "None | Replicated | RepNotify (default None). Wins over replicated and repNotify"
-        },
-        {
-          "name": "replicated",
-          "type": "boolean",
-          "required": false,
-          "description": "Shorthand: true is Replicated, false is None"
-        },
-        {
-          "name": "repNotify",
-          "type": "boolean",
-          "required": false,
-          "description": "Shorthand: true is RepNotify, and wins over replicated"
         }
       ]
     },
@@ -24366,6 +25517,67 @@
         }
       ]
     },
+    "set_sync_markers": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "markers",
+          "type": "array",
+          "required": false,
+          "description": "Sync markers to author; with markerMode=replace an empty array clears them",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Marker name"
+            },
+            {
+              "name": "time",
+              "type": "number",
+              "required": true,
+              "description": "Marker time in seconds, within the clip"
+            }
+          ]
+        },
+        {
+          "name": "removeMarkers",
+          "type": "array",
+          "required": false,
+          "description": "Marker names to drop, applied after markers",
+          "items": "string"
+        },
+        {
+          "name": "markerMode",
+          "type": "string",
+          "required": false,
+          "description": "replace (default: markers becomes the whole list) | merge (add or move only the named markers)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "markers"
+            ],
+            [
+              "removeMarkers"
+            ]
+          ]
+        }
+      ]
+    },
     "set_texture_settings_by_type": {
       "category": "asset",
       "params": [
@@ -25080,50 +26292,6 @@
           "description": "Node-specific fields to set, as {property: value}"
         }
       ]
-    },
-    "soundcue_author": {
-      "category": "audio",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "SoundCue asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Audio/SoundCues)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
-        },
-        {
-          "name": "nodes",
-          "type": "array",
-          "required": false,
-          "description": "Nodes to add, each {id, type, soundWavePath?, properties?: {field: value}}; id is the local name connections use, type is a soundcue_add_node nodeType",
-          "items": "object"
-        },
-        {
-          "name": "connections",
-          "type": "array",
-          "required": false,
-          "description": "Links, each {child, parent?, index?}; an omitted or 'root' parent makes the child the cue root, and index defaults to append",
-          "items": "object"
-        },
-        {
-          "name": "root",
-          "type": "string",
-          "required": false,
-          "description": "Local id of the node to make the cue root, overriding the connections"
-        }
-      ],
-      "contractExempt": "Creates and saves a SoundCue asset named by the contract values"
     },
     "soundcue_connect": {
       "category": "audio",
