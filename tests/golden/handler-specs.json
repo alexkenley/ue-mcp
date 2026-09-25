@@ -1,5 +1,5 @@
 {
-  "handlerCount": 838,
+  "handlerCount": 845,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -6026,6 +6026,98 @@
         }
       ]
     },
+    "create_editor_utility_blueprint": {
+      "category": "widget",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "Full destination, e.g. /Game/UI/WBP_Example; wins over name + packagePath",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Bare asset name, placed in packagePath"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for name (default /Game/EditorUtilities)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "assetPath"
+            ],
+            [
+              "name"
+            ]
+          ]
+        }
+      ],
+      "contractExempt": "Creates and saves an Editor Utility Blueprint under the contract values; nothing it reads fails first"
+    },
+    "create_editor_utility_widget": {
+      "category": "widget",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "Full destination, e.g. /Game/UI/WBP_Example; wins over name + packagePath",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Bare asset name, placed in packagePath"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for name (default /Game/EditorUtilities)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "assetPath"
+            ],
+            [
+              "name"
+            ]
+          ]
+        }
+      ],
+      "contractExempt": "Creates and saves an Editor Utility Widget under the contract values; nothing it reads fails first"
+    },
     "create_foliage_type": {
       "category": "foliage",
       "params": [
@@ -6643,6 +6735,58 @@
           "description": "Designer-facing label (defaults to animationName)"
         }
       ]
+    },
+    "create_widget_blueprint": {
+      "category": "widget",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "Full destination, e.g. /Game/UI/WBP_Example; wins over name + packagePath",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Bare asset name, placed in packagePath"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for name (default /Game/UI/Widgets)"
+        },
+        {
+          "name": "parentClass",
+          "type": "string",
+          "required": false,
+          "description": "UUserWidget subclass: a short name or a class path (default UserWidget)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "assetPath"
+            ],
+            [
+              "name"
+            ]
+          ]
+        }
+      ],
+      "contractExempt": "Creates and saves a Widget Blueprint under the contract values; nothing it reads fails first"
     },
     "delete_actor": {
       "category": "level",
@@ -8543,6 +8687,39 @@
           "description": "BehaviorTree asset path",
           "aliases": [
             "path"
+          ]
+        }
+      ]
+    },
+    "get_bind_widget_contract": {
+      "category": "widget",
+      "params": [
+        {
+          "name": "className",
+          "type": "string",
+          "required": false,
+          "description": "Native UserWidget parent whose contract to read: a short name, a class path, or a Widget Blueprint path"
+        },
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "Widget Blueprint whose parent's contract to read and whose tree to check against it",
+          "aliases": [
+            "path"
+          ]
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "className"
+            ],
+            [
+              "assetPath"
+            ]
           ]
         }
       ]
@@ -10486,6 +10663,54 @@
         }
       ]
     },
+    "get_runtime_widget": {
+      "category": "widget",
+      "params": [
+        {
+          "name": "widgetName",
+          "type": "string",
+          "required": false,
+          "description": "Exact live instance name"
+        },
+        {
+          "name": "className",
+          "type": "string",
+          "required": false,
+          "description": "Widget class name that locates the live host widget"
+        },
+        {
+          "name": "childName",
+          "type": "string",
+          "required": false,
+          "description": "Named child inside the UserWidget (#559)"
+        },
+        {
+          "name": "maxDepth",
+          "type": "integer",
+          "required": false,
+          "description": "Max widget-tree depth to walk (default 6)"
+        },
+        {
+          "name": "includeLayout",
+          "type": "boolean",
+          "required": false,
+          "description": "Add read-only layout diagnostics (geometry, slot, clipping, viewport, per-node deltas) to every node and report the host UserWidget under host (#775)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "widgetName"
+            ],
+            [
+              "className"
+            ]
+          ]
+        }
+      ]
+    },
     "get_selected_actors": {
       "category": "level",
       "params": []
@@ -11683,6 +11908,60 @@
           "type": "integer",
           "required": false,
           "description": "Platform user index (default 0)"
+        }
+      ]
+    },
+    "invoke_runtime_function": {
+      "category": "widget",
+      "params": [
+        {
+          "name": "widgetName",
+          "type": "string",
+          "required": false,
+          "description": "Exact live instance name"
+        },
+        {
+          "name": "className",
+          "type": "string",
+          "required": false,
+          "description": "Widget class name that locates the live host widget"
+        },
+        {
+          "name": "functionName",
+          "type": "string",
+          "required": false,
+          "description": "Parameterless UFUNCTION to call on the live widget (#559), or with childName the child delegate to fire (#812)"
+        },
+        {
+          "name": "childName",
+          "type": "string",
+          "required": false,
+          "description": "Named child inside the UserWidget (#559)"
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": false,
+          "description": "Value for the child interaction: true, false or toggle for a CheckBox, a number for a Slider or SpinBox, text for a text box, an option or index for a ComboBoxString"
+        },
+        {
+          "name": "commitMethod",
+          "type": "string",
+          "required": false,
+          "description": "Text and spin box commit type: OnEnter (default), OnUserMovedFocus, OnCleared, Default (#812)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "widgetName"
+            ],
+            [
+              "className"
+            ]
+          ]
         }
       ]
     },
@@ -24314,6 +24593,90 @@
           "type": "any",
           "required": true,
           "description": "Value to write: string, number or boolean"
+        }
+      ]
+    },
+    "set_widget_navigation": {
+      "category": "widget",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Widget Blueprint or Editor Utility asset path, e.g. /Game/UI/WBP_Example (#798)",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "rules",
+          "type": "array",
+          "required": false,
+          "description": "Navigation writes applied as one validated batch",
+          "items": "object",
+          "fields": [
+            {
+              "name": "widgetName",
+              "type": "string",
+              "required": true,
+              "description": "Widget whose navigation is written"
+            },
+            {
+              "name": "direction",
+              "type": "string",
+              "required": true,
+              "description": "Up, Down, Left, Right, Next or Previous"
+            },
+            {
+              "name": "rule",
+              "type": "string",
+              "required": false,
+              "description": "Escape, Explicit (default), Wrap, Stop, Custom or CustomBoundary"
+            },
+            {
+              "name": "widgetToFocus",
+              "type": "string",
+              "required": false,
+              "description": "Target widget name; required for Explicit"
+            }
+          ]
+        },
+        {
+          "name": "widgetName",
+          "type": "string",
+          "required": false,
+          "description": "Widget whose navigation a single write sets"
+        },
+        {
+          "name": "direction",
+          "type": "string",
+          "required": false,
+          "description": "Direction of a single write, which it needs: Up, Down, Left, Right, Next or Previous"
+        },
+        {
+          "name": "rule",
+          "type": "string",
+          "required": false,
+          "description": "Rule of a single write: Escape, Explicit (default), Wrap, Stop, Custom or CustomBoundary"
+        },
+        {
+          "name": "widgetToFocus",
+          "type": "string",
+          "required": false,
+          "description": "Target widget of a single Explicit write"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "rules"
+            ],
+            [
+              "widgetName"
+            ]
+          ]
         }
       ]
     },
