@@ -1,5 +1,5 @@
 {
-  "handlerCount": 845,
+  "handlerCount": 853,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -5905,6 +5905,30 @@
         }
       ]
     },
+    "create_blackboard": {
+      "category": "gameplay",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Content folder (default /Game/AI)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default, returns the existing asset) or error when the asset already exists"
+        }
+      ],
+      "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
+    },
     "create_blendspace": {
       "category": "animation",
       "params": [
@@ -6154,6 +6178,30 @@
         }
       ]
     },
+    "create_eqs_query": {
+      "category": "gameplay",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Content folder (default /Game/AI/EQS)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default, returns the existing asset) or error when the asset already exists"
+        }
+      ],
+      "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
+    },
     "create_foliage_type": {
       "category": "foliage",
       "params": [
@@ -6367,6 +6415,60 @@
           "description": "Parent deriving from HUD: short name, /Script path or Blueprint asset path"
         }
       ]
+    },
+    "create_input_action": {
+      "category": "gameplay",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Content folder (default /Game/Input)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default, returns the existing asset) or error when the asset already exists"
+        },
+        {
+          "name": "valueType",
+          "type": "string",
+          "required": false,
+          "description": "Boolean (default) | Axis1D | Axis2D | Axis3D; an unrecognised type leaves the default"
+        }
+      ],
+      "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
+    },
+    "create_input_mapping_context": {
+      "category": "gameplay",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Content folder (default /Game/Input)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default, returns the existing asset) or error when the asset already exists"
+        }
+      ],
+      "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
     },
     "create_landscape": {
       "category": "landscape",
@@ -6742,6 +6844,42 @@
         }
       ]
     },
+    "create_smart_object_definition": {
+      "category": "gameplay",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Content folder (default /Game/AI/SmartObjects)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default, returns the existing asset) or error when the asset already exists"
+        },
+        {
+          "name": "defaultBehaviorClass",
+          "type": "string",
+          "required": false,
+          "description": "Behavior definition asset path or class path added to DefaultBehaviorDefinitions"
+        },
+        {
+          "name": "instanceProperties",
+          "type": "object",
+          "required": false,
+          "description": "Property writes applied to a freshly-spawned behavior instance"
+        }
+      ],
+      "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
+    },
     "create_state_machine": {
       "category": "animation",
       "params": [
@@ -6767,6 +6905,36 @@
           "description": "Graph to add it to (default AnimGraph)"
         }
       ]
+    },
+    "create_state_tree": {
+      "category": "gameplay",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Content folder (default /Game/AI)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default, returns the existing asset) or error when the asset already exists"
+        },
+        {
+          "name": "schema",
+          "type": "string",
+          "required": false,
+          "description": "StateTree schema class path; omit to take the gameplay default (StateTreeComponentSchema, then StateTreeAIComponentSchema, then any concrete schema)"
+        }
+      ],
+      "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
     },
     "create_subobject": {
       "category": "asset",
@@ -16442,6 +16610,11 @@
         }
       ]
     },
+    "rebuild_navigation": {
+      "category": "gameplay",
+      "params": [],
+      "contractExempt": "Rebuilds the navmesh; it takes no parameters that could fail first"
+    },
     "rebuild_water_zone": {
       "category": "level",
       "params": [
@@ -25293,6 +25466,48 @@
           "description": "Point, spot and rect lights only"
         }
       ]
+    },
+    "spawn_nav_modifier_volume": {
+      "category": "gameplay",
+      "params": [
+        {
+          "name": "location",
+          "type": "vec3",
+          "required": false,
+          "description": "World location of the volume (default origin)"
+        },
+        {
+          "name": "extent",
+          "type": "vec3",
+          "required": false,
+          "description": "Half-size in world units, positive on every axis (default 100)"
+        },
+        {
+          "name": "areaClass",
+          "type": "string",
+          "required": false,
+          "description": "UNavArea subclass: NavArea_Null (default, cuts a hole), NavArea_Obstacle, or a /Script path"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "required": false,
+          "description": "Actor label, also what onConflict dedupes on"
+        },
+        {
+          "name": "scale",
+          "type": "vec3",
+          "required": false,
+          "description": "Actor scale, applied after the brush is built"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default, returns the actor already carrying label) or error when one does"
+        }
+      ],
+      "contractExempt": "Spawns a NavModifierVolume under the contract values; nothing it reads fails first"
     },
     "spawn_niagara_actor": {
       "category": "niagara",

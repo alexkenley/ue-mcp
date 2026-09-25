@@ -449,6 +449,54 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "create_blackboard": {
+    "category": "gameplay",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Asset name"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Content folder (default /Game/AI)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip (default, returns the existing asset) or error when the asset already exists"
+      }
+    ],
+    "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
+  },
+  "create_eqs_query": {
+    "category": "gameplay",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Asset name"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Content folder (default /Game/AI/EQS)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip (default, returns the existing asset) or error when the asset already exists"
+      }
+    ],
+    "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
+  },
   "create_game_mode": {
     "category": "gameplay",
     "params": [
@@ -518,6 +566,60 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "create_input_action": {
+    "category": "gameplay",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Asset name"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Content folder (default /Game/Input)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip (default, returns the existing asset) or error when the asset already exists"
+      },
+      {
+        "name": "valueType",
+        "type": "string",
+        "required": false,
+        "description": "Boolean (default) | Axis1D | Axis2D | Axis3D; an unrecognised type leaves the default"
+      }
+    ],
+    "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
+  },
+  "create_input_mapping_context": {
+    "category": "gameplay",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Asset name"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Content folder (default /Game/Input)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip (default, returns the existing asset) or error when the asset already exists"
+      }
+    ],
+    "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
+  },
   "create_player_controller": {
     "category": "gameplay",
     "params": [
@@ -563,6 +665,72 @@ export const handlerSpecs: HandlerSpecs = {
         "description": "Parent deriving from PlayerState: short name, /Script path or Blueprint asset path"
       }
     ]
+  },
+  "create_smart_object_definition": {
+    "category": "gameplay",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Asset name"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Content folder (default /Game/AI/SmartObjects)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip (default, returns the existing asset) or error when the asset already exists"
+      },
+      {
+        "name": "defaultBehaviorClass",
+        "type": "string",
+        "required": false,
+        "description": "Behavior definition asset path or class path added to DefaultBehaviorDefinitions"
+      },
+      {
+        "name": "instanceProperties",
+        "type": "object",
+        "required": false,
+        "description": "Property writes applied to a freshly-spawned behavior instance"
+      }
+    ],
+    "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
+  },
+  "create_state_tree": {
+    "category": "gameplay",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Asset name"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Content folder (default /Game/AI)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip (default, returns the existing asset) or error when the asset already exists"
+      },
+      {
+        "name": "schema",
+        "type": "string",
+        "required": false,
+        "description": "StateTree schema class path; omit to take the gameplay default (StateTreeComponentSchema, then StateTreeAIComponentSchema, then any concrete schema)"
+      }
+    ],
+    "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
   },
   "find_nav_path": {
     "category": "gameplay",
@@ -1408,6 +1576,11 @@ export const handlerSpecs: HandlerSpecs = {
         "description": "Target AIPerceptionComponent name (default: first found)"
       }
     ]
+  },
+  "rebuild_navigation": {
+    "category": "gameplay",
+    "params": [],
+    "contractExempt": "Rebuilds the navmesh; it takes no parameters that could fail first"
   },
   "remove_blackboard_key": {
     "category": "gameplay",
@@ -2284,6 +2457,48 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "spawn_nav_modifier_volume": {
+    "category": "gameplay",
+    "params": [
+      {
+        "name": "location",
+        "type": "vec3",
+        "required": false,
+        "description": "World location of the volume (default origin)"
+      },
+      {
+        "name": "extent",
+        "type": "vec3",
+        "required": false,
+        "description": "Half-size in world units, positive on every axis (default 100)"
+      },
+      {
+        "name": "areaClass",
+        "type": "string",
+        "required": false,
+        "description": "UNavArea subclass: NavArea_Null (default, cuts a hole), NavArea_Obstacle, or a /Script path"
+      },
+      {
+        "name": "label",
+        "type": "string",
+        "required": false,
+        "description": "Actor label, also what onConflict dedupes on"
+      },
+      {
+        "name": "scale",
+        "type": "vec3",
+        "required": false,
+        "description": "Actor scale, applied after the brush is built"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip (default, returns the actor already carrying label) or error when one does"
+      }
+    ],
+    "contractExempt": "Spawns a NavModifierVolume under the contract values; nothing it reads fails first"
+  },
   "stop_behavior_tree": {
     "category": "gameplay",
     "params": [
@@ -2390,11 +2605,17 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   check_perception: "Params: perceiverLabel?, perceiverPath?, targetLabel?, targetPath?, world?, pieInstance?",
   configure_ai_perception_sense: "Params: blueprintPath, senseType?, settings?, componentName?",
   create_behavior_tree: "Params: name, packagePath?, onConflict?, blackboardPath?",
+  create_blackboard: "Params: name, packagePath?, onConflict?",
+  create_eqs_query: "Params: name, packagePath?, onConflict?",
   create_game_mode: "Params: name, packagePath?, parentClass?",
   create_game_state: "Params: name, packagePath?, parentClass?",
   create_hud: "Params: name, packagePath?, parentClass?",
+  create_input_action: "Params: name, packagePath?, onConflict?, valueType?",
+  create_input_mapping_context: "Params: name, packagePath?, onConflict?",
   create_player_controller: "Params: name, packagePath?, parentClass?",
   create_player_state: "Params: name, packagePath?, parentClass?",
+  create_smart_object_definition: "Params: name, packagePath?, onConflict?, defaultBehaviorClass?, instanceProperties?",
+  create_state_tree: "Params: name, packagePath?, onConflict?, schema?",
   find_nav_path: "Params: start, end, pathfindingContext?, pathfindingContextPath?",
   get_action_value: "Params: inputActionPath?, pieInstance?, playerIndex?",
   get_applied_imcs: "Params: pieInstance?, playerIndex?, mappingContext?, includeActions?",
@@ -2430,6 +2651,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   read_imc: "Params: imcPath (or mappingContext, or assetPath)",
   read_input_action: "Params: inputActionPath",
   read_perception: "Params: blueprintPath?, actorLabel?, actorPath?, world?, pieInstance?, componentName?",
+  rebuild_navigation: "Params: none",
   remove_blackboard_key: "Params: blackboardPath, keyName",
   remove_bt_node: "Params: assetPath (or path), node (or nodePath)",
   remove_eqs_option: "Params: queryPath, optionIndex",
@@ -2456,6 +2678,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   set_player_mappable_settings: "Params: inputActionPath, mappingName, displayName?, displayCategory?, save?",
   set_smart_object_slot: "Params: assetPath, slotIndex, name?, offset?, rotation?, tags?",
   set_world_game_mode: "Params: gameModeClass (or gameModePath)",
+  spawn_nav_modifier_volume: "Params: location?, extent?, areaClass?, label?, scale?, onConflict?",
   stop_behavior_tree: "Params: actorLabel?, actorPath?, world?, pieInstance?, mode?, reason?, completeRestart?",
   validate_input: "Params: imcPath?, directory?, recursive?, limit?",
   validate_mass_entity_config: "Params: assetPath",
@@ -2466,6 +2689,7 @@ export const schema: Record<string, z.ZodType> = {
   actorLabel: z.string().optional().describe("Live actor label or name (the pawn or its AIController) (get_bt_runtime, get_live_blackboard, get_perceived_actors, read_perception, run_behavior_tree, set_live_blackboard, stop_behavior_tree). Actor label, name or path. Pass actorLabel or actorPath (get_state_tree_runtime). Only this ZoneGraphData actor, by label or name (query_zone_graph)"),
   actorPath: z.string().optional().describe("Full actor object path; wins over actorLabel (get_bt_runtime, get_live_blackboard, get_perceived_actors, read_perception, run_behavior_tree, set_live_blackboard, stop_behavior_tree). Full actor object path; the unambiguous selector (get_state_tree_runtime). Only this ZoneGraphData actor, by full object path (query_zone_graph)"),
   amount: z.number().optional().describe("Damage amount (damage only, required there)"),
+  areaClass: z.string().optional().describe("UNavArea subclass: NavArea_Null (default, cuts a hole), NavArea_Obstacle, or a /Script path"),
   assetPath: z.string().optional().describe("BehaviorTree asset path (add_bt_node, get_behavior_tree_info, list_bt_graph_nodes, move_bt_node, read_behavior_tree_graph, read_bt_node_properties, remove_bt_node, set_bt_node_property, set_bt_task_property). Alias for imcPath (add_imc_mapping, read_imc, remove_imc_mapping). SmartObjectDefinition asset path (add_smart_object_default_behavior, add_smart_object_slot, add_smart_object_slot_behavior, list_smart_object_slots, remove_smart_object_slot, set_smart_object_slot). BehaviorTree asset path; omit to sweep directory (list_bt_tasks). Alias for blackboardPath (read_blackboard). MassEntityConfigAsset path (remove_mass_trait, reorder_mass_traits, validate_mass_entity_config). BehaviorTree asset to run (run_behavior_tree)"),
   autoPruneDuplicateKeys: z.boolean().optional().describe("Remove own keys the parent chain already defines (default true)"),
   baseClass: z.string().optional().describe("Base class for an Object/Class key (e.g. /Script/Engine.Actor); for an Enum key, the enum when enumType is absent"),
@@ -2480,12 +2704,14 @@ export const schema: Record<string, z.ZodType> = {
   completeRestart: z.boolean().optional().describe("With mode=restart, restart from the root rather than resuming"),
   componentName: z.string().optional().describe("Target AIPerceptionComponent name (default: first found) (configure_ai_perception_sense, read_perception, remove_sense). StateTree component to read (default: first found) (get_state_tree_runtime)"),
   cursor: z.string().optional().describe("nextCursor from the previous page, passed back unmodified. Omit for the first page"),
+  defaultBehaviorClass: z.string().optional().describe("Behavior definition asset path or class path added to DefaultBehaviorDefinitions"),
   directory: z.string().optional().describe("Content folder to sweep when assetPath is omitted (default: every BehaviorTree) (list_bt_tasks). Content root the InputMappingContext sweep covers (default /Game) (validate_input)"),
   displayCategory: z.string().optional().describe("Display category (Movement, Combat, ...) written onto UPlayerMappableKeySettings"),
   displayName: z.string().optional().describe("Display name written onto UPlayerMappableKeySettings"),
   end: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Query end (world point)"),
   enumType: z.string().optional().describe("Enum name or path for keyType=Enum"),
   executionMode: z.string().optional().describe("looped (default) | singleRun"),
+  extent: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Half-size in world units, positive on every axis (default 100)"),
   filter: z.string().optional().describe("Case-insensitive substring over the class names"),
   filterClassOnly: z.boolean().optional().describe("Keep only tasks that declare a FilterClass"),
   gameModeClass: z.string().optional().describe("GameMode class or Blueprint path"),
@@ -2508,9 +2734,10 @@ export const schema: Record<string, z.ZodType> = {
   keyName: z.string().optional().describe("Key name to add (add_blackboard_key). Key name to remove (remove_blackboard_key)"),
   keyType: z.string().optional().describe("Bool (default) | Int | Float | String | Name | Vector | Rotator | Object | Class | Enum"),
   kind: z.string().optional().describe("composite | task | decorator | service. Omit for every kind; anything else is refused (list_bt_node_classes). BT node kind: composite | task | decorator | service (list_bt_tasks, read_bt_node_properties, set_bt_node_property, set_bt_task_property). all | traits | processors (default all) (list_mass_types)"),
+  label: z.string().optional().describe("Actor label, also what onConflict dedupes on"),
   laneIndex: z.number().optional().describe("Lane queryMode=lane reports, as queryMode=lanes numbers them"),
   limit: z.number().optional().describe("Maximum agents to return (list_ai_agents). Rows on this page (default 200, max 2000) (list_behavior_trees, list_bt_node_classes, list_eqs_types, list_input_assets, list_state_trees). How many BehaviorTree assets a directory sweep loads (default 200) (list_bt_tasks). How many classes per kind (default 200) (list_mass_types). How many lanes to report (default 50) (query_zone_graph). How many scored items to return (default 50) (run_eqs_query). How many InputMappingContexts a sweep loads (default 200) (validate_input)"),
-  location: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("World point to project onto the navmesh (project_point_to_navigation). Query point for queryMode=nearest (query_zone_graph). Event location; defaults to the instigator's (hearing) or the damaged actor's (damage) (report_noise_event)"),
+  location: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("World point to project onto the navmesh (project_point_to_navigation). Query point for queryMode=nearest (query_zone_graph). Event location; defaults to the instigator's (hearing) or the damaged actor's (damage) (report_noise_event). World location of the volume (default origin) (spawn_nav_modifier_volume)"),
   loudness: z.number().optional().describe("Noise loudness (default 1)"),
   mappingContext: z.string().optional().describe("Alias for imcPath (add_imc_mapping, read_imc, remove_imc_mapping). InputMappingContext asset path to apply to the live player (apply_mapping_context). Name or path of one context to answer yes/no about (get_applied_imcs, get_input_mapping_contexts). InputMappingContext asset path to remove from the live player (remove_mapping_context)"),
   mappingIndex: z.number().optional().describe("Index of the mapping to remove (remove_imc_mapping). Index of the mapping to retarget (set_imc_mapping_action). Index of the mapping to rebind (set_imc_mapping_key). Index of the mapping in the IMC (default 0) (set_mapping_modifiers)"),
@@ -2518,7 +2745,7 @@ export const schema: Record<string, z.ZodType> = {
   maxRange: z.number().optional().describe("Maximum range the noise carries (0 = unlimited)"),
   mode: z.string().optional().describe("stop (default) | forced | restart | pause | resume"),
   modifiers: z.array(z.record(z.unknown())).optional().describe("Modifier specs that replace the action's own Modifiers array (set_action_triggers). Modifier objects: {type, ...props} or {class, properties}. Replaces the mapping's list (set_mapping_modifiers)"),
-  name: z.string().optional().describe("Slot name (add_smart_object_slot, set_smart_object_slot). Asset name (create_behavior_tree). Blueprint name (create_game_mode, create_game_state, create_hud, create_player_controller, create_player_state)"),
+  name: z.string().optional().describe("Slot name (add_smart_object_slot, set_smart_object_slot). Asset name (create_behavior_tree, create_blackboard, create_eqs_query, create_input_action, create_input_mapping_context, create_smart_object_definition, create_state_tree). Blueprint name (create_game_mode, create_game_state, create_hud, create_player_controller, create_player_state)"),
   newInputActionPath: z.string().optional().describe("InputAction the mapping should use"),
   newKey: z.string().optional().describe("New FKey name"),
   node: z.string().optional().describe("Node to move: a guid, a runtime address, or a unique node name (move_bt_node). Node to remove: a guid, a runtime address, or a unique node name (remove_bt_node)"),
@@ -2527,10 +2754,10 @@ export const schema: Record<string, z.ZodType> = {
   nodeName: z.string().optional().describe("Display name for the new node (add_bt_node). BT node selector: the node's object name or its NodeName display text (list_bt_tasks, read_bt_node_properties, set_bt_node_property, set_bt_task_property)"),
   nodePath: z.string().optional().describe("BT node address from read_behavior_tree_graph, e.g. 'Root.Children[0].Decorators[1]' (list_bt_tasks, read_bt_node_properties, set_bt_node_property, set_bt_task_property). Alias for node (move_bt_node, remove_bt_node)"),
   offset: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Slot offset {x,y,z}"),
-  onConflict: z.string().optional().describe("skip (default, returns the existing asset) or error when the asset already exists"),
+  onConflict: z.string().optional().describe("skip (default, returns the existing asset) or error when the asset already exists (create_behavior_tree, create_blackboard, create_eqs_query, create_input_action, create_input_mapping_context, create_smart_object_definition, create_state_tree). skip (default, returns the actor already carrying label) or error when one does (spawn_nav_modifier_volume)"),
   optionIndex: z.number().optional().describe("Option to add the test to (default 0) (add_eqs_test). Option to remove, as read_eqs_query reports it (remove_eqs_option). Option the test belongs to (default 0) (remove_eqs_test). Option whose tests to reorder (default 0) (reorder_eqs_tests)"),
   order: z.array(z.number()).optional().describe("Current test indices in the order wanted; must be a full permutation (reorder_eqs_tests). Current trait indices in the order wanted; must be a full permutation (reorder_mass_traits)"),
-  packagePath: z.string().optional().describe("Content folder (default /Game/AI) (create_behavior_tree). Content folder (default /Game/Blueprints/GameFramework) (create_game_mode, create_game_state, create_hud, create_player_controller, create_player_state)"),
+  packagePath: z.string().optional().describe("Content folder (default /Game/AI) (create_behavior_tree, create_blackboard, create_state_tree). Content folder (default /Game/AI/EQS) (create_eqs_query). Content folder (default /Game/Blueprints/GameFramework) (create_game_mode, create_game_state, create_hud, create_player_controller, create_player_state). Content folder (default /Game/Input) (create_input_action, create_input_mapping_context). Content folder (default /Game/AI/SmartObjects) (create_smart_object_definition)"),
   parent: z.string().optional().describe("Node to attach under: a guid from list_bt_graph_nodes, a runtime address from read_behavior_tree_graph, a unique node name, or 'root' (default)"),
   parentClass: z.string().optional().describe("Parent deriving from GameModeBase: short name, /Script path or Blueprint asset path (create_game_mode). Parent deriving from GameStateBase: short name, /Script path or Blueprint asset path (create_game_state). Parent deriving from HUD: short name, /Script path or Blueprint asset path (create_hud). Parent deriving from PlayerController: short name, /Script path or Blueprint asset path (create_player_controller). Parent deriving from PlayerState: short name, /Script path or Blueprint asset path (create_player_state)"),
   parentPath: z.string().optional().describe("Parent BlackboardData asset path; None or omitted clears it"),
@@ -2558,6 +2785,8 @@ export const schema: Record<string, z.ZodType> = {
   runMode: z.string().optional().describe("all | best | random (default all)"),
   runningOnly: z.boolean().optional().describe("Only agents whose brain is currently running"),
   save: z.boolean().optional().describe("Persist the asset (default true); false defers the write"),
+  scale: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Actor scale, applied after the brush is built"),
+  schema: z.string().optional().describe("StateTree schema class path; omit to take the gameplay default (StateTreeComponentSchema, then StateTreeAIComponentSchema, then any concrete schema)"),
   senses: z.array(z.string()).optional().describe("Sense names (Sight, Hearing, Damage, Touch, Team, Prediction), AISenseConfig_* names or class paths"),
   senseType: z.string().optional().describe("Sight (default) | Hearing | Damage | Touch | Team | Prediction | Blueprint (configure_ai_perception_sense). Only report this sense: Sight | Hearing | Damage | Touch | Team | Prediction (get_perceived_actors). Sense to remove when index is omitted: Sight | Hearing | Damage | Touch | Team | Prediction | Blueprint (remove_sense). hearing (default) | damage (report_noise_event)"),
   settings: z.record(z.unknown()).optional().describe("Per-sense property writes, e.g. {SightRadius: 1500}"),
@@ -2573,6 +2802,7 @@ export const schema: Record<string, z.ZodType> = {
   traitClass: z.string().optional().describe("Concrete UMassEntityTraitBase subclass to remove, short name or /Script path. Idempotent selector"),
   triggers: z.array(z.record(z.unknown())).optional().describe("Trigger specs that replace the action's own Triggers array (set_action_triggers). Trigger objects: {type, ...props} or {class, properties}. Replaces the mapping's list (set_mapping_modifiers)"),
   value: z.unknown().optional().describe("Value for property: scalar, object, array, class path, or null to clear a reference (set_bt_node_property, set_bt_task_property). Value to write, typed to the key; required unless clear is true (set_live_blackboard)"),
+  valueType: z.string().optional().describe("Boolean (default) | Axis1D | Axis2D | Axis3D; an unrecognised type leaves the default"),
   verbosity: z.string().optional().describe("onlyValue | keyWithValue | detailed (default) | full"),
   world: z.string().optional().describe("World scope: auto (default) | pie | editor (check_perception, get_bt_runtime, get_live_blackboard, get_perceived_actors, list_ai_agents, read_perception, report_noise_event, run_behavior_tree, set_live_blackboard, stop_behavior_tree). pie (default) | editor | auto (get_state_tree_runtime). editor | pie | auto (default editor) (query_zone_graph). auto | pie | editor (default auto) (run_eqs_query)"),
 };
