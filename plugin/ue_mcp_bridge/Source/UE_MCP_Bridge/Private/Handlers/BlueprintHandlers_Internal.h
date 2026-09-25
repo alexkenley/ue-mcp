@@ -16,6 +16,7 @@
 #include "Serialization/JsonWriter.h"
 #include "UObject/Class.h"
 #include "UObject/Interface.h"
+#include "HandlerUtils.h"
 
 class UBlueprint;
 class UActorComponent;
@@ -135,8 +136,8 @@ inline FString MakeGraphSelector(const FString& Name, int32 DuplicateIndex, int3
 inline FString ReadGraphNameOrSelector(const TSharedPtr<FJsonObject>& Params, const FString& Default)
 {
 	FString Value;
-	if (Params.IsValid() && Params->TryGetStringField(TEXT("graphSelector"), Value) && !Value.IsEmpty()) return Value;
-	if (Params.IsValid() && Params->TryGetStringField(TEXT("graphName"), Value) && !Value.IsEmpty()) return Value;
+	if (TryGetStringParam(Params, TEXT("graphSelector"), Value) && !Value.IsEmpty()) return Value;
+	if (TryGetStringParam(Params, TEXT("graphName"), Value) && !Value.IsEmpty()) return Value;
 	return Default;
 }
 

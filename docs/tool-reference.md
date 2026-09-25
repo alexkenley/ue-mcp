@@ -49,7 +49,7 @@ A path that matches nothing comes back in a `fieldsNotFound` field on the result
 A parameter the action does not use is reported, not silently dropped:
 
 - `paramsNotForwarded` lists keys you sent that the action never passes to the editor. With `UE_MCP_STRICT_PARAMS=1` the call is refused instead and nothing reaches the editor.
-- `paramsNotRead` lists keys that reached the editor and that the handler never read. Only the animation category reports it so far; more categories join as their handlers move to the shared parameter readers.
+- `paramsNotRead` lists keys that reached the editor and that the handler never read. Every category reports it.
 
 Either field means the call ran without that parameter. Check the spelling against the action's `Params:` list before trusting the result.
 
