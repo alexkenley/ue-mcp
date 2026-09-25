@@ -242,6 +242,34 @@ export function attachUnforwarded<T>(result: T, unforwarded: string[] | undefine
 }
 
 /**
+ * Reshape the editor's `paramsNotRead` into a report beside the result (#1057).
+ *
+ * A C++ handler of a reporting category lists the keys that arrived and were
+ * never read. The list is taken from the unprojected answer and written after
+ * the projection, so a narrow `select` cannot filter it away.
+ */
+export function attachNotRead<T>(result: T, answered: unknown): T {
+  if (answered === null || typeof answered !== "object" || Array.isArray(answered)) return result;
+  const listed = (answered as Record<string, unknown>).paramsNotRead;
+  if (!Array.isArray(listed)) return result;
+  const names = listed.filter((n): n is string => typeof n === "string");
+  if (names.length === 0) return result;
+  if (result === null || typeof result !== "object" || Array.isArray(result)) return result;
+  const record = result as Record<string, unknown>;
+  if (record.__directive === true && "result" in record) {
+    return { ...record, result: attachNotRead(record.result, answered) } as T;
+  }
+  return {
+    ...record,
+    paramsNotRead: {
+      params: names,
+      note: "The editor received these parameters and this action never read them, so they had no effect. "
+        + "project(action=\"describe_action\") lists what it takes.",
+    },
+  } as T;
+}
+
+/**
  * Apply the caller's projection, then attach the reports.
  *
  * Order matters: the reports are attached AFTER the projection, so a narrow
@@ -250,9 +278,12 @@ export function attachUnforwarded<T>(result: T, unforwarded: string[] | undefine
  */
 export function finishCall(raw: unknown, pipeline: CallPipeline): unknown {
   const projection = projectResult(raw, pipeline.selection);
-  return attachUnforwarded(
-    attachPathRepairs(attachFieldReport(projection.result, projection), pipeline.repairs),
-    pipeline.unforwarded,
+  return attachNotRead(
+    attachUnforwarded(
+      attachPathRepairs(attachFieldReport(projection.result, projection), pipeline.repairs),
+      pipeline.unforwarded,
+    ),
+    raw,
   );
 }
 
