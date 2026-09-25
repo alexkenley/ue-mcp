@@ -82,6 +82,56 @@ describe("unforwarded parameters at dispatch", () => {
   });
 });
 
+describe("parameters the editor never read", () => {
+  const probe = () => categoryTool("probe", "Probe.", {
+    add: bp("mutate", "Add. Params: blendDuration", "probe_add"),
+  }, undefined, { blendDuration: z.number().optional() });
+
+  const answering = (answer: Record<string, unknown>) => ({
+    bridge: {
+      isConnected: true,
+      call: async () => answer,
+      getTarget: () => ({ projectPath: null, port: 0, portSource: "default", verified: true }),
+      connect: async () => {},
+      retargetProject: () => ({}),
+    },
+    project: {},
+  } as never);
+
+  it("reports the editor's paramsNotRead with a note", async () => {
+    const result = await probe().handler(
+      answering({ success: true, value: 1, paramsNotRead: ["blendDuration"] }),
+      { action: "add", blendDuration: 0.2 },
+    ) as Record<string, unknown>;
+    const report = result.paramsNotRead as { params: string[]; note: string };
+    expect(report.params).toEqual(["blendDuration"]);
+    expect(report.note).toMatch(/never read/);
+    expect(result.value).toBe(1);
+  });
+
+  it("keeps the report when select narrows the result", async () => {
+    const result = await probe().handler(
+      answering({ success: true, value: 1, paramsNotRead: ["blendDuration"] }),
+      { action: "add", blendDuration: 0.2, select: ["value"] },
+    ) as Record<string, unknown>;
+    expect((result.paramsNotRead as { params: string[] }).params).toEqual(["blendDuration"]);
+    expect(result).not.toHaveProperty("success");
+  });
+
+  it("says nothing when the editor read everything", async () => {
+    const result = await probe().handler(answering({ success: true }), { action: "add", blendDuration: 0.2 }) as Record<string, unknown>;
+    expect(result).not.toHaveProperty("paramsNotRead");
+  });
+
+  it("leaves a field of that name alone when it is not a list", async () => {
+    const result = await probe().handler(
+      answering({ success: true, paramsNotRead: "unrelated" }),
+      { action: "add" },
+    ) as Record<string, unknown>;
+    expect(result.paramsNotRead).toBe("unrelated");
+  });
+});
+
 /* ── the surface ─────────────────────────────────────────────────────── */
 
 interface ZodDef { typeName?: string; innerType?: z.ZodTypeAny; schema?: z.ZodTypeAny; values?: unknown[]; options?: z.ZodTypeAny[]; value?: unknown }

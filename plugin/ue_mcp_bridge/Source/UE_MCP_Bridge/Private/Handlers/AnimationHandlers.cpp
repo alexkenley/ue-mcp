@@ -76,6 +76,8 @@
 
 void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
+	// Reports parameters its handlers never read (#1057 pilot).
+	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("animation"));
 	Registry.RegisterHandler(TEXT("list_anim_assets"), &ListAnimAssets);
 	Registry.RegisterHandler(TEXT("create_skeleton"), &CreateSkeleton);
 	Registry.RegisterHandler(TEXT("begin_skeleton_edit"), &BeginSkeletonEdit);
@@ -1050,7 +1052,7 @@ namespace
 TSharedPtr<FJsonValue> FAnimationHandlers::AuthorMontagesBatch(const TSharedPtr<FJsonObject>& Params)
 {
 	const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
-	if (!Params->TryGetArrayField(TEXT("items"), Items) || !Items)
+	if (!TryGetArrayParam(Params, TEXT("items"), Items) || !Items)
 	{
 		return MCPError(TEXT("Missing 'items' array"));
 	}
@@ -1336,7 +1338,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddAnimNotify(const TSharedPtr<FJsonO
 	if (auto Err = RequireString(Params, TEXT("notifyName"), NotifyName)) return Err;
 
 	double TriggerTime = 0.0;
-	if (!Params->TryGetNumberField(TEXT("triggerTime"), TriggerTime))
+	if (!TryGetNumberParam(Params, TEXT("triggerTime"), TriggerTime))
 	{
 		return MCPError(TEXT("Missing 'triggerTime' parameter"));
 	}
@@ -1393,7 +1395,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddAnimNotify(const TSharedPtr<FJsonO
 	// somewhere to land when notifyClass resolved. Reporting success while
 	// quietly dropping the requested values is the failure mode this guards.
 	const TSharedPtr<FJsonObject>* NotifyProperties = nullptr;
-	if (Params->TryGetObjectField(TEXT("notifyProperties"), NotifyProperties)
+	if (TryGetObjectParam(Params, TEXT("notifyProperties"), NotifyProperties)
 		&& NotifyProperties && (*NotifyProperties).IsValid() && (*NotifyProperties)->Values.Num() > 0)
 	{
 		if (!NewNotify)
@@ -1485,7 +1487,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddAnimNotify(const TSharedPtr<FJsonO
 		}
 	}
 	bool bExplicitBranchingPoint = false;
-	if (Params->TryGetBoolField(TEXT("branchingPoint"), bExplicitBranchingPoint))
+	if (TryGetBoolParam(Params, TEXT("branchingPoint"), bExplicitBranchingPoint))
 	{
 		bWantBranchingPoint = bExplicitBranchingPoint;
 	}
@@ -1933,7 +1935,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::PopulateBlendspace(const TSharedPtr<F
 	};
 
 	const TArray<TSharedPtr<FJsonValue>>* AxesArr = nullptr;
-	if (Params->TryGetArrayField(TEXT("axes"), AxesArr) && AxesArr)
+	if (TryGetArrayParam(Params, TEXT("axes"), AxesArr) && AxesArr)
 	{
 		for (int32 i = 0; i < AxesArr->Num(); ++i)
 		{
@@ -1942,7 +1944,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::PopulateBlendspace(const TSharedPtr<F
 		}
 	}
 	const TSharedPtr<FJsonObject>* AxisObj = nullptr;
-	if (Params->TryGetObjectField(TEXT("axis"), AxisObj) && *AxisObj)
+	if (TryGetObjectParam(Params, TEXT("axis"), AxisObj) && *AxisObj)
 	{
 		int32 AxisIdx = (int32)OptionalNumber(Params, TEXT("axisIndex"), 0.0);
 		ApplyAxis(AxisIdx, *AxisObj);
@@ -1952,21 +1954,21 @@ TSharedPtr<FJsonValue> FAnimationHandlers::PopulateBlendspace(const TSharedPtr<F
 	{
 		FBlendParameter& BP0 = const_cast<FBlendParameter&>(BS->GetBlendParameter(0));
 		FString S; double D = 0;
-		if (Params->TryGetStringField(TEXT("axisHorizontal"), S)) BP0.DisplayName = S;
-		if (Params->TryGetNumberField(TEXT("horizontalMin"), D)) BP0.Min = D;
-		if (Params->TryGetNumberField(TEXT("horizontalMax"), D)) BP0.Max = D;
+		if (TryGetStringParam(Params, TEXT("axisHorizontal"), S)) BP0.DisplayName = S;
+		if (TryGetNumberParam(Params, TEXT("horizontalMin"), D)) BP0.Min = D;
+		if (TryGetNumberParam(Params, TEXT("horizontalMax"), D)) BP0.Max = D;
 		int32 I = 0;
-		if (Params->TryGetNumberField(TEXT("gridNumHorizontal"), I)) BP0.GridNum = I;
+		if (TryGetNumberParam(Params, TEXT("gridNumHorizontal"), I)) BP0.GridNum = I;
 
 		// Only touch axis 1 if the asset has one (BlendSpace1D returns a stub for index 1 in some versions).
 		const bool bIs1D = BS->IsA<UBlendSpace1D>();
 		if (!bIs1D)
 		{
 			FBlendParameter& BP1 = const_cast<FBlendParameter&>(BS->GetBlendParameter(1));
-			if (Params->TryGetStringField(TEXT("axisVertical"), S)) BP1.DisplayName = S;
-			if (Params->TryGetNumberField(TEXT("verticalMin"), D)) BP1.Min = D;
-			if (Params->TryGetNumberField(TEXT("verticalMax"), D)) BP1.Max = D;
-			if (Params->TryGetNumberField(TEXT("gridNumVertical"), I)) BP1.GridNum = I;
+			if (TryGetStringParam(Params, TEXT("axisVertical"), S)) BP1.DisplayName = S;
+			if (TryGetNumberParam(Params, TEXT("verticalMin"), D)) BP1.Min = D;
+			if (TryGetNumberParam(Params, TEXT("verticalMax"), D)) BP1.Max = D;
+			if (TryGetNumberParam(Params, TEXT("gridNumVertical"), I)) BP1.GridNum = I;
 		}
 	}
 
@@ -1986,7 +1988,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::PopulateBlendspace(const TSharedPtr<F
 	TArray<TSharedPtr<FJsonValue>> AddedIndices;
 	TArray<TSharedPtr<FJsonValue>> Failed;
 	const TArray<TSharedPtr<FJsonValue>>* SamplesArr = nullptr;
-	if (Params->TryGetArrayField(TEXT("samples"), SamplesArr) && SamplesArr)
+	if (TryGetArrayParam(Params, TEXT("samples"), SamplesArr) && SamplesArr)
 	{
 		for (const TSharedPtr<FJsonValue>& V : *SamplesArr)
 		{
@@ -2064,15 +2066,15 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddBlendSample(const TSharedPtr<FJson
 
 	double PosX = 0.0, PosY = 0.0;
 	const TSharedPtr<FJsonObject>* PosObj = nullptr;
-	if (Params->TryGetObjectField(TEXT("position"), PosObj) && PosObj && (*PosObj).IsValid())
+	if (TryGetObjectParam(Params, TEXT("position"), PosObj) && PosObj && (*PosObj).IsValid())
 	{
 		(*PosObj)->TryGetNumberField(TEXT("x"), PosX);
 		(*PosObj)->TryGetNumberField(TEXT("y"), PosY);
 	}
 	else
 	{
-		Params->TryGetNumberField(TEXT("x"), PosX);
-		Params->TryGetNumberField(TEXT("y"), PosY);
+		TryGetNumberParam(Params, TEXT("x"), PosX);
+		TryGetNumberParam(Params, TEXT("y"), PosY);
 	}
 
 	// Captured before the append. There is no remove-by-index action, so the
@@ -2124,7 +2126,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetBlendSample(const TSharedPtr<FJson
 	}
 
 	int32 SampleIndex = -1;
-	if (!Params->TryGetNumberField(TEXT("sampleIndex"), SampleIndex))
+	if (!TryGetNumberParam(Params, TEXT("sampleIndex"), SampleIndex))
 	{
 		return MCPError(TEXT("Missing required parameter 'sampleIndex'"));
 	}
@@ -2145,7 +2147,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetBlendSample(const TSharedPtr<FJson
 
 	const TSharedPtr<FJsonObject>* PosObj = nullptr;
 	bool bHasPos = false;
-	if (Params->TryGetObjectField(TEXT("position"), PosObj) && PosObj && (*PosObj).IsValid())
+	if (TryGetObjectParam(Params, TEXT("position"), PosObj) && PosObj && (*PosObj).IsValid())
 	{
 		double PX = NewPos.X, PY = NewPos.Y;
 		(*PosObj)->TryGetNumberField(TEXT("x"), PX);
@@ -2156,8 +2158,8 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetBlendSample(const TSharedPtr<FJson
 	else
 	{
 		double PX = 0, PY = 0;
-		const bool bX = Params->TryGetNumberField(TEXT("x"), PX);
-		const bool bY = Params->TryGetNumberField(TEXT("y"), PY);
+		const bool bX = TryGetNumberParam(Params, TEXT("x"), PX);
+		const bool bY = TryGetNumberParam(Params, TEXT("y"), PY);
 		if (bX || bY)
 		{
 			NewPos = FVector(bX ? PX : NewPos.X, bY ? PY : NewPos.Y, NewPos.Z);
@@ -2174,7 +2176,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetBlendSample(const TSharedPtr<FJson
 	}
 
 	FString NewAnimPath;
-	if (Params->TryGetStringField(TEXT("animation"), NewAnimPath) && !NewAnimPath.IsEmpty())
+	if (TryGetStringParam(Params, TEXT("animation"), NewAnimPath) && !NewAnimPath.IsEmpty())
 	{
 		UAnimSequence* NewAnim = LoadAssetByPath<UAnimSequence>(NewAnimPath);
 		if (!NewAnim)
@@ -2311,7 +2313,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageSequence(const TSharedPtr<F
 
 	// #626: when segmentIndex is given, replace only that one segment's
 	// sequence; otherwise replace every segment in the slot (prior behavior).
-	const bool bHasSegmentIndex = Params->HasField(TEXT("segmentIndex"));
+	const bool bHasSegmentIndex = HasParam(Params, TEXT("segmentIndex"));
 	const int32 SegmentIndex = OptionalInt(Params, TEXT("segmentIndex"), -1);
 	if (bHasSegmentIndex)
 	{
@@ -2483,7 +2485,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageProperties(const TSharedPtr
 
 	// sequenceLength - update via property reflection (SequenceLength is protected)
 	double SeqLen;
-	const bool bHasSeqLen = Params->TryGetNumberField(TEXT("sequenceLength"), SeqLen);
+	const bool bHasSeqLen = TryGetNumberParam(Params, TEXT("sequenceLength"), SeqLen);
 	if (bHasSeqLen)
 	{
 		float NewLength = static_cast<float>(SeqLen);
@@ -2501,7 +2503,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageProperties(const TSharedPtr
 
 	// rateScale
 	double RateScale;
-	const bool bHasRate = Params->TryGetNumberField(TEXT("rateScale"), RateScale);
+	const bool bHasRate = TryGetNumberParam(Params, TEXT("rateScale"), RateScale);
 	if (bHasRate)
 	{
 		float NewRate = static_cast<float>(RateScale);
@@ -2515,7 +2517,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageProperties(const TSharedPtr
 
 	// blendIn
 	double BlendIn;
-	const bool bHasBlendIn = Params->TryGetNumberField(TEXT("blendIn"), BlendIn);
+	const bool bHasBlendIn = TryGetNumberParam(Params, TEXT("blendIn"), BlendIn);
 	if (bHasBlendIn)
 	{
 		float NewIn = static_cast<float>(BlendIn);
@@ -2529,7 +2531,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageProperties(const TSharedPtr
 
 	// blendOut
 	double BlendOut;
-	const bool bHasBlendOut = Params->TryGetNumberField(TEXT("blendOut"), BlendOut);
+	const bool bHasBlendOut = TryGetNumberParam(Params, TEXT("blendOut"), BlendOut);
 	if (bHasBlendOut)
 	{
 		float NewOut = static_cast<float>(BlendOut);
@@ -2793,7 +2795,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSection(const TSharedPtr<FJ
 	// drifts the moment a segment is inserted ahead of it; a linked section
 	// follows its segment instead. Resolved before the idempotency check so a
 	// bad slot or segment index is reported rather than silently skipped.
-	const bool bHasSegmentIndex = Params->HasField(TEXT("segmentIndex"));
+	const bool bHasSegmentIndex = HasParam(Params, TEXT("segmentIndex"));
 	int32 SlotIndex = 0;
 	int32 SegmentIndex = INDEX_NONE;
 	FString SlotNameUsed;
@@ -3064,7 +3066,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveMontageSegment(const TSharedPtr
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
-	if (!Params->HasField(TEXT("segmentIndex")))
+	if (!HasParam(Params, TEXT("segmentIndex")))
 	{
 		return MCPError(TEXT("Missing required parameter 'segmentIndex'"));
 	}
@@ -3340,22 +3342,22 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetRootMotionSettings(const TSharedPt
 
 	Seq->Modify();
 	bool EnableRootMotion;
-	if (Params->TryGetBoolField(TEXT("enableRootMotion"), EnableRootMotion))
+	if (TryGetBoolParam(Params, TEXT("enableRootMotion"), EnableRootMotion))
 	{
 		Seq->bEnableRootMotion = EnableRootMotion;
 	}
 	bool ForceRootLock;
-	if (Params->TryGetBoolField(TEXT("forceRootLock"), ForceRootLock))
+	if (TryGetBoolParam(Params, TEXT("forceRootLock"), ForceRootLock))
 	{
 		Seq->bForceRootLock = ForceRootLock;
 	}
 	bool UseNormalizedRootMotionScale;
-	if (Params->TryGetBoolField(TEXT("useNormalizedRootMotionScale"), UseNormalizedRootMotionScale))
+	if (TryGetBoolParam(Params, TEXT("useNormalizedRootMotionScale"), UseNormalizedRootMotionScale))
 	{
 		Seq->bUseNormalizedRootMotionScale = UseNormalizedRootMotionScale;
 	}
 	FString RootMotionMode;
-	if (Params->TryGetStringField(TEXT("rootMotionRootLock"), RootMotionMode))
+	if (TryGetStringParam(Params, TEXT("rootMotionRootLock"), RootMotionMode))
 	{
 		if      (RootMotionMode.Equals(TEXT("RefPose"),       ESearchCase::IgnoreCase)) Seq->RootMotionRootLock = ERootMotionRootLock::RefPose;
 		else if (RootMotionMode.Equals(TEXT("AnimFirstFrame"), ESearchCase::IgnoreCase)) Seq->RootMotionRootLock = ERootMotionRootLock::AnimFirstFrame;

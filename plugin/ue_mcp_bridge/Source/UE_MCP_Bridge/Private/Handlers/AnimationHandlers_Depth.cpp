@@ -822,12 +822,12 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddNotifyState(const TSharedPtr<FJson
 	if (auto Err = RequireString(Params, TEXT("notifyStateClass"), StateClassName)) return Err;
 
 	double TriggerTime = 0.0;
-	if (!Params->TryGetNumberField(TEXT("triggerTime"), TriggerTime))
+	if (!TryGetNumberParam(Params, TEXT("triggerTime"), TriggerTime))
 	{
 		return MCPError(TEXT("Missing required parameter 'triggerTime' (seconds from the start of the animation)"));
 	}
 	double Duration = 0.0;
-	if (!Params->TryGetNumberField(TEXT("duration"), Duration))
+	if (!TryGetNumberParam(Params, TEXT("duration"), Duration))
 	{
 		return MCPError(TEXT("Missing required parameter 'duration' (seconds; a notify state spans a window, which is what distinguishes it from add_notify)"));
 	}
@@ -904,7 +904,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddNotifyState(const TSharedPtr<FJson
 	// a bad property name cannot leave a half-configured notify behind.
 	UAnimNotifyState* StateObject = NewObject<UAnimNotifyState>(AnimAsset, StateClass);
 	const TSharedPtr<FJsonObject>* NotifyProperties = nullptr;
-	if (Params->TryGetObjectField(TEXT("notifyProperties"), NotifyProperties)
+	if (TryGetObjectParam(Params, TEXT("notifyProperties"), NotifyProperties)
 		&& NotifyProperties && (*NotifyProperties).IsValid())
 	{
 		for (const auto& JsonEntry : (*NotifyProperties)->Values)
@@ -954,7 +954,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddNotifyState(const TSharedPtr<FJson
 	// branching point ticks inline and is the only form montage branching logic
 	// observes. Left at the engine default unless asked, matching add_notify.
 	bool bBranchingPoint = false;
-	if (AnimAsset->IsA<UAnimMontage>() && Params->TryGetBoolField(TEXT("branchingPoint"), bBranchingPoint) && bBranchingPoint)
+	if (AnimAsset->IsA<UAnimMontage>() && TryGetBoolParam(Params, TEXT("branchingPoint"), bBranchingPoint) && bBranchingPoint)
 	{
 		NewEvent.MontageTickType = EMontageNotifyTickType::BranchingPoint;
 	}
@@ -1128,7 +1128,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetSyncMarkers(const TSharedPtr<FJson
 	struct FParsedMarker { FName Name; float Time; };
 	TArray<FParsedMarker> Parsed;
 	const TArray<TSharedPtr<FJsonValue>>* MarkerArray = nullptr;
-	const bool bHasMarkers = Params->TryGetArrayField(TEXT("markers"), MarkerArray) && MarkerArray;
+	const bool bHasMarkers = TryGetArrayParam(Params, TEXT("markers"), MarkerArray) && MarkerArray;
 	if (bHasMarkers)
 	{
 		int32 Index = 0;
@@ -1162,7 +1162,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetSyncMarkers(const TSharedPtr<FJson
 
 	TArray<FString> RemoveNames;
 	const TArray<TSharedPtr<FJsonValue>>* RemoveArray = nullptr;
-	if (Params->TryGetArrayField(TEXT("removeMarkers"), RemoveArray) && RemoveArray)
+	if (TryGetArrayParam(Params, TEXT("removeMarkers"), RemoveArray) && RemoveArray)
 	{
 		for (const TSharedPtr<FJsonValue>& Entry : *RemoveArray)
 		{
