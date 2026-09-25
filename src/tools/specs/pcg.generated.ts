@@ -270,6 +270,58 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "set_pcg_node_settings": {
+    "category": "pcg",
+    "params": [
+      {
+        "name": "assetPath",
+        "type": "string",
+        "required": true,
+        "description": "PCGGraph asset path",
+        "aliases": [
+          "path"
+        ]
+      },
+      {
+        "name": "nodeName",
+        "type": "string",
+        "required": true,
+        "description": "Engine name of the node, as read_graph reports it"
+      },
+      {
+        "name": "settings",
+        "type": "object",
+        "required": false,
+        "description": "{propertyPath: value}; dotted paths and nested structs supported"
+      },
+      {
+        "name": "propertyName",
+        "type": "string",
+        "required": false,
+        "description": "One property to write instead of a settings object"
+      },
+      {
+        "name": "propertyValue",
+        "type": "string",
+        "required": false,
+        "description": "The value for propertyName, as UE export text"
+      }
+    ],
+    "choices": [
+      {
+        "mode": "exactlyOne",
+        "branches": [
+          [
+            "settings"
+          ],
+          [
+            "propertyName",
+            "propertyValue"
+          ]
+        ]
+      }
+    ]
+  },
   "set_static_mesh_spawner_meshes": {
     "category": "pcg",
     "params": [
@@ -337,6 +389,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   read_pcg_graph: "Params: assetPath (or path)",
   read_pcg_node_settings: "Params: assetPath (or path), nodeName",
   remove_pcg_node: "Params: assetPath (or path), nodeName",
+  set_pcg_node_settings: "Params: assetPath (or path), nodeName, settings OR propertyName + propertyValue",
   set_static_mesh_spawner_meshes: "Params: assetPath (or path), nodeName, entries, replace?",
   unwrap_pcg_instance_nodes: "Params: assetPath (or path), nodeName?",
 };
@@ -349,13 +402,16 @@ export const schema: Record<string, z.ZodType> = {
   entries: z.array(z.record(z.unknown())).optional().describe("Array of {mesh, weight?} entries"),
   includeSettings: z.boolean().optional().describe("Include per-node editable settings in the response (default true)"),
   limit: z.number().int().optional().describe("Rows to return on this page (default 200, max 2000)"),
-  nodeName: z.string().optional().describe("Engine name of the node, as read_graph reports it (read_pcg_node_settings, remove_pcg_node, set_static_mesh_spawner_meshes). Only this node (default: every node in the graph) (unwrap_pcg_instance_nodes)"),
+  nodeName: z.string().optional().describe("Engine name of the node, as read_graph reports it (read_pcg_node_settings, remove_pcg_node, set_pcg_node_settings, set_static_mesh_spawner_meshes). Only this node (default: every node in the graph) (unwrap_pcg_instance_nodes)"),
   nodes: z.array(z.record(z.unknown())).optional().describe("[{name, class, posX?, posY?, settings?}]"),
   nodeType: z.string().optional().describe("PCG settings class of the node to add"),
   path: z.string().optional().describe("Alias for assetPath"),
   posX: z.number().optional().describe("Graph editor X position for the new node"),
   posY: z.number().optional().describe("Graph editor Y position for the new node"),
+  propertyName: z.string().optional().describe("One property to write instead of a settings object"),
+  propertyValue: z.string().optional().describe("The value for propertyName, as UE export text"),
   replace: z.boolean().optional().describe("Wipe existing user nodes first (default false) (import_pcg_graph). Overwrite existing MeshEntries (default true) (set_static_mesh_spawner_meshes)"),
+  settings: z.record(z.unknown()).optional().describe("{propertyPath: value}; dotted paths and nested structs supported"),
   sourceNode: z.string().optional().describe("Node the edge leaves"),
   sourceNodeName: z.string().optional().describe("Alias for sourceNode"),
   sourcePin: z.string().optional().describe("Output pin label. connect_nodes defaults to the first output pin, disconnect_nodes to any"),

@@ -1,5 +1,5 @@
 {
-  "handlerCount": 826,
+  "handlerCount": 827,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -22107,6 +22107,58 @@
           "type": "boolean",
           "required": false,
           "description": "bOnlyRelevantToOwner (default false)"
+        }
+      ]
+    },
+    "set_pcg_node_settings": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "PCGGraph asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "nodeName",
+          "type": "string",
+          "required": true,
+          "description": "Engine name of the node, as read_graph reports it"
+        },
+        {
+          "name": "settings",
+          "type": "object",
+          "required": false,
+          "description": "{propertyPath: value}; dotted paths and nested structs supported"
+        },
+        {
+          "name": "propertyName",
+          "type": "string",
+          "required": false,
+          "description": "One property to write instead of a settings object"
+        },
+        {
+          "name": "propertyValue",
+          "type": "string",
+          "required": false,
+          "description": "The value for propertyName, as UE export text"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "settings"
+            ],
+            [
+              "propertyName",
+              "propertyValue"
+            ]
+          ]
         }
       ]
     },
