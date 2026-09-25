@@ -20,7 +20,9 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraph/EdGraphSchema.h"
+#include "Misc/OutputDevice.h"
 #include "ScopedTransaction.h"
+#include "UObject/StructOnScope.h"
 #include "UObject/UObjectIterator.h"
 #include "Materials/Material.h"
 #include "UObject/UObjectHash.h"
@@ -323,7 +325,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadAssetGraph(const TSharedPtr<FJsonObje
 
 // ---------------------------------------------------------------------------
 // Graph authoring (#1059): connect, disconnect, add and remove nodes through
-// the graph's own schema.
+// the graph's own schema, plus the Mutable compile.
 // ---------------------------------------------------------------------------
 
 // 5.5 replaced ActionGroup access with GetSchemaAction; 5.6 moved graph
@@ -781,6 +783,93 @@ namespace
 		return MakeShared<FJsonValueObject>(Obj);
 	}
 
+	/** Collects LogMutable warnings and errors while a compile runs. */
+	class FMCPGraphCompileLog : public FOutputDevice
+	{
+	public:
+		FMCPGraphCompileLog() { if (GLog) GLog->AddOutputDevice(this); }
+		virtual ~FMCPGraphCompileLog() override { if (GLog) GLog->RemoveOutputDevice(this); }
+		FMCPGraphCompileLog(const FMCPGraphCompileLog&) = delete;
+		FMCPGraphCompileLog& operator=(const FMCPGraphCompileLog&) = delete;
+
+		virtual bool CanBeUsedOnAnyThread() const override { return true; }
+
+		virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const class FName& Category) override
+		{
+			const FString CategoryText = Category.ToString();
+			if (!CategoryText.Contains(TEXT("Mutable")) && !CategoryText.Contains(TEXT("CustomizableObject"))) return;
+			const ELogVerbosity::Type Level = (ELogVerbosity::Type)(Verbosity & ELogVerbosity::VerbosityMask);
+			FScopeLock Lock(&Mutex);
+			if (Level == ELogVerbosity::Error || Level == ELogVerbosity::Fatal)
+			{
+				if (Errors.Num() < 200) Errors.Add(V);
+			}
+			else if (Level == ELogVerbosity::Warning)
+			{
+				if (Warnings.Num() < 200) Warnings.Add(V);
+			}
+		}
+
+		TArray<FString> Errors;
+		TArray<FString> Warnings;
+		FCriticalSection Mutex;
+	};
+
+	/** Set an enum-typed property from a value name ("Fast" or "ECustomizableObjectTextureCompression::Fast"). */
+	bool MCPGraphSetEnumText(FProperty* Prop, void* ValuePtr, const FString& Text)
+	{
+		UEnum* Enum = nullptr;
+		FNumericProperty* Underlying = nullptr;
+		if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
+		{
+			Enum = EnumProp->GetEnum();
+			Underlying = EnumProp->GetUnderlyingProperty();
+		}
+		else if (FByteProperty* ByteProp = CastField<FByteProperty>(Prop))
+		{
+			Enum = ByteProp->Enum;
+			Underlying = ByteProp;
+		}
+		if (!Enum || !Underlying) return false;
+		int64 Value = Enum->GetValueByNameString(Text);
+		if (Value == INDEX_NONE) Value = Enum->GetValueByNameString(Enum->GenerateFullEnumName(*Text));
+		if (Value == INDEX_NONE) return false;
+		Underlying->SetIntPropertyValue(ValuePtr, Value);
+		return true;
+	}
+
+	FString MCPGraphEnumText(const FProperty* Prop, const void* ValuePtr)
+	{
+		const UEnum* Enum = nullptr;
+		const FNumericProperty* Underlying = nullptr;
+		if (const FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
+		{
+			Enum = EnumProp->GetEnum();
+			Underlying = EnumProp->GetUnderlyingProperty();
+		}
+		else if (const FByteProperty* ByteProp = CastField<FByteProperty>(Prop))
+		{
+			Enum = ByteProp->Enum;
+			Underlying = ByteProp;
+		}
+		if (!Enum || !Underlying) return FString();
+		return Enum->GetNameStringByValue(Underlying->GetSignedIntPropertyValue(ValuePtr));
+	}
+
+	/** The caller's option for a reflected compile parameter, by what its name says it is. */
+	FString MCPGraphCompileOption(const TSharedPtr<FJsonObject>& Params, const FString& PropName)
+	{
+		if (PropName.Contains(TEXT("Optimization"))) return OptionalString(Params, TEXT("optimizationLevel"));
+		if (PropName.Contains(TEXT("Compression"))) return OptionalString(Params, TEXT("textureCompression"));
+		return FString();
+	}
+
+	bool MCPGraphApplyText(FProperty* Prop, void* ValuePtr, const FString& Text)
+	{
+		if (MCPGraphSetEnumText(Prop, ValuePtr, Text)) return true;
+		if (CastField<FEnumProperty>(Prop)) return false;
+		return Prop->ImportText_Direct(*Text, ValuePtr, nullptr, PPF_None) != nullptr;
+	}
 }
 
 TSharedPtr<FJsonValue> FAssetHandlers::ConnectGraphPins(const TSharedPtr<FJsonObject>& Params)
@@ -1235,5 +1324,141 @@ TSharedPtr<FJsonValue> FAssetHandlers::RemoveGraphNode(const TSharedPtr<FJsonObj
 			TEXT("and reconnect the entries of brokenLinks with connect_graph_pins."));
 	}
 	MCPGraphAuthorFinish(Ctx, Graph, Result);
+	return MCPResult(Result);
+}
+
+TSharedPtr<FJsonValue> FAssetHandlers::CompileCustomizableObject(const TSharedPtr<FJsonObject>& Params)
+{
+	MCP_CHECK_GAME_THREAD();
+	FString AssetPath;
+	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+
+	UClass* ObjectClass = FindObject<UClass>(nullptr, TEXT("/Script/CustomizableObject.CustomizableObject"));
+	if (!ObjectClass)
+	{
+		return MCPError(TEXT("Mutable plugin not available: the CustomizableObject module is not loaded. Enable the Mutable plugin and restart the editor."));
+	}
+
+	TSharedPtr<FJsonValue> LoadError;
+	UObject* Asset = MCPRequireAssetObject(AssetPath, LoadError);
+	if (!Asset) return LoadError;
+	if (!Asset->IsA(ObjectClass))
+	{
+		return MCPError(FString::Printf(TEXT("'%s' is a %s, not a CustomizableObject."), *AssetPath, *Asset->GetClass()->GetName()));
+	}
+
+	UClass* LibraryClass = FindObject<UClass>(nullptr, TEXT("/Script/CustomizableObjectEditor.CustomizableObjectEditorFunctionLibrary"));
+	UFunction* SyncCompile = LibraryClass ? LibraryClass->FindFunctionByName(TEXT("CompileCustomizableObjectSynchronously")) : nullptr;
+	UFunction* Compile = ObjectClass->FindFunctionByName(TEXT("Compile"));
+	if (!SyncCompile && !Compile)
+	{
+		return MCPError(TEXT("Mutable plugin not available: neither CompileCustomizableObjectSynchronously nor CustomizableObject::Compile is registered. Is the CustomizableObjectEditor module loaded?"));
+	}
+
+	auto Result = MCPSuccess();
+	MCPSetUpdated(Result);
+	Result->SetStringField(TEXT("assetPath"), AssetPath);
+	MCPSetNoRollback(Result, TEXT("A compile rebuilds the object's compiled data from its graph. There is no earlier ")
+		TEXT("compiled state to restore; edit the graph and compile again."));
+	FString State;
+	TArray<FString> Errors;
+	TArray<FString> Warnings;
+	TArray<FString> IgnoredOptions;
+	{
+		FMCPGraphCompileLog Log;
+		if (SyncCompile)
+		{
+			FStructOnScope Frame(SyncCompile);
+			uint8* Memory = Frame.GetStructMemory();
+			FProperty* ReturnProp = nullptr;
+			for (TFieldIterator<FProperty> It(SyncCompile); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+			{
+				FProperty* Prop = *It;
+				void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Memory);
+				if (Prop->HasAnyPropertyFlags(CPF_ReturnParm)) { ReturnProp = Prop; continue; }
+				if (FObjectPropertyBase* ObjectProp = CastField<FObjectPropertyBase>(Prop))
+				{
+					if (ObjectProp->PropertyClass && Asset->IsA(ObjectProp->PropertyClass)) ObjectProp->SetObjectPropertyValue(ValuePtr, Asset);
+					continue;
+				}
+				const FString Option = MCPGraphCompileOption(Params, Prop->GetName());
+				if (!Option.IsEmpty())
+				{
+					if (!MCPGraphApplyText(Prop, ValuePtr, Option)) IgnoredOptions.Add(FString::Printf(TEXT("%s=%s"), *Prop->GetName(), *Option));
+					continue;
+				}
+				const FString Default = SyncCompile->GetMetaData(*(FString(TEXT("CPP_Default_")) + Prop->GetName()));
+				if (!Default.IsEmpty()) MCPGraphApplyText(Prop, ValuePtr, Default);
+			}
+			LibraryClass->GetDefaultObject()->ProcessEvent(SyncCompile, Memory);
+			if (ReturnProp) State = MCPGraphEnumText(ReturnProp, ReturnProp->ContainerPtrToValuePtr<void>(Memory));
+			Result->SetStringField(TEXT("compiledWith"), TEXT("CompileCustomizableObjectSynchronously"));
+		}
+		else
+		{
+			FStructOnScope Frame(Compile);
+			uint8* Memory = Frame.GetStructMemory();
+			for (TFieldIterator<FProperty> It(Compile); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+			{
+				FStructProperty* StructProp = CastField<FStructProperty>(*It);
+				if (!StructProp) continue;
+				void* StructPtr = StructProp->ContainerPtrToValuePtr<void>(Memory);
+				for (TFieldIterator<FProperty> Field(StructProp->Struct); Field; ++Field)
+				{
+					void* FieldPtr = Field->ContainerPtrToValuePtr<void>(StructPtr);
+					const FString Name = Field->GetName();
+					if (FBoolProperty* Bool = CastField<FBoolProperty>(*Field))
+					{
+						if (Name == TEXT("bAsync") || Name == TEXT("bSkipIfCompiled") || Name == TEXT("bSkipIfNotOutOfDate"))
+						{
+							Bool->SetPropertyValue(FieldPtr, false);
+							continue;
+						}
+					}
+					const FString Option = MCPGraphCompileOption(Params, Name);
+					if (!Option.IsEmpty() && !MCPGraphApplyText(*Field, FieldPtr, Option))
+					{
+						IgnoredOptions.Add(FString::Printf(TEXT("%s=%s"), *Name, *Option));
+					}
+				}
+			}
+			Asset->ProcessEvent(Compile, Memory);
+			Result->SetStringField(TEXT("compiledWith"), TEXT("CustomizableObject.Compile"));
+		}
+		if (GLog) GLog->Flush();
+		FScopeLock Lock(&Log.Mutex);
+		Errors = Log.Errors;
+		Warnings = Log.Warnings;
+	}
+
+	bool bCompiled = false;
+	bool bKnown = false;
+	if (UFunction* IsCompiled = ObjectClass->FindFunctionByName(TEXT("IsCompiled")))
+	{
+		FStructOnScope Frame(IsCompiled);
+		Asset->ProcessEvent(IsCompiled, Frame.GetStructMemory());
+		if (FBoolProperty* Ret = CastField<FBoolProperty>(IsCompiled->GetReturnProperty()))
+		{
+			bCompiled = Ret->GetPropertyValue_InContainer(Frame.GetStructMemory());
+			bKnown = true;
+		}
+	}
+
+	if (!State.IsEmpty()) Result->SetStringField(TEXT("state"), State);
+	if (bKnown) Result->SetBoolField(TEXT("compiled"), bCompiled);
+	Result->SetArrayField(TEXT("errors"), MCPStringListToJson(Errors));
+	Result->SetArrayField(TEXT("warnings"), MCPStringListToJson(Warnings));
+	Result->SetNumberField(TEXT("errorCount"), Errors.Num());
+	Result->SetNumberField(TEXT("warningCount"), Warnings.Num());
+	if (IgnoredOptions.Num() > 0) Result->SetArrayField(TEXT("ignoredOptions"), MCPStringListToJson(IgnoredOptions));
+
+	const bool bFailed = State == TEXT("Failed") || (bKnown && !bCompiled) || Errors.Num() > 0;
+	if (bFailed)
+	{
+		Result->SetBoolField(TEXT("success"), false);
+		Result->SetStringField(TEXT("error"), Errors.Num() > 0
+			? FString::Printf(TEXT("Compile of '%s' failed with %d error(s); the first: %s"), *AssetPath, Errors.Num(), *Errors[0])
+			: FString::Printf(TEXT("Compile of '%s' did not produce a compiled object. See warnings and the Mutable message log."), *AssetPath));
+	}
 	return MCPResult(Result);
 }

@@ -195,6 +195,7 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("disconnect_graph_pins"), &DisconnectGraphPins);
 	Registry.RegisterHandler(TEXT("add_graph_node"), &AddGraphNode);
 	Registry.RegisterHandler(TEXT("remove_graph_node"), &RemoveGraphNode);
+	Registry.RegisterHandlerWithTimeout(TEXT("compile_customizable_object"), &CompileCustomizableObject, 600.0f);
 	Registry.RegisterHandler(TEXT("save_asset"), &SaveAsset);
 	Registry.RegisterHandler(TEXT("save_all_dirty"), &SaveAllDirty);
 	Registry.RegisterHandler(TEXT("list_textures"), &ListTextures);

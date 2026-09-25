@@ -74,4 +74,10 @@ describe("asset - graph authoring through the schema", () => {
     const r = await callBridge(bridge, "add_graph_node", { assetPath, nodeClass: "Actor", save: false });
     expect(r.ok).toBe(false);
   });
+
+  it("compile_customizable_object refuses a non-CustomizableObject", async () => {
+    const r = await callBridge(bridge, "compile_customizable_object", { assetPath });
+    expect(r.ok).toBe(false);
+    expect(r.error ?? "").toMatch(/Mutable plugin not available|not a CustomizableObject/);
+  });
 });
