@@ -191,6 +191,10 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// create_asset_by_class cannot make because it always creates a package.
 	Registry.RegisterHandler(TEXT("create_subobject"), &CreateSubobject);
 	Registry.RegisterHandler(TEXT("read_asset_graph"), &ReadAssetGraph);
+	Registry.RegisterHandler(TEXT("connect_graph_pins"), &ConnectGraphPins);
+	Registry.RegisterHandler(TEXT("disconnect_graph_pins"), &DisconnectGraphPins);
+	Registry.RegisterHandler(TEXT("add_graph_node"), &AddGraphNode);
+	Registry.RegisterHandler(TEXT("remove_graph_node"), &RemoveGraphNode);
 	Registry.RegisterHandler(TEXT("save_asset"), &SaveAsset);
 	Registry.RegisterHandler(TEXT("save_all_dirty"), &SaveAllDirty);
 	Registry.RegisterHandler(TEXT("list_textures"), &ListTextures);
