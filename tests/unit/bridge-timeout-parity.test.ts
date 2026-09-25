@@ -53,7 +53,9 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 function registrationsInPlugin(): { found: Record<string, number>; unresolved: string[] } {
   const found: Record<string, number> = {};
   const unresolved: string[] = [];
-  const CALL = /RegisterHandlerWithTimeout\(\s*TEXT\("([a-z0-9_]+)"\)\s*,\s*&?[A-Za-z0-9_:]+\s*,\s*([A-Za-z0-9_.]+)f?\s*\)/g;
+  // The call ends at its closing parenthesis, or at the opening brace of a
+  // parameter spec (#1057).
+  const CALL = /RegisterHandlerWithTimeout\(\s*TEXT\("([a-z0-9_]+)"\)\s*,\s*&?[A-Za-z0-9_:]+\s*,\s*([A-Za-z0-9_.]+)f?\s*(?:\)|,\s*\{)/g;
   const CONST = /constexpr\s+(?:float|double)\s+([A-Za-z0-9_]+)\s*=\s*([0-9.]+)f?\s*;/g;
 
   for (const file of sourceFiles(PLUGIN_SOURCE)) {

@@ -206,6 +206,16 @@ void FMCPHandlerRegistry::RegisterHandlerWithTimeout(const FString& MethodName, 
 	}
 }
 
+bool FMCPHandlerRegistry::RegisterHandlerWithTimeout(const FString& MethodName, FHandlerFunction Handler, float TimeoutSeconds, const TArray<FMCPParamSpec>& Params)
+{
+	const bool bAccepted = RegisterHandler(MethodName, MoveTemp(Handler), Params);
+	if (TimeoutSeconds > 0.0f)
+	{
+		HandlerTimeouts.Add(MethodName, TimeoutSeconds);
+	}
+	return bAccepted;
+}
+
 float FMCPHandlerRegistry::GetHandlerTimeout(const FString& MethodName) const
 {
 	if (const float* V = HandlerTimeouts.Find(MethodName))
