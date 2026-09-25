@@ -1373,7 +1373,7 @@ Nothing outside these modes ever answers a dialog by itself. `editor(set_dialog_
 | `read_node_settings` | Read node settings. Params: `assetPath (or path), nodeName` |
 | `get_components` | List PCG components in level. Params: `none` |
 | `get_component_details` | Inspect PCG component. Params: `actorLabel OR actorPath (#983)` |
-| `create_graph` | Create graph. Idempotent by path: an existing graph is reported rather than replaced. Params: `name, packagePath? (default /Game/PCG), onConflict? (skip\|error)` |
+| `create_graph` | Create graph. Idempotent by path: an existing graph is reported rather than replaced. Params: `name, packagePath?, onConflict?` |
 | `add_node` | Add node. nodeName is a RESULT, not an input: the engine assigns the name and this action reports it back for connect_nodes and remove_node. Params: `assetPath (or path), nodeType, posX?, posY?` |
 | `connect_nodes` | Wire nodes. Returns edgeVerified=true after confirming the UPCGEdge persisted; surfaces an error if AddEdge succeeded but no edge object was instantiated (#304). Params: `assetPath (or path), sourceNode (or sourceNodeName), sourcePin? (or sourcePinLabel), targetNode (or targetNodeName), targetPin? (or targetPinLabel)` |
 | `disconnect_nodes` | Remove a wired edge between two PCG nodes. Omitted pins match any pin. Returns removedEdges count (#346). Params: `assetPath (or path), sourceNode (or sourceNodeName), targetNode (or targetNodeName), sourcePin? (or sourcePinLabel), targetPin? (or targetPinLabel)` |

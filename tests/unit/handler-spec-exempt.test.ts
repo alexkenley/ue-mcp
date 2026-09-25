@@ -116,11 +116,14 @@ static void ReadHidden(const TSharedPtr<FJsonObject>& Bag, const FString& Role)
 describe("a contract-exempt spec", () => {
   const exempt = Object.entries(SNAPSHOT.handlers).filter(([, spec]) => spec.contractExempt);
 
-  it.each(exempt.length ? exempt : [["(none recorded)", undefined]])("%s reads exactly what it declares", (method, spec) => {
-    if (!spec) return;
-    const reads = handlerParamReads(method as string, { registrations: REGISTRATIONS, sources: SOURCES });
+  it("exists in the recording, so this check is exercised", () => {
+    expect(exempt.length).toBeGreaterThan(0);
+  });
+
+  it.each(exempt)("%s reads exactly what it declares", (method, spec) => {
+    const reads = handlerParamReads(method, { registrations: REGISTRATIONS, sources: SOURCES });
     expect(reads, `${method}: its handler body was not found, so nothing holds it to its spec`).not.toBeNull();
     expect(reads!.opaque, `${method}: reads the source cannot resolve; read them through a helper with a literal key`).toEqual([]);
-    expect(sorted(reads!.keys), method as string).toEqual(sorted(spec.params.map((p) => p.name)));
+    expect(sorted(reads!.keys), method).toEqual(sorted(spec.params.map((p) => p.name)));
   });
 });

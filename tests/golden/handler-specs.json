@@ -1,5 +1,5 @@
 {
-  "handlerCount": 827,
+  "handlerCount": 828,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -6120,6 +6120,30 @@
           "description": "skip (default) reports the existing entry; error refuses"
         }
       ]
+    },
+    "create_pcg_graph": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Graph asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new graph (default /Game/PCG)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the graph exists: skip (default, report it) | error"
+        }
+      ],
+      "contractExempt": "Creates and saves a graph under the contract values; nothing it reads fails first"
     },
     "create_player_controller": {
       "category": "gameplay",

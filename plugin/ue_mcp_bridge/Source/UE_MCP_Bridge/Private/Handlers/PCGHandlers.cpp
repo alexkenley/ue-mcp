@@ -145,9 +145,9 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 
 	// #1057: a handler registered with a spec declares its parameters here and
 	// nowhere else; the TS surface is generated from a recording of these.
-	// Unspecified: create_pcg_graph and add_pcg_volume, which the contract test
-	// would see create an asset or spawn an actor before anything failed, and
-	// the actor-selector actions, not yet migrated to a choice.
+	// create_pcg_graph is contract-exempt: its values would create a graph
+	// before anything failed. Unspecified: add_pcg_volume, which would spawn an
+	// actor, and the actor-selector actions, not yet migrated to a choice.
 	using EType = EMCPParamType;
 	auto GraphPath = []()
 	{
@@ -167,7 +167,11 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 200, max 2000)")),
 	});
 	Registry.RegisterHandler(TEXT("get_pcg_components"), &GetPCGComponents, TArray<FMCPParamSpec>());
-	Registry.RegisterHandler(TEXT("create_pcg_graph"), &CreatePCGGraph);
+	Registry.RegisterHandler(TEXT("create_pcg_graph"), &CreatePCGGraph, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Graph asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Folder for the new graph (default /Game/PCG)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the graph exists: skip (default, report it) | error")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a graph under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("read_pcg_graph"), &ReadPCGGraph, {
 		GraphPath(),
 	});

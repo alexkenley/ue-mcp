@@ -91,6 +91,30 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "create_pcg_graph": {
+    "category": "pcg",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Graph asset name"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Folder for the new graph (default /Game/PCG)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "When the graph exists: skip (default, report it) | error"
+      }
+    ],
+    "contractExempt": "Creates and saves a graph under the contract values; nothing it reads fails first"
+  },
   "disconnect_pcg_nodes": {
     "category": "pcg",
     "params": [
@@ -381,6 +405,7 @@ export const handlerSpecs: HandlerSpecs = {
 export const paramsClauses: Readonly<Record<string, string>> = {
   add_pcg_node: "Params: assetPath (or path), nodeType, posX?, posY?",
   connect_pcg_nodes: "Params: assetPath (or path), sourceNode (or sourceNodeName), sourcePin? (or sourcePinLabel), targetNode (or targetNodeName), targetPin? (or targetPinLabel)",
+  create_pcg_graph: "Params: name, packagePath?, onConflict?",
   disconnect_pcg_nodes: "Params: assetPath (or path), sourceNode (or sourceNodeName), targetNode (or targetNodeName), sourcePin? (or sourcePinLabel), targetPin? (or targetPinLabel)",
   export_pcg_graph: "Params: assetPath (or path), includeSettings?",
   get_pcg_components: "Params: none",
@@ -402,9 +427,12 @@ export const schema: Record<string, z.ZodType> = {
   entries: z.array(z.record(z.unknown())).optional().describe("Array of {mesh, weight?} entries"),
   includeSettings: z.boolean().optional().describe("Include per-node editable settings in the response (default true)"),
   limit: z.number().int().optional().describe("Rows to return on this page (default 200, max 2000)"),
+  name: z.string().optional().describe("Graph asset name"),
   nodeName: z.string().optional().describe("Engine name of the node, as read_graph reports it (read_pcg_node_settings, remove_pcg_node, set_pcg_node_settings, set_static_mesh_spawner_meshes). Only this node (default: every node in the graph) (unwrap_pcg_instance_nodes)"),
   nodes: z.array(z.record(z.unknown())).optional().describe("[{name, class, posX?, posY?, settings?}]"),
   nodeType: z.string().optional().describe("PCG settings class of the node to add"),
+  onConflict: z.string().optional().describe("When the graph exists: skip (default, report it) | error"),
+  packagePath: z.string().optional().describe("Folder for the new graph (default /Game/PCG)"),
   path: z.string().optional().describe("Alias for assetPath"),
   posX: z.number().optional().describe("Graph editor X position for the new node"),
   posY: z.number().optional().describe("Graph editor Y position for the new node"),
