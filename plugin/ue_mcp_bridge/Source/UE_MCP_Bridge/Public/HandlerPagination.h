@@ -228,9 +228,6 @@ namespace MCPPagination
 		// translates one into the other, but the bridge is also called directly,
 		// and there a page cap that is read by nobody is a silent wrong answer:
 		// the caller asks for one row and is handed the default page.
-		// Both are read before either is validated, so a bad limit does not
-		// leave `cursor` unread (#1057).
-		const FString Cursor = Params.IsValid() ? OptionalString(Params, TEXT("cursor")) : FString();
 
 		const TCHAR* LimitField = nullptr;
 		if (HasParam(Params, TEXT("limit"))) LimitField = TEXT("limit");
