@@ -1,5 +1,5 @@
 {
-  "handlerCount": 843,
+  "handlerCount": 848,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -8161,13 +8161,63 @@
       "category": "fab",
       "params": []
     },
+    "fab_clear_cache": {
+      "category": "fab",
+      "params": [],
+      "contractExempt": "Takes no parameters and deletes the Fab download cache when called"
+    },
+    "fab_import_file": {
+      "category": "fab",
+      "params": [
+        {
+          "name": "source",
+          "type": "string",
+          "required": true,
+          "description": "Absolute path of the source file on disk",
+          "aliases": [
+            "sourceFile"
+          ]
+        },
+        {
+          "name": "destination",
+          "type": "string",
+          "required": true,
+          "description": "Destination content path, e.g. /Game/Fab/Imported",
+          "aliases": [
+            "destPath"
+          ]
+        }
+      ]
+    },
     "fab_list_cached": {
       "category": "fab",
       "params": []
     },
+    "fab_login": {
+      "category": "fab",
+      "params": [],
+      "contractExempt": "Takes no parameters and opens the EOS account-portal login flow when called"
+    },
+    "fab_logout": {
+      "category": "fab",
+      "params": [],
+      "contractExempt": "Takes no parameters and clears the stored Fab credentials when called"
+    },
     "fab_status": {
       "category": "fab",
       "params": []
+    },
+    "fab_sync_library": {
+      "category": "fab",
+      "params": [
+        {
+          "name": "batchSize",
+          "type": "integer",
+          "required": false,
+          "description": "Library items to pull per sync request (default the plugin's own)"
+        }
+      ],
+      "contractExempt": "Queues a Fab library sync whatever the batch size"
     },
     "fill_datatable_from_json": {
       "category": "asset",
