@@ -59,7 +59,7 @@ describe("animation.set_live_post_process_anim_blueprint", () => {
       import.meta.url,
     ), "utf8");
 
-    expect(registry).toContain('RegisterHandler(TEXT("set_live_post_process_anim_blueprint"), &SetLivePostProcessAnimBlueprint)');
+    expect(registry).toContain('RegisterHandler(TEXT("set_live_post_process_anim_blueprint"), &SetLivePostProcessAnimBlueprint, {');
     expect(header).toContain("SetLivePostProcessAnimBlueprint");
     expect(live).toContain("LoadObject<UAnimBlueprintGeneratedClass>");
     expect(live).toContain("IsCompatibleForEditor");

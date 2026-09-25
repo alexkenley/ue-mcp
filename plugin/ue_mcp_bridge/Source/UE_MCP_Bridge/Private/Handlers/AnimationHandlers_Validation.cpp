@@ -198,6 +198,20 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AnalyzeAnimation(const TSharedPtr<FJs
 	FString AssetPath;
 	if (auto Error = RequireString(Params, TEXT("assetPath"), AssetPath)) return Error;
 
+	// Every parameter is read before anything can fail (#1057).
+	const FString SkeletalMeshPath = OptionalString(Params, TEXT("skeletalMeshPath"));
+	const TArray<TSharedPtr<FJsonValue>>* BoneNamesJson = nullptr;
+	const bool bHasBoneNames = TryGetArrayParam(Params, TEXT("boneNames"), BoneNamesJson) && BoneNamesJson;
+	const TArray<TSharedPtr<FJsonValue>>* FacingBonesJson = nullptr;
+	const bool bHasFacingBones = TryGetArrayParam(Params, TEXT("facingBones"), FacingBonesJson) && FacingBonesJson;
+	const bool bLoop = OptionalBool(Params, TEXT("loop"), false);
+	const TArray<TSharedPtr<FJsonValue>>* FramesJson = nullptr;
+	const bool bHasFrames = TryGetArrayParam(Params, TEXT("frames"), FramesJson) && FramesJson;
+	const bool bHasSampleRate = HasParam(Params, TEXT("sampleRate"));
+	double RequestedSampleRate = 0.0;
+	const bool bSampleRateIsNumber = TryGetNumberParam(Params, TEXT("sampleRate"), RequestedSampleRate);
+	const FString RequestedOutputDirectory = OptionalString(Params, TEXT("outputDirectory"));
+
 	UAnimSequence* Sequence = LoadAssetByPath<UAnimSequence>(AssetPath);
 	if (!Sequence)
 	{
@@ -212,7 +226,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AnalyzeAnimation(const TSharedPtr<FJs
 	{
 		return MCPError(TEXT("Additive AnimSequences are not supported by analyze_animation v1; provide a baked full-pose sequence"));
 	}
-	const FString SkeletalMeshPath = OptionalString(Params, TEXT("skeletalMeshPath"));
 	USkeletalMesh* SkeletalMesh = nullptr;
 	if (!SkeletalMeshPath.IsEmpty())
 	{
@@ -296,8 +309,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AnalyzeAnimation(const TSharedPtr<FJs
 	}
 
 	TArray<int32> BoneIndices;
-	const TArray<TSharedPtr<FJsonValue>>* BoneNamesJson = nullptr;
-	if (TryGetArrayParam(Params, TEXT("boneNames"), BoneNamesJson))
+	if (bHasBoneNames)
 	{
 		for (const TSharedPtr<FJsonValue>& Value : *BoneNamesJson)
 		{
@@ -344,8 +356,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AnalyzeAnimation(const TSharedPtr<FJs
 	// sample and summarised over the clip. Generic: any two bones, any rig.
 	int32 FacingBoneA = INDEX_NONE;
 	int32 FacingBoneB = INDEX_NONE;
-	const TArray<TSharedPtr<FJsonValue>>* FacingBonesJson = nullptr;
-	if (TryGetArrayParam(Params, TEXT("facingBones"), FacingBonesJson))
+	if (bHasFacingBones)
 	{
 		if (FacingBonesJson->Num() != 2)
 		{
@@ -377,10 +388,8 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AnalyzeAnimation(const TSharedPtr<FJs
 	TArray<double> FacingYaws;
 	int32 FacingDegenerateCount = 0;
 
-	const bool bLoop = OptionalBool(Params, TEXT("loop"), false);
 	TArray<int32> Frames;
-	const TArray<TSharedPtr<FJsonValue>>* FramesJson = nullptr;
-	if (TryGetArrayParam(Params, TEXT("frames"), FramesJson))
+	if (bHasFrames)
 	{
 		if (FramesJson->Num() > 2401)
 		{
@@ -401,9 +410,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AnalyzeAnimation(const TSharedPtr<FJs
 	}
 	else
 	{
-		double RequestedRate = SourceRateDecimal;
-		if (HasParam(Params, TEXT("sampleRate"))
-			&& (!TryGetNumberParam(Params, TEXT("sampleRate"), RequestedRate)
+		const double RequestedRate = bHasSampleRate ? RequestedSampleRate : SourceRateDecimal;
+		if (bHasSampleRate
+			&& (!bSampleRateIsNumber
 				|| !FMath::IsFinite(RequestedRate) || RequestedRate < 1.0 || RequestedRate > 240.0))
 		{
 			return MCPError(TEXT("'sampleRate' must be a finite number in [1, 240]"));
@@ -722,7 +731,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AnalyzeAnimation(const TSharedPtr<FJs
 
 	FString OutputDirectory;
 	FString OutputError;
-	if (!AnimQaResolveOutputDirectory(OptionalString(Params, TEXT("outputDirectory")), OutputDirectory, OutputError))
+	if (!AnimQaResolveOutputDirectory(RequestedOutputDirectory, OutputDirectory, OutputError))
 	{
 		return MCPError(OutputError);
 	}

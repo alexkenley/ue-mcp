@@ -88,17 +88,74 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	{
 		return MCPParam::Required(TEXT("assetPath"), EType::String, Description).Alias(TEXT("path"));
 	};
-	Registry.RegisterHandler(TEXT("list_anim_assets"), &ListAnimAssets);
-	Registry.RegisterHandler(TEXT("create_skeleton"), &CreateSkeleton);
-	Registry.RegisterHandler(TEXT("begin_skeleton_edit"), &BeginSkeletonEdit);
-	Registry.RegisterHandler(TEXT("edit_skeleton_bones"), &EditSkeletonBones);
-	Registry.RegisterHandler(TEXT("commit_skeleton_edit"), &CommitSkeletonEdit);
-	Registry.RegisterHandler(TEXT("cancel_skeleton_edit"), &CancelSkeletonEdit);
+	auto Cursor = []()
+	{
+		return MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: the nextCursor the previous page returned, unmodified"));
+	};
+	auto Limit = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("limit"), EType::Integer, Description);
+	};
+	Registry.RegisterHandler(TEXT("list_anim_assets"), &ListAnimAssets, {
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Folder to scope the read to")),
+		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include subfolders (default true)")),
+		Cursor(),
+		Limit(TEXT("Rows per page (default 200, max 5000)")),
+	});
+	Registry.RegisterHandler(TEXT("create_skeleton"), &CreateSkeleton, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Skeleton asset name")),
+		MCPParam::Required(TEXT("skeletalMeshPath"), EType::String, TEXT("SkeletalMesh to build the skeleton from; the factory assigns the new skeleton to it")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) | error. It never overwrites")),
+	});
+	auto SessionTag = []()
+	{
+		return MCPParam::Optional(TEXT("sessionTag"), EType::String, TEXT("The open skeleton edit session to address; wins over skeletalMeshPath"));
+	};
+	auto SessionMesh = []()
+	{
+		return MCPParam::Optional(TEXT("skeletalMeshPath"), EType::String, TEXT("The skeletal mesh whose one open session to address, when sessionTag is omitted"));
+	};
+	Registry.RegisterHandler(TEXT("begin_skeleton_edit"), &BeginSkeletonEdit, {
+		MCPParam::Required(TEXT("skeletalMeshPath"), EType::String, TEXT("SkeletalMesh whose reference skeleton to edit")),
+		MCPParam::Optional(TEXT("sessionTag"), EType::String, TEXT("Stable key every later call addresses (default Skel_<MeshName>)")),
+	});
+	Registry.RegisterHandler(TEXT("edit_skeleton_bones"), &EditSkeletonBones, {
+		SessionTag(),
+		SessionMesh(),
+		MCPParam::Required(TEXT("edits"), EType::Array, TEXT("Hierarchy edits, each one of {op:'add',bone,parent,transform?} | {op:'remove',bone,removeChildren?} | {op:'rename',bone,newName} | {op:'reparent',bone,parent} | {op:'set_transform',bone,transform,moveChildren?}")).Items(EType::Object),
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Remove a bone despite dependents, which are listed in the refusal")),
+	});
+	Registry.RegisterHandler(TEXT("commit_skeleton_edit"), &CommitSkeletonEdit, {
+		SessionTag(),
+		SessionMesh(),
+	});
+	Registry.RegisterHandler(TEXT("cancel_skeleton_edit"), &CancelSkeletonEdit, {
+		SessionTag(),
+		SessionMesh(),
+	});
+	// Unspecced: `bones` is a string list here and a structured union on the
+	// PoseSearch pose channel, and one category key has one type.
 	Registry.RegisterHandler(TEXT("set_bone_retargeting"), &SetBoneRetargeting);
-	Registry.RegisterHandler(TEXT("author_blend_profile"), &AuthorBlendProfile);
+	Registry.RegisterHandler(TEXT("author_blend_profile"), &AuthorBlendProfile, {
+		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("USkeleton that owns the blend profile")),
+		MCPParam::Required(TEXT("profileName"), EType::String, TEXT("Blend profile to create or edit")),
+		MCPParam::Optional(TEXT("operation"), EType::String, TEXT("upsert (default) | remove | rename")),
+		MCPParam::Optional(TEXT("newProfileName"), EType::String, TEXT("New name when operation=rename")),
+		MCPParam::Optional(TEXT("mode"), EType::String, TEXT("TimeFactor | WeightFactor | BlendMask")),
+		MCPParam::Optional(TEXT("entries"), EType::Array, TEXT("Per-bone scales as [{bone, scale, recursive?}]")).Items(EType::Object),
+		MCPParam::Optional(TEXT("removeEntries"), EType::Array, TEXT("Bone names to drop from the profile")).Items(EType::String),
+	});
+	// Unspecced: `remove` is a string list here and a boolean on
+	// register_compatible_skeleton, and one category key has one type.
 	Registry.RegisterHandler(TEXT("edit_curve_metadata"), &EditCurveMetadata);
 	Registry.RegisterHandler(TEXT("register_compatible_skeleton"), &RegisterCompatibleSkeleton);
-	Registry.RegisterHandler(TEXT("list_skeletal_meshes"), &ListSkeletalMeshes);
+	Registry.RegisterHandler(TEXT("list_skeletal_meshes"), &ListSkeletalMeshes, {
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Folder to scope the read to")),
+		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include subfolders (default true)")),
+		Cursor(),
+		Limit(TEXT("Rows per page (default 200, max 5000)")),
+	});
 	Registry.RegisterHandler(TEXT("get_skeleton_info"), &GetSkeletonInfo, {
 		AssetPath(TEXT("SkeletalMesh asset path")),
 	});
@@ -114,23 +171,84 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("read_anim_montage"), &ReadAnimMontage, {
 		AssetPath(TEXT("AnimMontage asset path")),
 	});
-	// Batch form (assetPaths, directory, fields) is not in the spec yet, so this one stays hand-authored.
-	Registry.RegisterHandler(TEXT("read_anim_sequence"), &ReadAnimSequence);
-	Registry.RegisterHandler(TEXT("scan_animation_tracks"), &ScanAnimationTracks);
-	Registry.RegisterHandler(TEXT("create_anim_blueprint"), &CreateAnimBlueprint);
-	Registry.RegisterHandler(TEXT("create_anim_montage"), &CreateMontage);
+	Registry.RegisterHandler(TEXT("read_anim_sequence"), &ReadAnimSequence, {
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("AnimSequence to read; omit when reading a batch")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("assetPaths"), EType::Array, TEXT("Batch: up to 1000 AnimSequence paths, one row each")).Items(EType::String),
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Batch: every AnimSequence in this folder")),
+		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("With directory: include subfolders (default true)")),
+		MCPParam::Optional(TEXT("nameFilter"), EType::String, TEXT("With directory: case-insensitive substring, or * ? wildcard, the asset name must match")),
+		MCPParam::Optional(TEXT("fields"), EType::Array, TEXT("Result keys to return; assetPath is always kept and an unknown name is refused with the valid list")).Items(EType::String),
+		Cursor(),
+		Limit(TEXT("Batch rows per page (default 50, max 200)")),
+	});
+	Registry.RegisterHandler(TEXT("scan_animation_tracks"), &ScanAnimationTracks, {
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content root to scan (default every root)")),
+		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include subfolders (default true)")),
+		MCPParam::Optional(TEXT("assetPaths"), EType::Array, TEXT("Scan exactly these AnimSequences instead of a directory")).Items(EType::String),
+		MCPParam::Optional(TEXT("skeletonPath"), EType::String, TEXT("Only sequences on this skeleton; a path that names no skeleton is refused")),
+		MCPParam::Optional(TEXT("targetTrackCount"), EType::Number, TEXT("Flag sequences with more than this many bone tracks")),
+		MCPParam::Optional(TEXT("includeTrackNames"), EType::Boolean, TEXT("Include each sequence's bone track names")),
+	});
+	auto OnConflict = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("onConflict"), EType::String, Description);
+	};
+	Registry.RegisterHandler(TEXT("create_anim_blueprint"), &CreateAnimBlueprint, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("AnimBlueprint asset name")),
+		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("USkeleton the AnimBlueprint targets")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Animations)")),
+		MCPParam::Optional(TEXT("parentClass"), EType::String, TEXT("Parent AnimInstance class name")),
+		OnConflict(TEXT("skip (default) returns an existing asset untouched, error refuses")),
+	});
+	Registry.RegisterHandler(TEXT("create_anim_montage"), &CreateMontage, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("AnimMontage asset name")),
+		MCPParam::Required(TEXT("animSequencePath"), EType::String, TEXT("AnimSequence the montage plays")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Animations)")),
+		OnConflict(TEXT("skip (default) returns an existing asset untouched, error refuses")),
+	});
+	// Unspecced: items carry fields the spec types cannot express.
 	Registry.RegisterHandler(TEXT("author_montages_batch"), &AuthorMontagesBatch);
-	Registry.RegisterHandler(TEXT("create_blendspace"), &CreateBlendspace);
-	Registry.RegisterHandler(TEXT("create_blendspace_1d"), &CreateBlendspace1D);
+	Registry.RegisterHandler(TEXT("create_blendspace"), &CreateBlendspace, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("BlendSpace asset name")),
+		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("USkeleton the blendspace targets")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Animations)")),
+		MCPParam::Optional(TEXT("axisHorizontal"), EType::String, TEXT("Horizontal axis name (default Speed)")),
+		MCPParam::Optional(TEXT("axisVertical"), EType::String, TEXT("Vertical axis name (default Direction)")),
+		MCPParam::Optional(TEXT("horizontalMin"), EType::Number, TEXT("Horizontal axis minimum (default 0)")),
+		MCPParam::Optional(TEXT("horizontalMax"), EType::Number, TEXT("Horizontal axis maximum (default 500)")),
+		MCPParam::Optional(TEXT("verticalMin"), EType::Number, TEXT("Vertical axis minimum (default -180)")),
+		MCPParam::Optional(TEXT("verticalMax"), EType::Number, TEXT("Vertical axis maximum (default 180)")),
+		OnConflict(TEXT("skip (default) returns an existing asset untouched, error refuses")),
+	});
+	Registry.RegisterHandler(TEXT("create_blendspace_1d"), &CreateBlendspace1D, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("BlendSpace1D asset name")),
+		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("USkeleton the blendspace targets")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Animations)")),
+		MCPParam::Optional(TEXT("axisName"), EType::String, TEXT("Axis display name (default Speed)")),
+		MCPParam::Optional(TEXT("axisMin"), EType::Number, TEXT("Axis minimum (default 0)")),
+		MCPParam::Optional(TEXT("axisMax"), EType::Number, TEXT("Axis maximum (default 500)")),
+		MCPParam::Optional(TEXT("gridNum"), EType::Number, TEXT("Grid divisions (default 4)")),
+		OnConflict(TEXT("skip (default) returns an existing asset untouched, error refuses")),
+	});
+	// Unspecced: position carries x/y fields the spec types cannot express.
 	Registry.RegisterHandler(TEXT("add_blend_sample"), &AddBlendSample);
 	Registry.RegisterHandler(TEXT("set_blend_sample"), &SetBlendSample);
 	Registry.RegisterHandler(TEXT("read_blendspace"), &ReadBlendspace, {
 		AssetPath(TEXT("BlendSpace or BlendSpace1D asset path")),
 	});
-	// #459: configure axis params + bulk-add samples in one call.
+	// #459: configure axis params + bulk-add samples in one call. Unspecced: its
+	// wire key `axes` is an object list and bake_root_motion_from_bone's is a
+	// string list, so the TS rename from blendspaceAxes cannot become an alias.
 	Registry.RegisterHandler(TEXT("populate_blendspace"), &PopulateBlendspace);
 	Registry.RegisterHandler(TEXT("populate_blendspace_1d"), &PopulateBlendspace);
-	Registry.RegisterHandler(TEXT("add_anim_notify"), &AddAnimNotify);
+	Registry.RegisterHandler(TEXT("add_anim_notify"), &AddAnimNotify, {
+		AssetPath(TEXT("AnimSequence or AnimMontage asset path")),
+		MCPParam::Required(TEXT("notifyName"), EType::String, TEXT("Notify name")),
+		MCPParam::Required(TEXT("triggerTime"), EType::Number, TEXT("Trigger time in seconds, clamped to the asset length")),
+		MCPParam::Optional(TEXT("notifyClass"), EType::String, TEXT("UAnimNotify class to spawn: a class name, a name without the AnimNotify_ prefix, or a path")),
+		MCPParam::Optional(TEXT("notifyProperties"), EType::Object, TEXT("EditAnywhere fields to set on the spawned notify object; requires a notifyClass that resolves")),
+		MCPParam::Optional(TEXT("branchingPoint"), EType::Boolean, TEXT("Force the montage notify's tick type. The PlayMontageNotify classes default to true on a montage, everything else to the engine's queued tick (#880)")),
+	});
 	Registry.RegisterHandler(TEXT("remove_anim_notify"), &RemoveAnimNotify, {
 		AssetPath(TEXT("AnimSequence or AnimMontage asset path")),
 		MCPParam::Optional(TEXT("notifyName"), EType::String, TEXT("Notify name to match")),
@@ -141,14 +259,43 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("notifyName"), EType::String, TEXT("Notify name to match")),
 		MCPParam::Optional(TEXT("notifyClass"), EType::String, TEXT("Notify class to match. Pass at least one of notifyName and notifyClass; both filters apply together")),
 	});
-	Registry.RegisterHandler(TEXT("create_sequence"), &CreateSequence);
+	Registry.RegisterHandler(TEXT("create_sequence"), &CreateSequence, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("AnimSequence asset name")),
+		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("USkeleton, or a SkeletalMesh whose skeleton to use")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Animations)")),
+		MCPParam::Optional(TEXT("numFrames"), EType::Number, TEXT("Frame count (default 30)")),
+		MCPParam::Optional(TEXT("frameRate"), EType::Number, TEXT("Frames per second (default 30)")),
+		OnConflict(TEXT("skip (default) returns an existing asset untouched, error refuses")),
+	});
+	// Unspecced: keyframes and tracks carry fields the spec types cannot express.
 	Registry.RegisterHandler(TEXT("set_bone_keyframes"), &SetBoneKeyframes);
 	Registry.RegisterHandler(TEXT("bake_keyframes_batch"), &BakeKeyframesBatch);
-	Registry.RegisterHandler(TEXT("reverse_sequence"), &ReverseSequence);
-	Registry.RegisterHandler(TEXT("get_bone_transforms"), &GetBoneTransforms);
+	Registry.RegisterHandler(TEXT("reverse_sequence"), &ReverseSequence, {
+		MCPParam::Required(TEXT("sourcePath"), EType::String, TEXT("AnimSequence to reverse")),
+		MCPParam::Optional(TEXT("destinationPath"), EType::String, TEXT("Asset path for the reversed copy; alternative to name and packagePath")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Name of the reversed copy (default <Source>_Reversed)")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Folder of the reversed copy (default the source's folder)")),
+		MCPParam::Optional(TEXT("inPlace"), EType::Boolean, TEXT("Reverse the source itself instead of writing a copy (default false)")),
+		MCPParam::Optional(TEXT("cycleOffsetFrames"), EType::Integer, TEXT("Rotate the reversed loop to start this many frames in")),
+		MCPParam::Optional(TEXT("cycleOffsetSeconds"), EType::Number, TEXT("Rotate the reversed loop to start this many seconds in, rounded to whole frames")),
+		OnConflict(TEXT("skip (default) returns an existing destination untouched, error refuses; it never overwrites")),
+	});
+	Registry.RegisterHandler(TEXT("get_bone_transforms"), &GetBoneTransforms, {
+		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("USkeleton, or a SkeletalMesh whose skeleton to read")).Alias(TEXT("assetPath")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("boneNames"), EType::Array, TEXT("Bones to return (default every bone)")).Items(EType::String),
+		MCPParam::Optional(TEXT("space"), EType::String, TEXT("local (default) | component, which composes the parent chain")),
+	});
 	// #656: curve vs morph-target comparison.
-	Registry.RegisterHandler(TEXT("compare_curves_to_morph_targets"), &CompareCurvesToMorphTargets);
-	Registry.RegisterHandler(TEXT("set_montage_sequence"), &SetMontageSequence);
+	Registry.RegisterHandler(TEXT("compare_curves_to_morph_targets"), &CompareCurvesToMorphTargets, {
+		MCPParam::Required(TEXT("animPath"), EType::String, TEXT("AnimSequence or PoseAsset whose curve names to compare")).Alias(TEXT("assetPath")),
+		MCPParam::Required(TEXT("skeletalMeshPath"), EType::String, TEXT("SkeletalMesh whose morph targets to compare against")).Alias(TEXT("meshPath")),
+	});
+	Registry.RegisterHandler(TEXT("set_montage_sequence"), &SetMontageSequence, {
+		AssetPath(TEXT("AnimMontage asset path")),
+		MCPParam::Required(TEXT("animSequencePath"), EType::String, TEXT("AnimSequence to put in the slot")),
+		MCPParam::Optional(TEXT("slotIndex"), EType::Number, TEXT("Slot track index (default 0)")),
+		MCPParam::Optional(TEXT("segmentIndex"), EType::Number, TEXT("Replace only this segment; without it every segment in the slot is replaced (#626)")),
+	});
 	Registry.RegisterHandler(TEXT("set_montage_properties"), &SetMontageProperties, {
 		AssetPath(TEXT("AnimMontage asset path")),
 		MCPParam::Optional(TEXT("sequenceLength"), EType::Number, TEXT("Montage length in seconds")),
@@ -158,12 +305,52 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 
 	// State machine authoring
-	Registry.RegisterHandler(TEXT("create_state_machine"), &CreateStateMachine);
-	Registry.RegisterHandler(TEXT("add_state"), &AddState);
-	Registry.RegisterHandler(TEXT("add_transition"), &AddTransition);
-	Registry.RegisterHandler(TEXT("set_state_animation"), &SetStateAnimation);
-	Registry.RegisterHandler(TEXT("set_transition_blend"), &SetTransitionBlend);
-	Registry.RegisterHandler(TEXT("set_transition_condition"), &SetTransitionCondition);
+	auto StateMachineName = []()
+	{
+		return MCPParam::Required(TEXT("stateMachineName"), EType::String, TEXT("State machine to edit"));
+	};
+	Registry.RegisterHandler(TEXT("create_state_machine"), &CreateStateMachine, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("State machine name (default NewStateMachine)")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph to add it to (default AnimGraph)")),
+	});
+	Registry.RegisterHandler(TEXT("add_state"), &AddState, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		StateMachineName(),
+		MCPParam::Required(TEXT("stateName"), EType::String, TEXT("State to add")),
+		OnConflict(TEXT("skip (default) returns an existing state untouched, error refuses")),
+	});
+	Registry.RegisterHandler(TEXT("add_transition"), &AddTransition, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		StateMachineName(),
+		MCPParam::Required(TEXT("fromState"), EType::String, TEXT("State the transition leaves")),
+		MCPParam::Required(TEXT("toState"), EType::String, TEXT("State the transition enters")),
+		MCPParam::Optional(TEXT("blendDuration"), EType::Number, TEXT("Crossfade in seconds (engine default 0.2)")),
+		MCPParam::Optional(TEXT("blendLogic"), EType::String, TEXT("Standard | Inertialization")),
+	});
+	Registry.RegisterHandler(TEXT("set_state_animation"), &SetStateAnimation, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		StateMachineName(),
+		MCPParam::Required(TEXT("stateName"), EType::String, TEXT("State whose animation to set")),
+		MCPParam::Required(TEXT("animAssetPath"), EType::String, TEXT("AnimSequence or BlendSpace the state plays")),
+	});
+	Registry.RegisterHandler(TEXT("set_transition_blend"), &SetTransitionBlend, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		StateMachineName(),
+		MCPParam::Required(TEXT("fromState"), EType::String, TEXT("State the transition leaves")),
+		MCPParam::Required(TEXT("toState"), EType::String, TEXT("State the transition enters")),
+		MCPParam::Optional(TEXT("blendDuration"), EType::Number, TEXT("Crossfade in seconds")),
+		MCPParam::Optional(TEXT("blendLogic"), EType::String, TEXT("Standard | Inertialization")),
+	});
+	Registry.RegisterHandler(TEXT("set_transition_condition"), &SetTransitionCondition, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		StateMachineName(),
+		MCPParam::Required(TEXT("variableName"), EType::String, TEXT("Existing bool variable the condition reads")),
+		MCPParam::Optional(TEXT("transitionGuid"), EType::String, TEXT("Transition to condition, from add_transition or read_state_machine; wins over fromState and toState")),
+		MCPParam::Optional(TEXT("fromState"), EType::String, TEXT("With toState, the transition to condition when transitionGuid is omitted")),
+		MCPParam::Optional(TEXT("toState"), EType::String, TEXT("With fromState, the transition to condition when transitionGuid is omitted")),
+		MCPParam::Optional(TEXT("negate"), EType::Boolean, TEXT("Enter when the variable is false (default false)")),
+	});
 	Registry.RegisterHandler(TEXT("read_state_machine"), &ReadStateMachine, {
 		AssetPath(TEXT("AnimBlueprint asset path")),
 		MCPParam::Required(TEXT("stateMachineName"), EType::String, TEXT("State machine to read")),
@@ -175,15 +362,24 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph to read (default AnimGraph)")),
 	});
 	// #657: deep anim-node struct inspection (PoseDriver, RBF, etc.).
-	Registry.RegisterHandler(TEXT("inspect_anim_nodes"), &InspectAnimNodes);
+	Registry.RegisterHandler(TEXT("inspect_anim_nodes"), &InspectAnimNodes, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph to inspect (default AnimGraph)")),
+		MCPParam::Optional(TEXT("nodeClass"), EType::String, TEXT("Node class substring filter, e.g. PoseDriver")),
+	});
 
 	// Float curve authoring (#79 / #24)
 	Registry.RegisterHandler(TEXT("add_curve"), &AddCurve, {
 		AssetPath(TEXT("AnimSequence asset path")),
 		MCPParam::Required(TEXT("curveName"), EType::String, TEXT("Float curve to add")),
 	});
+	// Unspecced: keys carry fields the spec types cannot express.
 	Registry.RegisterHandler(TEXT("set_anim_curve_keys"), &SetAnimCurveKeys);
-	Registry.RegisterHandler(TEXT("apply_animation_modifier"), &ApplyAnimationModifier);
+	Registry.RegisterHandler(TEXT("apply_animation_modifier"), &ApplyAnimationModifier, {
+		AssetPath(TEXT("AnimSequence asset path")),
+		MCPParam::Required(TEXT("modifierClass"), EType::String, TEXT("UAnimationModifier subclass: a short name such as DistanceCurveModifier, or a /Script path")).Alias(TEXT("modifier")),
+		MCPParam::Optional(TEXT("props"), EType::Object, TEXT("EditAnywhere property values to set on the modifier before it runs")),
+	});
 
 	// Montage slot & section editing (#78, #27)
 	Registry.RegisterHandler(TEXT("set_montage_slot"), &SetMontageSlot, {
@@ -191,35 +387,118 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("slotName"), EType::String, TEXT("Slot name to write onto the track")),
 		MCPParam::Optional(TEXT("trackIndex"), EType::Integer, TEXT("Slot track index (default 0)")),
 	});
-	Registry.RegisterHandler(TEXT("add_montage_section"), &AddMontageSection);
+	Registry.RegisterHandler(TEXT("add_montage_section"), &AddMontageSection, {
+		AssetPath(TEXT("AnimMontage asset path")),
+		MCPParam::Required(TEXT("sectionName"), EType::String, TEXT("Composite section to add")),
+		MCPParam::Optional(TEXT("startTime"), EType::Number, TEXT("Section start in seconds; taken from the segment when segmentIndex is given")),
+		MCPParam::Optional(TEXT("linkedSection"), EType::String, TEXT("Next section to link to")),
+		MCPParam::Optional(TEXT("segmentIndex"), EType::Number, TEXT("Segment to anchor the section to, so it moves with that segment (#826)")),
+		MCPParam::Optional(TEXT("slotName"), EType::String, TEXT("Slot holding the anchor segment; wins over slotIndex")),
+		MCPParam::Optional(TEXT("slotIndex"), EType::Number, TEXT("Slot index holding the anchor segment (default 0)")),
+		OnConflict(TEXT("skip (default) returns an existing section untouched, error refuses")),
+	});
 
 	// Montage segment authoring (#826)
-	Registry.RegisterHandler(TEXT("add_montage_segment"), &AddMontageSegment);
-	Registry.RegisterHandler(TEXT("remove_montage_segment"), &RemoveMontageSegment);
-	Registry.RegisterHandler(TEXT("list_montage_segments"), &ListMontageSegments);
+	Registry.RegisterHandler(TEXT("add_montage_segment"), &AddMontageSegment, {
+		AssetPath(TEXT("AnimMontage asset path")),
+		MCPParam::Required(TEXT("animSequencePath"), EType::String, TEXT("AnimSequence or AnimComposite to append as a segment")),
+		MCPParam::Optional(TEXT("slotName"), EType::String, TEXT("Target slot, created when absent")),
+		MCPParam::Optional(TEXT("slotIndex"), EType::Number, TEXT("Target slot index when slotName is omitted (default 0)")),
+		MCPParam::Optional(TEXT("startPos"), EType::Number, TEXT("Trim start inside the source, in seconds (default 0)")),
+		MCPParam::Optional(TEXT("endPos"), EType::Number, TEXT("Trim end inside the source, in seconds (default the source play length)")),
+		MCPParam::Optional(TEXT("playRate"), EType::Number, TEXT("Segment play rate; negative plays in reverse (default 1)")),
+		MCPParam::Optional(TEXT("loopCount"), EType::Integer, TEXT("How many times the segment repeats (default 1)")),
+		MCPParam::Optional(TEXT("insertIndex"), EType::Integer, TEXT("Position in the slot's segment list (default appends)")),
+	});
+	Registry.RegisterHandler(TEXT("remove_montage_segment"), &RemoveMontageSegment, {
+		AssetPath(TEXT("AnimMontage asset path")),
+		MCPParam::Required(TEXT("segmentIndex"), EType::Number, TEXT("Segment to remove")),
+		MCPParam::Optional(TEXT("slotName"), EType::String, TEXT("Slot holding the segment; wins over slotIndex")),
+		MCPParam::Optional(TEXT("slotIndex"), EType::Number, TEXT("Slot index holding the segment (default 0)")),
+	});
+	Registry.RegisterHandler(TEXT("list_montage_segments"), &ListMontageSegments, {
+		AssetPath(TEXT("AnimMontage asset path")),
+		MCPParam::Optional(TEXT("slotName"), EType::String, TEXT("List only this slot")),
+	});
 
 	// IK Rig (#93)
+	// Unspecced: create_ik_rig and configure_ik_rig share `chains`, whose
+	// element schema the spec types cannot express, and configure_ik_rig is
+	// 5.8 only, where the older-engine stub reads nothing.
 	Registry.RegisterHandler(TEXT("create_ik_rig"), &CreateIKRig);
-	Registry.RegisterHandler(TEXT("read_ik_rig"), &ReadIKRig);
+	Registry.RegisterHandler(TEXT("read_ik_rig"), &ReadIKRig, {
+		AssetPath(TEXT("IKRigDefinition asset path")),
+	});
 	Registry.RegisterHandler(TEXT("configure_ik_rig"), &ConfigureIKRig);
 	// #701/#703: IK authoring tail + batch retarget.
-	Registry.RegisterHandler(TEXT("set_ik_rig_mesh"), &SetIKRigMesh);
-	Registry.RegisterHandler(TEXT("set_ik_retargeter_rig"), &SetIKRetargeterRig);
-	Registry.RegisterHandler(TEXT("auto_align_retarget_pose"), &AutoAlignRetargetPose);
-	Registry.RegisterHandler(TEXT("reset_retarget_pose"), &ResetRetargetPose);
+	Registry.RegisterHandler(TEXT("set_ik_rig_mesh"), &SetIKRigMesh, {
+		MCPParam::Required(TEXT("rigPath"), EType::String, TEXT("Existing IKRigDefinition to edit")).Alias(TEXT("assetPath")),
+		MCPParam::Required(TEXT("meshPath"), EType::String, TEXT("SkeletalMesh to set as the rig's preview and source mesh")).Alias(TEXT("skeletalMesh")),
+	});
+	auto RetargeterPath = []()
+	{
+		return MCPParam::Required(TEXT("retargeterPath"), EType::String, TEXT("Existing IKRetargeter to edit")).Alias(TEXT("assetPath"));
+	};
+	auto Side = []()
+	{
+		return MCPParam::Optional(TEXT("side"), EType::String, TEXT("source | target (default target)"));
+	};
+	Registry.RegisterHandler(TEXT("set_ik_retargeter_rig"), &SetIKRetargeterRig, {
+		RetargeterPath(),
+		MCPParam::Required(TEXT("rigPath"), EType::String, TEXT("IKRigDefinition to assign")).Alias(TEXT("ikRig")),
+		Side(),
+	});
+	Registry.RegisterHandler(TEXT("auto_align_retarget_pose"), &AutoAlignRetargetPose, {
+		RetargeterPath(),
+		Side(),
+	});
+	Registry.RegisterHandler(TEXT("reset_retarget_pose"), &ResetRetargetPose, {
+		RetargeterPath(),
+		Side(),
+	});
+	// Unspecced: 5.8 only, and the older-engine stub reads nothing.
 	Registry.RegisterHandlerWithTimeout(TEXT("batch_retarget_animations"), &BatchRetargetAnimations, 300.0f);
 
 	// Control Rig (#11)
-	Registry.RegisterHandler(TEXT("list_control_rig_variables"), &ListControlRigVariables);
-	Registry.RegisterHandler(TEXT("read_control_rig_graph"), &ReadControlRigGraph);
-	Registry.RegisterHandler(TEXT("read_control_rig_hierarchy"), &ReadControlRigHierarchy);
-	Registry.RegisterHandler(TEXT("create_control_rig"), &CreateControlRig);
+	Registry.RegisterHandler(TEXT("list_control_rig_variables"), &ListControlRigVariables, {
+		AssetPath(TEXT("Control Rig Blueprint asset path")),
+	});
+	Registry.RegisterHandler(TEXT("read_control_rig_graph"), &ReadControlRigGraph, {
+		AssetPath(TEXT("Control Rig Blueprint asset path")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Substring filter over model names")),
+		MCPParam::Optional(TEXT("includePins"), EType::Boolean, TEXT("Include each node's pins (default true)")),
+		MCPParam::Optional(TEXT("includeDefaults"), EType::Boolean, TEXT("Include pin default values (default true)")),
+		MCPParam::Optional(TEXT("includeLinks"), EType::Boolean, TEXT("Include pin-to-pin links (default true)")),
+		Limit(TEXT("Nodes per graph (default 200)")),
+	});
+	Registry.RegisterHandler(TEXT("read_control_rig_hierarchy"), &ReadControlRigHierarchy, {
+		AssetPath(TEXT("Control Rig Blueprint asset path")),
+	});
+	Registry.RegisterHandler(TEXT("create_control_rig"), &CreateControlRig, {
+		MCPParam::Optional(TEXT("skeletalMeshPath"), EType::String, TEXT("SkeletalMesh to import the bone hierarchy from; pass exactly one of this and skeletonPath")),
+		MCPParam::Optional(TEXT("skeletonPath"), EType::String, TEXT("Skeleton to import the bone hierarchy from; pass exactly one of this and skeletalMeshPath")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Asset name (default <Source>_CtrlRig)")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default the source's folder)")),
+		OnConflict(TEXT("skip (default) returns the existing asset, error refuses; it never overwrites")),
+	});
+	// Unspecced: the Control Rig edit session is 5.8 only and the older-engine
+	// stubs read nothing; operations and the bake's literal-false flags also
+	// carry constraints the spec types cannot express.
 	Registry.RegisterHandler(TEXT("begin_control_rig_edit"), &BeginControlRigEdit);
 	Registry.RegisterHandler(TEXT("read_control_rig_edit"), &ReadControlRigEdit);
 	Registry.RegisterHandler(TEXT("capture_control_rig_pose"), &CaptureControlRigPose);
 	Registry.RegisterHandler(TEXT("apply_control_rig_edits"), &ApplyControlRigEdits);
 	Registry.RegisterHandler(TEXT("bake_control_rig_edit"), &BakeControlRigEdit);
-	Registry.RegisterHandler(TEXT("analyze_animation"), &AnalyzeAnimation);
+	Registry.RegisterHandler(TEXT("analyze_animation"), &AnalyzeAnimation, {
+		AssetPath(TEXT("AnimSequence asset path")),
+		MCPParam::Optional(TEXT("skeletalMeshPath"), EType::String, TEXT("SkeletalMesh whose proportions to sample with; must be compatible with the sequence's skeleton")),
+		MCPParam::Optional(TEXT("boneNames"), EType::Array, TEXT("Bones to sample (default root, pelvis, head, hands and feet when present)")).Items(EType::String),
+		MCPParam::Optional(TEXT("frames"), EType::Array, TEXT("Explicit frames to sample, integers in [0, frame count]")).Items(EType::Number),
+		MCPParam::Optional(TEXT("sampleRate"), EType::Number, TEXT("Samples per second when frames is omitted, 1 to 240 (default the source rate)")),
+		MCPParam::Optional(TEXT("loop"), EType::Boolean, TEXT("Include end-to-start loop continuity metrics")),
+		MCPParam::Optional(TEXT("facingBones"), EType::Array, TEXT("[boneA, boneB]: report the yaw of the boneA to boneB vector relative to the root bone's forward, per sample and over the clip")).Items(EType::String),
+		MCPParam::Optional(TEXT("outputDirectory"), EType::String, TEXT("Directory under Project/Saved/Codex/AnimationQA for analysis artifacts; must not already contain them")),
+	});
 
 	// v0.7.11 - depth
 	Registry.RegisterHandler(TEXT("set_root_motion_settings"), &SetRootMotionSettings, {
@@ -238,14 +517,25 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("USkeleton asset path")),
 		MCPParam::Required(TEXT("virtualBoneName"), EType::String, TEXT("Virtual bone to remove")),
 	});
-	Registry.RegisterHandler(TEXT("create_anim_composite"), &CreateAnimComposite);
+	Registry.RegisterHandler(TEXT("create_anim_composite"), &CreateAnimComposite, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("AnimComposite asset name")),
+		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("USkeleton the composite targets")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Animations)")),
+		OnConflict(TEXT("skip (default) returns an existing asset untouched, error refuses")),
+	});
 	Registry.RegisterHandler(TEXT("list_anim_modifiers"), &ListAnimModifiers, {
 		AssetPath(TEXT("AnimSequence asset path")),
 	});
 
 	// v0.7.11 - issue fixes
+	// Unspecced: it creates the asset before any input can fail, and before 5.8
+	// an unresolved rig is only a warning, so contract values would create one.
 	Registry.RegisterHandler(TEXT("create_ik_retargeter"), &CreateIKRetargeter);
-	Registry.RegisterHandler(TEXT("read_ik_retargeter"), &ReadIKRetargeter);
+	Registry.RegisterHandler(TEXT("read_ik_retargeter"), &ReadIKRetargeter, {
+		AssetPath(TEXT("IKRetargeter asset path")),
+	});
+	// Unspecced: 5.8 only, and ops, chainMappings and pose carry element
+	// schemas the spec types cannot express.
 	Registry.RegisterHandler(TEXT("configure_ik_retargeter"), &ConfigureIKRetargeter);
 	Registry.RegisterHandler(TEXT("set_anim_blueprint_skeleton"), &SetAnimBlueprintSkeleton, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("AnimBlueprint asset path")),
@@ -258,57 +548,244 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 
 	// v1.0.0-rc.2 - animation authoring gaps (#153, #154)
-	Registry.RegisterHandler(TEXT("set_sequence_properties"), &SetSequenceProperties);
-	Registry.RegisterHandler(TEXT("bake_root_motion_from_bone"), &BakeRootMotionFromBone);
+	Registry.RegisterHandler(TEXT("set_sequence_properties"), &SetSequenceProperties, {
+		MCPParam::Required(TEXT("assetPaths"), EType::Array, TEXT("AnimSequences to write, or montages when resolveFromMontages is on")).Items(EType::String),
+		MCPParam::Required(TEXT("properties"), EType::Object, TEXT("{enableRootMotion?, forceRootLock?, useNormalizedRootMotionScale?, rootMotionRootLock?}")),
+		MCPParam::Optional(TEXT("resolveFromMontages"), EType::Boolean, TEXT("Resolve a montage to its first AnimSequence (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("bake_root_motion_from_bone"), &BakeRootMotionFromBone, {
+		AssetPath(TEXT("AnimSequence asset path")),
+		MCPParam::Required(TEXT("sourceBone"), EType::String, TEXT("Bone whose translation moves onto the root, e.g. pelvis")),
+		MCPParam::Optional(TEXT("rootBone"), EType::String, TEXT("Root bone name (default root)")),
+		MCPParam::Optional(TEXT("axes"), EType::Array, TEXT("Axes to bake: x, y, z (default [x, y])")).Items(EType::String),
+		MCPParam::Optional(TEXT("interpolation"), EType::String, TEXT("linear (default) | per_frame")),
+	});
 
 	// v0.7.15 - PoseSearch (motion matching)
-	Registry.RegisterHandler(TEXT("create_pose_search_database"), &CreatePoseSearchDatabase);
-	Registry.RegisterHandler(TEXT("set_pose_search_schema"), &SetPoseSearchSchema);
-	Registry.RegisterHandler(TEXT("add_pose_search_sequence"), &AddPoseSearchSequence);
+	Registry.RegisterHandler(TEXT("create_pose_search_database"), &CreatePoseSearchDatabase, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("PoseSearchDatabase asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/MotionMatching)")),
+		MCPParam::Optional(TEXT("schemaPath"), EType::String, TEXT("Existing PoseSearchSchema to use; a schema that cannot index is refused")),
+		MCPParam::Optional(TEXT("skeletonPath"), EType::String, TEXT("Author a <name>_Schema with default channels on this skeleton when schemaPath is omitted")),
+		OnConflict(TEXT("skip (default) returns an existing asset untouched, error refuses")),
+	});
+	Registry.RegisterHandler(TEXT("set_pose_search_schema"), &SetPoseSearchSchema, {
+		AssetPath(TEXT("PoseSearchDatabase asset path")),
+		MCPParam::Required(TEXT("schemaPath"), EType::String, TEXT("PoseSearchSchema to assign; a schema that cannot index is refused")),
+	});
+	Registry.RegisterHandler(TEXT("add_pose_search_sequence"), &AddPoseSearchSequence, {
+		AssetPath(TEXT("PoseSearchDatabase asset path")),
+		MCPParam::Required(TEXT("sequencePath"), EType::String, TEXT("AnimSequence, AnimComposite, AnimMontage or BlendSpace to append")),
+		MCPParam::Optional(TEXT("mirror"), EType::String, TEXT("original | mirrored | both")),
+		MCPParam::Optional(TEXT("disableReselection"), EType::Boolean, TEXT("Disallow reselecting poses from the same asset")),
+		MCPParam::Optional(TEXT("sampleStart"), EType::Number, TEXT("Sampling range start in seconds")),
+		MCPParam::Optional(TEXT("sampleEnd"), EType::Number, TEXT("Sampling range end in seconds")),
+		MCPParam::Optional(TEXT("enabled"), EType::Boolean, TEXT("Include the clip in the database")),
+	});
+	// Unspecced: clips entries are objects or bare path strings, which the
+	// spec types cannot express.
 	Registry.RegisterHandler(TEXT("set_pose_search_clips"), &SetPoseSearchClips);
-	Registry.RegisterHandler(TEXT("build_pose_search_index"), &BuildPoseSearchIndex);
-	Registry.RegisterHandler(TEXT("read_pose_search_database"), &ReadPoseSearchDatabase);
+	Registry.RegisterHandler(TEXT("build_pose_search_index"), &BuildPoseSearchIndex, {
+		AssetPath(TEXT("PoseSearchDatabase asset path")),
+		MCPParam::Optional(TEXT("wait"), EType::Boolean, TEXT("Block until the build resolves (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("read_pose_search_database"), &ReadPoseSearchDatabase, {
+		AssetPath(TEXT("PoseSearchDatabase asset path")),
+	});
 
 	// Motion Matching content pipeline (schema / mirror / normalization / tuning)
-	Registry.RegisterHandler(TEXT("create_pose_search_schema"), &CreatePoseSearchSchema);
+	Registry.RegisterHandler(TEXT("create_pose_search_schema"), &CreatePoseSearchSchema, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("PoseSearchSchema asset name")),
+		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("USkeleton the schema samples")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/MotionMatching)")),
+		MCPParam::Optional(TEXT("mirrorDataTablePath"), EType::String, TEXT("MirrorDataTable to bind")),
+		MCPParam::Optional(TEXT("sampleRate"), EType::Number, TEXT("Schema sample rate (default 30)")),
+		MCPParam::Optional(TEXT("addDefaultChannels"), EType::Boolean, TEXT("Add Trajectory and Pose default channels so the schema is buildable (default true)")),
+		OnConflict(TEXT("skip (default) returns an existing asset untouched, error refuses")),
+	});
+	// Unspecced: bones entries are objects or bare bone-name strings, which the
+	// spec types cannot express.
 	Registry.RegisterHandler(TEXT("add_pose_search_schema_pose_channel"), &AddPoseSearchSchemaPoseChannel);
-	Registry.RegisterHandler(TEXT("add_pose_search_schema_trajectory_channel"), &AddPoseSearchSchemaTrajectoryChannel);
-	Registry.RegisterHandler(TEXT("read_pose_search_schema"), &ReadPoseSearchSchema);
+	Registry.RegisterHandler(TEXT("add_pose_search_schema_trajectory_channel"), &AddPoseSearchSchemaTrajectoryChannel, {
+		MCPParam::Required(TEXT("schemaPath"), EType::String, TEXT("PoseSearchSchema to add the channel to")).Alias(TEXT("assetPath")),
+		MCPParam::Required(TEXT("samples"), EType::Array, TEXT("[{offset, flags?, weight?}]: offset in seconds, negative for history and positive for prediction; flags from position, velocity, facingDirection, velocityDirection and their XY variants")).Items(EType::Object),
+		MCPParam::Optional(TEXT("weight"), EType::Number, TEXT("Channel weight")),
+	});
+	Registry.RegisterHandler(TEXT("read_pose_search_schema"), &ReadPoseSearchSchema, {
+		MCPParam::Required(TEXT("schemaPath"), EType::String, TEXT("PoseSearchSchema to read")).Alias(TEXT("assetPath")),
+	});
+	// Unspecced: expressions entries carry fields the spec types cannot express.
 	Registry.RegisterHandler(TEXT("create_mirror_data_table"), &CreateMirrorDataTable);
-	Registry.RegisterHandler(TEXT("read_mirror_data_table"), &ReadMirrorDataTable);
+	Registry.RegisterHandler(TEXT("read_mirror_data_table"), &ReadMirrorDataTable, {
+		AssetPath(TEXT("MirrorDataTable asset path")),
+	});
+	// Unspecced: nothing it reads can fail before the asset is created, so the
+	// contract test's values would create one.
 	Registry.RegisterHandler(TEXT("create_pose_search_normalization_set"), &CreatePoseSearchNormalizationSet);
-	Registry.RegisterHandler(TEXT("set_pose_search_database_settings"), &SetPoseSearchDatabaseSettings);
-	Registry.RegisterHandler(TEXT("add_motion_matching_node"), &AddMotionMatchingNode);
-	Registry.RegisterHandler(TEXT("add_pose_history_node"), &AddPoseHistoryNode);
-	Registry.RegisterHandler(TEXT("set_motion_matching_chooser"), &SetMotionMatchingChooser);
+	Registry.RegisterHandler(TEXT("set_pose_search_database_settings"), &SetPoseSearchDatabaseSettings, {
+		AssetPath(TEXT("PoseSearchDatabase asset path")),
+		MCPParam::Optional(TEXT("continuingPoseCostBias"), EType::Number, TEXT("Bias to keep playing the current clip")),
+		MCPParam::Optional(TEXT("baseCostBias"), EType::Number, TEXT("Flat cost added to every pose")),
+		MCPParam::Optional(TEXT("loopingCostBias"), EType::Number, TEXT("Bias for looping clips")),
+		MCPParam::Optional(TEXT("kdTreeQueryNumNeighbors"), EType::Number, TEXT("KD-tree neighbours to consider")),
+		MCPParam::Optional(TEXT("numberOfPrincipalComponents"), EType::Number, TEXT("PCA components for PCAKDTree mode")),
+		MCPParam::Optional(TEXT("poseSearchMode"), EType::String, TEXT("bruteforce | pcakdtree | vptree | eventonly")),
+		MCPParam::Optional(TEXT("normalizationSetPath"), EType::String, TEXT("PoseSearchNormalizationSet to assign")),
+	});
+	Registry.RegisterHandler(TEXT("add_motion_matching_node"), &AddMotionMatchingNode, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		MCPParam::Optional(TEXT("databasePath"), EType::String, TEXT("PoseSearchDatabase the node searches")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph to add the node to (default AnimGraph)")),
+		MCPParam::Optional(TEXT("connectToOutput"), EType::Boolean, TEXT("Wire the node to the Output Pose (default true)")),
+		MCPParam::Optional(TEXT("blendTime"), EType::Number, TEXT("Inertial blend time")),
+	});
+	Registry.RegisterHandler(TEXT("add_pose_history_node"), &AddPoseHistoryNode, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph to add the node to (default AnimGraph)")),
+		MCPParam::Optional(TEXT("poseCount"), EType::Number, TEXT("History poses to retain")),
+		MCPParam::Optional(TEXT("samplingInterval"), EType::Number, TEXT("Seconds between history samples")),
+		MCPParam::Optional(TEXT("generateTrajectory"), EType::Boolean, TEXT("Self-generate the trajectory (default true)")),
+		MCPParam::Optional(TEXT("trajectoryHistoryCount"), EType::Number, TEXT("Generated trajectory history samples")),
+		MCPParam::Optional(TEXT("trajectoryPredictionCount"), EType::Number, TEXT("Generated trajectory prediction samples")),
+		MCPParam::Optional(TEXT("insertBeforeOutput"), EType::Boolean, TEXT("Splice into the pose chain feeding the Output Pose (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("set_motion_matching_chooser"), &SetMotionMatchingChooser, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		MCPParam::Required(TEXT("chooserPath"), EType::String, TEXT("ChooserTable that selects the database")).Alias(TEXT("table")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph holding the Motion Matching node (default AnimGraph)")),
+		MCPParam::Optional(TEXT("contextSource"), EType::String, TEXT("What the chooser reads its columns from: self (default, the anim instance) | pawn (the owning pawn)")),
+	});
 
 	// #713 - distance-matching graph authoring
-	Registry.RegisterHandler(TEXT("add_sequence_evaluator"), &AddSequenceEvaluator);
-	Registry.RegisterHandler(TEXT("bind_anim_node_function"), &BindAnimNodeFunction);
+	Registry.RegisterHandler(TEXT("add_sequence_evaluator"), &AddSequenceEvaluator, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		MCPParam::Optional(TEXT("sequencePath"), EType::String, TEXT("AnimSequence to evaluate")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("AnimGraph (default) or a state's name for its inner graph")),
+		MCPParam::Optional(TEXT("explicitTime"), EType::Number, TEXT("Initial ExplicitTime")),
+		MCPParam::Optional(TEXT("shouldLoop"), EType::Boolean, TEXT("bShouldLoop")),
+		MCPParam::Optional(TEXT("teleportToExplicitTime"), EType::Boolean, TEXT("bTeleportToExplicitTime (default false, so time advances and root motion extracts)")),
+		MCPParam::Optional(TEXT("connectToOutput"), EType::Boolean, TEXT("Wire the node to the graph's result pose (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("bind_anim_node_function"), &BindAnimNodeFunction, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		MCPParam::Required(TEXT("nodeGuid"), EType::String, TEXT("Anim graph node to bind, from add_sequence_evaluator or an add_*_node action")).Alias(TEXT("nodeId")),
+		MCPParam::Required(TEXT("functionName"), EType::String, TEXT("Existing thread-safe anim-node function on the AnimBlueprint")).Alias(TEXT("function")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph holding the node (default AnimGraph)")),
+		MCPParam::Optional(TEXT("binding"), EType::String, TEXT("update (default) | becomeRelevant | initialUpdate")),
+	});
 
 	// #419/#420 - live-actor skeletal reads + rebind + preview (moved from Level)
-	Registry.RegisterHandler(TEXT("get_bone_transform"), &GetBoneTransform);
-	Registry.RegisterHandler(TEXT("list_bones"), &ListBones);
-	Registry.RegisterHandler(TEXT("rebind_leader_pose"), &RebindLeaderPose);
-	Registry.RegisterHandler(TEXT("preview_animation"), &PreviewAnimation);
-	Registry.RegisterHandler(TEXT("set_live_post_process_anim_blueprint"), &SetLivePostProcessAnimBlueprint);
+	auto ActorLabel = []()
+	{
+		return MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Editor label of the actor; pass this or actorPath"));
+	};
+	auto ActorPath = []()
+	{
+		return MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path, the unambiguous selector; wins over actorLabel"));
+	};
+	auto ComponentName = []()
+	{
+		return MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("SkeletalMeshComponent to read (default CharacterMesh0, then Mesh, then the first one)"));
+	};
+	auto WorldScope = []()
+	{
+		return MCPParam::Optional(TEXT("world"), EType::String, TEXT("auto (default, prefers PIE) | pie | game | editor"));
+	};
+	Registry.RegisterHandler(TEXT("get_bone_transform"), &GetBoneTransform, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Required(TEXT("boneName"), EType::String, TEXT("Bone or socket to read")),
+		ComponentName(),
+		WorldScope(),
+		MCPParam::Optional(TEXT("space"), EType::String, TEXT("world (default) | component | local")),
+	});
+	Registry.RegisterHandler(TEXT("list_bones"), &ListBones, {
+		ActorLabel(),
+		ActorPath(),
+		ComponentName(),
+		WorldScope(),
+		Cursor(),
+		Limit(TEXT("Bones per page (default 200, max 5000)")),
+	});
+	Registry.RegisterHandler(TEXT("rebind_leader_pose"), &RebindLeaderPose, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Optional(TEXT("bodyComponent"), EType::String, TEXT("Body component every other one follows (default CharacterMesh0, then Mesh)")),
+	});
+	Registry.RegisterHandler(TEXT("preview_animation"), &PreviewAnimation, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Optional(TEXT("enabled"), EType::Boolean, TEXT("Tick animation in the editor (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("set_live_post_process_anim_blueprint"), &SetLivePostProcessAnimBlueprint, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Optional(TEXT("animBlueprintClassPath"), EType::String, TEXT("AnimBlueprintGeneratedClass object path, e.g. /Game/Animations/ABP_Name.ABP_Name_C, not the AnimBlueprint asset path")),
+		MCPParam::Optional(TEXT("clear"), EType::Boolean, TEXT("Clear the transient override and fall back to the skeletal mesh asset's post-process AnimBP")),
+		ComponentName(),
+		WorldScope(),
+	});
 
 	// #922/#923/#926 - evaluated pose reads (live component, and asset sampling)
-	Registry.RegisterHandler(TEXT("get_live_bone_transforms"), &GetLiveBoneTransforms);
+	Registry.RegisterHandler(TEXT("get_live_bone_transforms"), &GetLiveBoneTransforms, {
+		ActorLabel(),
+		ActorPath(),
+		ComponentName(),
+		MCPParam::Optional(TEXT("boneNames"), EType::Array, TEXT("Bones to read (default every bone, max 1000)")).Items(EType::String),
+		MCPParam::Optional(TEXT("space"), EType::String, TEXT("world (default) | component | local")),
+		WorldScope(),
+	});
+	// Unspecced: blendPosition carries x/y/z fields the spec types cannot express.
 	Registry.RegisterHandler(TEXT("sample_pose"), &SamplePose);
 	Registry.RegisterHandler(TEXT("measure_natural_speed"), &MeasureNaturalSpeed);
 
 	// Authoring depth (AnimationHandlers_Depth.cpp): the entry wiring that made
 	// state machines run, the five removals whose adds documented their own
 	// missing inverse, windowed notifies, and sync markers.
-	Registry.RegisterHandler(TEXT("set_state_machine_entry"), &SetStateMachineEntry);
-	Registry.RegisterHandler(TEXT("remove_state"), &RemoveState);
-	Registry.RegisterHandler(TEXT("remove_transition"), &RemoveTransition);
-	Registry.RegisterHandler(TEXT("remove_state_machine"), &RemoveStateMachine);
-	Registry.RegisterHandler(TEXT("remove_montage_section"), &RemoveMontageSection);
-	Registry.RegisterHandler(TEXT("remove_anim_curve"), &RemoveAnimCurve);
-	Registry.RegisterHandler(TEXT("add_anim_notify_state"), &AddNotifyState);
-	Registry.RegisterHandler(TEXT("remove_anim_notify_state"), &RemoveNotifyState);
+	Registry.RegisterHandler(TEXT("set_state_machine_entry"), &SetStateMachineEntry, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		StateMachineName(),
+		MCPParam::Optional(TEXT("stateName"), EType::String, TEXT("State the entry points at; omitted or empty clears the link")),
+	});
+	Registry.RegisterHandler(TEXT("remove_state"), &RemoveState, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		StateMachineName(),
+		MCPParam::Required(TEXT("stateName"), EType::String, TEXT("State to remove, with every transition that touches it")),
+	});
+	Registry.RegisterHandler(TEXT("remove_transition"), &RemoveTransition, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		StateMachineName(),
+		MCPParam::Optional(TEXT("transitionGuid"), EType::String, TEXT("Transition to remove, from add_transition or read_state_machine")),
+		MCPParam::Optional(TEXT("fromState"), EType::String, TEXT("With toState, removes every transition between the two")),
+		MCPParam::Optional(TEXT("toState"), EType::String, TEXT("With fromState, removes every transition between the two")),
+	});
+	Registry.RegisterHandler(TEXT("remove_state_machine"), &RemoveStateMachine, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		StateMachineName(),
+	});
+	Registry.RegisterHandler(TEXT("remove_montage_section"), &RemoveMontageSection, {
+		AssetPath(TEXT("AnimMontage asset path")),
+		MCPParam::Required(TEXT("sectionName"), EType::String, TEXT("Composite section to remove")),
+	});
+	Registry.RegisterHandler(TEXT("remove_anim_curve"), &RemoveAnimCurve, {
+		AssetPath(TEXT("AnimSequence asset path")),
+		MCPParam::Required(TEXT("curveName"), EType::String, TEXT("Float curve to remove")),
+	});
+	Registry.RegisterHandler(TEXT("add_anim_notify_state"), &AddNotifyState, {
+		AssetPath(TEXT("AnimSequence or AnimMontage asset path")),
+		MCPParam::Required(TEXT("notifyName"), EType::String, TEXT("Notify name")),
+		MCPParam::Required(TEXT("notifyStateClass"), EType::String, TEXT("UAnimNotifyState subclass: a class name, a bare suffix such as TimedParticleEffect, or a full path")),
+		MCPParam::Required(TEXT("triggerTime"), EType::Number, TEXT("Window start in seconds")),
+		MCPParam::Required(TEXT("duration"), EType::Number, TEXT("Window length in seconds, greater than 0")),
+		MCPParam::Optional(TEXT("notifyProperties"), EType::Object, TEXT("EditAnywhere fields to set on the spawned notify state object, validated against the class first")),
+		MCPParam::Optional(TEXT("branchingPoint"), EType::Boolean, TEXT("On a montage, tick the window as a branching point")),
+	});
+	Registry.RegisterHandler(TEXT("remove_anim_notify_state"), &RemoveNotifyState, {
+		AssetPath(TEXT("AnimSequence or AnimMontage asset path")),
+		MCPParam::Optional(TEXT("notifyName"), EType::String, TEXT("Notify name to match")),
+		MCPParam::Optional(TEXT("notifyStateClass"), EType::String, TEXT("Notify state class to match. Pass at least one of notifyName and notifyStateClass; both filters apply together")),
+	});
+	// Unspecced: markers entries carry fields the spec types cannot express.
 	Registry.RegisterHandler(TEXT("set_sync_markers"), &SetSyncMarkers);
 }
 
@@ -504,8 +981,16 @@ bool HasExactReferenceSkeletonHierarchy(const USkeleton* Skeleton, const USkelet
 // an isolated create.
 TSharedPtr<FJsonValue> FAnimationHandlers::CreateSkeleton(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
 	FString Name;
-	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
+	TSharedPtr<FJsonValue> NameErr = RequireString(Params, TEXT("name"), Name);
+	FString SkeletalMeshPath;
+	TSharedPtr<FJsonValue> MeshErr = RequireString(Params, TEXT("skeletalMeshPath"), SkeletalMeshPath);
+	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game"));
+	FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	if (NameErr) return NameErr;
+	if (MeshErr) return MeshErr;
+
 	Name.TrimStartAndEndInline();
 	FText InvalidNameReason;
 	const FName AssetName(*Name);
@@ -514,15 +999,12 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateSkeleton(const TSharedPtr<FJson
 		return MCPError(FString::Printf(TEXT("Invalid skeleton name '%s': %s"), *Name, *InvalidNameReason.ToString()));
 	}
 
-	FString SkeletalMeshPath;
-	if (auto Err = RequireString(Params, TEXT("skeletalMeshPath"), SkeletalMeshPath)) return Err;
 	USkeletalMesh* SkeletalMesh = LoadAssetByPath<USkeletalMesh>(SkeletalMeshPath);
 	if (!SkeletalMesh)
 	{
 		return MCPError(FString::Printf(TEXT("Failed to load SkeletalMesh at '%s'"), *SkeletalMeshPath));
 	}
 
-	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game"));
 	PackagePath.TrimStartAndEndInline();
 	while (PackagePath.EndsWith(TEXT("/"))) PackagePath.LeftChopInline(1);
 	FText InvalidPackageReason;
@@ -536,7 +1018,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateSkeleton(const TSharedPtr<FJson
 		return MCPError(FString::Printf(TEXT("Invalid skeleton destination '%s/%s': %s"), *PackagePath, *Name, *InvalidPackageReason.ToString()));
 	}
 
-	FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 	OnConflict.ToLowerInline();
 	if (OnConflict != TEXT("skip") && OnConflict != TEXT("error"))
 	{
@@ -1405,18 +1886,24 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadBlendspace(const TSharedPtr<FJson
 TSharedPtr<FJsonValue> FAnimationHandlers::AddAnimNotify(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString NotifyName;
 	if (auto Err = RequireString(Params, TEXT("notifyName"), NotifyName)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
 	double TriggerTime = 0.0;
-	if (!TryGetNumberParam(Params, TEXT("triggerTime"), TriggerTime))
+	const bool bHasTriggerTime = TryGetNumberParam(Params, TEXT("triggerTime"), TriggerTime);
+	FString NotifyClassName = OptionalString(Params, TEXT("notifyClass"));
+	const TSharedPtr<FJsonObject>* NotifyProperties = nullptr;
+	TryGetObjectParam(Params, TEXT("notifyProperties"), NotifyProperties);
+	bool bExplicitBranchingPoint = false;
+	const bool bHasBranchingPoint = TryGetBoolParam(Params, TEXT("branchingPoint"), bExplicitBranchingPoint);
+
+	if (!bHasTriggerTime)
 	{
 		return MCPError(TEXT("Missing 'triggerTime' parameter"));
 	}
-
-	FString NotifyClassName = OptionalString(Params, TEXT("notifyClass"));
 
 	// Load the animation asset - could be a montage or a sequence
 	UAnimSequenceBase* AnimAsset = LoadAssetByPath<UAnimSequenceBase>(AssetPath);
@@ -1467,9 +1954,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddAnimNotify(const TSharedPtr<FJsonO
 	// notifyProperties writes onto the spawned notify OBJECT, so it only has
 	// somewhere to land when notifyClass resolved. Reporting success while
 	// quietly dropping the requested values is the failure mode this guards.
-	const TSharedPtr<FJsonObject>* NotifyProperties = nullptr;
-	if (TryGetObjectParam(Params, TEXT("notifyProperties"), NotifyProperties)
-		&& NotifyProperties && (*NotifyProperties).IsValid() && (*NotifyProperties)->Values.Num() > 0)
+	if (NotifyProperties && (*NotifyProperties).IsValid() && (*NotifyProperties)->Values.Num() > 0)
 	{
 		if (!NewNotify)
 		{
@@ -1559,8 +2044,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddAnimNotify(const TSharedPtr<FJsonO
 			}
 		}
 	}
-	bool bExplicitBranchingPoint = false;
-	if (TryGetBoolParam(Params, TEXT("branchingPoint"), bExplicitBranchingPoint))
+	if (bHasBranchingPoint)
 	{
 		bWantBranchingPoint = bExplicitBranchingPoint;
 	}
@@ -2354,12 +2838,17 @@ static void SetMontageSequenceLength(UAnimMontage* Montage, float NewLength)
 TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageSequence(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimSequencePath;
 	if (auto Err = RequireString(Params, TEXT("animSequencePath"), AnimSequencePath)) return Err;
 
 	double SlotIndex = OptionalNumber(Params, TEXT("slotIndex"), 0.0);
+	// #626: when segmentIndex is given, replace only that one segment's
+	// sequence; otherwise replace every segment in the slot (prior behavior).
+	// Read before anything can fail (#1057).
+	const bool bHasSegmentIndex = HasParam(Params, TEXT("segmentIndex"));
+	const int32 SegmentIndex = OptionalInt(Params, TEXT("segmentIndex"), -1);
 
 	// Load the montage
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
@@ -2384,10 +2873,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageSequence(const TSharedPtr<F
 
 	FSlotAnimationTrack& SlotTrack = Montage->SlotAnimTracks[TrackIdx];
 
-	// #626: when segmentIndex is given, replace only that one segment's
-	// sequence; otherwise replace every segment in the slot (prior behavior).
-	const bool bHasSegmentIndex = HasParam(Params, TEXT("segmentIndex"));
-	const int32 SegmentIndex = OptionalInt(Params, TEXT("segmentIndex"), -1);
 	if (bHasSegmentIndex)
 	{
 		if (SegmentIndex < 0 || SegmentIndex >= SlotTrack.AnimTrack.AnimSegments.Num())
@@ -2731,11 +3216,11 @@ namespace MCPMontageSegments
 	 *  a rejected call cannot leave an empty slot on the asset. */
 	static FSlotAnimationTrack* FindSlot(
 		UAnimMontage* Montage,
-		const TSharedPtr<FJsonObject>& Params,
+		const FString& SlotName,
+		const int32 SlotIndex,
 		int32& OutSlotIndex,
 		FString& OutError)
 	{
-		const FString SlotName = OptionalString(Params, TEXT("slotName"));
 		if (!SlotName.IsEmpty())
 		{
 			const FName Wanted(*SlotName);
@@ -2760,7 +3245,6 @@ namespace MCPMontageSegments
 			return nullptr;
 		}
 
-		const int32 SlotIndex = OptionalInt(Params, TEXT("slotIndex"), 0);
 		if (!Montage->SlotAnimTracks.IsValidIndex(SlotIndex))
 		{
 			OutError = FString::Printf(
@@ -2852,13 +3336,19 @@ namespace MCPMontageSegments
 TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSection(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SectionName;
 	if (auto Err = RequireString(Params, TEXT("sectionName"), SectionName)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
 	double StartTime = OptionalNumber(Params, TEXT("startTime"), 0.0);
 	FString LinkedSection = OptionalString(Params, TEXT("linkedSection"));
+	const bool bHasSegmentIndex = HasParam(Params, TEXT("segmentIndex"));
+	const int32 RequestedSegmentIndex = OptionalInt(Params, TEXT("segmentIndex"), 0);
+	const FString SlotNameParam = OptionalString(Params, TEXT("slotName"));
+	const int32 SlotIndexParam = OptionalInt(Params, TEXT("slotIndex"), 0);
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
@@ -2870,17 +3360,16 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSection(const TSharedPtr<FJ
 	// drifts the moment a segment is inserted ahead of it; a linked section
 	// follows its segment instead. Resolved before the idempotency check so a
 	// bad slot or segment index is reported rather than silently skipped.
-	const bool bHasSegmentIndex = HasParam(Params, TEXT("segmentIndex"));
 	int32 SlotIndex = 0;
 	int32 SegmentIndex = INDEX_NONE;
 	FString SlotNameUsed;
 	if (bHasSegmentIndex)
 	{
 		FString SlotError;
-		FSlotAnimationTrack* SlotTrack = MCPMontageSegments::FindSlot(Montage, Params, SlotIndex, SlotError);
+		FSlotAnimationTrack* SlotTrack = MCPMontageSegments::FindSlot(Montage, SlotNameParam, SlotIndexParam, SlotIndex, SlotError);
 		if (!SlotTrack) return MCPError(SlotError);
 
-		SegmentIndex = OptionalInt(Params, TEXT("segmentIndex"), 0);
+		SegmentIndex = RequestedSegmentIndex;
 		if (!SlotTrack->AnimTrack.AnimSegments.IsValidIndex(SegmentIndex))
 		{
 			return MCPError(FString::Printf(
@@ -2898,7 +3387,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSection(const TSharedPtr<FJ
 	int32 ExistingIdx = Montage->GetSectionIndex(FName(*SectionName));
 	if (ExistingIdx != INDEX_NONE)
 	{
-		const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 		if (OnConflict == TEXT("error"))
 		{
 			return MCPError(FString::Printf(TEXT("Section '%s' already exists at index %d"), *SectionName, ExistingIdx));
@@ -2967,10 +3455,23 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSection(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSegment(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimSequencePath;
 	if (auto Err = RequireString(Params, TEXT("animSequencePath"), AnimSequencePath)) return Err;
+
+	// Every parameter is read before anything can fail (#1057). endPos and
+	// insertIndex default to values only the loaded assets know, so their
+	// presence is recorded here and the defaults are applied below.
+	const float StartPos = static_cast<float>(OptionalNumber(Params, TEXT("startPos"), 0.0));
+	double EndPosParam = 0.0;
+	const bool bHasEndPos = TryGetNumberParam(Params, TEXT("endPos"), EndPosParam);
+	const float PlayRate = static_cast<float>(OptionalNumber(Params, TEXT("playRate"), 1.0));
+	const int32 LoopCount = OptionalInt(Params, TEXT("loopCount"), 1);
+	const FString SlotNameParam = OptionalString(Params, TEXT("slotName"));
+	const int32 SlotIndexParam = OptionalInt(Params, TEXT("slotIndex"), 0);
+	int32 InsertIndexParam = 0;
+	const bool bHasInsertIndex = TryGetNumberParam(Params, TEXT("insertIndex"), InsertIndexParam);
 
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
@@ -3016,10 +3517,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSegment(const TSharedPtr<FJ
 			TEXT("Animation '%s' has no playable length"), *AnimSequencePath));
 	}
 
-	const float StartPos = static_cast<float>(OptionalNumber(Params, TEXT("startPos"), 0.0));
-	const float EndPos = static_cast<float>(OptionalNumber(Params, TEXT("endPos"), SourceLength));
-	const float PlayRate = static_cast<float>(OptionalNumber(Params, TEXT("playRate"), 1.0));
-	const int32 LoopCount = OptionalInt(Params, TEXT("loopCount"), 1);
+	const float EndPos = bHasEndPos ? static_cast<float>(EndPosParam) : SourceLength;
 
 	if (StartPos < 0.0f || EndPos > SourceLength + UE_KINDA_SMALL_NUMBER || StartPos >= EndPos)
 	{
@@ -3038,7 +3536,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSegment(const TSharedPtr<FJ
 
 	// Resolve the slot without mutating: a later validation failure must not
 	// leave a stray empty slot on the montage.
-	const FString SlotNameParam = OptionalString(Params, TEXT("slotName"));
 	int32 SlotIndex = INDEX_NONE;
 	if (!SlotNameParam.IsEmpty())
 	{
@@ -3054,7 +3551,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSegment(const TSharedPtr<FJ
 	}
 	else
 	{
-		SlotIndex = OptionalInt(Params, TEXT("slotIndex"), 0);
+		SlotIndex = SlotIndexParam;
 		if (!Montage->SlotAnimTracks.IsValidIndex(SlotIndex))
 		{
 			return MCPError(FString::Printf(
@@ -3083,7 +3580,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSegment(const TSharedPtr<FJ
 		}
 	}
 
-	const int32 InsertIndex = OptionalInt(Params, TEXT("insertIndex"), SegmentCount);
+	const int32 InsertIndex = bHasInsertIndex ? InsertIndexParam : SegmentCount;
 	if (InsertIndex < 0 || InsertIndex > SegmentCount)
 	{
 		return MCPError(FString::Printf(
@@ -3139,13 +3636,17 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSegment(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FAnimationHandlers::RemoveMontageSegment(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
-	if (!HasParam(Params, TEXT("segmentIndex")))
+	// Every parameter is read before anything can fail (#1057).
+	const bool bHasSegmentIndex = HasParam(Params, TEXT("segmentIndex"));
+	const int32 SegmentIndex = OptionalInt(Params, TEXT("segmentIndex"), 0);
+	const FString SlotNameParam = OptionalString(Params, TEXT("slotName"));
+	const int32 SlotIndexParam = OptionalInt(Params, TEXT("slotIndex"), 0);
+	if (!bHasSegmentIndex)
 	{
 		return MCPError(TEXT("Missing required parameter 'segmentIndex'"));
 	}
-	const int32 SegmentIndex = OptionalInt(Params, TEXT("segmentIndex"), 0);
 
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
@@ -3155,7 +3656,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveMontageSegment(const TSharedPtr
 
 	int32 SlotIndex = 0;
 	FString SlotError;
-	FSlotAnimationTrack* SlotTrack = MCPMontageSegments::FindSlot(Montage, Params, SlotIndex, SlotError);
+	FSlotAnimationTrack* SlotTrack = MCPMontageSegments::FindSlot(Montage, SlotNameParam, SlotIndexParam, SlotIndex, SlotError);
 	if (!SlotTrack) return MCPError(SlotError);
 
 	TArray<FAnimSegment>& Segments = SlotTrack->AnimTrack.AnimSegments;
@@ -3216,15 +3717,14 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveMontageSegment(const TSharedPtr
 TSharedPtr<FJsonValue> FAnimationHandlers::ListMontageSegments(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FString SlotFilter = OptionalString(Params, TEXT("slotName"));
 
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
 	{
 		return MCPAssetLoadError(AssetPath, TEXT("AnimMontage"));
 	}
-
-	const FString SlotFilter = OptionalString(Params, TEXT("slotName"));
 
 	TArray<TSharedPtr<FJsonValue>> SlotsArray;
 	int32 TotalSegments = 0;
@@ -3294,7 +3794,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListMontageSegments(const TSharedPtr<
 TSharedPtr<FJsonValue> FAnimationHandlers::ListControlRigVariables(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	// In UE 5.7, ControlRigBlueprint was removed - load as a generic UBlueprint
 	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
@@ -3356,7 +3856,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListControlRigVariables(const TShared
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadControlRigHierarchy(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UBlueprint* CRBlueprint = Cast<UBlueprint>(LoadedAsset);

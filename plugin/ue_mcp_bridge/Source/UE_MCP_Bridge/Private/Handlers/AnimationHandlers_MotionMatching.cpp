@@ -234,31 +234,35 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreatePoseSearchSchema(const TSharedP
 	FString SkeletonPath;
 	if (auto Err = RequireString(Params, TEXT("skeletonPath"), SkeletonPath)) return Err;
 	const FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/MotionMatching"));
+	// Every parameter is read before anything can fail (#1057).
+	const FString MirrorPath = OptionalString(Params, TEXT("mirrorDataTablePath"));
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	int32 SampleRate = 0;
+	const bool bHasSampleRate = TryGetNumberParam(Params, TEXT("sampleRate"), SampleRate);
+	const bool bAddDefaultChannels = OptionalBool(Params, TEXT("addDefaultChannels"), true);
 
 	USkeleton* Skeleton = LoadAssetByPath<USkeleton>(SkeletonPath);
 	if (!Skeleton) return MCPError(FString::Printf(TEXT("Skeleton not found: %s"), *SkeletonPath));
 
 	UMirrorDataTable* MirrorTable = nullptr;
-	const FString MirrorPath = OptionalString(Params, TEXT("mirrorDataTablePath"));
 	if (!MirrorPath.IsEmpty())
 	{
 		MirrorTable = LoadAssetByPath<UMirrorDataTable>(MirrorPath);
 		if (!MirrorTable) return MCPError(FString::Printf(TEXT("MirrorDataTable not found: %s"), *MirrorPath));
 	}
 
-	auto Created = MCPCreateAssetIdempotentNewObject<UPoseSearchSchema>(Name, PackagePath, OptionalString(Params, TEXT("onConflict"), TEXT("skip")), TEXT("PoseSearchSchema"));
+	auto Created = MCPCreateAssetIdempotentNewObject<UPoseSearchSchema>(Name, PackagePath, OnConflict, TEXT("PoseSearchSchema"));
 	if (Created.EarlyReturn) return Created.EarlyReturn;
 	UPoseSearchSchema* Schema = Created.Asset;
 
 	Schema->AddSkeleton(Skeleton, MirrorTable);
-	int32 SampleRate = 0;
-	if (TryGetNumberParam(Params, TEXT("sampleRate"), SampleRate) && SampleRate > 0)
+	if (bHasSampleRate && SampleRate > 0)
 	{
 		Schema->SampleRate = SampleRate;
 	}
 	// Default channels (Trajectory + Pose on the root bone) give a schema you can
 	// immediately build an index against; add_pose_search_schema_*_channel refines it.
-	if (OptionalBool(Params, TEXT("addDefaultChannels"), true))
+	if (bAddDefaultChannels)
 	{
 		Schema->AddDefaultChannels();
 	}
@@ -380,13 +384,19 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSchemaPoseChannel(const 
 
 TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSchemaTrajectoryChannel(const TSharedPtr<FJsonObject>& Params)
 {
+	// assetPath is an alias the registry resolves to schemaPath (#1057).
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("schemaPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("schemaPath"), AssetPath)) return Err;
+	// Read before anything can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* Samples = nullptr;
+	const bool bHasSamples = TryGetArrayParam(Params, TEXT("samples"), Samples) && Samples && Samples->Num() > 0;
+	double ChannelWeight = 0.0;
+	const bool bHasChannelWeight = TryGetNumberParam(Params, TEXT("weight"), ChannelWeight);
+
 	UPoseSearchSchema* Schema = LoadAssetByPath<UPoseSearchSchema>(AssetPath);
 	if (!Schema) return MCPError(FString::Printf(TEXT("PoseSearchSchema not found: %s"), *AssetPath));
 
-	const TArray<TSharedPtr<FJsonValue>>* Samples = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("samples"), Samples) || !Samples || Samples->Num() == 0)
+	if (!bHasSamples)
 	{
 		return MCPError(TEXT("Missing 'samples' (array of {offset, flags?:[position,velocity,facingDirection,...], weight?}). Negative offsets are history, positive are prediction."));
 	}
@@ -409,8 +419,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSchemaTrajectoryChannel(
 	const int32 Count = ParsedSamples.Num();
 
 	Schema->Modify();
-	double ChannelWeight = 0.0;
-	const bool bHasChannelWeight = TryGetNumberParam(Params, TEXT("weight"), ChannelWeight);
 
 #if UE_MCP_HAS_5_5_API
 	UPoseSearchFeatureChannel_Trajectory* Channel = NewObject<UPoseSearchFeatureChannel_Trajectory>(Schema, NAME_None, RF_Transactional);
@@ -467,8 +475,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSchemaTrajectoryChannel(
 
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadPoseSearchSchema(const TSharedPtr<FJsonObject>& Params)
 {
+	// assetPath is an alias the registry resolves to schemaPath (#1057).
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("schemaPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("schemaPath"), AssetPath)) return Err;
 	UPoseSearchSchema* Schema = LoadAssetByPath<UPoseSearchSchema>(AssetPath);
 	if (!Schema) return MCPError(FString::Printf(TEXT("PoseSearchSchema not found: %s"), *AssetPath));
 
@@ -578,7 +587,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateMirrorDataTable(const TSharedPt
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadMirrorDataTable(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	UMirrorDataTable* Table = LoadAssetByPath<UMirrorDataTable>(AssetPath);
 	if (!Table) return MCPError(FString::Printf(TEXT("MirrorDataTable not found: %s"), *AssetPath));
 
@@ -644,7 +653,23 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreatePoseSearchNormalizationSet(cons
 TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchDatabaseSettings(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+
+	// Every parameter is read before anything can fail (#1057).
+	double ContinuingPoseCostBias = 0.0;
+	const bool bHasContinuingPoseCostBias = TryGetNumberParam(Params, TEXT("continuingPoseCostBias"), ContinuingPoseCostBias);
+	double BaseCostBias = 0.0;
+	const bool bHasBaseCostBias = TryGetNumberParam(Params, TEXT("baseCostBias"), BaseCostBias);
+	double LoopingCostBias = 0.0;
+	const bool bHasLoopingCostBias = TryGetNumberParam(Params, TEXT("loopingCostBias"), LoopingCostBias);
+	int32 KDTreeQueryNumNeighbors = 0;
+	const bool bHasKDTreeQueryNumNeighbors = TryGetNumberParam(Params, TEXT("kdTreeQueryNumNeighbors"), KDTreeQueryNumNeighbors);
+	FString Mode;
+	const bool bHasMode = TryGetStringParam(Params, TEXT("poseSearchMode"), Mode);
+	int32 NumberOfPrincipalComponents = 0;
+	const bool bHasNumberOfPrincipalComponents = TryGetNumberParam(Params, TEXT("numberOfPrincipalComponents"), NumberOfPrincipalComponents);
+	const FString NormSetPath = OptionalString(Params, TEXT("normalizationSetPath"));
+
 	UPoseSearchDatabase* Database = LoadAssetByPath<UPoseSearchDatabase>(AssetPath);
 	if (!Database) return MCPError(FString::Printf(TEXT("PoseSearchDatabase not found: %s"), *AssetPath));
 
@@ -670,15 +695,12 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchDatabaseSettings(const T
 #endif
 
 	Database->Modify();
-	double Num = 0.0;
-	if (TryGetNumberParam(Params, TEXT("continuingPoseCostBias"), Num)) Database->ContinuingPoseCostBias = (float)Num;
-	if (TryGetNumberParam(Params, TEXT("baseCostBias"), Num)) Database->BaseCostBias = (float)Num;
-	if (TryGetNumberParam(Params, TEXT("loopingCostBias"), Num)) Database->LoopingCostBias = (float)Num;
-	int32 IntVal = 0;
-	if (TryGetNumberParam(Params, TEXT("kdTreeQueryNumNeighbors"), IntVal)) Database->KDTreeQueryNumNeighbors = IntVal;
+	if (bHasContinuingPoseCostBias) Database->ContinuingPoseCostBias = (float)ContinuingPoseCostBias;
+	if (bHasBaseCostBias) Database->BaseCostBias = (float)BaseCostBias;
+	if (bHasLoopingCostBias) Database->LoopingCostBias = (float)LoopingCostBias;
+	if (bHasKDTreeQueryNumNeighbors) Database->KDTreeQueryNumNeighbors = KDTreeQueryNumNeighbors;
 
-	FString Mode;
-	if (TryGetStringParam(Params, TEXT("poseSearchMode"), Mode))
+	if (bHasMode)
 	{
 		if (Mode.Equals(TEXT("bruteforce"), ESearchCase::IgnoreCase)) Database->PoseSearchMode = EPoseSearchMode::BruteForce;
 		else if (Mode.Equals(TEXT("pcakdtree"), ESearchCase::IgnoreCase)) Database->PoseSearchMode = EPoseSearchMode::PCAKDTree;
@@ -689,8 +711,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchDatabaseSettings(const T
 	}
 
 #if WITH_EDITORONLY_DATA
-	if (TryGetNumberParam(Params, TEXT("numberOfPrincipalComponents"), IntVal)) Database->NumberOfPrincipalComponents = IntVal;
-	const FString NormSetPath = OptionalString(Params, TEXT("normalizationSetPath"));
+	if (bHasNumberOfPrincipalComponents) Database->NumberOfPrincipalComponents = NumberOfPrincipalComponents;
 	if (!NormSetPath.IsEmpty())
 	{
 		UPoseSearchNormalizationSet* NormSet = LoadAssetByPath<UPoseSearchNormalizationSet>(NormSetPath);
@@ -764,11 +785,17 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchDatabaseSettings(const T
 TSharedPtr<FJsonValue> FAnimationHandlers::AddMotionMatchingNode(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("AnimGraph"));
+	const FString DbPath = OptionalString(Params, TEXT("databasePath"));
+	double BlendTime = 0.0;
+	const bool bHasBlendTime = TryGetNumberParam(Params, TEXT("blendTime"), BlendTime);
+	const bool bConnectToOutput = OptionalBool(Params, TEXT("connectToOutput"), true);
+
 	UAnimBlueprint* AnimBP = LoadAssetByPath<UAnimBlueprint>(AssetPath);
 	if (!AnimBP) return MCPError(FString::Printf(TEXT("AnimBlueprint not found: %s"), *AssetPath));
 
-	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("AnimGraph"));
 	UEdGraph* Graph = nullptr;
 	TArray<UEdGraph*> All;
 	AnimBP->GetAllGraphs(All);
@@ -776,7 +803,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMotionMatchingNode(const TSharedPt
 	if (!Graph) return MCPError(FString::Printf(TEXT("Graph not found: %s"), *GraphName));
 
 	UPoseSearchDatabase* Database = nullptr;
-	const FString DbPath = OptionalString(Params, TEXT("databasePath"));
 	if (!DbPath.IsEmpty())
 	{
 		Database = LoadAssetByPath<UPoseSearchDatabase>(DbPath);
@@ -791,15 +817,14 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMotionMatchingNode(const TSharedPt
 	if (NodeStruct && NodeData)
 	{
 		if (Database) SetNodeObject(NodeStruct, NodeData, TEXT("Database"), Database);
-		double BlendTime = 0.0;
-		if (TryGetNumberParam(Params, TEXT("blendTime"), BlendTime)) SetNodeFloat(NodeStruct, NodeData, TEXT("BlendTime"), (float)BlendTime);
+		if (bHasBlendTime) SetNodeFloat(NodeStruct, NodeData, TEXT("BlendTime"), (float)BlendTime);
 	}
 
 	bool bConnected = false;
 	// The node that fed the output pose before this call took the pin, recorded
 	// because deleting this node does not put that link back.
 	FString DisplacedOutputSource;
-	if (OptionalBool(Params, TEXT("connectToOutput"), true))
+	if (bConnectToOutput)
 	{
 		if (UAnimGraphNode_Root* Root = FindOutputPoseNode(Graph))
 		{
@@ -848,11 +873,24 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMotionMatchingNode(const TSharedPt
 TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseHistoryNode(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("AnimGraph"));
+	int32 PoseCount = 0;
+	const bool bHasPoseCount = TryGetNumberParam(Params, TEXT("poseCount"), PoseCount);
+	double SamplingInterval = 0.0;
+	const bool bHasSamplingInterval = TryGetNumberParam(Params, TEXT("samplingInterval"), SamplingInterval);
+	// Default to self-generated trajectory so no external trajectory pin is required.
+	const bool bGenerateTrajectory = OptionalBool(Params, TEXT("generateTrajectory"), true);
+	int32 TrajectoryHistoryCount = 0;
+	const bool bHasTrajectoryHistoryCount = TryGetNumberParam(Params, TEXT("trajectoryHistoryCount"), TrajectoryHistoryCount);
+	int32 TrajectoryPredictionCount = 0;
+	const bool bHasTrajectoryPredictionCount = TryGetNumberParam(Params, TEXT("trajectoryPredictionCount"), TrajectoryPredictionCount);
+	const bool bInsertBeforeOutput = OptionalBool(Params, TEXT("insertBeforeOutput"), true);
+
 	UAnimBlueprint* AnimBP = LoadAssetByPath<UAnimBlueprint>(AssetPath);
 	if (!AnimBP) return MCPError(FString::Printf(TEXT("AnimBlueprint not found: %s"), *AssetPath));
 
-	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("AnimGraph"));
 	UEdGraph* Graph = nullptr;
 	TArray<UEdGraph*> All;
 	AnimBP->GetAllGraphs(All);
@@ -866,14 +904,11 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseHistoryNode(const TSharedPtr<F
 	void* NodeData = GetAnimNodeMemory(HistNode, NodeStruct);
 	if (NodeStruct && NodeData)
 	{
-		int32 IntVal = 0;
-		if (TryGetNumberParam(Params, TEXT("poseCount"), IntVal)) SetNodeInt(NodeStruct, NodeData, TEXT("PoseCount"), IntVal);
-		double Num = 0.0;
-		if (TryGetNumberParam(Params, TEXT("samplingInterval"), Num)) SetNodeFloat(NodeStruct, NodeData, TEXT("SamplingInterval"), (float)Num);
-		// Default to self-generated trajectory so no external trajectory pin is required.
-		SetNodeBool(NodeStruct, NodeData, TEXT("bGenerateTrajectory"), OptionalBool(Params, TEXT("generateTrajectory"), true));
-		if (TryGetNumberParam(Params, TEXT("trajectoryHistoryCount"), IntVal)) SetNodeInt(NodeStruct, NodeData, TEXT("TrajectoryHistoryCount"), IntVal);
-		if (TryGetNumberParam(Params, TEXT("trajectoryPredictionCount"), IntVal)) SetNodeInt(NodeStruct, NodeData, TEXT("TrajectoryPredictionCount"), IntVal);
+		if (bHasPoseCount) SetNodeInt(NodeStruct, NodeData, TEXT("PoseCount"), PoseCount);
+		if (bHasSamplingInterval) SetNodeFloat(NodeStruct, NodeData, TEXT("SamplingInterval"), (float)SamplingInterval);
+		SetNodeBool(NodeStruct, NodeData, TEXT("bGenerateTrajectory"), bGenerateTrajectory);
+		if (bHasTrajectoryHistoryCount) SetNodeInt(NodeStruct, NodeData, TEXT("TrajectoryHistoryCount"), TrajectoryHistoryCount);
+		if (bHasTrajectoryPredictionCount) SetNodeInt(NodeStruct, NodeData, TEXT("TrajectoryPredictionCount"), TrajectoryPredictionCount);
 	}
 
 	// Insert into the pose chain feeding the output: whatever currently drives the
@@ -882,7 +917,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseHistoryNode(const TSharedPtr<F
 	// The node that fed the output pose before this one was spliced in front of
 	// it, recorded because deleting this node does not re-link it.
 	FString DisplacedOutputSource;
-	if (OptionalBool(Params, TEXT("insertBeforeOutput"), true))
+	if (bInsertBeforeOutput)
 	{
 		if (UAnimGraphNode_Root* Root = FindOutputPoseNode(Graph))
 		{
@@ -943,16 +978,24 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseHistoryNode(const TSharedPtr<F
 TSharedPtr<FJsonValue> FAnimationHandlers::SetMotionMatchingChooser(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// table is an alias the registry resolves to chooserPath. Every parameter
+	// is read before anything can fail (#1057).
+	FString ChooserPath;
+	TSharedPtr<FJsonValue> ChooserPathError = RequireString(Params, TEXT("chooserPath"), ChooserPath);
+	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("AnimGraph"));
+	// Context object the chooser reads its column values from. "self" (default) =
+	// the anim instance (choosers that branch on AnimBP variables). "pawn" = the
+	// owning pawn via TryGetPawnOwner (choosers that branch on character/pawn state).
+	const FString ContextSource = OptionalString(Params, TEXT("contextSource"), TEXT("self")).ToLower();
+
 	UAnimBlueprint* AnimBP = LoadAssetByPath<UAnimBlueprint>(AssetPath);
 	if (!AnimBP) return MCPError(FString::Printf(TEXT("AnimBlueprint not found: %s"), *AssetPath));
 
-	FString ChooserPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("chooserPath"), TEXT("table"), ChooserPath)) return Err;
+	if (ChooserPathError) return ChooserPathError;
 	UChooserTable* Chooser = LoadAssetByPath<UChooserTable>(ChooserPath);
 	if (!Chooser) return MCPError(FString::Printf(TEXT("ChooserTable not found: %s"), *ChooserPath));
 
-	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("AnimGraph"));
 	UEdGraph* Graph = nullptr;
 	TArray<UEdGraph*> All;
 	AnimBP->GetAllGraphs(All);
@@ -984,10 +1027,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMotionMatchingChooser(const TShare
 	if (UEdGraphPin* ClassPin = EvalNode->FindPin(TEXT("ObjectClass"), EGPD_Input)) ClassPin->DefaultObject = UPoseSearchDatabase::StaticClass();
 	EvalNode->ReconstructNode();
 
-	// Context object the chooser reads its column values from. "self" (default) =
-	// the anim instance (choosers that branch on AnimBP variables). "pawn" = the
-	// owning pawn via TryGetPawnOwner (choosers that branch on character/pawn state).
-	const FString ContextSource = OptionalString(Params, TEXT("contextSource"), TEXT("self")).ToLower();
 	UEdGraphPin* ContextPin = EvalNode->FindPin(TEXT("ContextObject"), EGPD_Input);
 	bool bContextWired = false;
 	FString ContextWiredTo;
@@ -1117,18 +1156,28 @@ static UAnimGraphNode_Base* FindGraphResultNode(UEdGraph* Graph)
 TSharedPtr<FJsonValue> FAnimationHandlers::AddSequenceEvaluator(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
-	UAnimBlueprint* AnimBP = LoadAssetByPath<UAnimBlueprint>(AssetPath);
-	if (!AnimBP) return MCPError(FString::Printf(TEXT("AnimBlueprint not found: %s"), *AssetPath));
-
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before anything can fail (#1057).
 	// Distance matching usually lives inside a state's graph; pass that state name
 	// as graphName. Defaults to the top-level AnimGraph.
 	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("AnimGraph"));
+	const FString SequencePath = OptionalString(Params, TEXT("sequencePath"));
+	double ExplicitTime = 0.0;
+	const bool bHasExplicitTime = TryGetNumberParam(Params, TEXT("explicitTime"), ExplicitTime);
+	bool bShouldLoop = false;
+	const bool bHasShouldLoop = TryGetBoolParam(Params, TEXT("shouldLoop"), bShouldLoop);
+	// Distance matching wants time to advance (root motion extraction), so the
+	// default here flips the engine default of bTeleportToExplicitTime=true.
+	const bool bTeleportToExplicitTime = OptionalBool(Params, TEXT("teleportToExplicitTime"), false);
+	const bool bConnectToOutput = OptionalBool(Params, TEXT("connectToOutput"), true);
+
+	UAnimBlueprint* AnimBP = LoadAssetByPath<UAnimBlueprint>(AssetPath);
+	if (!AnimBP) return MCPError(FString::Printf(TEXT("AnimBlueprint not found: %s"), *AssetPath));
+
 	UEdGraph* Graph = FindAnimGraphByName(AnimBP, GraphName);
 	if (!Graph) return MCPError(FString::Printf(TEXT("Graph not found: %s"), *GraphName));
 
 	UAnimSequenceBase* Sequence = nullptr;
-	const FString SequencePath = OptionalString(Params, TEXT("sequencePath"));
 	if (!SequencePath.IsEmpty())
 	{
 		Sequence = LoadAssetByPath<UAnimSequenceBase>(SequencePath);
@@ -1143,21 +1192,16 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddSequenceEvaluator(const TSharedPtr
 	if (NodeStruct && NodeData)
 	{
 		if (Sequence) SetNodeObject(NodeStruct, NodeData, TEXT("Sequence"), Sequence);
-		double Num = 0.0;
-		if (TryGetNumberParam(Params, TEXT("explicitTime"), Num)) SetNodeFloat(NodeStruct, NodeData, TEXT("ExplicitTime"), (float)Num);
-		bool bFlag = false;
-		if (TryGetBoolParam(Params, TEXT("shouldLoop"), bFlag)) SetNodeBool(NodeStruct, NodeData, TEXT("bShouldLoop"), bFlag);
-		// Distance matching wants time to advance (root motion extraction), so the
-		// default here flips the engine default of bTeleportToExplicitTime=true.
-		SetNodeBool(NodeStruct, NodeData, TEXT("bTeleportToExplicitTime"),
-			OptionalBool(Params, TEXT("teleportToExplicitTime"), false));
+		if (bHasExplicitTime) SetNodeFloat(NodeStruct, NodeData, TEXT("ExplicitTime"), (float)ExplicitTime);
+		if (bHasShouldLoop) SetNodeBool(NodeStruct, NodeData, TEXT("bShouldLoop"), bShouldLoop);
+		SetNodeBool(NodeStruct, NodeData, TEXT("bTeleportToExplicitTime"), bTeleportToExplicitTime);
 	}
 
 	bool bConnected = false;
 	// The node that fed the result pose before this call took the pin, recorded
 	// because deleting this node does not put that link back.
 	FString DisplacedOutputSource;
-	if (OptionalBool(Params, TEXT("connectToOutput"), true))
+	if (bConnectToOutput)
 	{
 		if (UAnimGraphNode_Base* Result = FindGraphResultNode(Graph))
 		{
@@ -1204,20 +1248,27 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddSequenceEvaluator(const TSharedPtr
 TSharedPtr<FJsonValue> FAnimationHandlers::BindAnimNodeFunction(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// function and nodeId are aliases the registry resolves. Every parameter is
+	// read before anything can fail (#1057).
+	FString FunctionName;
+	TSharedPtr<FJsonValue> FunctionNameError = RequireString(Params, TEXT("functionName"), FunctionName);
+	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("AnimGraph"));
+	FString NodeGuidStr;
+	TSharedPtr<FJsonValue> NodeGuidError = RequireString(Params, TEXT("nodeGuid"), NodeGuidStr);
+	// Which bindable slot: OnUpdate (default), OnBecomeRelevant, OnInitialUpdate.
+	const FString Slot = OptionalString(Params, TEXT("binding"), TEXT("update")).ToLower();
+
 	UAnimBlueprint* AnimBP = LoadAssetByPath<UAnimBlueprint>(AssetPath);
 	if (!AnimBP) return MCPError(FString::Printf(TEXT("AnimBlueprint not found: %s"), *AssetPath));
 
-	FString FunctionName;
-	if (auto Err = RequireStringAlt(Params, TEXT("functionName"), TEXT("function"), FunctionName)) return Err;
+	if (FunctionNameError) return FunctionNameError;
 
-	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("AnimGraph"));
 	UEdGraph* Graph = FindAnimGraphByName(AnimBP, GraphName);
 	if (!Graph) return MCPError(FString::Printf(TEXT("Graph not found: %s"), *GraphName));
 
 	// Locate the target node by GUID (from add_sequence_evaluator / add_*_node).
-	FString NodeGuidStr;
-	if (auto Err = RequireStringAlt(Params, TEXT("nodeGuid"), TEXT("nodeId"), NodeGuidStr)) return Err;
+	if (NodeGuidError) return NodeGuidError;
 	FGuid NodeGuid;
 	if (!FGuid::Parse(NodeGuidStr, NodeGuid)) return MCPError(FString::Printf(TEXT("Invalid nodeGuid: %s"), *NodeGuidStr));
 
@@ -1228,8 +1279,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BindAnimNodeFunction(const TSharedPtr
 	}
 	if (!Node) return MCPError(FString::Printf(TEXT("Anim graph node with guid %s not found in graph '%s'"), *NodeGuidStr, *GraphName));
 
-	// Which bindable slot: OnUpdate (default), OnBecomeRelevant, OnInitialUpdate.
-	const FString Slot = OptionalString(Params, TEXT("binding"), TEXT("update")).ToLower();
 	FMemberReference* Target = nullptr;
 	FString SlotResolved;
 	if (Slot == TEXT("update") || Slot == TEXT("onupdate"))                       { Target = &Node->UpdateFunction;        SlotResolved = TEXT("update"); }

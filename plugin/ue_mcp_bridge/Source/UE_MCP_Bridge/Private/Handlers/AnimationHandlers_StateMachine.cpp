@@ -382,7 +382,7 @@ static void CompileAndSave(UBlueprint* BP)
 TSharedPtr<FJsonValue> FAnimationHandlers::CreateStateMachine(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString Name = OptionalString(Params, TEXT("name"), TEXT("NewStateMachine"));
 	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("AnimGraph"));
@@ -448,13 +448,16 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateStateMachine(const TSharedPtr<F
 TSharedPtr<FJsonValue> FAnimationHandlers::AddState(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SMName;
 	if (auto Err = RequireString(Params, TEXT("stateMachineName"), SMName)) return Err;
 
 	FString StateName;
 	if (auto Err = RequireString(Params, TEXT("stateName"), StateName)) return Err;
+
+	// Read before anything can fail (#1057).
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
 	UAnimBlueprint* AnimBP = LoadAnimBP(AssetPath);
 	if (!AnimBP)
@@ -475,7 +478,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddState(const TSharedPtr<FJsonObject
 	}
 
 	// Idempotency: existing state with this name short-circuits
-	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 	if (FindStateNode(SMGraph, StateName))
 	{
 		if (OnConflict == TEXT("error"))
@@ -578,7 +580,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddState(const TSharedPtr<FJsonObject
 TSharedPtr<FJsonValue> FAnimationHandlers::AddTransition(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SMName;
 	if (auto Err = RequireString(Params, TEXT("stateMachineName"), SMName)) return Err;
@@ -590,14 +592,15 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddTransition(const TSharedPtr<FJsonO
 	if (auto Err = RequireString(Params, TEXT("toState"), ToState)) return Err;
 
 	// Optional blend settings, written the same way set_transition_blend writes them.
+	// Both are read before either is validated (#1057).
 	double BlendDuration = 0.0;
 	const bool bHasBlendDuration = TryGetNumberParam(Params, TEXT("blendDuration"), BlendDuration);
+	FString BlendLogic;
+	const bool bHasBlendLogic = TryGetStringParam(Params, TEXT("blendLogic"), BlendLogic);
 	if (bHasBlendDuration && BlendDuration < 0.0)
 	{
 		return MCPError(FString::Printf(TEXT("blendDuration must be >= 0 (got %g)"), BlendDuration));
 	}
-	FString BlendLogic;
-	const bool bHasBlendLogic = TryGetStringParam(Params, TEXT("blendLogic"), BlendLogic);
 	const bool bInertialization = bHasBlendLogic && BlendLogic.Equals(TEXT("Inertialization"), ESearchCase::IgnoreCase);
 	if (bHasBlendLogic && !bInertialization && !BlendLogic.Equals(TEXT("Standard"), ESearchCase::IgnoreCase))
 	{
@@ -758,12 +761,14 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddTransition(const TSharedPtr<FJsonO
 TSharedPtr<FJsonValue> FAnimationHandlers::SetStateAnimation(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
+	// All three are read before any is checked (#1057).
 	FString SMName, StateName, AnimAssetPath;
-	if (!TryGetStringParam(Params, TEXT("stateMachineName"), SMName) ||
-		!TryGetStringParam(Params, TEXT("stateName"), StateName) ||
-		!TryGetStringParam(Params, TEXT("animAssetPath"), AnimAssetPath))
+	const bool bHasSMName = TryGetStringParam(Params, TEXT("stateMachineName"), SMName);
+	const bool bHasStateName = TryGetStringParam(Params, TEXT("stateName"), StateName);
+	const bool bHasAnimAssetPath = TryGetStringParam(Params, TEXT("animAssetPath"), AnimAssetPath);
+	if (!bHasSMName || !bHasStateName || !bHasAnimAssetPath)
 	{
 		return MCPError(TEXT("Missing required params: stateMachineName, stateName, animAssetPath"));
 	}
@@ -912,12 +917,18 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetStateAnimation(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FAnimationHandlers::SetTransitionBlend(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
 	FString SMName, FromState, ToState;
-	if (!TryGetStringParam(Params, TEXT("stateMachineName"), SMName) ||
-		!TryGetStringParam(Params, TEXT("fromState"), FromState) ||
-		!TryGetStringParam(Params, TEXT("toState"), ToState))
+	const bool bHasSMName = TryGetStringParam(Params, TEXT("stateMachineName"), SMName);
+	const bool bHasFromState = TryGetStringParam(Params, TEXT("fromState"), FromState);
+	const bool bHasToState = TryGetStringParam(Params, TEXT("toState"), ToState);
+	double BlendDuration = 0.2;
+	const bool bWroteDuration = TryGetNumberParam(Params, TEXT("blendDuration"), BlendDuration);
+	FString BlendLogic;
+	const bool bWroteLogic = TryGetStringParam(Params, TEXT("blendLogic"), BlendLogic);
+	if (!bHasSMName || !bHasFromState || !bHasToState)
 	{
 		return MCPError(TEXT("Missing required params: stateMachineName, fromState, toState"));
 	}
@@ -964,16 +975,12 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetTransitionBlend(const TSharedPtr<F
 	const EAlphaBlendOption PrevBlendMode = TransNode->BlendMode;
 
 	// Set blend duration
-	double BlendDuration = 0.2;
-	const bool bWroteDuration = TryGetNumberParam(Params, TEXT("blendDuration"), BlendDuration);
 	if (bWroteDuration)
 	{
 		TransNode->CrossfadeDuration = static_cast<float>(BlendDuration);
 	}
 
 	// Set blend logic (Standard vs Inertialization)
-	FString BlendLogic;
-	const bool bWroteLogic = TryGetStringParam(Params, TEXT("blendLogic"), BlendLogic);
 	if (bWroteLogic)
 	{
 		if (BlendLogic.Equals(TEXT("Inertialization"), ESearchCase::IgnoreCase))
@@ -1078,7 +1085,7 @@ static UAnimStateTransitionNode* FindTransitionNode(
 TSharedPtr<FJsonValue> FAnimationHandlers::SetTransitionCondition(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SMName;
 	if (auto Err = RequireString(Params, TEXT("stateMachineName"), SMName)) return Err;
@@ -1090,12 +1097,11 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetTransitionCondition(const TSharedP
 	const FString TransitionGuid = OptionalString(Params, TEXT("transitionGuid"), TEXT(""));
 	const FString FromState = OptionalString(Params, TEXT("fromState"), TEXT(""));
 	const FString ToState = OptionalString(Params, TEXT("toState"), TEXT(""));
+	const bool bNegate = OptionalBool(Params, TEXT("negate"), false);
 	if (TransitionGuid.IsEmpty() && (FromState.IsEmpty() || ToState.IsEmpty()))
 	{
 		return MCPError(TEXT("Provide transitionGuid, or both fromState and toState, to identify the transition."));
 	}
-
-	const bool bNegate = OptionalBool(Params, TEXT("negate"), false);
 
 	UAnimBlueprint* AnimBP = LoadAnimBP(AssetPath);
 	if (!AnimBP)
@@ -1632,7 +1638,7 @@ static FName MCPIKRigRetargetRootBone(const RigType* Rig)
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadIKRig(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UIKRigDefinition* IKRig = Cast<UIKRigDefinition>(LoadedAsset);
@@ -2185,6 +2191,8 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreatePoseSearchDatabase(const TShare
 	// database as the invalid asset. Naming a skeleton is enough to author the
 	// schema here, so the one call produces something that can actually index.
 	const FString SkeletonPath = OptionalString(Params, TEXT("skeletonPath"), TEXT(""));
+	// Read before anything can fail (#1057).
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
 	// Resolve (or author) the schema BEFORE the database exists, so a bad
 	// schema argument leaves no half-built database behind.
@@ -2229,7 +2237,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreatePoseSearchDatabase(const TShare
 		}
 	}
 
-	auto Created = MCPCreateAssetIdempotentNewObject<UPoseSearchDatabase>(Name, PackagePath, OptionalString(Params, TEXT("onConflict"), TEXT("skip")), TEXT("PoseSearchDatabase"));
+	auto Created = MCPCreateAssetIdempotentNewObject<UPoseSearchDatabase>(Name, PackagePath, OnConflict, TEXT("PoseSearchDatabase"));
 	if (Created.EarlyReturn) return Created.EarlyReturn;
 	UPoseSearchDatabase* Database = Created.Asset;
 
@@ -2263,7 +2271,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreatePoseSearchDatabase(const TShare
 TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchSchema(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString SchemaPath;
 	if (auto Err = RequireString(Params, TEXT("schemaPath"), SchemaPath)) return Err;
 
@@ -2306,9 +2314,12 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchSchema(const TSharedPtr<
 TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSequence(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString SequencePath;
 	if (auto Err = RequireString(Params, TEXT("sequencePath"), SequencePath)) return Err;
+	// #684: optional per-clip flags (mirror / disableReselection / samplingRange / enabled).
+	// Read before anything can fail (#1057).
+	const FPoseSearchClipFlags Flags = ParsePoseSearchClipFlags(Params);
 
 	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(MCPLoadAssetObject(AssetPath));
 	if (!Database) return MCPError(FString::Printf(TEXT("PoseSearchDatabase not found: %s"), *AssetPath));
@@ -2329,9 +2340,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSequence(const TSharedPt
 		const FString Refusal = MCPPoseSearch::DescribeClipRefusal(Database->Schema, AssetPath);
 		if (!Refusal.IsEmpty()) return MCPError(Refusal);
 	}
-
-	// #684: optional per-clip flags (mirror / disableReselection / samplingRange / enabled).
-	const FPoseSearchClipFlags Flags = ParsePoseSearchClipFlags(Params);
 
 	const int32 PrevCount = GetPoseSearchAnimationAssetCount(Database);
 	// Captured before the append, because the inverse of "append one clip" is
@@ -2503,7 +2511,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchClips(const TSharedPtr<F
 TSharedPtr<FJsonValue> FAnimationHandlers::BuildPoseSearchIndex(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	const bool bWait = OptionalBool(Params, TEXT("wait"), true);
 
 	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(MCPLoadAssetObject(AssetPath));
@@ -2548,7 +2556,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BuildPoseSearchIndex(const TSharedPtr
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadPoseSearchDatabase(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(MCPLoadAssetObject(AssetPath));
 	if (!Database) return MCPError(FString::Printf(TEXT("PoseSearchDatabase not found: %s"), *AssetPath));
@@ -2630,14 +2638,15 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadPoseSearchDatabase(const TSharedP
 // Set the preview/source skeletal mesh on an EXISTING IK Rig.
 TSharedPtr<FJsonValue> FAnimationHandlers::SetIKRigMesh(const TSharedPtr<FJsonObject>& Params)
 {
+	// assetPath and skeletalMesh are aliases the registry resolves (#1057).
 	FString RigPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("rigPath"), TEXT("assetPath"), RigPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("rigPath"), RigPath)) return Err;
+	FString MeshPath;
+	if (auto Err = RequireString(Params, TEXT("meshPath"), MeshPath)) return Err;
 	if (MCPIsProtectedAssetPath(RigPath))
 	{
 		return MCPError(FString::Printf(TEXT("Protected asset cannot be modified: %s"), *RigPath));
 	}
-	FString MeshPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("meshPath"), TEXT("skeletalMesh"), MeshPath)) return Err;
 
 	UIKRigDefinition* IKRig = LoadAssetByPath<UIKRigDefinition>(RigPath);
 	if (!IKRig) return MCPError(FString::Printf(TEXT("IKRig not found: %s"), *RigPath));
@@ -2689,15 +2698,16 @@ namespace
 // ─── #703 set_ik_retargeter_rig ─────────────────────────────────────
 TSharedPtr<FJsonValue> FAnimationHandlers::SetIKRetargeterRig(const TSharedPtr<FJsonObject>& Params)
 {
+	// assetPath and ikRig are aliases the registry resolves (#1057).
 	FString RetargeterPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("retargeterPath"), TEXT("assetPath"), RetargeterPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("retargeterPath"), RetargeterPath)) return Err;
+	FString RigPath;
+	if (auto Err = RequireString(Params, TEXT("rigPath"), RigPath)) return Err;
+	const FString Side = OptionalString(Params, TEXT("side"), TEXT("target"));
 	if (MCPIsProtectedAssetPath(RetargeterPath))
 	{
 		return MCPError(FString::Printf(TEXT("Protected asset cannot be modified: %s"), *RetargeterPath));
 	}
-	FString RigPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("rigPath"), TEXT("ikRig"), RigPath)) return Err;
-	const FString Side = OptionalString(Params, TEXT("side"), TEXT("target"));
 	if (!Side.Equals(TEXT("source"), ESearchCase::IgnoreCase)
 		&& !Side.Equals(TEXT("target"), ESearchCase::IgnoreCase))
 	{
@@ -2823,12 +2833,12 @@ static TSharedPtr<FJsonObject> CaptureRetargetPosePayload(
 TSharedPtr<FJsonValue> FAnimationHandlers::AutoAlignRetargetPose(const TSharedPtr<FJsonObject>& Params)
 {
 	FString RetargeterPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("retargeterPath"), TEXT("assetPath"), RetargeterPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("retargeterPath"), RetargeterPath)) return Err;
+	const FString Side = OptionalString(Params, TEXT("side"), TEXT("target"));
 	if (MCPIsProtectedAssetPath(RetargeterPath))
 	{
 		return MCPError(FString::Printf(TEXT("Protected asset cannot be modified: %s"), *RetargeterPath));
 	}
-	const FString Side = OptionalString(Params, TEXT("side"), TEXT("target"));
 	// ParseSourceOrTarget maps anything that is not 'source' to Target, so an
 	// unrecognised side used to succeed silently and then be echoed into a
 	// rollback payload whose reader accepts only the two names. Refuse it here,
@@ -2895,12 +2905,12 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AutoAlignRetargetPose(const TSharedPt
 TSharedPtr<FJsonValue> FAnimationHandlers::ResetRetargetPose(const TSharedPtr<FJsonObject>& Params)
 {
 	FString RetargeterPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("retargeterPath"), TEXT("assetPath"), RetargeterPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("retargeterPath"), RetargeterPath)) return Err;
+	const FString Side = OptionalString(Params, TEXT("side"), TEXT("target"));
 	if (MCPIsProtectedAssetPath(RetargeterPath))
 	{
 		return MCPError(FString::Printf(TEXT("Protected asset cannot be modified: %s"), *RetargeterPath));
 	}
-	const FString Side = OptionalString(Params, TEXT("side"), TEXT("target"));
 	// ParseSourceOrTarget maps anything that is not 'source' to Target, so an
 	// unrecognised side used to succeed silently and then be echoed into a
 	// rollback payload whose reader accepts only the two names. Refuse it here,
@@ -3188,7 +3198,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BatchRetargetAnimations(const TShared
 TSharedPtr<FJsonValue> FAnimationHandlers::InspectAnimNodes(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("AnimGraph"));
 	const FString ClassFilter = OptionalString(Params, TEXT("nodeClass"));
 

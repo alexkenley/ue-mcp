@@ -13,6 +13,12 @@
 // reads all of its parameters before loading anything. An actor selector gets
 // the same path, which names no actor, so nothing is spawned or edited either;
 // a handler that would create or spawn before failing is left unspecified.
+// The values point at an asset that does not exist, so every handler stops
+// before it writes: at its first load, or at a validation these values fail
+// (a zero duration, two sources where one is allowed). A handler with nothing
+// to load before it creates is left unspecced rather than given a spec this
+// test would run. That is also why each spec'd handler reads all of its
+// parameters before loading anything.
 
 #if WITH_DEV_AUTOMATION_TESTS
 

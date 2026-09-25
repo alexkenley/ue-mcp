@@ -95,7 +95,13 @@ namespace
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadControlRigGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+
+	const FString GraphFilter = OptionalString(Params, TEXT("graphName"));
+	const bool bIncludePins = OptionalBool(Params, TEXT("includePins"), true);
+	const bool bIncludeDefaults = OptionalBool(Params, TEXT("includeDefaults"), true);
+	const bool bIncludeLinks = OptionalBool(Params, TEXT("includeLinks"), true);
+	const int32 NodeLimit = FMath::Max(1, OptionalInt(Params, TEXT("limit"), 200));
 
 	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UBlueprint* Blueprint = Cast<UBlueprint>(LoadedAsset);
@@ -103,12 +109,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadControlRigGraph(const TSharedPtr<
 	{
 		return MCPError(FString::Printf(TEXT("Failed to load Blueprint at '%s'"), *AssetPath));
 	}
-
-	const FString GraphFilter = OptionalString(Params, TEXT("graphName"));
-	const bool bIncludePins = OptionalBool(Params, TEXT("includePins"), true);
-	const bool bIncludeDefaults = OptionalBool(Params, TEXT("includeDefaults"), true);
-	const bool bIncludeLinks = OptionalBool(Params, TEXT("includeLinks"), true);
-	const int32 NodeLimit = FMath::Max(1, OptionalInt(Params, TEXT("limit"), 200));
 
 	// ControlRigBlueprint was removed in 5.7 and the client-host interface
 	// moved, so reach the models by walking the blueprint's own subobjects for
@@ -257,15 +257,19 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadControlRigGraph(const TSharedPtr<
 
 TSharedPtr<FJsonValue> FAnimationHandlers::CreateControlRig(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057). name and
+	// packagePath default from the source, so they are resolved once it loads.
 	const FString SkeletalMeshPath = OptionalString(Params, TEXT("skeletalMeshPath"));
 	const FString SkeletonPath = OptionalString(Params, TEXT("skeletonPath"));
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip")).ToLower();
+	const FString RequestedName = OptionalString(Params, TEXT("name"));
+	const FString RequestedPackagePath = OptionalString(Params, TEXT("packagePath"));
 	if (SkeletalMeshPath.IsEmpty() == SkeletonPath.IsEmpty())
 	{
 		return MCPError(TEXT("Pass exactly one of 'skeletalMeshPath' or 'skeletonPath' as the source of the Control Rig's bone hierarchy"));
 	}
 	const FString SourcePath = SkeletalMeshPath.IsEmpty() ? SkeletonPath : SkeletalMeshPath;
 
-	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip")).ToLower();
 	if (OnConflict != TEXT("skip") && OnConflict != TEXT("error"))
 	{
 		return MCPError(TEXT("'onConflict' must be 'skip' or 'error'; create_control_rig never overwrites an asset"));
@@ -291,8 +295,8 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateControlRig(const TSharedPtr<FJs
 	}
 
 	const FString SourcePackage = Source->GetOutermost()->GetName();
-	const FString Name = OptionalString(Params, TEXT("name"), Source->GetName() + TEXT("_CtrlRig"));
-	const FString PackagePath = OptionalString(Params, TEXT("packagePath"), FPackageName::GetLongPackagePath(SourcePackage));
+	const FString Name = RequestedName.IsEmpty() ? Source->GetName() + TEXT("_CtrlRig") : RequestedName;
+	const FString PackagePath = RequestedPackagePath.IsEmpty() ? FPackageName::GetLongPackagePath(SourcePackage) : RequestedPackagePath;
 	if (auto Existing = MCPCheckAssetExists(PackagePath, Name, OnConflict, TEXT("ControlRigBlueprint")))
 	{
 		return Existing;

@@ -44,7 +44,7 @@ describe("animation(read_sequence) batch form (#1163)", () => {
   it("declares the new parameters on the category schema", () => {
     expect(animationTool.schema.nameFilter).toBeDefined();
     expect(animationTool.schema.fields.safeParse(["rateScale"]).success).toBe(true);
-    expect(animationTool.schema.assetPaths.description).toContain("read_sequence");
+    expect(animationTool.schema.assetPaths.description).toContain("read_anim_sequence");
   });
 
   it("documents the batch form, its paging and its per-row failures", () => {

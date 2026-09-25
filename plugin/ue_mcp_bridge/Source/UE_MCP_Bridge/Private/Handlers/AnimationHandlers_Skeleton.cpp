@@ -896,6 +896,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BeginSkeletonEdit(const TSharedPtr<FJ
 
 	FString MeshPath;
 	if (auto Err = RequireString(Params, TEXT("skeletalMeshPath"), MeshPath)) return Err;
+	// Read before anything can fail (#1057); its default needs the mesh.
+	FString RequestedTag;
+	const bool bHasTag = TryGetStringParam(Params, TEXT("sessionTag"), RequestedTag);
 	if (MCPIsProtectedAssetPath(MeshPath)) return MCPProtectedPathError(MeshPath);
 
 	USkeletalMesh* Mesh = LoadAssetByPath<USkeletalMesh>(MeshPath);
@@ -905,7 +908,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BeginSkeletonEdit(const TSharedPtr<FJ
 		return Blocked;
 	}
 
-	const FString Tag = OptionalString(Params, TEXT("sessionTag"), SkeletonDefaultSessionTag(Mesh));
+	const FString Tag = bHasTag ? RequestedTag : SkeletonDefaultSessionTag(Mesh);
 	if (Tag.IsEmpty()) return SkeletonError(TEXT("invalid_params"), TEXT("'sessionTag' must not be empty"));
 
 	SkeletonPruneDeadSessions();
@@ -1023,6 +1026,11 @@ TSharedPtr<FJsonValue> FAnimationHandlers::EditSkeletonBones(const TSharedPtr<FJ
 #else
 	if (!Params.IsValid()) return SkeletonError(TEXT("invalid_params"), TEXT("Parameters are required"));
 
+	// Every parameter is read before anything can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* EditsArray = nullptr;
+	const bool bHasEdits = TryGetArrayParam(Params, TEXT("edits"), EditsArray) && EditsArray && EditsArray->Num() > 0;
+	const bool bForce = OptionalBool(Params, TEXT("force"), false);
+
 	TSharedPtr<FJsonValue> SessionError;
 	TSharedPtr<FSkeletonEditSession> Session = SkeletonResolveSession(Params, SessionError);
 	if (!Session.IsValid()) return SessionError;
@@ -1040,16 +1048,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::EditSkeletonBones(const TSharedPtr<FJ
 				*Session->Tag));
 	}
 
-	const TArray<TSharedPtr<FJsonValue>>* EditsArray = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("edits"), EditsArray) || !EditsArray || EditsArray->Num() == 0)
+	if (!bHasEdits)
 	{
 		return SkeletonError(
 			TEXT("invalid_params"),
 			TEXT("'edits' must be a non-empty array. Each entry is "
 				 "{ op: \"add\"|\"remove\"|\"rename\"|\"reparent\"|\"set_transform\", bone: \"...\", ... }."));
 	}
-
-	const bool bForce = OptionalBool(Params, TEXT("force"), false);
 
 	// ── Working model of the hierarchy, so the WHOLE batch is validated before
 	//    a single bone moves. Nothing below touches the modifier until every
@@ -2082,16 +2087,25 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AuthorBlendProfile(const TSharedPtr<F
 
 	if (!Params.IsValid()) return SkeletonError(TEXT("invalid_params"), TEXT("Parameters are required"));
 
+	// Every parameter is read before anything can fail (#1057).
+	FString ProfileName;
+	TSharedPtr<FJsonValue> ProfileNameError = RequireString(Params, TEXT("profileName"), ProfileName);
+	const FString Operation = OptionalString(Params, TEXT("operation"), TEXT("upsert")).ToLower();
+	const FString RequestedNewName = OptionalString(Params, TEXT("newProfileName"));
+	const TArray<TSharedPtr<FJsonValue>>* EntriesArray = nullptr;
+	TryGetArrayParam(Params, TEXT("entries"), EntriesArray);
+	const TArray<FString> RemoveBones = SkeletonReadStringList(Params, TEXT("removeEntries"));
+	const bool bHasModeParam = HasParam(Params, TEXT("mode"));
+	const FString ModeText = SkeletonReadString(Params, TEXT("mode"));
+
 	FString SkeletonPath;
 	TSharedPtr<FJsonValue> LoadError;
 	USkeleton* Skeleton = SkeletonRequireWritableSkeleton(
 		Params, TEXT("author a blend profile on this skeleton"), SkeletonPath, LoadError);
 	if (!Skeleton) return LoadError;
 
-	FString ProfileName;
-	if (auto Err = RequireString(Params, TEXT("profileName"), ProfileName)) return Err;
+	if (ProfileNameError) return ProfileNameError;
 
-	const FString Operation = OptionalString(Params, TEXT("operation"), TEXT("upsert")).ToLower();
 	const TArray<FString> ValidOperations = { TEXT("upsert"), TEXT("remove"), TEXT("rename") };
 	if (!ValidOperations.Contains(Operation))
 	{
@@ -2158,8 +2172,8 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AuthorBlendProfile(const TSharedPtr<F
 	// ── rename ────────────────────────────────────────────────────────────────
 	if (Operation == TEXT("rename"))
 	{
-		FString NewName;
-		if (auto Err = RequireString(Params, TEXT("newProfileName"), NewName)) return Err;
+		const FString NewName = RequestedNewName;
+		if (NewName.IsEmpty()) return MCPError(TEXT("Missing required parameter 'newProfileName'"));
 
 		if (!Profile)
 		{
@@ -2247,8 +2261,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AuthorBlendProfile(const TSharedPtr<F
 	};
 	TArray<FEntryRequest> EntryRequests;
 
-	const TArray<TSharedPtr<FJsonValue>>* EntriesArray = nullptr;
-	if (TryGetArrayParam(Params, TEXT("entries"), EntriesArray) && EntriesArray)
+	if (EntriesArray)
 	{
 		int32 EntryIndex = -1;
 		for (const TSharedPtr<FJsonValue>& Value : *EntriesArray)
@@ -2290,7 +2303,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AuthorBlendProfile(const TSharedPtr<F
 		}
 	}
 
-	TArray<FString> RemoveBones = SkeletonReadStringList(Params, TEXT("removeEntries"));
 	for (const FString& BoneText : RemoveBones)
 	{
 		if (RefSkeleton.FindBoneIndex(FName(*BoneText)) == INDEX_NONE)
@@ -2304,9 +2316,8 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AuthorBlendProfile(const TSharedPtr<F
 
 	EBlendProfileMode Mode = EBlendProfileMode::TimeFactor;
 	bool bModeRequested = false;
-	if (HasParam(Params, TEXT("mode")))
+	if (bHasModeParam)
 	{
-		const FString ModeText = SkeletonReadString(Params, TEXT("mode"));
 		if (!SkeletonParseBlendProfileMode(ModeText, Mode))
 		{
 			return SkeletonError(

@@ -220,15 +220,15 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReverseSequence(const TSharedPtr<FJso
 	const FString RequestedName = OptionalString(Params, TEXT("name"));
 	const FString RequestedPackagePath = OptionalString(Params, TEXT("packagePath"));
 	FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip")).ToLower();
-	if (OnConflict != TEXT("skip") && OnConflict != TEXT("error"))
-	{
-		return MCPError(TEXT("onConflict must be 'skip' or 'error'. reverse_sequence never overwrites an existing asset; pass inPlace=true to reverse the source itself."));
-	}
-
+	// Read before anything can fail (#1057).
 	double OffsetFramesParam = 0.0;
 	double OffsetSecondsParam = 0.0;
 	const bool bHasOffsetFrames = TryGetNumberParam(Params, TEXT("cycleOffsetFrames"), OffsetFramesParam);
 	const bool bHasOffsetSeconds = TryGetNumberParam(Params, TEXT("cycleOffsetSeconds"), OffsetSecondsParam);
+	if (OnConflict != TEXT("skip") && OnConflict != TEXT("error"))
+	{
+		return MCPError(TEXT("onConflict must be 'skip' or 'error'. reverse_sequence never overwrites an existing asset; pass inPlace=true to reverse the source itself."));
+	}
 	if (bHasOffsetFrames && bHasOffsetSeconds)
 	{
 		return MCPError(TEXT("Pass cycleOffsetFrames or cycleOffsetSeconds, not both."));

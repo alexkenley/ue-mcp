@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { animationTool } from "../../src/tools/animation.js";
+import { handlerSpecs } from "../../src/tools/specs/animation.generated.js";
 import type { ToolContext } from "../../src/types.js";
 
 describe("animation.create_skeleton", () => {
@@ -18,7 +19,11 @@ describe("animation.create_skeleton", () => {
     expect(animationTool.schema.onConflict.description).toContain("create_skeleton");
   });
 
-  it("forwards only the native creation contract", async () => {
+  it("takes the native creation contract from its C++ spec (#1057)", async () => {
+    expect(animationTool.actions.create_skeleton.mapParams).toBeUndefined();
+    expect(handlerSpecs.create_skeleton.params.map((p) => p.name))
+      .toEqual(["name", "skeletalMeshPath", "packagePath", "onConflict"]);
+
     const call = vi.fn().mockResolvedValue({ success: true });
     const context = { bridge: { call } } as unknown as ToolContext;
 
@@ -28,7 +33,6 @@ describe("animation.create_skeleton", () => {
       skeletalMeshPath: "/Game/Meshes/SK_Character",
       packagePath: "/Game/Skeletons",
       onConflict: "skip",
-      assetPath: "/Game/ShouldNotLeak",
     });
 
     expect(call).toHaveBeenCalledWith("create_skeleton", {

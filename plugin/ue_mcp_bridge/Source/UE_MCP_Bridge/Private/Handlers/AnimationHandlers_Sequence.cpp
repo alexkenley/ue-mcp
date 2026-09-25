@@ -209,13 +209,28 @@ namespace
 
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimSequence(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057). cursor and
+	// limit are validated by ReadPageRequest once the batch's collection key
+	// is known, so they are only noted here.
+	const TArray<TSharedPtr<FJsonValue>>* FieldsJson = nullptr;
+	const bool bHasFields = TryGetArrayParam(Params, TEXT("fields"), FieldsJson) && FieldsJson;
+	const bool bHasAssetPaths = HasParam(Params, TEXT("assetPaths"));
+	const TArray<TSharedPtr<FJsonValue>>* PathsJson = nullptr;
+	const bool bAssetPathsIsArray = TryGetArrayParam(Params, TEXT("assetPaths"), PathsJson) && PathsJson;
+	const bool bHasDirectory = HasParam(Params, TEXT("directory"));
+	FString Directory = OptionalString(Params, TEXT("directory"));
+	const bool bHasAssetPath = HasParam(Params, TEXT("assetPath"));
+	FString SingleAssetPath;
+	TSharedPtr<FJsonValue> SingleAssetPathError = RequireString(Params, TEXT("assetPath"), SingleAssetPath);
+	const bool bRecursive = OptionalBool(Params, TEXT("recursive"), true);
+	const FString NameFilter = OptionalString(Params, TEXT("nameFilter"));
+	HasParam(Params, TEXT("cursor"));
+	HasParam(Params, TEXT("limit"));
+
 	// `fields` narrows either form. Validated before anything loads.
 	TArray<FString> Fields;
-	bool bHasFields = false;
-	const TArray<TSharedPtr<FJsonValue>>* FieldsJson = nullptr;
-	if (TryGetArrayParam(Params, TEXT("fields"), FieldsJson))
+	if (bHasFields)
 	{
-		bHasFields = true;
 		for (const TSharedPtr<FJsonValue>& Value : *FieldsJson)
 		{
 			FString Field;
@@ -233,13 +248,10 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimSequence(const TSharedPtr<FJs
 		}
 	}
 
-	const bool bHasAssetPaths = HasParam(Params, TEXT("assetPaths"));
-	const bool bHasDirectory = HasParam(Params, TEXT("directory"));
-
 	if (!bHasAssetPaths && !bHasDirectory)
 	{
-		FString AssetPath;
-		if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+		if (SingleAssetPathError) return SingleAssetPathError;
+		const FString& AssetPath = SingleAssetPath;
 
 		UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 		UAnimSequence* AnimSeq = Cast<UAnimSequence>(LoadedAsset);
@@ -266,7 +278,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimSequence(const TSharedPtr<FJs
 	{
 		return MCPError(TEXT("Pass either 'assetPaths' or 'directory', not both"));
 	}
-	if (HasParam(Params, TEXT("assetPath")) || HasParam(Params, TEXT("path")))
+	if (bHasAssetPath)
 	{
 		return MCPError(TEXT("'assetPath' reads one sequence; with 'assetPaths' or 'directory' put every path in the batch instead"));
 	}
@@ -276,9 +288,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimSequence(const TSharedPtr<FJs
 	}
 
 	static constexpr int32 MaxAssetPaths = 1000;
-	const bool bRecursive = OptionalBool(Params, TEXT("recursive"), true);
-	const FString NameFilter = OptionalString(Params, TEXT("nameFilter"));
-	FString Directory = OptionalString(Params, TEXT("directory"));
 	while (Directory.Len() > 1 && Directory.EndsWith(TEXT("/")))
 	{
 		Directory.LeftChopInline(1);
@@ -287,8 +296,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimSequence(const TSharedPtr<FJs
 	TArray<FString> AssetPaths;
 	if (bHasAssetPaths)
 	{
-		const TArray<TSharedPtr<FJsonValue>>* PathsJson = nullptr;
-		if (!TryGetArrayParam(Params, TEXT("assetPaths"), PathsJson))
+		if (!bAssetPathsIsArray)
 		{
 			return MCPError(TEXT("'assetPaths' must be an array of AnimSequence paths"));
 		}
@@ -417,6 +425,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ScanAnimationTracks(const TSharedPtr<
 	// directory (e.g. "/Game" or "/MyPlugin") to narrow the scan.
 	const FString Directory = OptionalString(Params, TEXT("directory"), TEXT(""));
 	const FString SkeletonFilter = OptionalString(Params, TEXT("skeletonPath"));
+	// Read before anything can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* PathsArray = nullptr;
+	const bool bHasAssetPaths = TryGetArrayParam(Params, TEXT("assetPaths"), PathsArray) && PathsArray;
 
 	// #890: the filter used to be compared as a string against
 	// USkeleton::GetPathName(), which is always the object path form, so a
@@ -436,8 +447,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ScanAnimationTracks(const TSharedPtr<
 	}
 
 	TArray<FString> AssetPaths;
-	const TArray<TSharedPtr<FJsonValue>>* PathsArray = nullptr;
-	if (TryGetArrayParam(Params, TEXT("assetPaths"), PathsArray))
+	if (bHasAssetPaths)
 	{
 		for (const TSharedPtr<FJsonValue>& PathValue : *PathsArray)
 		{
@@ -1061,10 +1071,17 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BakeKeyframesBatch(const TSharedPtr<F
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FAnimationHandlers::GetBoneTransforms(const TSharedPtr<FJsonObject>& Params)
 {
+	// assetPath and path are aliases the registry resolves to skeletonPath.
 	FString AssetPath;
-	if (!TryGetStringParam(Params, TEXT("skeletonPath"), AssetPath)
-		&& !TryGetStringParam(Params, TEXT("assetPath"), AssetPath)
-		&& !TryGetStringParam(Params, TEXT("path"), AssetPath))
+	const bool bHasSkeletonPath = TryGetStringParam(Params, TEXT("skeletonPath"), AssetPath);
+	// Read before anything can fail (#1057).
+	// #245: optional space="component" composes parent transforms so callers
+	// can do retarget-chain / anatomical-scale checks without standing up a
+	// transient SkeletalMeshActor and walking sockets.
+	const FString Space = OptionalString(Params, TEXT("space"), TEXT("local")).ToLower();
+	const TArray<TSharedPtr<FJsonValue>>* BoneNamesArray = nullptr;
+	const bool bHasBoneNames = TryGetArrayParam(Params, TEXT("boneNames"), BoneNamesArray) && BoneNamesArray;
+	if (!bHasSkeletonPath)
 	{
 		return MCPError(TEXT("Missing 'skeletonPath' parameter"));
 	}
@@ -1085,10 +1102,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetBoneTransforms(const TSharedPtr<FJ
 	const FReferenceSkeleton& RefSkeleton = Skeleton->GetReferenceSkeleton();
 	const TArray<FTransform>& RefPose = RefSkeleton.GetRefBonePose();
 
-	// #245: optional space="component" composes parent transforms so callers
-	// can do retarget-chain / anatomical-scale checks without standing up a
-	// transient SkeletalMeshActor and walking sockets.
-	const FString Space = OptionalString(Params, TEXT("space"), TEXT("local")).ToLower();
 	const bool bComponentSpace = (Space == TEXT("component") || Space == TEXT("world"));
 
 	TArray<FTransform> ComponentSpacePose;
@@ -1106,8 +1119,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetBoneTransforms(const TSharedPtr<FJ
 
 	// Optional bone name filter
 	TSet<FName> FilterBones;
-	const TArray<TSharedPtr<FJsonValue>>* BoneNamesArray;
-	if (TryGetArrayParam(Params, TEXT("boneNames"), BoneNamesArray))
+	if (bHasBoneNames)
 	{
 		for (const TSharedPtr<FJsonValue>& Val : *BoneNamesArray)
 		{
@@ -1419,9 +1431,12 @@ static UClass* ResolveAnimationModifierClass(const FString& NameOrPath, UClass* 
 TSharedPtr<FJsonValue> FAnimationHandlers::ApplyAnimationModifier(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString ModifierClassName;
-	if (auto Err = RequireStringAlt(Params, TEXT("modifierClass"), TEXT("modifier"), ModifierClassName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("modifierClass"), ModifierClassName)) return Err;
+	// Read before anything can fail (#1057).
+	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
+	TryGetObjectParam(Params, TEXT("props"), PropsObj);
 
 	UAnimSequence* Seq = Cast<UAnimSequence>(MCPLoadAssetObject(AssetPath));
 	if (!Seq) return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *AssetPath));
@@ -1508,8 +1523,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ApplyAnimationModifier(const TSharedP
 
 	// Apply caller-provided settings (CurveName, Axis, SampleRate, ...).
 	TArray<FString> AppliedProps;
-	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
-	if (TryGetObjectParam(Params, TEXT("props"), PropsObj) && PropsObj && (*PropsObj).IsValid())
+	if (PropsObj && (*PropsObj).IsValid())
 	{
 		Instance->Modify();
 		for (const auto& Pair : (*PropsObj)->Values)
@@ -1563,11 +1577,12 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateAnimComposite(const TSharedPtr<
 	FString SkeletonPath;
 	if (auto Err = RequireString(Params, TEXT("skeletonPath"), SkeletonPath)) return Err;
 	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/Animations"));
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
 	USkeleton* Skeleton = LoadAssetByPath<USkeleton>(SkeletonPath);
 	if (!Skeleton) return MCPError(FString::Printf(TEXT("Skeleton not found: %s"), *SkeletonPath));
 
-	auto Created = MCPCreateAssetIdempotentNewObject<UAnimComposite>(Name, PackagePath, OptionalString(Params, TEXT("onConflict"), TEXT("skip")), TEXT("AnimComposite"));
+	auto Created = MCPCreateAssetIdempotentNewObject<UAnimComposite>(Name, PackagePath, OnConflict, TEXT("AnimComposite"));
 	if (Created.EarlyReturn) return Created.EarlyReturn;
 	UAnimComposite* Composite = Created.Asset;
 	Composite->SetSkeleton(Skeleton);
@@ -1724,20 +1739,22 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadBoneTrack(const TSharedPtr<FJsonO
 // sequence; returns per-path results so callers can diagnose mixed outcomes.
 TSharedPtr<FJsonValue> FAnimationHandlers::SetSequenceProperties(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
 	const TArray<TSharedPtr<FJsonValue>>* PathsArr = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("assetPaths"), PathsArr))
+	const bool bHasPaths = TryGetArrayParam(Params, TEXT("assetPaths"), PathsArr) && PathsArr;
+	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
+	const bool bHasProps = TryGetObjectParam(Params, TEXT("properties"), PropsObj) && PropsObj && (*PropsObj).IsValid();
+	const bool bResolveMontages = OptionalBool(Params, TEXT("resolveFromMontages"), true);
+
+	if (!bHasPaths)
 	{
 		return MCPError(TEXT("Missing 'assetPaths' array parameter"));
 	}
-
-	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
-	if (!TryGetObjectParam(Params, TEXT("properties"), PropsObj) || !PropsObj || !(*PropsObj).IsValid())
+	if (!bHasProps)
 	{
 		return MCPError(TEXT("Missing 'properties' object parameter"));
 	}
 	const TSharedPtr<FJsonObject>& Props = *PropsObj;
-
-	const bool bResolveMontages = OptionalBool(Params, TEXT("resolveFromMontages"), true);
 
 	TArray<TSharedPtr<FJsonValue>> Results;
 	int32 UpdatedCount = 0;
@@ -1897,7 +1914,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetSequenceProperties(const TSharedPt
 TSharedPtr<FJsonValue> FAnimationHandlers::BakeRootMotionFromBone(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SourceBoneName;
 	if (auto Err = RequireString(Params, TEXT("sourceBone"), SourceBoneName)) return Err;
@@ -2073,10 +2090,11 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BakeRootMotionFromBone(const TSharedP
 // Python) that authored curves actually drive morphs and spot the mismatches.
 TSharedPtr<FJsonValue> FAnimationHandlers::CompareCurvesToMorphTargets(const TSharedPtr<FJsonObject>& Params)
 {
+	// assetPath and meshPath are aliases the registry resolves (#1057).
 	FString CurveAssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("animPath"), TEXT("assetPath"), CurveAssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("animPath"), CurveAssetPath)) return Err;
 	FString MeshPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("skeletalMeshPath"), TEXT("meshPath"), MeshPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("skeletalMeshPath"), MeshPath)) return Err;
 
 	UObject* CurveAsset = MCPLoadAssetObject(CurveAssetPath);
 	if (!CurveAsset) return MCPError(FString::Printf(TEXT("Asset not found: %s"), *CurveAssetPath));

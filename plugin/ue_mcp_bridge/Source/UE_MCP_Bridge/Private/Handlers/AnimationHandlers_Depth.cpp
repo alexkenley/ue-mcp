@@ -185,10 +185,15 @@ static void MCPAnimDepthCompileAndSave(UBlueprint* BP)
 TSharedPtr<FJsonValue> FAnimationHandlers::SetStateMachineEntry(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SMName;
 	if (auto Err = RequireString(Params, TEXT("stateMachineName"), SMName)) return Err;
+
+	// An empty (or omitted) stateName clears the entry link, so the pair is a
+	// complete set/clear rather than a one-way write. Read before anything can
+	// fail (#1057).
+	const FString StateName = OptionalString(Params, TEXT("stateName"));
 
 	UAnimBlueprint* AnimBP = MCPAnimDepthLoadAnimBP(AssetPath);
 	if (!AnimBP)
@@ -247,9 +252,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetStateMachineEntry(const TSharedPtr
 		}
 	}
 
-	// An empty (or omitted) stateName clears the entry link, so the pair is a
-	// complete set/clear rather than a one-way write.
-	const FString StateName = OptionalString(Params, TEXT("stateName"));
 	UAnimStateNode* Target = nullptr;
 	if (!StateName.IsEmpty())
 	{
@@ -314,7 +316,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetStateMachineEntry(const TSharedPtr
 TSharedPtr<FJsonValue> FAnimationHandlers::RemoveState(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SMName;
 	if (auto Err = RequireString(Params, TEXT("stateMachineName"), SMName)) return Err;
@@ -405,7 +407,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveState(const TSharedPtr<FJsonObj
 TSharedPtr<FJsonValue> FAnimationHandlers::RemoveTransition(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SMName;
 	if (auto Err = RequireString(Params, TEXT("stateMachineName"), SMName)) return Err;
@@ -521,7 +523,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveTransition(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FAnimationHandlers::RemoveStateMachine(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SMName;
 	if (auto Err = RequireString(Params, TEXT("stateMachineName"), SMName)) return Err;
@@ -621,7 +623,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveStateMachine(const TSharedPtr<F
 TSharedPtr<FJsonValue> FAnimationHandlers::RemoveMontageSection(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SectionName;
 	if (auto Err = RequireString(Params, TEXT("sectionName"), SectionName)) return Err;
@@ -724,7 +726,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveMontageSection(const TSharedPtr
 TSharedPtr<FJsonValue> FAnimationHandlers::RemoveAnimCurve(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString CurveName;
 	if (auto Err = RequireString(Params, TEXT("curveName"), CurveName)) return Err;
@@ -813,7 +815,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveAnimCurve(const TSharedPtr<FJso
 TSharedPtr<FJsonValue> FAnimationHandlers::AddNotifyState(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString NotifyName;
 	if (auto Err = RequireString(Params, TEXT("notifyName"), NotifyName)) return Err;
@@ -821,13 +823,20 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddNotifyState(const TSharedPtr<FJson
 	FString StateClassName;
 	if (auto Err = RequireString(Params, TEXT("notifyStateClass"), StateClassName)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
 	double TriggerTime = 0.0;
-	if (!TryGetNumberParam(Params, TEXT("triggerTime"), TriggerTime))
+	const bool bHasTriggerTime = TryGetNumberParam(Params, TEXT("triggerTime"), TriggerTime);
+	double Duration = 0.0;
+	const bool bHasDuration = TryGetNumberParam(Params, TEXT("duration"), Duration);
+	const TSharedPtr<FJsonObject>* NotifyProperties = nullptr;
+	TryGetObjectParam(Params, TEXT("notifyProperties"), NotifyProperties);
+	bool bRequestedBranchingPoint = false;
+	const bool bHasBranchingPoint = TryGetBoolParam(Params, TEXT("branchingPoint"), bRequestedBranchingPoint);
+	if (!bHasTriggerTime)
 	{
 		return MCPError(TEXT("Missing required parameter 'triggerTime' (seconds from the start of the animation)"));
 	}
-	double Duration = 0.0;
-	if (!TryGetNumberParam(Params, TEXT("duration"), Duration))
+	if (!bHasDuration)
 	{
 		return MCPError(TEXT("Missing required parameter 'duration' (seconds; a notify state spans a window, which is what distinguishes it from add_notify)"));
 	}
@@ -903,9 +912,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddNotifyState(const TSharedPtr<FJson
 	// Build and configure the state object BEFORE touching the notify array, so
 	// a bad property name cannot leave a half-configured notify behind.
 	UAnimNotifyState* StateObject = NewObject<UAnimNotifyState>(AnimAsset, StateClass);
-	const TSharedPtr<FJsonObject>* NotifyProperties = nullptr;
-	if (TryGetObjectParam(Params, TEXT("notifyProperties"), NotifyProperties)
-		&& NotifyProperties && (*NotifyProperties).IsValid())
+	if (NotifyProperties && (*NotifyProperties).IsValid())
 	{
 		for (const auto& JsonEntry : (*NotifyProperties)->Values)
 		{
@@ -953,8 +960,8 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddNotifyState(const TSharedPtr<FJson
 	// Montage-only: a queued notify state ticks on the animation thread, a
 	// branching point ticks inline and is the only form montage branching logic
 	// observes. Left at the engine default unless asked, matching add_notify.
-	bool bBranchingPoint = false;
-	if (AnimAsset->IsA<UAnimMontage>() && TryGetBoolParam(Params, TEXT("branchingPoint"), bBranchingPoint) && bBranchingPoint)
+	const bool bBranchingPoint = AnimAsset->IsA<UAnimMontage>() && bHasBranchingPoint && bRequestedBranchingPoint;
+	if (bBranchingPoint)
 	{
 		NewEvent.MontageTickType = EMontageNotifyTickType::BranchingPoint;
 	}
@@ -990,7 +997,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddNotifyState(const TSharedPtr<FJson
 TSharedPtr<FJsonValue> FAnimationHandlers::RemoveNotifyState(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	const FString NotifyName = OptionalString(Params, TEXT("notifyName"));
 	const FString StateClassName = OptionalString(Params, TEXT("notifyStateClass"));

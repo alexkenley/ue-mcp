@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { animationTool } from "../../src/tools/animation.js";
+import { handlerSpecs } from "../../src/tools/specs/animation.generated.js";
 import type { ToolContext } from "../../src/types.js";
 
 describe("animation.create_control_rig (#1133)", () => {
@@ -8,11 +9,16 @@ describe("animation.create_control_rig (#1133)", () => {
     const action = animationTool.actions.create_control_rig;
     expect(action.bridge).toBe("create_control_rig");
     expect(action.effect).toBe("mutate");
-    expect(action.description).toContain("skeletalMeshPath? | skeletonPath?");
+    expect(action.description).toContain("Params: skeletalMeshPath?, skeletonPath?");
+    expect(action.description).toContain("Pass exactly one source");
     expect(action.description).toContain("delete_asset rollback");
   });
 
-  it("forwards only the creation parameters", async () => {
+  it("takes the creation parameters from its C++ spec (#1057)", async () => {
+    expect(animationTool.actions.create_control_rig.mapParams).toBeUndefined();
+    expect(handlerSpecs.create_control_rig.params.map((p) => p.name))
+      .toEqual(["skeletalMeshPath", "skeletonPath", "name", "packagePath", "onConflict"]);
+
     const call = vi.fn().mockResolvedValue({ success: true });
     const context = { bridge: { call } } as unknown as ToolContext;
 
@@ -22,12 +28,10 @@ describe("animation.create_control_rig (#1133)", () => {
       name: "CR_Hero",
       packagePath: "/Game/Rigs",
       onConflict: "error",
-      assetPath: "/Game/ShouldNotLeak",
     });
 
     expect(call).toHaveBeenCalledWith("create_control_rig", {
       skeletalMeshPath: "/Game/Meshes/SKM_Hero",
-      skeletonPath: undefined,
       name: "CR_Hero",
       packagePath: "/Game/Rigs",
       onConflict: "error",
