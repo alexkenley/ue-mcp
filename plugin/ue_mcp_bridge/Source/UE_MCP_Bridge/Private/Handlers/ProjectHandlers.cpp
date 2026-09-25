@@ -96,18 +96,27 @@ void FProjectHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// create_cpp_class triggers AddCodeToProject which regenerates IDE
 	// project files + kicks a Live Coding compile. Both are synchronous
 	// game-thread work and easily exceed the 30-second default.
-	Registry.RegisterHandlerWithTimeout(TEXT("create_cpp_class"), &CreateCppClass, 300.0f);
-
-	// #1057: the reads declare their parameters here. create_cpp_class,
-	// live_coding_compile and the plugin writers change source, binaries or the
-	// .uproject, so they stay unspecced and the spec contract test never calls them.
+	//
+	// #1057: every handler declares its parameters here. create_cpp_class and the
+	// plugin writers refuse an unresolvable class or plugin before they write, so
+	// the contract test calls them; live_coding_compile compiles whatever it is
+	// sent, so it is contract-exempt.
 	using EType = EMCPParamType;
+	Registry.RegisterHandlerWithTimeout(TEXT("create_cpp_class"), &CreateCppClass, 300.0f, {
+		MCPParam::Required(TEXT("className"), EType::String, TEXT("Class name without its prefix; the parent decides A or U")),
+		MCPParam::Optional(TEXT("parentClass"), EType::String, TEXT("Parent class as a short name (Actor) or /Script/<Module>.<Class> path (default UObject)")),
+		MCPParam::Optional(TEXT("moduleName"), EType::String, TEXT("Project module to add it to (default the first; list_project_modules names them)")),
+		MCPParam::Optional(TEXT("classDomain"), EType::String, TEXT("public | private | classes (default public)")),
+		MCPParam::Optional(TEXT("subPath"), EType::String, TEXT("Folder under the domain folder, e.g. Gameplay/Abilities (default its root)")),
+	});
 	Registry.RegisterHandler(TEXT("list_project_modules"), &ListProjectModules, {
 		MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: the nextCursor from the previous page, unmodified")),
 		MCPParam::Optional(TEXT("limit"), EType::Number, TEXT("Rows per page, a whole number (default 200, max 2000)")),
 	});
 	// live_coding_compile(wait=true) can also exceed 30s on a full rebuild.
-	Registry.RegisterHandlerWithTimeout(TEXT("live_coding_compile"), &LiveCodingCompile, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("live_coding_compile"), &LiveCodingCompile, 300.0f, {
+		MCPParam::Optional(TEXT("wait"), EType::Boolean, TEXT("Block until the compile finishes (default false returns in_progress)")),
+	}, MCPSpec::ContractExempt(TEXT("Starts a Live Coding compile of the running editor whatever it is sent")));
 	Registry.RegisterHandler(TEXT("live_coding_status"), &LiveCodingStatus, {});
 
 	// Plugin enablement. Bodies live in ProjectHandlers_Plugins.cpp.
@@ -118,8 +127,13 @@ void FProjectHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: the nextCursor from the previous page, unmodified")),
 		MCPParam::Optional(TEXT("limit"), EType::Number, TEXT("Rows per page, a whole number (default 200, max 2000)")),
 	});
-	Registry.RegisterHandler(TEXT("enable_plugin"), &EnablePlugin);
-	Registry.RegisterHandler(TEXT("disable_plugin"), &DisablePlugin);
+	Registry.RegisterHandler(TEXT("enable_plugin"), &EnablePlugin, {
+		MCPParam::Required(TEXT("pluginName"), EType::String, TEXT("Plugin name as its .uplugin spells it, any case")),
+	});
+	Registry.RegisterHandler(TEXT("disable_plugin"), &DisablePlugin, {
+		MCPParam::Required(TEXT("pluginName"), EType::String, TEXT("Plugin name as its .uplugin spells it, any case")),
+		MCPParam::Optional(TEXT("removeReference"), EType::Boolean, TEXT("Delete the .uproject entry instead of writing an explicit disable (default false)")),
+	});
 }
 
 // ─── create_cpp_class ────────────────────────────────────────────────
@@ -150,6 +164,14 @@ TSharedPtr<FJsonValue> FProjectHandlers::CreateCppClass(const TSharedPtr<FJsonOb
 	const FString TargetModule   = OptionalString(Params, TEXT("moduleName"), TEXT(""));
 	const FString ClassDomain    = OptionalString(Params, TEXT("classDomain"), TEXT("public")).ToLower();
 	const FString SubPath        = OptionalString(Params, TEXT("subPath"), TEXT(""));
+
+	// The folder mapping below falls through to Public, so a misspelt domain
+	// would write the header into the wrong folder and report success.
+	if (ClassDomain != TEXT("public") && ClassDomain != TEXT("private") && ClassDomain != TEXT("classes"))
+	{
+		return MCPError(FString::Printf(
+			TEXT("classDomain must be public, private or classes (got '%s')"), *ClassDomain));
+	}
 
 	const UClass* ParentClass = ResolveParentClass(ParentClassStr);
 	if (!ParentClass)

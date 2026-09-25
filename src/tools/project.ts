@@ -1038,20 +1038,10 @@ export const projectTool: ToolDef = categoryTool(
     // GameProjectUtils / ILiveCodingModule (same APIs used by the editor's
     // File → New C++ Class and Live Coding menus).
     create_cpp_class: {
-      kind: "bridge",
-      effect: "mutate",
-      description: "Create a new native UCLASS in a project module. Uses the same engine template path as File → New C++ Class. Writes .h + .cpp; returns both paths plus needsEditorRestart (true unless Live Coding successfully hot-reloaded). Params: className (no prefix), parentClass? (default UObject; accepts short names like 'Actor' or /Script/<Module>.<Class> paths), moduleName? (default: first project module, use list_project_modules to pick), classDomain? ('public'|'private'|'classes', default public), subPath?",
-      bridge: "create_cpp_class",
+      ...specBp("mutate", "Create a new native UCLASS in a project module. Uses the same engine template path as File → New C++ Class. Writes .h + .cpp; returns both paths plus needsEditorRestart (true unless Live Coding successfully hot-reloaded).", "create_cpp_class"),
       // AddCodeToProject regenerates IDE project files synchronously - can
       // easily exceed the default 30-second cap on first use.
       timeoutMs: 300_000,
-      mapParams: (p) => ({
-        className: p.className,
-        parentClass: p.parentClass,
-        moduleName: p.moduleName,
-        classDomain: p.classDomain,
-        subPath: p.subPath,
-      }),
     },
     list_project_modules: specBp("read", 
       "List native modules in the current project (name, host type, source path), in the .uproject's own declaration order. Feed moduleName from here into create_cpp_class.",
@@ -1070,23 +1060,17 @@ export const projectTool: ToolDef = categoryTool(
       "List every plugin installed in this engine or project, sorted by name, with its category, version, type, whether it is enabled in THIS editor session, whether it is enabled by default, and the .uproject's current reference to it under projectReference {present, enabled}. Those two disagree after enable_plugin until the editor restarts, which is the point of reporting both.",
       "list_available_plugins",
     ),
-    enable_plugin: bp("mutate", 
-      "Enable a plugin in the .uproject. Plugin enablement is neither a UPROPERTY nor an INI key, it is a JSON array in the .uproject read once at startup, so set_config cannot reach it and without this a plugin-gated capability stays permanently unreachable through the bridge. Idempotent: a plugin already enabled, or enabled by default with no entry, reports existed and writes nothing. The change is a file change, so modules, classes, content and settings appear only after editor(restart_editor), which the result says. Params: pluginName",
+    enable_plugin: specBp("mutate", 
+      "Enable a plugin in the .uproject. Plugin enablement is neither a UPROPERTY nor an INI key, it is a JSON array in the .uproject read once at startup, so set_config cannot reach it and without this a plugin-gated capability stays permanently unreachable through the bridge. Idempotent: a plugin already enabled, or enabled by default with no entry, reports existed and writes nothing. The change is a file change, so modules, classes, content and settings appear only after editor(restart_editor), which the result says.",
       "enable_plugin",
-      (p) => ({ pluginName: p.pluginName }),
     ),
-    disable_plugin: bp("mutate", 
-      "Disable a plugin in the .uproject. removeReference deletes the entry outright instead of writing an explicit disable, which is the difference between handing a default-on plugin back to its default and overriding it, and the two are not the same file. Idempotent against whichever of the two was asked for. Refuses to disable the bridge itself, since that would leave no way to undo it. Takes effect on the next editor start. Params: pluginName, removeReference?",
+    disable_plugin: specBp("mutate", 
+      "Disable a plugin in the .uproject. removeReference deletes the entry outright instead of writing an explicit disable, which is the difference between handing a default-on plugin back to its default and overriding it, and the two are not the same file. Idempotent against whichever of the two was asked for. Refuses to disable the bridge itself, since that would leave no way to undo it. Takes effect on the next editor start.",
       "disable_plugin",
-      (p) => ({ pluginName: p.pluginName, removeReference: p.removeReference }),
     ),
     live_coding_compile: {
-      kind: "bridge",
-      effect: "mutate",
-      description: "Trigger a Live Coding compile (Windows only). Hot-patches method bodies of existing UCLASSes without editor restart - the fast inner loop for UFUNCTION implementations. Does NOT reliably register brand-new UCLASSes; use build_project + editor restart for those. Params: wait? (default false - fire and return 'in_progress').",
-      bridge: "live_coding_compile",
+      ...specBp("mutate", "Trigger a Live Coding compile (Windows only). Hot-patches method bodies of existing UCLASSes without editor restart - the fast inner loop for UFUNCTION implementations. Does NOT reliably register brand-new UCLASSes; use build_project + editor restart for those.", "live_coding_compile"),
       timeoutMs: 300_000,
-      mapParams: (p) => ({ wait: p.wait }),
     },
     live_coding_status: specBp("read", 
       "Report Live Coding availability/state (available, started, enabledForSession, compiling). Helps choose between live_coding_compile and build_project.",
@@ -1664,10 +1648,8 @@ export const projectTool: ToolDef = categoryTool(
     configName: z.string().optional().describe("For read_config/set_config: config file name"),
     query: z.string().optional().describe("For search_config/search_cpp: search text"),
     headerPath: z.string().optional().describe("For read_cpp_header: path to .h file"),
-    moduleName: z.string().optional().describe("For read_module / is_module_loaded: module name"),
+    moduleName: z.string().optional().describe("For read_module / is_module_loaded: module name. create_cpp_class: project module to add the class to (default the first)"),
     filter: z.string().optional().describe("For list_loaded_modules and list_available_plugins: case-insensitive name substring (#689)"),
-    pluginName: z.string().optional().describe("enable_plugin / disable_plugin: plugin name as it appears in list_available_plugins, matched case-insensitively"),
-    removeReference: z.boolean().optional().describe("disable_plugin: delete the .uproject entry entirely instead of writing an explicit disable (default false)"),
     loadedOnly: z.boolean().optional().describe("For list_loaded_modules: only loaded modules (#689)"),
     limit: z.number().optional().describe("Max results: search_tools (default 20), find_example_usage (10), find_references (40), find_callers (25), find_callees (100), class_hierarchy descendants (100). The paged list actions: rows on this page (#704)"),
     // The paged list actions in this category resume on a cursor. `limit`
@@ -1712,15 +1694,6 @@ export const projectTool: ToolDef = categoryTool(
     subdirectory: z.string().optional().describe("For search_engine_cpp: subdirectory within the chosen tree"),
 
     // v0.7.13 - native C++ authoring
-    className: z.string().optional().describe("For create_cpp_class: new class name (no A/U prefix - handled by parent type)"),
-    parentClass: z.string().optional().describe("For create_cpp_class: parent UClass. Short native names ('Actor') or /Script/<Module>.<Class> paths work. Default UObject."),
-    // Stays a strict enum on purpose: create_cpp_class maps "private" and
-    // "classes" to their folders and falls through to Public for everything
-    // else, so a typo would write the header into the wrong folder and report
-    // the class as created.
-    classDomain: z.enum(["public", "private", "classes"]).optional().describe("For create_cpp_class: which folder under the module (Public/Private/Classes). Default 'public'."),
-    subPath: z.string().optional().describe("For create_cpp_class: nested folder under the class domain (e.g. 'Gameplay/Abilities')."),
-    wait: z.boolean().optional().describe("For live_coding_compile: block until compile finishes. Default false."),
     path: z.string().optional().describe("For write_cpp_file: path to write (relative to Source/ or absolute within Source/)."),
     content: z.string().optional().describe("For write_cpp_file: full file contents."),
     sourcePath: z.string().optional().describe("For read_cpp_source: path to .cpp (relative to Source/ or absolute)."),

@@ -1,5 +1,5 @@
 {
-  "handlerCount": 848,
+  "handlerCount": 852,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -5954,6 +5954,41 @@
         }
       ]
     },
+    "create_cpp_class": {
+      "category": "project",
+      "params": [
+        {
+          "name": "className",
+          "type": "string",
+          "required": true,
+          "description": "Class name without its prefix; the parent decides A or U"
+        },
+        {
+          "name": "parentClass",
+          "type": "string",
+          "required": false,
+          "description": "Parent class as a short name (Actor) or /Script/<Module>.<Class> path (default UObject)"
+        },
+        {
+          "name": "moduleName",
+          "type": "string",
+          "required": false,
+          "description": "Project module to add it to (default the first; list_project_modules names them)"
+        },
+        {
+          "name": "classDomain",
+          "type": "string",
+          "required": false,
+          "description": "public | private | classes (default public)"
+        },
+        {
+          "name": "subPath",
+          "type": "string",
+          "required": false,
+          "description": "Folder under the domain folder, e.g. Gameplay/Abilities (default its root)"
+        }
+      ]
+    },
     "create_customizable_object": {
       "category": "asset",
       "params": [
@@ -7291,6 +7326,23 @@
         }
       ]
     },
+    "disable_plugin": {
+      "category": "project",
+      "params": [
+        {
+          "name": "pluginName",
+          "type": "string",
+          "required": true,
+          "description": "Plugin name as its .uplugin spells it, any case"
+        },
+        {
+          "name": "removeReference",
+          "type": "boolean",
+          "required": false,
+          "description": "Delete the .uproject entry instead of writing an explicit disable (default false)"
+        }
+      ]
+    },
     "disconnect_graph_pins": {
       "category": "asset",
       "params": [
@@ -7747,6 +7799,17 @@
           "type": "number",
           "required": false,
           "description": "Enumerator index for rename_value and remove_value"
+        }
+      ]
+    },
+    "enable_plugin": {
+      "category": "project",
+      "params": [
+        {
+          "name": "pluginName",
+          "type": "string",
+          "required": true,
+          "description": "Plugin name as its .uplugin spells it, any case"
         }
       ]
     },
@@ -13828,6 +13891,18 @@
           "description": "Rows to return on this page (default 300, max 5000)"
         }
       ]
+    },
+    "live_coding_compile": {
+      "category": "project",
+      "params": [
+        {
+          "name": "wait",
+          "type": "boolean",
+          "required": false,
+          "description": "Block until the compile finishes (default false returns in_progress)"
+        }
+      ],
+      "contractExempt": "Starts a Live Coding compile of the running editor whatever it is sent"
     },
     "live_coding_status": {
       "category": "project",
