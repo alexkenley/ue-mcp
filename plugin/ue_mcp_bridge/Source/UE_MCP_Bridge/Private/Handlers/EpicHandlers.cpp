@@ -178,6 +178,13 @@ TSharedPtr<FJsonValue> FEpicHandlers::Status(const TSharedPtr<FJsonObject>& Para
 
 TSharedPtr<FJsonValue> FEpicHandlers::ListToolsets(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the registry check can fail (#1057).
+	const FString Filter = OptionalString(Params, TEXT("nameFilter"), TEXT(""));
+	// When true, return the full tool objects (name/description/input/output
+	// schema) instead of just tool names. Used by the server to build
+	// per-category first-class actions from the live catalog in a single call.
+	const bool bIncludeSchemas = OptionalBool(Params, TEXT("includeSchemas"), false);
+
 	FString Raw;
 	if (!UEMCPEpic::GetAllSchemas(Raw))
 	{
@@ -189,12 +196,6 @@ TSharedPtr<FJsonValue> FEpicHandlers::ListToolsets(const TSharedPtr<FJsonObject>
 	{
 		return MCPError(TEXT("Failed to parse toolset schemas returned by the registry"));
 	}
-
-	const FString Filter = OptionalString(Params, TEXT("nameFilter"), TEXT(""));
-	// When true, return the full tool objects (name/description/input/output
-	// schema) instead of just tool names. Used by the server to build
-	// per-category first-class actions from the live catalog in a single call.
-	const bool bIncludeSchemas = OptionalBool(Params, TEXT("includeSchemas"), false);
 
 	TArray<TSharedPtr<FJsonValue>> OutList;
 	for (const TSharedPtr<FJsonValue>& V : Arr)
@@ -401,8 +402,19 @@ void FEpicHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("epic"));
-	Registry.RegisterHandler(TEXT("epic_status"), &Status);
-	Registry.RegisterHandler(TEXT("epic_list_toolsets"), &ListToolsets);
-	Registry.RegisterHandler(TEXT("epic_describe_toolset"), &DescribeToolset);
+
+	// #1057: the discovery handlers declare their parameters here.
+	using EType = EMCPParamType;
+	Registry.RegisterHandler(TEXT("epic_status"), &Status, {});
+	Registry.RegisterHandler(TEXT("epic_list_toolsets"), &ListToolsets, {
+		MCPParam::Optional(TEXT("nameFilter"), EType::String, TEXT("Case-sensitive substring of the qualified toolset name")),
+		MCPParam::Optional(TEXT("includeSchemas"), EType::Boolean, TEXT("Return each tool with its input and output schemas instead of its name (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("epic_describe_toolset"), &DescribeToolset, {
+		MCPParam::Required(TEXT("toolset"), EType::String, TEXT("Qualified toolset name from epic_list_toolsets, e.g. GASToolsets.AttributeSetToolset")),
+	});
+	// Unspecced: every generated epic_* action in every category dispatches
+	// here and builds this bag in its own mapParams from the wrapped tool's
+	// schema, so a spec would have to replace all of them.
 	Registry.RegisterHandler(TEXT("epic_call_tool"), &CallTool);
 }

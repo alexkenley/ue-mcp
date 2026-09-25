@@ -48,6 +48,7 @@
 #include "Handlers/ChooserHandlers.h"
 #include "Handlers/DemoHandlers.h"
 #include "Handlers/DiffHandlers.h"
+#include "Handlers/EpicHandlers.h"
 #include "Handlers/ReflectionHandlers.h"
 #include "Handlers/FoliageHandlers.h"
 #include "Handlers/LandscapeHandlers.h"
@@ -211,6 +212,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FChooserHandlers::RegisterHandlers(Registry);
 	FDemoHandlers::RegisterHandlers(Registry);
 	FDiffHandlers::RegisterHandlers(Registry);
+	FEpicHandlers::RegisterHandlers(Registry);
 	FReflectionHandlers::RegisterHandlers(Registry);
 	FFoliageHandlers::RegisterHandlers(Registry);
 	FLandscapeHandlers::RegisterHandlers(Registry);

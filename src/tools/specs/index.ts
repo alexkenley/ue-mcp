@@ -12,6 +12,7 @@ import { handlerSpecs as blueprint } from "./blueprint.generated.js";
 import { handlerSpecs as chooser } from "./chooser.generated.js";
 import { handlerSpecs as demo } from "./demo.generated.js";
 import { handlerSpecs as editor } from "./editor.generated.js";
+import { handlerSpecs as epic } from "./epic.generated.js";
 import { handlerSpecs as fab } from "./fab.generated.js";
 import { handlerSpecs as foliage } from "./foliage.generated.js";
 import { handlerSpecs as gameplay } from "./gameplay.generated.js";
@@ -38,6 +39,7 @@ export const RECORDED_HANDLER_SPECS: HandlerSpecs = {
   ...chooser,
   ...demo,
   ...editor,
+  ...epic,
   ...fab,
   ...foliage,
   ...gameplay,

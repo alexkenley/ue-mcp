@@ -1,5 +1,5 @@
 {
-  "handlerCount": 852,
+  "handlerCount": 855,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -7823,6 +7823,38 @@
           "description": "Name the region was opened under"
         }
       ]
+    },
+    "epic_describe_toolset": {
+      "category": "epic",
+      "params": [
+        {
+          "name": "toolset",
+          "type": "string",
+          "required": true,
+          "description": "Qualified toolset name from epic_list_toolsets, e.g. GASToolsets.AttributeSetToolset"
+        }
+      ]
+    },
+    "epic_list_toolsets": {
+      "category": "epic",
+      "params": [
+        {
+          "name": "nameFilter",
+          "type": "string",
+          "required": false,
+          "description": "Case-sensitive substring of the qualified toolset name"
+        },
+        {
+          "name": "includeSchemas",
+          "type": "boolean",
+          "required": false,
+          "description": "Return each tool with its input and output schemas instead of its name (default false)"
+        }
+      ]
+    },
+    "epic_status": {
+      "category": "epic",
+      "params": []
     },
     "export_actor_fbx": {
       "category": "level",
