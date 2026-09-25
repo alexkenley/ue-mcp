@@ -819,6 +819,26 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "set_material_base_color": {
+    "category": "material",
+    "params": [
+      {
+        "name": "assetPath",
+        "type": "string",
+        "required": true,
+        "description": "Material asset path",
+        "aliases": [
+          "path"
+        ]
+      },
+      {
+        "name": "color",
+        "type": "color",
+        "required": true,
+        "description": "Base colour {r, g, b, a?}; a channel left out is 1"
+      }
+    ]
+  },
   "set_material_blend_mode": {
     "category": "material",
     "params": [
@@ -993,6 +1013,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   read_runtime_virtual_texture: "Params: rvtPath (or assetPath)",
   recompile_material: "Params: materialPath (or path, or assetPath), recompileChildren?",
   render_material_preview: "Params: assetPath (or materialPath), outputPath, width?, height?",
+  set_material_base_color: "Params: assetPath (or path), color",
   set_material_blend_mode: "Params: assetPath (or path), blendMode",
   set_material_domain: "Params: assetPath (or path), materialDomain (or domain)",
   set_material_instance_parent: "Params: assetPath (or path, or materialPath), newParentPath (or parentPath)",
@@ -1004,11 +1025,12 @@ export const paramsClauses: Readonly<Record<string, string>> = {
 /** Every key the spec'd material handlers declare, aliases included. */
 export const schema: Record<string, z.ZodType> = {
   actorLabel: z.string().optional().describe("Editor label for the new volume (default RVTVolume_<rvt name>)"),
-  assetPath: z.string().optional().describe("Alias for materialPath (add_rvt_output, add_rvt_sampler, connect_material_expressions, connect_texture_to_material, connect_to_material_property, disconnect_material_property, list_material_expressions, read_material_graph, recompile_material). Alias for rvtPath (add_rvt_volume, read_runtime_virtual_texture). Material asset path (build_material_graph, export_material_graph, get_material_shader_stats, import_material_graph, render_material_preview, set_material_blend_mode, set_material_domain, set_material_shading_model, validate_material). MaterialInstanceConstant asset path (clear_material_instance_parameters, set_material_instance_parent, set_material_static_switch). Material or MaterialInstance asset path (get_material_usage, list_material_parameters, list_material_static_switches, read_material). MaterialParameterCollection asset path (read_material_parameter_collection)"),
+  assetPath: z.string().optional().describe("Alias for materialPath (add_rvt_output, add_rvt_sampler, connect_material_expressions, connect_texture_to_material, connect_to_material_property, disconnect_material_property, list_material_expressions, read_material_graph, recompile_material). Alias for rvtPath (add_rvt_volume, read_runtime_virtual_texture). Material asset path (build_material_graph, export_material_graph, get_material_shader_stats, import_material_graph, render_material_preview, set_material_base_color, set_material_blend_mode, set_material_domain, set_material_shading_model, validate_material). MaterialInstanceConstant asset path (clear_material_instance_parameters, set_material_instance_parent, set_material_static_switch). Material or MaterialInstance asset path (get_material_usage, list_material_parameters, list_material_static_switches, read_material). MaterialParameterCollection asset path (read_material_parameter_collection)"),
   association: z.string().optional().describe("Material parameter association: Global, Layer, or Blend"),
   blendMode: z.string().optional().describe("Blend mode: Opaque, Masked, Translucent, Additive, Modulate, AlphaComposite, AlphaHoldout"),
   boundsAlignActor: z.string().optional().describe("Actor label or object path whose rotation and bounds the volume aligns to, typically the landscape"),
   boundsMode: z.string().optional().describe("writers (cover every primitive writing into this RVT) | alignActor (match one actor's box and rotation)"),
+  color: z.object({ r: z.number(), g: z.number(), b: z.number(), a: z.number().optional() }).optional().describe("Base colour {r, g, b, a?}; a channel left out is 1"),
   connectOutputs: z.boolean().optional().describe("Connect each sample output to the material property of the same name (default true)"),
   cursor: z.string().optional().describe("Resume a paged read: pass back the 'nextCursor' from the previous page, unmodified"),
   domain: z.string().optional().describe("Alias for materialDomain"),
@@ -1035,7 +1057,7 @@ export const schema: Record<string, z.ZodType> = {
   parameterIndex: z.number().optional().describe("Material layer/blend parameter index"),
   parameterName: z.string().optional().describe("Material parameter name"),
   parentPath: z.string().optional().describe("Alias for newParentPath"),
-  path: z.string().optional().describe("Alias for assetPath (clear_material_instance_parameters, get_material_usage, list_material_parameters, list_material_static_switches, read_material, read_material_parameter_collection, set_material_blend_mode, set_material_domain, set_material_instance_parent, set_material_shading_model, set_material_static_switch). Alias for materialPath (connect_material_expressions, connect_texture_to_material, connect_to_material_property, list_material_expressions, read_material_graph, recompile_material)"),
+  path: z.string().optional().describe("Alias for assetPath (clear_material_instance_parameters, get_material_usage, list_material_parameters, list_material_static_switches, read_material, read_material_parameter_collection, set_material_base_color, set_material_blend_mode, set_material_domain, set_material_instance_parent, set_material_shading_model, set_material_static_switch). Alias for materialPath (connect_material_expressions, connect_texture_to_material, connect_to_material_property, list_material_expressions, read_material_graph, recompile_material)"),
   pieInstance: z.number().optional().describe("Which PIE world when several run (0 = server/primary). See editor(list_pie_instances)"),
   positionX: z.number().optional().describe("Graph editor X position for a new node"),
   positionY: z.number().optional().describe("Graph editor Y position for a new node"),

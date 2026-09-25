@@ -1,5 +1,5 @@
 {
-  "handlerCount": 828,
+  "handlerCount": 829,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -21402,6 +21402,26 @@
           "type": "boolean",
           "required": false,
           "description": "Persist the asset (default true); false defers the write"
+        }
+      ]
+    },
+    "set_material_base_color": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "color",
+          "type": "color",
+          "required": true,
+          "description": "Base colour {r, g, b, a?}; a channel left out is 1"
         }
       ]
     },

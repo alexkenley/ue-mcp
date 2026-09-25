@@ -777,7 +777,7 @@ Nothing outside these modes ever answers a dialog by itself. `editor(set_dialog_
 | `set_shading_model` | Set shading model. Params: `assetPath (or path), shadingModel` |
 | `set_blend_mode` | Set blend mode. Params: `assetPath (or path), blendMode` |
 | `set_domain` | Set material domain. Required for post-process / decal / UI authoring (#299/#356). Params: `assetPath (or path), materialDomain (or domain)` |
-| `set_base_color` | Set base color. Params: `assetPath, color` |
+| `set_base_color` | Set base color. Params: `assetPath (or path), color` |
 | `connect_texture` | Connect texture to property. Params: `materialPath (or path, or assetPath), texturePath, property? (or materialProperty)` |
 | `add_expression` | Add expression node. Params: `materialPath, expressionType, name?, parameterName?, group?, sortPriority?, defaultValue? (scalar number or {r,g,b,a} for vector params), value? (number for Constant, {r,g,b} for Constant3Vector, {x,y} for Constant2Vector), channels? ({r,g,b,a} bools for ComponentMask), positionX?, positionY? (#318)` |
 | `connect_expressions` | Wire two expressions. Params: `materialPath (or path, or assetPath), sourceExpression, sourceOutput?, targetExpression, targetInput?` |

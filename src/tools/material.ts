@@ -35,7 +35,7 @@ export const materialTool: ToolDef = categoryTool(
     set_shading_model: specBp("mutate", "Set shading model.", "set_material_shading_model"),
     set_blend_mode:    specBp("mutate", "Set blend mode.", "set_material_blend_mode"),
     set_domain:        specBp("mutate", "Set material domain. Required for post-process / decal / UI authoring (#299/#356).", "set_material_domain"),
-    set_base_color:    bp("mutate", "Set base color. Params: assetPath, color", "set_material_base_color"),
+    set_base_color:    specBp("mutate", "Set base color.", "set_material_base_color"),
     connect_texture:   specBp("mutate", "Connect texture to property.", "connect_texture_to_material"),
     add_expression:    bp("mutate", "Add expression node. Params: materialPath, expressionType, name?, parameterName?, group?, sortPriority?, defaultValue? (scalar number or {r,g,b,a} for vector params), value? (number for Constant, {r,g,b} for Constant3Vector, {x,y} for Constant2Vector), channels? ({r,g,b,a} bools for ComponentMask), positionX?, positionY? (#318)", "add_material_expression"),
     connect_expressions: specBp("mutate", "Wire two expressions.", "connect_material_expressions"),

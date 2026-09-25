@@ -66,9 +66,8 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// transaction pair, which the contract test would see write; every action
 	// whose parameters are a required choice (materialPath OR functionPath,
 	// assetPath OR actorLabel/actorPath, usage OR usages), which a spec cannot
-	// express yet; and set_material_parameter, set_material_base_color and
-	// add_material_expression, whose value, color and defaultValue take shapes
-	// no spec type describes.
+	// express yet; and set_material_parameter and add_material_expression,
+	// whose value and defaultValue take shapes not yet declared.
 	using EType = EMCPParamType;
 	auto SpecAssetPath = [](const TCHAR* Description)
 	{
@@ -172,7 +171,10 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		SpecAssetPath(TEXT("Material asset path")),
 		MCPParam::Required(TEXT("materialDomain"), EType::String, TEXT("Material domain: Surface, DeferredDecal, LightFunction, Volume, PostProcess, UI, RuntimeVirtualTexture")).Alias(TEXT("domain")),
 	});
-	Registry.RegisterHandler(TEXT("set_material_base_color"), &SetMaterialBaseColor);
+	Registry.RegisterHandler(TEXT("set_material_base_color"), &SetMaterialBaseColor, {
+		SpecAssetPath(TEXT("Material asset path")),
+		MCPParam::Required(TEXT("color"), EType::Color, TEXT("Base colour {r, g, b, a?}; a channel left out is 1")),
+	});
 	Registry.RegisterHandler(TEXT("add_material_expression"), &AddMaterialExpression);
 	Registry.RegisterHandler(TEXT("list_material_expressions"), &ListMaterialExpressions, {
 		SpecMaterialPath(),
@@ -1609,8 +1611,9 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialBlendMode(const TSharedPtr<
 
 TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialBaseColor(const TSharedPtr<FJsonObject>& Params)
 {
+	// 'path' is the spec's alias, renamed to assetPath before this runs.
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	const TSharedPtr<FJsonObject>* ColorObj = nullptr;
 	if (!TryGetObjectParam(Params, TEXT("color"), ColorObj))
