@@ -424,7 +424,8 @@ TSharedPtr<FJsonValue> FPCGHandlers::AddPCGNode(const TSharedPtr<FJsonObject>& P
 	DefaultSettings->PostEditChange();
 
 	double PosX = 0, PosY = 0;
-	if (TryGetNumberParam(Params, TEXT("posX"), PosX) || TryGetNumberParam(Params, TEXT("posY"), PosY))
+	// Bitwise | so both are read; || ignored posY whenever posX was given.
+	if (TryGetNumberParam(Params, TEXT("posX"), PosX) | TryGetNumberParam(Params, TEXT("posY"), PosY))
 	{
 		NewNode->PositionX = (int32)PosX;
 		NewNode->PositionY = (int32)PosY;

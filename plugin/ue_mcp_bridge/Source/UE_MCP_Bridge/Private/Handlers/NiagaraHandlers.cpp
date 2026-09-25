@@ -429,8 +429,9 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::SpawnNiagaraAtLocation(const TSharedPtr
 	// Parse scale
 	FVector Scale = FVector::OneVector;
 	double ScaleX = 1, ScaleY = 1, ScaleZ = 1;
-	if (TryGetNumberParam(Params, TEXT("scaleX"), ScaleX) ||
-		TryGetNumberParam(Params, TEXT("scaleY"), ScaleY) ||
+	// Bitwise | so every axis is read; || stopped at the first one present.
+	if (TryGetNumberParam(Params, TEXT("scaleX"), ScaleX) |
+		TryGetNumberParam(Params, TEXT("scaleY"), ScaleY) |
 		TryGetNumberParam(Params, TEXT("scaleZ"), ScaleZ))
 	{
 		Scale = FVector(ScaleX, ScaleY, ScaleZ);
