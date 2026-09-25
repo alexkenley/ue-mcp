@@ -87,6 +87,8 @@ private:
 	static TSharedPtr<FJsonValue> AddGraphNode(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> RemoveGraphNode(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> CompileCustomizableObject(const TSharedPtr<FJsonObject>& Params);
+	// A CustomizableObject with its Source graph, through Mutable's factory.
+	static TSharedPtr<FJsonValue> CreateCustomizableObject(const TSharedPtr<FJsonObject>& Params);
 	// A named subobject inside an existing asset's package (#975). Lives in
 	// AssetHandlers_Subobject.cpp.
 	static TSharedPtr<FJsonValue> CreateSubobject(const TSharedPtr<FJsonObject>& Params);

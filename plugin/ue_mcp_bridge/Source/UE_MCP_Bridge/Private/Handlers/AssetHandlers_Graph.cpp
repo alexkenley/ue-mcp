@@ -19,7 +19,11 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
+#include "AssetToolsModule.h"
 #include "EdGraph/EdGraphSchema.h"
+#include "Factories/Factory.h"
+#include "IAssetTools.h"
+#include "Misc/PackageName.h"
 #include "Misc/OutputDevice.h"
 #include "ScopedTransaction.h"
 #include "UObject/StructOnScope.h"
@@ -181,6 +185,21 @@ namespace
 
 namespace
 {
+	/** What to do about an asset whose graph was never built, when this type has an answer. */
+	FString MCPGraphMissingHint(const UObject* Asset)
+	{
+		for (const UClass* Class = Asset ? Asset->GetClass() : nullptr; Class; Class = Class->GetSuperClass())
+		{
+			if (Class->GetFName() == FName(TEXT("CustomizableObject")))
+			{
+				return TEXT(" A CustomizableObject gets its Source graph and Base Object node from Mutable's factory: ")
+					TEXT("create it with asset(action=\"create_customizable_object\"). One made by create_asset_by_class ")
+					TEXT("has no graph.");
+			}
+		}
+		return FString();
+	}
+
 	/** The action that already owns this asset type's graph, or null. */
 	const TCHAR* MCPGraphReaderFor(const UObject* Asset)
 	{
@@ -245,8 +264,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadAssetGraph(const TSharedPtr<FJsonObje
 		Empty->SetStringField(TEXT("note"), FString::Printf(
 			TEXT("No UEdGraph was reachable from '%s' (a %s). Searched its subobjects and its own graph-typed ")
 			TEXT("properties. A type whose graph is built by its own editor holds none until that editor has ")
-			TEXT("opened it."),
-			*AssetPath, *Asset->GetClass()->GetName()));
+			TEXT("opened it.%s"),
+			*AssetPath, *Asset->GetClass()->GetName(), *MCPGraphMissingHint(Asset)));
 		return MCPResult(Empty);
 	}
 
@@ -381,8 +400,8 @@ namespace
 		{
 			return MCPError(FString::Printf(
 				TEXT("No UEdGraph is reachable from '%s' (a %s), so there is nothing to author. A type whose graph ")
-				TEXT("is built by its own editor holds none until that editor has opened it."),
-				*Ctx.AssetPath, *Ctx.Asset->GetClass()->GetName()));
+				TEXT("is built by its own editor holds none until that editor has opened it.%s"),
+				*Ctx.AssetPath, *Ctx.Asset->GetClass()->GetName(), *MCPGraphMissingHint(Ctx.Asset)));
 		}
 
 		const FString GraphName = OptionalString(Params, TEXT("graphName"));
@@ -1461,6 +1480,165 @@ TSharedPtr<FJsonValue> FAssetHandlers::CompileCustomizableObject(const TSharedPt
 		Result->SetStringField(TEXT("error"), Errors.Num() > 0
 			? FString::Printf(TEXT("Compile of '%s' failed with %d error(s); the first: %s"), *AssetPath, Errors.Num(), *Errors[0])
 			: FString::Printf(TEXT("Compile of '%s' did not produce a compiled object. See warnings and the Mutable message log."), *AssetPath));
+	}
+	return MCPResult(Result);
+}
+
+TSharedPtr<FJsonValue> FAssetHandlers::CreateCustomizableObject(const TSharedPtr<FJsonObject>& Params)
+{
+	MCP_CHECK_GAME_THREAD();
+	FString Name;
+	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
+	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game"));
+	while (PackagePath.Len() > 1 && PackagePath.EndsWith(TEXT("/"))) PackagePath.LeftChopInline(1);
+	FText InvalidReason;
+	if (!FPackageName::IsValidLongPackageName(PackagePath + TEXT("/") + Name, true, &InvalidReason))
+	{
+		return MCPError(FString::Printf(TEXT("Invalid destination '%s/%s': %s"), *PackagePath, *Name, *InvalidReason.ToString()));
+	}
+	if (MCPIsProtectedAssetPath(PackagePath)) return MCPProtectedPathError(PackagePath);
+
+	FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	OnConflict.ToLowerInline();
+	if (OnConflict != TEXT("skip") && OnConflict != TEXT("error"))
+	{
+		return MCPError(TEXT("onConflict must be 'skip' or 'error'"));
+	}
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
+
+	UClass* ObjectClass = FindObject<UClass>(nullptr, TEXT("/Script/CustomizableObject.CustomizableObject"));
+	if (!ObjectClass)
+	{
+		return MCPError(TEXT("Mutable plugin not available: the CustomizableObject module is not loaded. Enable the Mutable plugin and restart the editor."));
+	}
+
+	const FString AssetPath = PackagePath + TEXT("/") + Name;
+	const FString ObjectPath = AssetPath + TEXT(".") + Name;
+
+	// The graph, its schema and every node with pins, so the caller can wire straight away.
+	auto Describe = [](UObject* Object, const TSharedPtr<FJsonObject>& Result) -> int32
+	{
+		TArray<UEdGraph*> Graphs;
+		CollectGraphs(Object, Graphs);
+		TArray<TSharedPtr<FJsonValue>> GraphsJson;
+		for (UEdGraph* Graph : Graphs)
+		{
+			if (!Graph) continue;
+			TSharedPtr<FJsonObject> GraphJson = MakeShared<FJsonObject>();
+			GraphJson->SetStringField(TEXT("graphName"), Graph->GetName());
+			GraphJson->SetStringField(TEXT("schema"), Graph->Schema ? Graph->Schema->GetName() : TEXT(""));
+			TArray<TSharedPtr<FJsonValue>> Nodes;
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (!Node) continue;
+				TSharedPtr<FJsonObject> NodeJsonObj = MCPGraphAuthorNodeJson(Node);
+				TArray<TSharedPtr<FJsonValue>> Pins;
+				for (const UEdGraphPin* Pin : Node->Pins) if (Pin) Pins.Add(MakeShared<FJsonValueObject>(PinJson(*Pin)));
+				NodeJsonObj->SetArrayField(TEXT("pins"), Pins);
+				Nodes.Add(MakeShared<FJsonValueObject>(NodeJsonObj));
+				if (!Result->HasField(TEXT("rootNode"))) Result->SetObjectField(TEXT("rootNode"), NodeJsonObj);
+			}
+			GraphJson->SetArrayField(TEXT("nodes"), Nodes);
+			GraphsJson.Add(MakeShared<FJsonValueObject>(GraphJson));
+			if (!Result->HasField(TEXT("graphName"))) Result->SetStringField(TEXT("graphName"), Graph->GetName());
+		}
+		Result->SetArrayField(TEXT("graphs"), GraphsJson);
+		return GraphsJson.Num();
+	};
+
+	if (UObject* Existing = LoadObject<UObject>(nullptr, *ObjectPath))
+	{
+		if (!Existing->IsA(ObjectClass))
+		{
+			return MCPError(FString::Printf(TEXT("'%s' is already taken by a %s."), *ObjectPath, *Existing->GetClass()->GetName()));
+		}
+		if (OnConflict == TEXT("error"))
+		{
+			return MCPError(FString::Printf(TEXT("CustomizableObject '%s' already exists"), *ObjectPath));
+		}
+		auto Existed = MCPSuccess();
+		MCPSetExisted(Existed);
+		Existed->SetStringField(TEXT("assetPath"), AssetPath);
+		Existed->SetStringField(TEXT("objectPath"), Existing->GetPathName());
+		if (Describe(Existing, Existed) == 0)
+		{
+			Existed->SetStringField(TEXT("note"), TEXT("The existing asset has no graph; it was not made by Mutable's factory. Delete it and create it again here."));
+		}
+		return MCPResult(Existed);
+	}
+
+	// Mutable's own factory builds the Source graph and adds the Base Object
+	// node (UCustomizableObjectGraph::AddEssentialGraphNodes).
+	UObject* Created = nullptr;
+	FString CreatedVia;
+	if (UClass* FactoryClass = FindObject<UClass>(nullptr, TEXT("/Script/CustomizableObjectEditor.CustomizableObjectFactory")))
+	{
+		UFactory* Factory = NewObject<UFactory>(GetTransientPackage(), FactoryClass);
+		IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
+		Created = AssetTools.CreateAsset(Name, PackagePath, ObjectClass, Factory);
+		CreatedVia = TEXT("CustomizableObjectFactory");
+	}
+	// The editor library's NewCustomizableObject builds the same graph.
+	if (!Created)
+	{
+		UClass* LibraryClass = FindObject<UClass>(nullptr, TEXT("/Script/CustomizableObjectEditor.CustomizableObjectEditorFunctionLibrary"));
+		UFunction* NewObjectFunc = LibraryClass ? LibraryClass->FindFunctionByName(TEXT("NewCustomizableObject")) : nullptr;
+		if (NewObjectFunc)
+		{
+			FStructOnScope Frame(NewObjectFunc);
+			uint8* Memory = Frame.GetStructMemory();
+			for (TFieldIterator<FProperty> It(NewObjectFunc); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+			{
+				FStructProperty* StructProp = CastField<FStructProperty>(*It);
+				if (!StructProp) continue;
+				void* StructPtr = StructProp->ContainerPtrToValuePtr<void>(Memory);
+				if (FStrProperty* PathProp = CastField<FStrProperty>(StructProp->Struct->FindPropertyByName(TEXT("PackagePath"))))
+				{
+					PathProp->SetPropertyValue_InContainer(StructPtr, PackagePath);
+				}
+				if (FStrProperty* NameProp = CastField<FStrProperty>(StructProp->Struct->FindPropertyByName(TEXT("AssetName"))))
+				{
+					NameProp->SetPropertyValue_InContainer(StructPtr, Name);
+				}
+			}
+			LibraryClass->GetDefaultObject()->ProcessEvent(NewObjectFunc, Memory);
+			if (FObjectPropertyBase* Ret = CastField<FObjectPropertyBase>(NewObjectFunc->GetReturnProperty()))
+			{
+				Created = Ret->GetObjectPropertyValue_InContainer(Memory);
+			}
+			CreatedVia = TEXT("CustomizableObjectEditorFunctionLibrary.NewCustomizableObject");
+		}
+	}
+	if (!Created)
+	{
+		return MCPError(TEXT("Mutable plugin not available: neither CustomizableObjectFactory nor NewCustomizableObject could create the asset. Is the CustomizableObjectEditor module loaded?"));
+	}
+
+	auto Result = MCPSuccess();
+	MCPSetCreated(Result);
+	Result->SetStringField(TEXT("assetPath"), AssetPath);
+	Result->SetStringField(TEXT("objectPath"), Created->GetPathName());
+	Result->SetStringField(TEXT("createdVia"), CreatedVia);
+	MCPSetDeleteAssetRollback(Result, AssetPath);
+	if (Describe(Created, Result) == 0)
+	{
+		Result->SetBoolField(TEXT("success"), false);
+		Result->SetStringField(TEXT("error"), FString::Printf(
+			TEXT("%s created '%s' but it holds no graph, so nothing can be authored in it. Delete it with the rollback."),
+			*CreatedVia, *ObjectPath));
+		return MCPResult(Result);
+	}
+
+	if (bSave)
+	{
+		FString Reason;
+		const bool bSaved = SaveAssetPackageChecked(Created, Reason);
+		MCPNoteSaveOutcome(Result, AssetPath, bSaved, Reason);
+	}
+	else
+	{
+		Created->MarkPackageDirty();
+		Result->SetBoolField(TEXT("saved"), false);
 	}
 	return MCPResult(Result);
 }

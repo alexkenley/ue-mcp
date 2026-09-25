@@ -1,25 +1,31 @@
-// asset graph authoring (#1059) on a SoundCue: a schema-driven EdGraph that
-// every editor has, so the generic path is exercised without Mutable.
+// asset graph authoring (#1059) on a Mutable CustomizableObject, the graph
+// type the actions were built for. Skips when Mutable is not enabled.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { callBridge, disconnectBridge, getBridge, TEST_PREFIX } from "../setup.js";
 import type { EditorBridge } from "../../src/bridge.js";
 
-interface Pin { name: string; pinId: string; direction: string; linkCount?: number }
-interface Node { name: string; nodeGuid: string; path: string; class: string; pins?: Pin[] }
+interface Pin { name: string; pinId: string; direction: string }
+interface Node { nodeGuid: string; nodePath: string; nodeClass: string; pins: Pin[] }
+/** A handler's own answer. A JSON-RPC result with success=false is still ok=true in this harness. */
+type Answer = Record<string, unknown> & { success?: boolean; error?: string };
 
 let bridge: EditorBridge;
-const assetName = `SC_GraphAuthoring_${process.pid}`;
+let hasMutable = false;
+const assetName = `CO_GraphAuthoring_${process.pid}`;
 const assetPath = `${TEST_PREFIX}/${assetName}`;
 
-async function readNodes(): Promise<Node[]> {
-  const read = await callBridge(bridge, "read_asset_graph", { assetPath });
-  expect(read.ok, read.error).toBe(true);
-  const graphs = (read.result as { graphs?: { nodes?: Node[] }[] }).graphs ?? [];
-  return graphs.flatMap((g) => g.nodes ?? []);
+async function answer(method: string, params: Record<string, unknown>): Promise<Answer> {
+  const r = await callBridge(bridge, method, params);
+  expect(r.ok, r.error).toBe(true);
+  return r.result as Answer;
 }
 
 beforeAll(async () => {
   bridge = await getBridge();
+  await callBridge(bridge, "delete_asset", { assetPath, force: true }).catch(() => {});
+  const created = await answer("create_customizable_object", { name: assetName, packagePath: TEST_PREFIX, save: false });
+  hasMutable = created.success === true;
+  if (!hasMutable) expect(created.error).toMatch(/Mutable plugin not available/);
 }, 60_000);
 
 afterAll(async () => {
@@ -28,56 +34,68 @@ afterAll(async () => {
 });
 
 describe("asset - graph authoring through the schema", () => {
-  it("adds, connects, disconnects and removes a node", async () => {
-    await callBridge(bridge, "delete_asset", { assetPath, force: true }).catch(() => {});
-    const created = await callBridge(bridge, "create_sound_cue", { name: assetName, packagePath: TEST_PREFIX });
-    expect(created.ok, created.error).toBe(true);
+  it("adds, connects, disconnects and removes a node, then compiles", async ({ skip }) => {
+    if (!hasMutable) skip();
 
-    const root = (await readNodes()).find((n) => n.class === "SoundCueGraphNode_Root");
-    expect(root, "the cue has a root node").toBeDefined();
-    const rootInput = root!.pins!.find((p) => p.direction === "input")!;
-    expect(rootInput).toBeDefined();
+    const read = await answer("read_asset_graph", { assetPath });
+    const graphs = (read.graphs as { nodes: (Node & { class: string; pins: Pin[] })[] }[]) ?? [];
+    const base = graphs[0]?.nodes.find((n) => n.class === "CustomizableObjectNodeObject");
+    expect(base, "the factory adds a Base Object node").toBeDefined();
+    const components = base!.pins.find((p) => p.name === "Components")!;
+    expect(components).toBeDefined();
 
-    const added = await callBridge(bridge, "add_graph_node", {
-      assetPath, nodeClass: "SoundNodeAttenuation", posX: -300, posY: 0, save: false,
+    const add = await answer("add_graph_node", {
+      assetPath, nodeClass: "CONodeComponentSkeletalMesh", posX: -400, posY: 0, save: false,
     });
-    expect(added.ok, added.error).toBe(true);
-    const add = added.result as { nodeGuid: string; nodePath: string; createdVia: string; pins: Pin[] };
+    expect(add.success, add.error).toBe(true);
     expect(add.createdVia).toBe("schema_action");
-    const output = add.pins.find((p) => p.direction === "output")!;
+    const output = (add.pins as Pin[]).find((p) => p.direction === "output")!;
     expect(output, "the new node has an output pin").toBeDefined();
 
-    const connected = await callBridge(bridge, "connect_graph_pins", {
-      assetPath, sourceNode: add.nodeGuid, sourcePinId: output.pinId, targetPinId: rootInput.pinId, save: false,
+    const connected = await answer("connect_graph_pins", {
+      assetPath, sourceNode: add.nodeGuid, sourcePinId: output.pinId, targetPinId: components.pinId, save: false,
     });
-    expect(connected.ok, connected.error).toBe(true);
-    expect((connected.result as { rollback?: { method: string } }).rollback?.method).toBe("disconnect_graph_pins");
+    expect(connected.success, connected.error).toBe(true);
+    expect((connected.rollback as { method?: string })?.method).toBe("disconnect_graph_pins");
 
-    const again = await callBridge(bridge, "connect_graph_pins", {
-      assetPath, sourcePinId: output.pinId, targetPinId: rootInput.pinId, save: false,
+    const again = await answer("connect_graph_pins", {
+      assetPath, sourcePinId: output.pinId, targetPinId: components.pinId, save: false,
     });
-    expect(again.ok, again.error).toBe(true);
-    expect((again.result as { existed?: boolean }).existed).toBe(true);
+    expect(again.success, again.error).toBe(true);
+    expect(again.existed).toBe(true);
 
-    const disconnected = await callBridge(bridge, "disconnect_graph_pins", {
-      assetPath, sourcePinId: output.pinId, targetPinId: rootInput.pinId, save: false,
+    const refused = await answer("connect_graph_pins", {
+      assetPath, sourcePinId: components.pinId, targetPinId: base!.pins.find((p) => p.name === "Children")!.pinId, save: false,
     });
-    expect(disconnected.ok, disconnected.error).toBe(true);
-    expect((disconnected.result as { brokenCount?: number }).brokenCount).toBe(1);
+    expect(refused.success).toBe(false);
+    expect(refused.reason).toBe("schema_disallowed");
 
-    const removed = await callBridge(bridge, "remove_graph_node", { assetPath, node: add.nodePath, save: false });
-    expect(removed.ok, removed.error).toBe(true);
-    expect((await readNodes()).some((n) => n.nodeGuid === add.nodeGuid)).toBe(false);
+    const disconnected = await answer("disconnect_graph_pins", {
+      assetPath, sourcePinId: output.pinId, targetPinId: components.pinId, save: false,
+    });
+    expect(disconnected.success, disconnected.error).toBe(true);
+    expect(disconnected.brokenCount).toBe(1);
+
+    const removed = await answer("remove_graph_node", { assetPath, node: add.nodePath, save: false });
+    expect(removed.success, removed.error).toBe(true);
+
+    const rootRemoval = await answer("remove_graph_node", { assetPath, node: base!.nodeGuid, save: false });
+    expect(rootRemoval.success).toBe(false);
+
+    const compiled = await answer("compile_customizable_object", { assetPath });
+    expect(compiled.success, compiled.error).toBe(true);
   });
 
-  it("lists the schema's actions when nothing spawns the class", async () => {
-    const r = await callBridge(bridge, "add_graph_node", { assetPath, nodeClass: "Actor", save: false });
-    expect(r.ok).toBe(false);
+  it("lists the schema's actions when nothing spawns the class", async ({ skip }) => {
+    if (!hasMutable) skip();
+    const r = await answer("add_graph_node", { assetPath, nodeClass: "Actor", save: false });
+    expect(r.success).toBe(false);
+    expect(Array.isArray(r.availableActions)).toBe(true);
   });
 
-  it("compile_customizable_object refuses a non-CustomizableObject", async () => {
-    const r = await callBridge(bridge, "compile_customizable_object", { assetPath });
-    expect(r.ok).toBe(false);
+  it("compile_customizable_object refuses an asset that is not one", async () => {
+    const r = await answer("compile_customizable_object", { assetPath: "/Engine/EngineResources/DefaultTexture" });
+    expect(r.success).toBe(false);
     expect(r.error ?? "").toMatch(/Mutable plugin not available|not a CustomizableObject/);
   });
 });
