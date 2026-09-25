@@ -1586,7 +1586,14 @@ TSharedPtr<FJsonValue> FAssetHandlers::BindClothToSection(const TSharedPtr<FJson
 	{
 		Mesh->Modify();
 		FScopedSkeletalMeshPostEditChange ScopedPostEditChange(Mesh);
-		if (PreviousAsset) PreviousAsset->UnbindFromSkeletalMesh(Mesh, LodIndex);
+		if (PreviousAsset)
+		{
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
+			PreviousAsset->UnbindFromSkeletalMesh(Mesh, LodIndex, SectionIndex);
+#else
+			PreviousAsset->UnbindFromSkeletalMesh(Mesh, LodIndex);
+#endif
+		}
 		bBound = Cloth->BindToSkeletalMesh(Mesh, LodIndex, SectionIndex, AssetLodIndex);
 	}
 
@@ -1667,22 +1674,30 @@ TSharedPtr<FJsonValue> FAssetHandlers::UnbindClothFromSection(const TSharedPtr<F
 		return MCPError(FString::Printf(TEXT("Section %d of LOD %d is bound to '%s', not '%s'"), SectionIndex, LodIndex, *Bound->GetName(), *ExpectedName));
 	}
 	const int32 PreviousAssetLod = Section->ClothingData.AssetLodIndex;
-	const FGuid BoundGuid = Bound->GetAssetGuid();
 
-	// Every section of this LOD the per-LOD unbind will release.
+	// 5.8 unbinds one section; older engines release every section of the LOD bound to the asset.
 	TArray<TSharedPtr<FJsonValue>> Released;
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
+	Released.Add(MakeShared<FJsonValueNumber>(SectionIndex));
+#else
 	{
+		const FGuid BoundGuid = Bound->GetAssetGuid();
 		const FSkeletalMeshLODModel& LodModel = Mesh->GetImportedModel()->LODModels[LodIndex];
 		for (int32 i = 0; i < LodModel.Sections.Num(); ++i)
 		{
 			if (LodModel.Sections[i].ClothingData.AssetGuid == BoundGuid) Released.Add(MakeShared<FJsonValueNumber>(i));
 		}
 	}
+#endif
 
 	{
 		Mesh->Modify();
 		FScopedSkeletalMeshPostEditChange ScopedPostEditChange(Mesh);
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
+		Bound->UnbindFromSkeletalMesh(Mesh, LodIndex, SectionIndex);
+#else
 		Bound->UnbindFromSkeletalMesh(Mesh, LodIndex);
+#endif
 	}
 
 	auto Result = MCPSuccess();

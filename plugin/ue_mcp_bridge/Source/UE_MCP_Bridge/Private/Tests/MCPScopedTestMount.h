@@ -51,7 +51,11 @@ namespace UEMCPTests
 		for (UPackage* Package : Packages)
 		{
 			TArray<UObject*> Objects;
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
+			GetObjectsWithPackage(Package, Objects, EGetObjectsFlags::IncludeNestedObjects);
+#else
 			GetObjectsWithPackage(Package, Objects, /*bIncludeNestedObjects=*/true);
+#endif
 			for (UObject* Object : Objects)
 			{
 				if (Object->IsRooted())

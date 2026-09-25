@@ -2141,7 +2141,11 @@ static TSharedPtr<FJsonValue> MCPRefuseSplitPackages(const TArray<FAssetRenameDa
 		if (!Package || UWorld::FindWorldInPackage(Package)) continue;
 
 		TArray<UObject*> TopLevel;
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
+		GetObjectsWithPackage(Package, TopLevel, EGetObjectsFlags::None);
+#else
 		GetObjectsWithPackage(Package, TopLevel, /*bIncludeNestedObjects=*/false);
+#endif
 		TArray<TSharedPtr<FJsonValue>> Left;
 		for (UObject* Obj : TopLevel)
 		{
