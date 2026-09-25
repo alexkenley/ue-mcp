@@ -715,7 +715,7 @@ static TArray<TSharedPtr<FJsonValue>> CaptureBoneTrackKeyframes(
 TSharedPtr<FJsonValue> FAnimationHandlers::SetBoneKeyframes(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString BoneName;
 	if (auto Err = RequireString(Params, TEXT("boneName"), BoneName)) return Err;
@@ -882,7 +882,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetBoneKeyframes(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FAnimationHandlers::BakeKeyframesBatch(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	const TArray<TSharedPtr<FJsonValue>>* Tracks = nullptr;
 	if (!TryGetArrayParam(Params, TEXT("tracks"), Tracks) || !Tracks)
@@ -1258,7 +1258,7 @@ static ERichCurveInterpMode ParseRichCurveInterp(const FString& S, ERichCurveInt
 TSharedPtr<FJsonValue> FAnimationHandlers::SetAnimCurveKeys(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString CurveName;
 	if (auto Err = RequireString(Params, TEXT("curveName"), CurveName)) return Err;
 
@@ -1267,13 +1267,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetAnimCurveKeys(const TSharedPtr<FJs
 	{
 		return MCPError(TEXT("Missing 'keys' array parameter (each entry: {time, value, interp?})"));
 	}
+	// Read before the load can fail (#1057).
+	const ERichCurveInterpMode DefaultInterp = ParseRichCurveInterp(
+		OptionalString(Params, TEXT("interpolation"), TEXT("linear")), RCIM_Linear);
 
 	UAnimSequence* Seq = Cast<UAnimSequence>(MCPLoadAssetObject(AssetPath));
 	if (!Seq) return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *AssetPath));
 	if (!Seq->GetSkeleton()) return MCPError(TEXT("AnimSequence has no Skeleton"));
-
-	const ERichCurveInterpMode DefaultInterp = ParseRichCurveInterp(
-		OptionalString(Params, TEXT("interpolation"), TEXT("linear")), RCIM_Linear);
 
 	TArray<FRichCurveKey> Keys;
 	Keys.Reserve(KeysArr->Num());

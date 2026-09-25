@@ -40,9 +40,7 @@ void FReflectionHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("reflection"));
 
 	// #1057: a spec'd handler declares its parameters here and nowhere else; the
-	// TS surface is generated from a recording of them. create_gameplay_tag and
-	// create_enum have no spec: the contract test would write the ini entry and
-	// create the asset it is handed.
+	// TS surface is generated from a recording of them.
 	using EType = EMCPParamType;
 	const FMCPParamSpec CursorParam = MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the nextCursor from the previous page, unmodified"));
 
@@ -72,8 +70,16 @@ void FReflectionHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		CursorParam,
 		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 500, max 5000)")),
 	});
-	Registry.RegisterHandler(TEXT("create_gameplay_tag"), &CreateGameplayTag);
-	Registry.RegisterHandler(TEXT("create_enum"), &CreateEnum);
+	Registry.RegisterHandler(TEXT("create_gameplay_tag"), &CreateGameplayTag, {
+		MCPParam::Required(TEXT("tag"), EType::String, TEXT("Gameplay tag to create, e.g. Ability.Fire")),
+		MCPParam::Optional(TEXT("comment"), EType::String, TEXT("Developer comment stored with the tag")),
+	}, MCPSpec::ContractExempt(TEXT("Writes the tag into Config/DefaultGameplayTags.ini under the contract values unless the tag check refuses it first")));
+	Registry.RegisterHandler(TEXT("create_enum"), &CreateEnum, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Enum asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Folder for the new enum (default /Game)")),
+		MCPParam::Optional(TEXT("entries"), EType::Array, TEXT("Entries to seed: strings, or {name, displayName?} objects")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the enum exists: skip (default, report it) | error")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves an enum asset under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("set_enum_entries"), &SetEnumEntries, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Existing UserDefinedEnum asset path")),
 		MCPParam::Required(TEXT("entries"), EType::Array, TEXT("The complete new entry list: strings, or {name, displayName?} objects")),
@@ -1312,6 +1318,10 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateEnum(const TSharedPtr<FJsonObj
 	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
 	const FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game"));
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	// Optional entries[] - array of strings or {name, displayName?}. Read before
+	// the existing-asset early return, so a skip does not report it unread.
+	const TArray<TSharedPtr<FJsonValue>>* EntriesArr = nullptr;
+	const bool bHasEntries = TryGetArrayParam(Params, TEXT("entries"), EntriesArr) && EntriesArr;
 
 	UClass* FactoryClass = FindObject<UClass>(nullptr, TEXT("/Script/UnrealEd.EnumFactory"));
 	if (!FactoryClass)
@@ -1329,10 +1339,8 @@ TSharedPtr<FJsonValue> FReflectionHandlers::CreateEnum(const TSharedPtr<FJsonObj
 	if (Created.EarlyReturn) return Created.EarlyReturn;
 	UUserDefinedEnum* Enum = Created.Asset;
 
-	// Optional entries[] - array of strings or {name, displayName?}.
-	const TArray<TSharedPtr<FJsonValue>>* EntriesArr = nullptr;
 	int32 Added = 0;
-	if (TryGetArrayParam(Params, TEXT("entries"), EntriesArr) && EntriesArr)
+	if (bHasEntries)
 	{
 		for (const TSharedPtr<FJsonValue>& Entry : *EntriesArr)
 		{

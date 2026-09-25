@@ -145,9 +145,8 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 
 	// #1057: a handler registered with a spec declares its parameters here and
 	// nowhere else; the TS surface is generated from a recording of these.
-	// create_pcg_graph is contract-exempt: its values would create a graph
-	// before anything failed. Unspecified: add_pcg_volume, which would spawn an
-	// actor, and the actor-selector actions, not yet migrated to a choice.
+	// create_pcg_graph and add_pcg_volume are contract-exempt: their values
+	// would create a graph or spawn a volume before anything failed.
 	using EType = EMCPParamType;
 	auto GraphPath = []()
 	{
@@ -161,6 +160,10 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	{
 		return MCPParam::Required(TEXT("targetNode"), EType::String, TEXT("Node the edge enters")).Alias(TEXT("targetNodeName"));
 	};
+	// The component actions name their actor one way or the other, never both.
+	const FMCPParamSpec SpecActorLabel = MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Editor label of the actor holding the PCG component; a label naming several actors is refused"));
+	const FMCPParamSpec SpecActorPath = MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path; the unambiguous selector"));
+	const FMCPSpecRules ActorChoice = MCPSpec::ExactlyOne({ { TEXT("actorLabel") }, { TEXT("actorPath") } });
 
 	Registry.RegisterHandler(TEXT("list_pcg_graphs"), &ListPCGGraphs, {
 		MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the 'nextCursor' from the previous page, unmodified")),
@@ -208,13 +211,24 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("propertyName"), EType::String, TEXT("One property to write instead of a settings object")),
 		MCPParam::Optional(TEXT("propertyValue"), EType::String, TEXT("The value for propertyName, as UE export text")),
 	}, MCPSpec::ExactlyOne({ { TEXT("settings") }, { TEXT("propertyName"), TEXT("propertyValue") } }));
-	Registry.RegisterHandler(TEXT("execute_pcg_graph"), &ExecutePCGGraph);
-	Registry.RegisterHandler(TEXT("add_pcg_volume"), &SpawnPCGVolume);
+	Registry.RegisterHandler(TEXT("execute_pcg_graph"), &ExecutePCGGraph, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("seed"), EType::Integer, TEXT("Write the component's Seed before generating; the old one is reported as previousSeed")),
+	}, ActorChoice);
+	Registry.RegisterHandler(TEXT("add_pcg_volume"), &SpawnPCGVolume, {
+		MCPParam::Optional(TEXT("graphPath"), EType::String, TEXT("PCGGraph to assign to the volume's component")),
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("World location {x,y,z} (default origin)")),
+		MCPParam::Optional(TEXT("extent"), EType::Vec3, TEXT("Half-size of the volume box {x,y,z} (default 500 on each axis)")),
+		MCPParam::Optional(TEXT("label"), EType::String, TEXT("Editor label. Also the idempotency key: an existing actor with this label is reported rather than duplicated")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the label exists: skip (default, report it) | error")),
+	}, MCPSpec::ContractExempt(TEXT("Spawns a volume under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("read_pcg_node_settings"), &ReadPCGNodeSettings, {
 		GraphPath(),
 		MCPParam::Required(TEXT("nodeName"), EType::String, TEXT("Engine name of the node, as read_graph reports it")),
 	});
-	Registry.RegisterHandler(TEXT("get_pcg_component_details"), &GetPCGComponentDetails);
+	Registry.RegisterHandler(TEXT("get_pcg_component_details"), &GetPCGComponentDetails, {
+		SpecActorLabel, SpecActorPath,
+	}, ActorChoice);
 	Registry.RegisterHandler(TEXT("set_static_mesh_spawner_meshes"), &SetStaticMeshSpawnerMeshes, {
 		GraphPath(),
 		MCPParam::Required(TEXT("nodeName"), EType::String, TEXT("Engine name of the node, as read_graph reports it")),
@@ -225,9 +239,17 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("replace"), EType::Boolean, TEXT("Overwrite existing MeshEntries (default true)")),
 	});
 	// #146: force_regenerate / cleanup / toggle_graph on PCG components
-	Registry.RegisterHandler(TEXT("force_regenerate_pcg"), &ForceRegeneratePCG);
-	Registry.RegisterHandler(TEXT("cleanup_pcg"), &CleanupPCG);
-	Registry.RegisterHandler(TEXT("toggle_pcg_graph"), &ToggleGraphPCG);
+	Registry.RegisterHandler(TEXT("force_regenerate_pcg"), &ForceRegeneratePCG, {
+		SpecActorLabel, SpecActorPath,
+	}, ActorChoice);
+	Registry.RegisterHandler(TEXT("cleanup_pcg"), &CleanupPCG, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("removeComponents"), EType::Boolean, TEXT("Remove the managed spawned components too (default true)")),
+	}, ActorChoice);
+	Registry.RegisterHandler(TEXT("toggle_pcg_graph"), &ToggleGraphPCG, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("graphPath"), EType::String, TEXT("PCGGraph to assign (default: re-apply the component's current graph)")),
+	}, ActorChoice);
 
 	// #213: bulk JSON-driven graph authoring (mirrors material.import_graph).
 	Registry.RegisterHandler(TEXT("import_pcg_graph"), &ImportGraph, {
@@ -1193,6 +1215,8 @@ TSharedPtr<FJsonValue> FPCGHandlers::ExecutePCGGraph(const TSharedPtr<FJsonObjec
 {
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
+	double Seed = 0;
+	const bool bHasSeed = TryGetNumberParam(Params, TEXT("seed"), Seed);
 
 	REQUIRE_EDITOR_WORLD(World);
 
@@ -1223,8 +1247,7 @@ TSharedPtr<FJsonValue> FPCGHandlers::ExecutePCGGraph(const TSharedPtr<FJsonObjec
 	const int32 PreviousSeed = PCGComp->Seed;
 
 	// Set seed if provided
-	double Seed = 0;
-	if (TryGetNumberParam(Params, TEXT("seed"), Seed))
+	if (bHasSeed)
 	{
 		PCGComp->Seed = (int32)Seed;
 	}
@@ -1312,31 +1335,10 @@ TSharedPtr<FJsonValue> FPCGHandlers::SpawnPCGVolume(const TSharedPtr<FJsonObject
 		return Existing;
 	}
 
-	// #218: location/extent ship as nested {x,y,z} objects per the TS schema
-	// (Vec3). Older calls may pass flat x/y/z and extentX/Y/Z; accept both.
-	auto ReadVec3 = [&](const TCHAR* ObjKey, const TCHAR* FlatX, const TCHAR* FlatY, const TCHAR* FlatZ, FVector& Out) -> bool
-	{
-		bool bAny = false;
-		const TSharedPtr<FJsonObject>* Obj = nullptr;
-		if (TryGetObjectParam(Params, ObjKey, Obj) && Obj && Obj->IsValid())
-		{
-			double V = 0;
-			if ((*Obj)->TryGetNumberField(TEXT("x"), V)) { Out.X = V; bAny = true; }
-			if ((*Obj)->TryGetNumberField(TEXT("y"), V)) { Out.Y = V; bAny = true; }
-			if ((*Obj)->TryGetNumberField(TEXT("z"), V)) { Out.Z = V; bAny = true; }
-		}
-		double V = 0;
-		if (TryGetNumberParam(Params, FlatX, V)) { Out.X = V; bAny = true; }
-		if (TryGetNumberParam(Params, FlatY, V)) { Out.Y = V; bAny = true; }
-		if (TryGetNumberParam(Params, FlatZ, V)) { Out.Z = V; bAny = true; }
-		return bAny;
-	};
-
-	FVector Location = FVector::ZeroVector;
-	ReadVec3(TEXT("location"), TEXT("x"), TEXT("y"), TEXT("z"), Location);
-
-	FVector Extent(500.0, 500.0, 500.0);
-	ReadVec3(TEXT("extent"), TEXT("extentX"), TEXT("extentY"), TEXT("extentZ"), Extent);
+	// #218: location and extent are nested {x,y,z} objects; an axis left out keeps its default.
+	const FVector Location = OptionalVec3(Params, TEXT("location"), FVector::ZeroVector);
+	const FVector Extent = OptionalVec3(Params, TEXT("extent"), FVector(500.0, 500.0, 500.0));
+	const FString GraphPath = OptionalString(Params, TEXT("graphPath"));
 
 	// Spawn PCG Volume actor
 	FTransform SpawnTransform(FRotator::ZeroRotator, Location);
@@ -1353,7 +1355,6 @@ TSharedPtr<FJsonValue> FPCGHandlers::SpawnPCGVolume(const TSharedPtr<FJsonObject
 		PCGVolumeActor->SetActorLabel(Label);
 	}
 
-	FString GraphPath = OptionalString(Params, TEXT("graphPath"));
 	auto Result = MCPSuccess();
 	MCPSetCreated(Result);
 	TSharedPtr<FJsonObject> RBPayload = MakeShared<FJsonObject>();
@@ -1907,11 +1908,11 @@ TSharedPtr<FJsonValue> FPCGHandlers::CleanupPCG(const TSharedPtr<FJsonObject>& P
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
+	const bool bRemoveComponents = OptionalBool(Params, TEXT("removeComponents"), true);
+
 	UPCGComponent* PCGComp = nullptr; AActor* Actor = nullptr;
 	if (auto Err = FindPCGComponentByLabel(Params, PCGComp, Actor)) return Err;
 	ActorLabel = Actor->GetActorLabel();
-
-	const bool bRemoveComponents = OptionalBool(Params, TEXT("removeComponents"), true);
 	// bGenerated is always false on a partitioned component, so it must not be
 	// reported as "nothing was removed" there: the content it cleaned lives on
 	// the local components the partition subsystem owns.
@@ -1983,14 +1984,16 @@ TSharedPtr<FJsonValue> FPCGHandlers::ToggleGraphPCG(const TSharedPtr<FJsonObject
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
+	FString GraphPath;
+	TryGetStringParam(Params, TEXT("graphPath"), GraphPath);
+
 	UPCGComponent* PCGComp = nullptr; AActor* Actor = nullptr;
 	if (auto Err = FindPCGComponentByLabel(Params, PCGComp, Actor)) return Err;
 	ActorLabel = Actor->GetActorLabel();
 
 	// If the caller supplies graphPath, load and use that; otherwise re-apply the current graph.
-	FString GraphPath;
 	UPCGGraph* TargetGraph = nullptr;
-	if (TryGetStringParam(Params, TEXT("graphPath"), GraphPath) && !GraphPath.IsEmpty())
+	if (!GraphPath.IsEmpty())
 	{
 		TargetGraph = LoadObject<UPCGGraph>(nullptr, *GraphPath);
 		if (!TargetGraph) return MCPError(FString::Printf(TEXT("PCGGraph not found: %s"), *GraphPath));

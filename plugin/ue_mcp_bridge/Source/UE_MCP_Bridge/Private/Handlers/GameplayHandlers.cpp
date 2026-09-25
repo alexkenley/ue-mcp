@@ -110,9 +110,9 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 
 	// #1057: a handler registered with a spec declares its parameters here and
 	// nowhere else; the TS surface for it is generated from a recording of these.
-	// Unspecced: the create_* handlers that would reach AssetTools.CreateAsset
-	// with the spec contract test's values, spawn_nav_modifier_volume (spawns an
-	// actor) and rebuild_navigation (rebuilds the navmesh with no parameters).
+	// Contract-exempt: the create_* handlers whose contract values would reach
+	// AssetTools.CreateAsset, spawn_nav_modifier_volume (spawns an actor) and
+	// rebuild_navigation (rebuilds the navmesh with no parameters to fail).
 	using EType = EMCPParamType;
 	auto Cursor = []()
 	{
@@ -224,8 +224,26 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	{
 		return MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Target AIPerceptionComponent name (default: first found)"));
 	};
+	auto NewAssetName = []()
+	{
+		return MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name"));
+	};
+	auto NewAssetFolder = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("packagePath"), EType::String, Description);
+	};
+	auto NewAssetOnConflict = []()
+	{
+		return MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default, returns the existing asset) or error when the asset already exists"));
+	};
+	const FMCPSpecRules CreatesAsset = MCPSpec::ContractExempt(
+		TEXT("Creates and saves an asset under the contract values; nothing it reads fails first"));
 
-	Registry.RegisterHandler(TEXT("create_smart_object_definition"), &CreateSmartObjectDefinition);
+	Registry.RegisterHandler(TEXT("create_smart_object_definition"), &CreateSmartObjectDefinition, {
+		NewAssetName(), NewAssetFolder(TEXT("Content folder (default /Game/AI/SmartObjects)")), NewAssetOnConflict(),
+		MCPParam::Optional(TEXT("defaultBehaviorClass"), EType::String, TEXT("Behavior definition asset path or class path added to DefaultBehaviorDefinitions")),
+		InstanceProperties(),
+	}, CreatesAsset);
 	Registry.RegisterHandler(TEXT("get_navmesh_info"), &GetNavmeshInfo, {});
 	Registry.RegisterHandler(TEXT("get_game_framework_info"), &GetGameFrameworkInfo, {});
 	Registry.RegisterHandler(TEXT("list_input_assets"), &ListInputAssets, {
@@ -247,8 +265,13 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// Enhanced Input asset authoring stays here. pie-studio owns PIE-time
 	// inject/record/replay; authoring InputAction / InputMappingContext
 	// assets and editing IMC mappings is core ue-mcp.
-	Registry.RegisterHandler(TEXT("create_input_action"), &CreateInputAction);
-	Registry.RegisterHandler(TEXT("create_input_mapping_context"), &CreateInputMappingContext);
+	Registry.RegisterHandler(TEXT("create_input_action"), &CreateInputAction, {
+		NewAssetName(), NewAssetFolder(TEXT("Content folder (default /Game/Input)")), NewAssetOnConflict(),
+		MCPParam::Optional(TEXT("valueType"), EType::String, TEXT("Boolean (default) | Axis1D | Axis2D | Axis3D; an unrecognised type leaves the default")),
+	}, CreatesAsset);
+	Registry.RegisterHandler(TEXT("create_input_mapping_context"), &CreateInputMappingContext, {
+		NewAssetName(), NewAssetFolder(TEXT("Content folder (default /Game/Input)")), NewAssetOnConflict(),
+	}, CreatesAsset);
 	Registry.RegisterHandler(TEXT("read_imc"), &ReadImc, {
 		AssetImcPath(),
 	});
@@ -376,14 +399,18 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Only this ZoneGraphData actor, by label or name")),
 		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Only this ZoneGraphData actor, by full object path")),
 	});
-	Registry.RegisterHandler(TEXT("create_blackboard"), &CreateBlackboard);
+	Registry.RegisterHandler(TEXT("create_blackboard"), &CreateBlackboard, {
+		NewAssetName(), NewAssetFolder(TEXT("Content folder (default /Game/AI)")), NewAssetOnConflict(),
+	}, CreatesAsset);
 	Registry.RegisterHandler(TEXT("create_behavior_tree"), &CreateBehaviorTree, {
 		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name")),
 		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Content folder (default /Game/AI)")),
 		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default, returns the existing asset) or error when the asset already exists")),
 		MCPParam::Optional(TEXT("blackboardPath"), EType::String, TEXT("BlackboardData assigned before the first save; an unknown path creates nothing")),
 	});
-	Registry.RegisterHandler(TEXT("create_eqs_query"), &CreateEqsQuery);
+	Registry.RegisterHandler(TEXT("create_eqs_query"), &CreateEqsQuery, {
+		NewAssetName(), NewAssetFolder(TEXT("Content folder (default /Game/AI/EQS)")), NewAssetOnConflict(),
+	}, CreatesAsset);
 	Registry.RegisterHandler(TEXT("list_eqs_types"), &ListEqsTypes, {
 		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring over the class names")),
 		Cursor(),
@@ -520,7 +547,10 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		PieInstance(TEXT("PIE world instance when world is pie or auto")),
 		MCPParam::Optional(TEXT("limit"), EType::Number, TEXT("How many scored items to return (default 50)")),
 	});
-	Registry.RegisterHandler(TEXT("create_state_tree"), &CreateStateTree);
+	Registry.RegisterHandler(TEXT("create_state_tree"), &CreateStateTree, {
+		NewAssetName(), NewAssetFolder(TEXT("Content folder (default /Game/AI)")), NewAssetOnConflict(),
+		MCPParam::Optional(TEXT("schema"), EType::String, TEXT("StateTree schema class path; omit to take the gameplay default (StateTreeComponentSchema, then StateTreeAIComponentSchema, then any concrete schema)")),
+	}, CreatesAsset);
 	Registry.RegisterHandler(TEXT("get_input_mapping_contexts"), &GetInputMappingContexts, {
 		PieInstance(TEXT("PIE world instance (0 = server/primary); omit for every running PIE world")),
 		MCPParam::Optional(TEXT("playerIndex"), EType::Number, TEXT("Player index; omit for every player")),
@@ -559,7 +589,14 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		FrameworkPackage(),
 		MCPParam::Optional(TEXT("parentClass"), EType::String, TEXT("Parent deriving from HUD: short name, /Script path or Blueprint asset path")),
 	});
-	Registry.RegisterHandler(TEXT("spawn_nav_modifier_volume"), &SpawnNavModifierVolume);
+	Registry.RegisterHandler(TEXT("spawn_nav_modifier_volume"), &SpawnNavModifierVolume, {
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("World location of the volume (default origin)")),
+		MCPParam::Optional(TEXT("extent"), EType::Vec3, TEXT("Half-size in world units, positive on every axis (default 100)")),
+		MCPParam::Optional(TEXT("areaClass"), EType::String, TEXT("UNavArea subclass: NavArea_Null (default, cuts a hole), NavArea_Obstacle, or a /Script path")),
+		MCPParam::Optional(TEXT("label"), EType::String, TEXT("Actor label, also what onConflict dedupes on")),
+		MCPParam::Optional(TEXT("scale"), EType::Vec3, TEXT("Actor scale, applied after the brush is built")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default, returns the actor already carrying label) or error when one does")),
+	}, MCPSpec::ContractExempt(TEXT("Spawns a NavModifierVolume under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("set_world_game_mode"), &SetWorldGameMode, {
 		MCPParam::Required(TEXT("gameModeClass"), EType::String, TEXT("GameMode class or Blueprint path")).Alias(TEXT("gameModePath")),
 	});
@@ -594,7 +631,8 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("behaviorTreePath"), EType::String, TEXT("BehaviorTree asset path")),
 		MCPParam::Required(TEXT("blackboardPath"), EType::String, TEXT("BlackboardData asset to bind")),
 	});
-	Registry.RegisterHandler(TEXT("rebuild_navigation"), &RebuildNavmesh);
+	Registry.RegisterHandler(TEXT("rebuild_navigation"), &RebuildNavmesh, TArray<FMCPParamSpec>(),
+		MCPSpec::ContractExempt(TEXT("Rebuilds the navmesh; it takes no parameters that could fail first")));
 	Registry.RegisterHandler(TEXT("find_nav_path"), &FindNavPath, {
 		MCPParam::Required(TEXT("start"), EType::Vec3, TEXT("Query start (world point)")),
 		MCPParam::Required(TEXT("end"), EType::Vec3, TEXT("Query end (world point)")),

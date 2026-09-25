@@ -219,7 +219,12 @@ namespace
 TSharedPtr<FJsonValue> FAssetHandlers::SetMeshMaterialsBatch(const TSharedPtr<FJsonObject>& Params)
 {
 	const TArray<TSharedPtr<FJsonValue>>* Assignments = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("assignments"), Assignments) || !Assignments)
+	const bool bHasAssignments = TryGetArrayParam(Params, TEXT("assignments"), Assignments);
+	// Read before the checks below can refuse (#1057).
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
+	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
+	const bool bContinueOnError = OptionalBool(Params, TEXT("continueOnError"), false);
+	if (!bHasAssignments || !Assignments)
 	{
 		return MCPError(TEXT("Missing 'assignments' array"));
 	}
@@ -233,10 +238,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetMeshMaterialsBatch(const TSharedPtr<FJ
 			TEXT("'assignments' exceeds the maximum batch size of %d (received %d)"),
 			MaxMeshMaterialAssignments, Assignments->Num()));
 	}
-
-	const bool bSave = OptionalBool(Params, TEXT("save"), true);
-	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
-	const bool bContinueOnError = OptionalBool(Params, TEXT("continueOnError"), false);
 
 	TArray<FPreparedMeshMaterialAssignment> Prepared;
 	Prepared.Reserve(Assignments->Num());
@@ -631,7 +632,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::RecenterPivot(const TSharedPtr<FJsonObjec
 			}
 		}
 	}
-	else if (TryGetStringParam(Params, TEXT("assetPath"), SinglePath) || TryGetStringParam(Params, TEXT("path"), SinglePath))
+	else if (TryGetStringParam(Params, TEXT("assetPath"), SinglePath))
 	{
 		if (!SinglePath.IsEmpty())
 		{

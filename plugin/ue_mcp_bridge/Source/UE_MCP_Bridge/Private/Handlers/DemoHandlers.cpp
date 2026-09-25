@@ -118,15 +118,15 @@ void FDemoHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// #1057: a spec'd handler declares its parameters here and nowhere else; the
 	// TS surface is generated from a recording of them. demo_step's spec is safe
 	// under the contract test because step 0 is refused before anything is built.
-	// demo_cleanup and demo_go_home take no parameters and act unconditionally,
-	// so they have no spec: the contract test would run them.
 	using EType = EMCPParamType;
 	Registry.RegisterHandler(TEXT("demo_step"), &DemoStep, {
 		MCPParam::Optional(TEXT("step"), EType::Integer, TEXT("Step index to execute, 1 to 19. Omit for the step list")).Alias(TEXT("stepIndex")),
 	});
 	Registry.RegisterHandler(TEXT("demo_get_steps"), &DemoGetSteps, {});
-	Registry.RegisterHandler(TEXT("demo_cleanup"),   &DemoCleanup);
-	Registry.RegisterHandler(TEXT("demo_go_home"),   &DemoGoHome);
+	Registry.RegisterHandler(TEXT("demo_cleanup"), &DemoCleanup, TArray<FMCPParamSpec>(),
+		MCPSpec::ContractExempt(TEXT("Takes no parameters and acts unconditionally: switches levels and deletes the demo scene")));
+	Registry.RegisterHandler(TEXT("demo_go_home"), &DemoGoHome, TArray<FMCPParamSpec>(),
+		MCPSpec::ContractExempt(TEXT("Takes no parameters and acts unconditionally: creates the home level if missing and opens it")));
 }
 
 // Ensures /Game/MCP_Home exists on disk and loads it. Idempotent.

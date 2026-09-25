@@ -190,6 +190,12 @@ namespace
 
 TSharedPtr<FJsonValue> FLevelHandlers::NudgeComponent(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("frame"), TEXT("translationDelta"),
+		TEXT("axisRotation"), TEXT("viewRotation"), TEXT("scaleMultiplier"), TEXT("dryRun"), TEXT("world"),
+		TEXT("pieInstance"),
+	});
+
 	FString ActorLabel;
 	if (auto Error = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Error;
 	FString ComponentName;
@@ -234,11 +240,6 @@ TSharedPtr<FJsonValue> FLevelHandlers::NudgeComponent(const TSharedPtr<FJsonObje
 
 	const FTransform PreviousRelative = Component->GetRelativeTransform();
 	const FTransform PreviousWorld = Component->GetComponentTransform();
-	const TSharedPtr<FJsonObject>* RestoreJson = nullptr;
-	const bool bHasRestoreField = HasParam(Params, TEXT("_restoreRelative"));
-	const bool bRestore = bHasRestoreField && TryGetObjectParam(Params, TEXT("_restoreRelative"), RestoreJson) && *RestoreJson;
-	if (bHasRestoreField && !bRestore) return MCPError(TEXT("Invalid internal rollback transform"));
-	if (bRestore && bDryRun) return MCPError(TEXT("dryRun cannot be combined with internal rollback"));
 
 	FString Frame = TEXT("actor");
 	if (HasParam(Params, TEXT("frame")) && !TryGetStringParam(Params, TEXT("frame"), Frame))
@@ -255,16 +256,7 @@ TSharedPtr<FJsonValue> FLevelHandlers::NudgeComponent(const TSharedPtr<FJsonObje
 	bool bHasTranslation = false;
 	bool bHasRotation = false;
 	bool bHasScale = false;
-	FTransform RestoreRelative;
 
-	if (bRestore)
-	{
-		if (!ReadRollbackTransform(*RestoreJson, RestoreRelative))
-		{
-			return MCPError(TEXT("Invalid internal rollback transform"));
-		}
-	}
-	else
 	{
 		if (Frame != TEXT("world") && Frame != TEXT("actor") &&
 			Frame != TEXT("parent") && Frame != TEXT("component"))
@@ -361,17 +353,16 @@ TSharedPtr<FJsonValue> FLevelHandlers::NudgeComponent(const TSharedPtr<FJsonObje
 		}
 	}
 
-	const FTransform RequestedWorld = bRestore ? PreviousWorld : ApplyWorldNudge(
+	const FTransform RequestedWorld = ApplyWorldNudge(
 		PreviousWorld, TranslationWorld, bHasRotation, RotationAxisWorld, RotationDegrees);
-	const FVector RequestedRelativeScale = bRestore ? RestoreRelative.GetScale3D() :
-		PreviousRelative.GetScale3D() * ScaleMultiplier;
+	const FVector RequestedRelativeScale = PreviousRelative.GetScale3D() * ScaleMultiplier;
 	if (RequestedWorld.ContainsNaN() || RequestedRelativeScale.ContainsNaN())
 	{
 		return MCPError(TEXT("The requested nudge produces a non-finite transform"));
 	}
 	const bool bRuntimeWorld = World->IsGameWorld();
 	const bool bRuntimeMobilityRestricted = bRuntimeWorld && Component->IsRegistered() &&
-		Component->Mobility != EComponentMobility::Movable && (bHasTranslation || bHasRotation || bRestore);
+		Component->Mobility != EComponentMobility::Movable && (bHasTranslation || bHasRotation);
 	if (bRuntimeMobilityRestricted && !bDryRun)
 	{
 		return MCPError(TEXT("Registered non-Movable components in PIE cannot receive translation or rotation nudges"));
@@ -400,7 +391,7 @@ TSharedPtr<FJsonValue> FLevelHandlers::NudgeComponent(const TSharedPtr<FJsonObje
 	Result->SetStringField(TEXT("componentName"), Component->GetName());
 	Result->SetStringField(TEXT("componentPath"), Component->GetPathName());
 	Result->SetStringField(TEXT("componentClass"), Component->GetClass()->GetPathName());
-	Result->SetStringField(TEXT("frame"), bRestore ? TEXT("rollback") : Frame);
+	Result->SetStringField(TEXT("frame"), Frame);
 	Result->SetStringField(TEXT("world"), WorldScope);
 	Result->SetStringField(TEXT("worldName"), World->GetName());
 	Result->SetStringField(TEXT("worldPath"), World->GetPathName());
@@ -422,7 +413,7 @@ TSharedPtr<FJsonValue> FLevelHandlers::NudgeComponent(const TSharedPtr<FJsonObje
 	Result->SetBoolField(TEXT("absoluteScale"), Component->IsUsingAbsoluteScale());
 	Result->SetObjectField(TEXT("bounds"), BoundsToJson(*Component));
 	Result->SetObjectField(TEXT("before"), ComponentTransformsToJson(Component));
-	if (!bRestore) Result->SetObjectField(TEXT("frameAxesWorld"), FrameAxesToJson(FrameRotation));
+	Result->SetObjectField(TEXT("frameAxesWorld"), FrameAxesToJson(FrameRotation));
 	if (bHasTranslation) Result->SetObjectField(TEXT("resolvedTranslationWorld"), MCPVec3ToJsonObject(TranslationWorld));
 	if (bHasRotation)
 	{
@@ -463,20 +454,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::NudgeComponent(const TSharedPtr<FJsonObje
 		Component->Modify();
 	}
 
-	if (bRestore)
+	Component->SetWorldLocationAndRotation(
+		RequestedWorld.GetLocation(), RequestedWorld.GetRotation(), false, nullptr, ETeleportType::TeleportPhysics);
+	if (bHasScale)
 	{
-		Component->SetRelativeTransform(RestoreRelative);
-	}
-	else
-	{
-		const FTransform AdjustedWorld = ApplyWorldNudge(
-			PreviousWorld, TranslationWorld, bHasRotation, RotationAxisWorld, RotationDegrees);
-		Component->SetWorldLocationAndRotation(
-			AdjustedWorld.GetLocation(), AdjustedWorld.GetRotation(), false, nullptr, ETeleportType::TeleportPhysics);
-		if (bHasScale)
-		{
-			Component->SetRelativeScale3D(PreviousRelative.GetScale3D() * ScaleMultiplier);
-		}
+		Component->SetRelativeScale3D(RequestedRelativeScale);
 	}
 
 	Component->UpdateComponentToWorld();
@@ -492,8 +474,8 @@ TSharedPtr<FJsonValue> FLevelHandlers::NudgeComponent(const TSharedPtr<FJsonObje
 	Result->SetStringField(TEXT("postApplyWarning"),
 		TEXT("Physics simulation, construction scripts, or other runtime systems may subsequently change this component transform."));
 
+	// The inverse is its own action, so nudge_component has no hidden restore key.
 	auto RollbackPayload = MakeShared<FJsonObject>();
-	RollbackPayload->SetStringField(TEXT("actorLabel"), ActorLabel);
 	RollbackPayload->SetStringField(TEXT("actorPath"), Actor->GetPathName());
 	RollbackPayload->SetStringField(TEXT("componentName"), Component->GetName());
 	RollbackPayload->SetStringField(TEXT("world"), WorldScope);
@@ -502,8 +484,118 @@ TSharedPtr<FJsonValue> FLevelHandlers::NudgeComponent(const TSharedPtr<FJsonObje
 	{
 		RollbackPayload->SetNumberField(TEXT("pieInstance"), PieInstance);
 	}
-	RollbackPayload->SetObjectField(TEXT("_restoreRelative"), TransformToJson(PreviousRelative));
-	MCPSetRollback(Result, TEXT("nudge_component"), RollbackPayload);
+	RollbackPayload->SetObjectField(TEXT("relativeTransform"), TransformToJson(PreviousRelative));
+	MCPSetRollback(Result, TEXT("restore_component_relative_transform"), RollbackPayload);
+	return MCPResult(Result);
+}
+
+TSharedPtr<FJsonValue> FLevelHandlers::RestoreComponentRelativeTransform(const TSharedPtr<FJsonObject>& Params)
+{
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("relativeTransform"), TEXT("world"),
+		TEXT("pieInstance"),
+	});
+
+	FString ActorLabel;
+	if (auto Error = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Error;
+	FString ComponentName;
+	if (auto Error = RequireString(Params, TEXT("componentName"), ComponentName)) return Error;
+
+	const TSharedPtr<FJsonObject>* TransformJson = nullptr;
+	FTransform TargetRelative;
+	if (!TryGetObjectParam(Params, TEXT("relativeTransform"), TransformJson) || !TransformJson ||
+		!ReadRollbackTransform(*TransformJson, TargetRelative))
+	{
+		return MCPError(TEXT("relativeTransform must be {location:{x,y,z}, quaternion:{x,y,z,w}, scale:{x,y,z}} with finite numbers"));
+	}
+
+	FString WorldScope = TEXT("editor");
+	if (HasParam(Params, TEXT("world")) && !TryGetStringParam(Params, TEXT("world"), WorldScope))
+	{
+		return MCPError(TEXT("world must be editor or pie"));
+	}
+	WorldScope = WorldScope.ToLower();
+	if (WorldScope != TEXT("editor") && WorldScope != TEXT("pie"))
+	{
+		return MCPError(TEXT("world must be editor or pie"));
+	}
+	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
+	if (!World)
+	{
+		return MCPError(WorldScope == TEXT("pie")
+			? TEXT("PIE not running (or no such pieInstance). See editor(list_pie_instances).")
+			: TEXT("Editor world not available"));
+	}
+
+	FMCPActorSelector ActorSel;
+	ActorSel.Match = EMCPActorMatch::LabelNameOrPath;
+	ActorSel.WorldLabel = World->IsGameWorld() ? TEXT("PIE") : TEXT("editor");
+	TSharedPtr<FJsonValue> ActorErr;
+	AActor* Actor = MCPResolveActor(World, Params, ActorErr, ActorSel);
+	if (!Actor) return ActorErr;
+	USceneComponent* Component = FindExactSceneComponent(Actor, ComponentName);
+	if (!Component)
+	{
+		return MCPError(FString::Printf(
+			TEXT("Exact SceneComponent '%s' not found on actor '%s'"), *ComponentName, *Actor->GetActorLabel()));
+	}
+
+	const bool bRuntimeWorld = World->IsGameWorld();
+	if (bRuntimeWorld && Component->IsRegistered() && Component->Mobility != EComponentMobility::Movable)
+	{
+		return MCPError(TEXT("Registered non-Movable components in PIE cannot receive a transform restore"));
+	}
+
+	const FTransform PreviousRelative = Component->GetRelativeTransform();
+	auto Result = MCPSuccess();
+	Result->SetStringField(TEXT("actorLabel"), Actor->GetActorLabel());
+	Result->SetStringField(TEXT("actorPath"), Actor->GetPathName());
+	Result->SetStringField(TEXT("componentName"), Component->GetName());
+	Result->SetStringField(TEXT("componentPath"), Component->GetPathName());
+	Result->SetStringField(TEXT("world"), WorldScope);
+	Result->SetObjectField(TEXT("before"), ComponentTransformsToJson(Component));
+
+	if (PreviousRelative.Equals(TargetRelative, 1.e-6))
+	{
+		Result->SetBoolField(TEXT("updated"), false);
+		Result->SetBoolField(TEXT("unchanged"), true);
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), TEXT("The component already had this relative transform, so nothing changed and there is nothing to undo."));
+		return MCPResult(Result);
+	}
+
+	{
+		const FScopedTransaction Transaction(FText::FromString(TEXT("Restore component transform")), !bRuntimeWorld);
+		if (!bRuntimeWorld)
+		{
+			Actor->Modify();
+			Component->Modify();
+		}
+		Component->SetRelativeTransform(TargetRelative);
+		Component->UpdateComponentToWorld();
+		Component->MarkRenderStateDirty();
+		if (!bRuntimeWorld)
+		{
+			Component->PostEditComponentMove(true);
+			Component->MarkPackageDirty();
+		}
+	}
+
+	MCPSetUpdated(Result);
+	Result->SetBoolField(TEXT("unchanged"), false);
+	Result->SetObjectField(TEXT("after"), ComponentTransformsToJson(Component));
+
+	auto RollbackPayload = MakeShared<FJsonObject>();
+	RollbackPayload->SetStringField(TEXT("actorPath"), Actor->GetPathName());
+	RollbackPayload->SetStringField(TEXT("componentName"), Component->GetName());
+	RollbackPayload->SetStringField(TEXT("world"), WorldScope);
+	double PieInstance = 0.0;
+	if (TryGetNumberParam(Params, TEXT("pieInstance"), PieInstance))
+	{
+		RollbackPayload->SetNumberField(TEXT("pieInstance"), PieInstance);
+	}
+	RollbackPayload->SetObjectField(TEXT("relativeTransform"), TransformToJson(PreviousRelative));
+	MCPSetRollback(Result, TEXT("restore_component_relative_transform"), RollbackPayload);
 	return MCPResult(Result);
 }
 
@@ -814,10 +906,16 @@ bool FLevelSpatialComponentNudgeTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("apply changes the relative transform"), Child->GetRelativeTransform().Equals(BeforeDryRun, 1.e-6));
 	if (Rollback && *Rollback)
 	{
+		FString RollbackMethod;
+		(*Rollback)->TryGetStringField(TEXT("method"), RollbackMethod);
+		TestEqual(TEXT("rollback routes to the restore action"), RollbackMethod, FString(TEXT("restore_component_relative_transform")));
 		const TSharedPtr<FJsonObject>* RollbackPayload = nullptr;
 		if (TestTrue(TEXT("rollback carries a payload"), (*Rollback)->TryGetObjectField(TEXT("payload"), RollbackPayload) && *RollbackPayload))
 		{
-			const TSharedPtr<FJsonObject> Restored = SpatialNudgeResult(Registry, *RollbackPayload);
+			TestFalse(TEXT("rollback payload carries no nudge parameters"), (*RollbackPayload)->HasField(TEXT("translationDelta")));
+			const TSharedPtr<FJsonValue> RestoredResponse = Registry.ExecuteHandler(RollbackMethod, *RollbackPayload);
+			const TSharedPtr<FJsonObject> Restored =
+				RestoredResponse.IsValid() && RestoredResponse->Type == EJson::Object ? RestoredResponse->AsObject() : nullptr;
 			TestTrue(TEXT("rollback returns an object"), Restored.IsValid());
 			if (Restored.IsValid()) TestTrue(TEXT("rollback succeeds"), Restored->GetBoolField(TEXT("success")));
 			TestTrue(TEXT("rollback restores the relative transform"), Child->GetRelativeTransform().Equals(BeforeDryRun, 1.e-6));

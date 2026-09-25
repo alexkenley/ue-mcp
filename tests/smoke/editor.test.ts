@@ -39,7 +39,7 @@ describe("editor - read / query", () => {
   });
 
   it("pie_control (status)", async () => {
-    const r = await callBridge(bridge, "pie_control", { action: "status" });
+    const r = await callBridge(bridge, "pie_control", { pieAction: "status" });
     expect(r.ok, r.error).toBe(true);
   });
 });

@@ -187,6 +187,8 @@ TSharedPtr<FJsonValue> FEditorHandlers::BuildAll(const TSharedPtr<FJsonObject>& 
 
 TSharedPtr<FJsonValue> FEditorHandlers::ValidateAssets(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every selector is read before anything can fail (#1057).
+	MCPReadParamsAhead(Params, { TEXT("directory"), TEXT("assetPath"), TEXT("assetPaths") });
 	if (!GEditor)
 	{
 		return MCPError(TEXT("Editor not available"));

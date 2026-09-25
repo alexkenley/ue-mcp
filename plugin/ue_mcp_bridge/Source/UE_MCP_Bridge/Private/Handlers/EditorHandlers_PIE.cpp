@@ -196,10 +196,15 @@ namespace
 }
 
 
-TSharedPtr<FJsonValue> FEditorHandlers::PieControl(const TSharedPtr<FJsonObject>& Params)
+// The body of pie_control and pie_start_ignoring_blueprint_errors. The bypass
+// is a method of its own so pie_control never reads an authorization: its spec
+// is published on play_in_editor, and only the approval-gated action may send
+// one (#1057). An empty BypassAuthorization is an ordinary start.
+static TSharedPtr<FJsonValue> MCPRunPieControl(
+	const TSharedPtr<FJsonObject>& Params,
+	const FString& Action,
+	const FString& BypassAuthorization)
 {
-	FString Action;
-	if (auto Err = RequireString(Params, TEXT("action"), Action)) return Err;
 
 	if (!GEditor)
 	{
@@ -232,7 +237,7 @@ TSharedPtr<FJsonValue> FEditorHandlers::PieControl(const TSharedPtr<FJsonObject>
 			TSharedPtr<FJsonObject> Already = MakeShared<FJsonObject>();
 			Already->SetBoolField(TEXT("success"), false);
 			Already->SetStringField(TEXT("error"),
-				TEXT("PIE session already active, so none was started. This call changed nothing; stop the session with pie_control(action=stop) before starting a different one."));
+				TEXT("PIE session already active, so none was started. This call changed nothing; stop the session with pie_control(pieAction=stop) before starting a different one."));
 			Already->SetBoolField(TEXT("alreadyRunning"), true);
 			Already->SetBoolField(TEXT("isPlaying"), true);
 			Already->SetStringField(TEXT("action"), Action);
@@ -274,8 +279,7 @@ TSharedPtr<FJsonValue> FEditorHandlers::PieControl(const TSharedPtr<FJsonObject>
 			Result->SetBoolField(TEXT("waitedForAssetRegistry"), true);
 		}
 
-		bool bIgnoreBlueprintErrors = false;
-		TryGetBoolParam(Params, TEXT("ignoreBlueprintErrors"), bIgnoreBlueprintErrors);
+		const bool bIgnoreBlueprintErrors = !BypassAuthorization.IsEmpty();
 		if (bIgnoreBlueprintErrors)
 		{
 			if (bIgnoreErrorsBypassArmed)
@@ -283,11 +287,10 @@ TSharedPtr<FJsonValue> FEditorHandlers::PieControl(const TSharedPtr<FJsonObject>
 				return MCPError(TEXT("A Blueprint-error bypass PIE launch is already pending"));
 			}
 
-			FString AuthorizationSource;
-			TryGetStringParam(Params, TEXT("authorizationSource"), AuthorizationSource);
+			const FString& AuthorizationSource = BypassAuthorization;
 			if (!IsRecognizedBypassAuthorization(AuthorizationSource))
 			{
-				return MCPError(TEXT("Blueprint-error bypass requires authorizationSource=user_approval (an approval prompt the user accepted) or authorizationSource=config (a standing ue-mcp.pie.allowIgnoreBlueprintErrors opt-in). Call editor(play_in_editor_ignore_blueprint_errors) rather than pie_control directly."));
+				return MCPError(TEXT("Blueprint-error bypass requires authorizationSource=user_approval (an approval prompt the user accepted) or authorizationSource=config (a standing ue-mcp.pie.allowIgnoreBlueprintErrors opt-in). Call editor(play_in_editor_ignore_blueprint_errors) rather than pie_start_ignoring_blueprint_errors directly."));
 			}
 
 			TArray<UBlueprint*> BlueprintsToSuppress;
@@ -389,12 +392,12 @@ TSharedPtr<FJsonValue> FEditorHandlers::PieControl(const TSharedPtr<FJsonObject>
 		Result->SetBoolField(TEXT("isPlaying"), false);
 		Result->SetBoolField(TEXT("playSessionRequested"), true);
 		Result->SetStringField(TEXT("startNote"), bAlreadyQueued
-			? TEXT("A play session was already queued and this call replaced that request rather than adding one. It begins on a later editor tick; poll pie_control(action=status) until isPlaying is true before doing anything that needs the PIE world.")
-			: TEXT("The play session is queued and begins on a later editor tick. Poll pie_control(action=status) until isPlaying is true before doing anything that needs the PIE world."));
+			? TEXT("A play session was already queued and this call replaced that request rather than adding one. It begins on a later editor tick; poll pie_control(pieAction=status) until isPlaying is true before doing anything that needs the PIE world.")
+			: TEXT("The play session is queued and begins on a later editor tick. Poll pie_control(pieAction=status) until isPlaying is true before doing anything that needs the PIE world."));
 
 		// No rollback, and stopping is not one. The request is deferred, so at
 		// the moment a rollback would run PlayWorld is still null and
-		// pie_control(action=stop) reports alreadyStopped on exactly that - and
+		// pie_control(pieAction=stop) reports alreadyStopped on exactly that - and
 		// PIE then starts anyway a tick later, leaving the editor in play after
 		// a rollback that reported it had finished. An inverse that can leave
 		// the thing it was meant to undo running is worse than none, and the
@@ -408,7 +411,7 @@ TSharedPtr<FJsonValue> FEditorHandlers::PieControl(const TSharedPtr<FJsonObject>
 		// surface, not an engine limitation.
 		Result->SetBoolField(TEXT("rollbackPossible"), false);
 		Result->SetStringField(TEXT("rollbackNote"),
-			TEXT("Starting play is a deferred request. pie_control(action=stop) is not its inverse: at rollback time there is no session yet, so it reports alreadyStopped while the queued one starts regardless. The engine can drop a queued request through CancelRequestPlaySession, but no bridge action calls it, so no rollback can name one. Stop it deliberately once pie_control(action=status) reports isPlaying."));
+			TEXT("Starting play is a deferred request. pie_control(pieAction=stop) is not its inverse: at rollback time there is no session yet, so it reports alreadyStopped while the queued one starts regardless. The engine can drop a queued request through CancelRequestPlaySession, but no bridge action calls it, so no rollback can name one. Stop it deliberately once pie_control(pieAction=status) reports isPlaying."));
 	}
 	else if (Action == TEXT("stop"))
 	{
@@ -438,7 +441,7 @@ TSharedPtr<FJsonValue> FEditorHandlers::PieControl(const TSharedPtr<FJsonObject>
 		Result->SetBoolField(TEXT("changed"), true);
 		Result->SetBoolField(TEXT("endPlayRequested"), true);
 		Result->SetStringField(TEXT("stopNote"),
-			TEXT("The session ends on a later editor tick. Poll pie_control(action=status) until isPlaying is false before doing anything that needs the PIE world gone."));
+			TEXT("The session ends on a later editor tick. Poll pie_control(pieAction=status) until isPlaying is false before doing anything that needs the PIE world gone."));
 		// No rollback. Starting PIE again is not the inverse of stopping it: it
 		// is a fresh session from the map's saved state, with none of the world
 		// the stop tore down. A rollback here would also run after play had
@@ -446,14 +449,29 @@ TSharedPtr<FJsonValue> FEditorHandlers::PieControl(const TSharedPtr<FJsonObject>
 		// rather than an undo.
 		Result->SetBoolField(TEXT("rollbackPossible"), false);
 		Result->SetStringField(TEXT("rollbackNote"),
-			TEXT("Ending play destroys the PIE worlds and everything spawned in them. pie_control(action=start) launches a NEW session from the saved map rather than restoring this one."));
+			TEXT("Ending play destroys the PIE worlds and everything spawned in them. pie_control(pieAction=start) launches a NEW session from the saved map rather than restoring this one."));
 	}
 	else
 	{
-		return MCPError(FString::Printf(TEXT("Unknown action: %s. Expected 'status', 'start', or 'stop'"), *Action));
+		return MCPError(FString::Printf(TEXT("Unknown pieAction: %s. Expected 'status', 'start', or 'stop'"), *Action));
 	}
 
 	return MCPResult(Result);
+}
+
+TSharedPtr<FJsonValue> FEditorHandlers::PieControl(const TSharedPtr<FJsonObject>& Params)
+{
+	// pieAction, not action: that name is the category tool's dispatch field,
+	// and a routing name no spec may declare (#1057).
+	const FString Action = OptionalString(Params, TEXT("pieAction"), TEXT("status"));
+	return MCPRunPieControl(Params, Action, FString());
+}
+
+TSharedPtr<FJsonValue> FEditorHandlers::PieStartIgnoringBlueprintErrors(const TSharedPtr<FJsonObject>& Params)
+{
+	FString AuthorizationSource;
+	if (auto Err = RequireString(Params, TEXT("authorizationSource"), AuthorizationSource)) return Err;
+	return MCPRunPieControl(Params, TEXT("start"), AuthorizationSource);
 }
 
 

@@ -242,6 +242,9 @@ namespace
 TSharedPtr<FJsonValue> FLevelHandlers::RerunConstruction(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabels"), TEXT("className"), TEXT("matchSubclasses"), TEXT("world"), TEXT("pieInstance"),
+	});
 
 	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));
 	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
@@ -400,6 +403,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::RerunConstruction(const TSharedPtr<FJsonO
 TSharedPtr<FJsonValue> FLevelHandlers::RecreatePhysicsState(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabels"), TEXT("labelPrefix"), TEXT("tag"), TEXT("classFilter"), TEXT("componentClass"),
+		TEXT("componentNameContains"), TEXT("dryRun"), TEXT("maxComponents"), TEXT("world"), TEXT("pieInstance"),
+	});
 
 	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));
 	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);

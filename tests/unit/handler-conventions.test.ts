@@ -73,7 +73,8 @@ const BASELINE = {
   // anything says that too, through MCPSetIdempotencyUnobservable, rather than
   // inventing an `unchanged` flag about somebody else's code.
   mutationsWithoutIdempotency: 0,
-  orphanedHandlers: 22,
+  // 23: pie_start_ignoring_blueprint_errors, split out of pie_control (#1057).
+  orphanedHandlers: 23,
 };
 
 /**
@@ -97,6 +98,9 @@ const KNOWN_ORPHANS: Record<string, string> = {
   release_session_locks: "called on session teardown, not by a caller.",
   build_project: "editor(build_project) is a local handler that shells out to UBT instead.",
   execute_python: "editor(execute_python) wraps this with the workaround tracker and the search gate.",
+  pie_start_ignoring_blueprint_errors:
+    "editor(play_in_editor_ignore_blueprint_errors) calls it only after its approval gate, so no action "
+    + "declares it and play_in_editor's pie_control never reads an authorization (#1057).",
   request_editor_shutdown: "editor(stop_editor) drives it through the lifecycle path.",
   save_current_level: "level(save) supersedes it and reports per-package results.",
   search_assets: "asset(search) supersedes it.",

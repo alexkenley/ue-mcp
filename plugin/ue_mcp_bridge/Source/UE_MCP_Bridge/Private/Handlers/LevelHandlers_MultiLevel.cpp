@@ -192,6 +192,10 @@ namespace
 TSharedPtr<FJsonValue> FLevelHandlers::DeleteExactLabeledActorsInLevels(
 	const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("levels"), TEXT("dryRun"), TEXT("onMissing"), TEXT("restoreOriginalLevel"),
+	});
+
 	if (!GEditor)
 	{
 		return MCPError(TEXT("GEditor is not available"));

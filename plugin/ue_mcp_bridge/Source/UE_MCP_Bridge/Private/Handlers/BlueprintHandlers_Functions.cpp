@@ -802,8 +802,9 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteFunction(const TSharedPtr<FJson
 
 TSharedPtr<FJsonValue> FBlueprintHandlers::CreateBlueprintInterface(const TSharedPtr<FJsonObject>& Params)
 {
+	// 'path' is the spec's alias, renamed to assetPath before this runs.
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 

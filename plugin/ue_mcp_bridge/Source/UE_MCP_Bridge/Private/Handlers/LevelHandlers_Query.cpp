@@ -237,6 +237,13 @@ namespace
 TSharedPtr<FJsonValue> FLevelHandlers::QueryComponents(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	MCPReadParamsAhead(Params, {
+		TEXT("componentClass"), TEXT("actorClass"), TEXT("matchSubclasses"), TEXT("componentNameContains"),
+		TEXT("actorLabelPrefix"), TEXT("actorLabelContains"), TEXT("actorTag"), TEXT("folderPath"), TEXT("folderPathPrefix"),
+		TEXT("fields"), TEXT("propertyNames"), TEXT("where"), TEXT("whereMode"), TEXT("suspectOnly"), TEXT("groupBy"),
+		TEXT("countBy"), TEXT("sampleLimit"), TEXT("countOnly"), TEXT("limit"), TEXT("startIndex"),
+		TEXT("duplicateTransformTolerance"), TEXT("levelPath"), TEXT("world"), TEXT("pieInstance"),
+	});
 
 	// ── Parameters ──────────────────────────────────────────────────────────
 	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));

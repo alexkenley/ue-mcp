@@ -645,6 +645,11 @@ struct FMCPHygPlannedFix
 TSharedPtr<FJsonValue> FAssetHandlers::AuditAssetHygiene(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	// Every parameter is read before a check below can refuse (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("directory"), TEXT("directories"), TEXT("recursive"), TEXT("maxAssets"), TEXT("maxIssues"),
+		TEXT("checks"), TEXT("classNames"), TEXT("excludePaths"), TEXT("keepPaths"), TEXT("duplicateMethod"),
+		TEXT("namingRules"), TEXT("namingRuleMode"), TEXT("includeWorlds"), TEXT("ignoreRedirectorReferencers") });
 
 	FMCPHygScope Scope;
 	if (auto Err = MCPHygParseScope(Params, Scope)) return Err;
@@ -1054,6 +1059,12 @@ TSharedPtr<FJsonValue> FAssetHandlers::AuditAssetHygiene(const TSharedPtr<FJsonO
 TSharedPtr<FJsonValue> FAssetHandlers::FixAssetHygiene(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	// Every parameter is read before a check below can refuse (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("fix"), TEXT("assetPaths"), TEXT("directory"), TEXT("directories"), TEXT("recursive"),
+		TEXT("maxAssets"), TEXT("classNames"), TEXT("excludePaths"), TEXT("keepPaths"), TEXT("namingRules"),
+		TEXT("namingRuleMode"), TEXT("unreferencedAction"), TEXT("quarantineFolder"),
+		TEXT("ignoreRedirectorReferencers"), TEXT("maxFixes"), TEXT("continueOnError"), TEXT("save"), TEXT("dryRun") });
 
 	FString Fix;
 	if (auto Err = RequireString(Params, TEXT("fix"), Fix)) return Err;

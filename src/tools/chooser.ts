@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { categoryTool, bp, type ToolDef } from "../types.js";
+import { categoryTool, type ToolDef } from "../types.js";
 import { specBp, schema as specSchema } from "./specs/chooser.generated.js";
 
 // #685 - ChooserTable (UChooserTable) row authoring. Chooser tables are the
@@ -12,7 +11,7 @@ export const chooserTool: ToolDef = categoryTool(
   "chooser",
   "Author ChooserTable assets (the data-driven selection layer behind Motion Matching): introspect columns, list/add/edit/delete rows mapping input-column conditions to an output object.",
   {
-    create:     bp("mutate", "Create an empty ChooserTable asset. Add input columns with add_column, then rows with add_row. Params: name, packagePath? (default /Game), onConflict? (#685)", "chooser_create", (p) => ({ name: p.name, packagePath: p.packagePath, onConflict: p.onConflict })),
+    create:     specBp("mutate", "Create an empty ChooserTable asset. Add input columns with add_column, then rows with add_row (#685).", "chooser_create"),
     describe:   specBp("read", "Introspect a ChooserTable: row count, each input column (index, name, columnType, cellType) and the fallback result. Read this first to learn the cell text format each column expects (#685).", "chooser_describe"),
     add_column: specBp("mutate", "Add an input column to a ChooserTable (so rows have a condition to fill). columnType is a Chooser column struct short name, e.g. EnumColumn, BoolColumn, FloatRangeColumn, GameplayTagColumn, ObjectColumn, or an Output* column. Optionally bind its input: inputStruct (parameter struct e.g. EnumContextProperty/BoolContextProperty), boundProperty (context property name to read), enumPath (for enum columns). Sizes the new column's cells to the current rows (#685).", "chooser_add_column"),
     list_rows:  specBp("read", "List every row: index, disabled flag, output object (resultType + referenced asset path), and each column's cell value as round-trippable text (#685).", "chooser_list_rows"),
@@ -25,11 +24,7 @@ export const chooserTool: ToolDef = categoryTool(
   undefined,
   {
     // #1057: every key a spec'd handler declares, generated from its C++
-    // registration. A key listed again below is shared with hand-written
-    // actions, and tests/unit/handler-specs.test.ts holds the two to one type.
+    // registration.
     ...specSchema,
-    name: z.string().optional().describe("create: new ChooserTable asset name"),
-    packagePath: z.string().optional().describe("create: destination package path (default /Game)"),
-    onConflict: z.string().optional().describe("create: conflict policy skip (default) | error | overwrite"),
   },
 );

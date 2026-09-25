@@ -61,13 +61,9 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 
 	// #1057: a handler registered with a spec declares its parameters here and
 	// nowhere else; the TS surface is generated from a recording of these.
-	// Unspecified: the create actions, duplicate_material (it makes the
-	// destination folder before anything can fail), build_material and the
-	// transaction pair, which the contract test would see write; every action
-	// whose parameters are a required choice (materialPath OR functionPath,
-	// assetPath OR actorLabel/actorPath, usage OR usages), which a spec cannot
-	// express yet; and set_material_parameter and add_material_expression,
-	// whose value and defaultValue take shapes not yet declared.
+	// Contract-exempt: the create actions whose values would create an asset
+	// before anything failed, duplicate_material (it makes the destination
+	// folder first) and the transaction pair.
 	using EType = EMCPParamType;
 	auto SpecAssetPath = [](const TCHAR* Description)
 	{
@@ -150,12 +146,53 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	{
 		return MCPParam::Required(TEXT("property"), EType::String, Description);
 	};
+	auto SpecName = [](const TCHAR* Description)
+	{
+		return MCPParam::Required(TEXT("name"), EType::String, Description);
+	};
+	auto SpecPackagePath = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("packagePath"), EType::String, Description);
+	};
+	auto SpecOnConflict = []()
+	{
+		return MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the asset exists: skip (default, report it) | error"));
+	};
+	// A material graph or a MaterialFunction graph (#1138): one or the other.
+	const FMCPParamSpec SpecGraphMaterialPath = MCPParam::Optional(TEXT("materialPath"), EType::String, TEXT("Material asset path")).Alias(TEXT("path")).Alias(TEXT("assetPath"));
+	const FMCPParamSpec SpecGraphFunctionPath = MCPParam::Optional(TEXT("functionPath"), EType::String, TEXT("MaterialFunction asset path, instead of materialPath (#1138)")).Alias(TEXT("materialFunctionPath"));
+	const FMCPSpecRules GraphChoice = MCPSpec::ExactlyOne({ { TEXT("materialPath") }, { TEXT("functionPath") } });
+	const FMCPParamSpec SpecExpressionIndex = MCPParam::Required(TEXT("expressionIndex"), EType::Number, TEXT("Node position in the graph's expression list, as list_expressions reports it"));
+	// #952: a colour arrives as value or color, shaped {r,g,b,a}, [r,g,b,a] or UE struct text.
+	const FMCPParamSpec SpecColorValue = MCPParam::Optional(TEXT("color"), EType::Color, TEXT("A colour or vector value, instead of value")).Alias(TEXT("colour"));
+	// A placed component's material (#1114, #1131): the asset, or the actor holding it.
+	const FMCPParamSpec SpecActorLabel = MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Label of the actor whose component material to read; a label naming several actors is refused"));
+	const FMCPParamSpec SpecActorPath = MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full object path of that actor; the unambiguous selector"));
+	const FMCPParamSpec SpecComponentName = MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Primitive component whose material slot to read (default: the first with material slots)"));
+	const FMCPParamSpec SpecSlotIndex = MCPParam::Optional(TEXT("slotIndex"), EType::Integer, TEXT("Material slot index on the component (default 0)"));
+	const FMCPParamSpec SpecSlotName = MCPParam::Optional(TEXT("slotName"), EType::String, TEXT("Material slot name, instead of slotIndex"));
+	const FMCPParamSpec SpecPieInstance = MCPParam::Optional(TEXT("pieInstance"), EType::Number, TEXT("Which PIE world when several run (0 = server/primary). See editor(list_pie_instances)"));
+	auto SpecWorld = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("world"), EType::String, Description);
+	};
+	const FMCPSpecRules ActorChoice = MCPSpec::ExactlyOne({ { TEXT("actorLabel") }, { TEXT("actorPath") } });
+	const FMCPSpecRules AssetOrActorChoice = MCPSpec::ExactlyOne({ { TEXT("assetPath") }, { TEXT("actorLabel") }, { TEXT("actorPath") } });
+	// #1131 Material Designer selectors.
+	const FMCPParamSpec SpecDesignerAssetPath = MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("A DynamicMaterialInstance, a DynamicMaterialModel, or an object path inside one"));
+	const FMCPParamSpec SpecDesignerSlot = MCPParam::Optional(TEXT("designerSlot"), EType::Number, TEXT("Material Designer slot: index, or the material property it serves (BaseColor, or its short name Base)")).Or(EType::String);
+	const FMCPParamSpec SpecLayerIndex = MCPParam::Optional(TEXT("layerIndex"), EType::Integer, TEXT("Material Designer layer index within the slot"));
+	const FMCPParamSpec SpecLayerName = MCPParam::Optional(TEXT("layerName"), EType::String, TEXT("Material Designer layer name"));
 
 	Registry.RegisterHandler(TEXT("list_expression_types"), &ListExpressionTypes, {
 		SpecCursor(),
 		SpecLimit(),
 	});
-	Registry.RegisterHandler(TEXT("create_material"), &CreateMaterial);
+	Registry.RegisterHandler(TEXT("create_material"), &CreateMaterial, {
+		SpecName(TEXT("Material asset name")),
+		SpecPackagePath(TEXT("Folder for the new material (default /Game/Materials)")),
+		SpecOnConflict(),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a material under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("read_material"), &ReadMaterial, {
 		SpecAnyAssetPath(TEXT("Material or MaterialInstance asset path")),
 	});
@@ -175,7 +212,19 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		SpecAssetPath(TEXT("Material asset path")),
 		MCPParam::Required(TEXT("color"), EType::Color, TEXT("Base colour {r, g, b, a?}; a channel left out is 1")),
 	});
-	Registry.RegisterHandler(TEXT("add_material_expression"), &AddMaterialExpression);
+	Registry.RegisterHandler(TEXT("add_material_expression"), &AddMaterialExpression, {
+		SpecMaterialPath(),
+		MCPParam::Required(TEXT("expressionType"), EType::String, TEXT("Expression type: Constant, TextureSample, Multiply, Lerp, ScalarParameter, etc.")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Node description")).Alias(TEXT("expressionName")),
+		MCPParam::Optional(TEXT("parameterName"), EType::String, TEXT("Parameter name, on a parameter node")),
+		MCPParam::Optional(TEXT("group"), EType::String, TEXT("Parameter Group, on a parameter node (#318)")),
+		MCPParam::Optional(TEXT("sortPriority"), EType::Number, TEXT("SortPriority within the parameter Group")),
+		MCPParam::Optional(TEXT("defaultValue"), EType::Number, TEXT("ScalarParameter default (a number) or VectorParameter default ({r,g,b,a})")).Or(EType::Object),
+		MCPParam::Optional(TEXT("value"), EType::Any, TEXT("A number for Constant, {r,g,b} for Constant3Vector, {x,y} for Constant2Vector")),
+		MCPParam::Optional(TEXT("channels"), EType::Object, TEXT("ComponentMask channels {r,g,b,a} as bools")),
+		SpecPositionX(),
+		SpecPositionY(),
+	});
 	Registry.RegisterHandler(TEXT("list_material_expressions"), &ListMaterialExpressions, {
 		SpecMaterialPath(),
 		MCPParam::Optional(TEXT("includeInputs"), EType::Boolean, TEXT("Include each node's input pin wiring (default false)")),
@@ -195,9 +244,34 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		SpecMaterialPath(),
 		MCPParam::Optional(TEXT("recompileChildren"), EType::Boolean, TEXT("Cascade to every MaterialInstanceConstant whose parent chain reaches this material (#421)")),
 	});
-	Registry.RegisterHandler(TEXT("create_material_instance"), &CreateMaterialInstance);
-	Registry.RegisterHandler(TEXT("set_material_parameter"), &SetMaterialParameter);
-	Registry.RegisterHandler(TEXT("read_material_instance"), &ReadMaterialInstance);
+	// The contract values' parentPath fails to load before anything is created.
+	Registry.RegisterHandler(TEXT("create_material_instance"), &CreateMaterialInstance, {
+		MCPParam::Required(TEXT("parentPath"), EType::String, TEXT("Parent material or material instance")),
+		SpecName(TEXT("Material instance asset name")),
+		SpecPackagePath(TEXT("Folder for the new instance (default /Game/Materials)")),
+		SpecOnConflict(),
+	});
+	// value wins over color, and a texture's value over texturePath.
+	Registry.RegisterHandler(TEXT("set_material_parameter"), &SetMaterialParameter, {
+		SpecAssetPath(TEXT("MaterialInstanceConstant asset path")),
+		SpecParameterName(),
+		MCPParam::Optional(TEXT("parameterType"), EType::String, TEXT("scalar | vector (alias color) | texture; detected from the instance when omitted")),
+		MCPParam::Optional(TEXT("value"), EType::Any, TEXT("A number (scalar), a colour {r,g,b,a}, [r,g,b,a] or '(R=..,G=..,B=..,A=..)' (vector), or a texture asset path (texture)")),
+		SpecColorValue,
+		MCPParam::Optional(TEXT("texturePath"), EType::String, TEXT("Texture asset path, instead of value, for a texture parameter")),
+		MCPParam::Optional(TEXT("association"), EType::String, TEXT("Material parameter association: Global (default), Layer, or Blend")),
+	}, MCPSpec::AtLeastOne({ { TEXT("value") }, { TEXT("color") }, { TEXT("texturePath") } }));
+	// #1114: an instance asset, or the material on a placed component,
+	// including a transient MaterialInstanceDynamic in PIE.
+	Registry.RegisterHandler(TEXT("read_material_instance"), &ReadMaterialInstance, {
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("MaterialInstance asset path")).Alias(TEXT("path")).Alias(TEXT("materialPath")),
+		SpecActorLabel, SpecActorPath,
+		SpecComponentName,
+		SpecSlotIndex,
+		SpecSlotName,
+		SpecWorld(TEXT("World holding the actor: editor | pie | auto (default auto: PIE when running, else editor)")),
+		SpecPieInstance,
+	}, AssetOrActorChoice);
 	Registry.RegisterHandler(TEXT("read_material_parameter_collection"), &ReadMaterialParameterCollection, {
 		SpecAssetPath(TEXT("MaterialParameterCollection asset path")),
 		MCPParam::Optional(TEXT("world"), EType::String, TEXT("World whose live collection instance to read: editor, pie or auto. Omit for the stored defaults only")),
@@ -223,8 +297,29 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("association"), EType::String, TEXT("Material parameter association: Global, Layer, or Blend")),
 		MCPParam::Optional(TEXT("parameterIndex"), EType::Number, TEXT("Material layer/blend parameter index")),
 	});
-	Registry.RegisterHandler(TEXT("set_expression_value"), &SetExpressionValue);
-	Registry.RegisterHandler(TEXT("set_custom_expression"), &SetCustomExpression);
+	// Called once per branch by the contract test; the graph load fails first.
+	Registry.RegisterHandler(TEXT("set_expression_value"), &SetExpressionValue, {
+		SpecGraphMaterialPath, SpecGraphFunctionPath,
+		SpecExpressionIndex,
+		MCPParam::Optional(TEXT("value"), EType::Any, TEXT("Constant or parameter default: a number, or a colour/vector {r,g,b,a}, {x,y,z,w}, [r,g,b,a] or '(R=..,G=..)'; with propertyName, the property's value")),
+		SpecColorValue,
+		MCPParam::Optional(TEXT("x"), EType::Number, TEXT("A vector component passed at the top level instead of inside value (#979)")),
+		MCPParam::Optional(TEXT("y"), EType::Number, TEXT("A vector component passed at the top level instead of inside value (#979)")),
+		MCPParam::Optional(TEXT("parameterName"), EType::String, TEXT("Rename a scalar or vector parameter node")),
+		MCPParam::Optional(TEXT("texturePath"), EType::String, TEXT("Default texture of a TextureSample node")),
+		MCPParam::Optional(TEXT("uTiling"), EType::Number, TEXT("U tiling multiplier of a TextureCoordinate node")),
+		MCPParam::Optional(TEXT("vTiling"), EType::Number, TEXT("V tiling multiplier of a TextureCoordinate node")),
+		MCPParam::Optional(TEXT("coordinateIndex"), EType::Integer, TEXT("UV channel a TextureCoordinate node reads")),
+		MCPParam::Optional(TEXT("propertyName"), EType::String, TEXT("Any other UPROPERTY on the node, set from value by reflection, e.g. SamplerType (#663)")),
+	}, GraphChoice);
+	Registry.RegisterHandler(TEXT("set_custom_expression"), &SetCustomExpression, {
+		SpecGraphMaterialPath, SpecGraphFunctionPath,
+		SpecExpressionIndex,
+		MCPParam::Optional(TEXT("code"), EType::String, TEXT("HLSL code body (#617)")),
+		MCPParam::Optional(TEXT("inputs"), EType::Array, TEXT("Named input pins; rebuilds the node's inputs (#617)")).Items(EType::String),
+		MCPParam::Optional(TEXT("outputType"), EType::String, TEXT("float1 | float2 | float3 | float4 | materialAttributes (#617)")),
+		MCPParam::Optional(TEXT("description"), EType::String, TEXT("Node description")),
+	}, GraphChoice);
 
 	// Expression graph operations
 	Registry.RegisterHandler(TEXT("connect_texture_to_material"), &ConnectTextureToMaterial, {
@@ -245,14 +340,20 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("outputName"), EType::String, TEXT("Output of the expression, by name or index (default: its first output)")),
 		SpecProperty(TEXT("Material property: BaseColor, Normal, Roughness, Metallic, EmissiveColor, etc.")),
 	});
-	Registry.RegisterHandler(TEXT("delete_material_expression"), &DeleteMaterialExpression);
+	Registry.RegisterHandler(TEXT("delete_material_expression"), &DeleteMaterialExpression, {
+		SpecGraphMaterialPath, SpecGraphFunctionPath,
+		MCPParam::Required(TEXT("expressionName"), EType::String, TEXT("A description, class, parameter name, FunctionInput/FunctionOutput name, index or engine name")),
+	}, GraphChoice);
 	Registry.RegisterHandler(TEXT("disconnect_material_property"), &DisconnectMaterialProperty, {
 		MCPParam::Required(TEXT("materialPath"), EType::String, TEXT("Material asset path")).Alias(TEXT("assetPath")),
 		SpecProperty(TEXT("Material property: BaseColor, Normal, Roughness, Metallic, EmissiveColor, etc.")),
 	});
 
 	// v0.7.9 - depth
-	Registry.RegisterHandler(TEXT("duplicate_material"), &DuplicateMaterial);
+	Registry.RegisterHandler(TEXT("duplicate_material"), &DuplicateMaterial, {
+		MCPParam::Required(TEXT("sourcePath"), EType::String, TEXT("Material asset to copy")),
+		MCPParam::Required(TEXT("destinationPath"), EType::String, TEXT("Package path of the copy, including its name; a missing folder is created")),
+	}, MCPSpec::ContractExempt(TEXT("Makes the destination folder under the contract values before the copy can fail")));
 	Registry.RegisterHandler(TEXT("validate_material"), &ValidateMaterial, {
 		SpecGraphAssetPath(),
 	});
@@ -278,20 +379,53 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("width"), EType::Number, TEXT("Image width in pixels (default 256)")),
 		MCPParam::Optional(TEXT("height"), EType::Number, TEXT("Image height in pixels (default 256)")),
 	});
-	Registry.RegisterHandler(TEXT("begin_material_transaction"), &BeginMaterialTransaction);
-	Registry.RegisterHandler(TEXT("end_material_transaction"), &EndMaterialTransaction);
+	Registry.RegisterHandler(TEXT("begin_material_transaction"), &BeginMaterialTransaction, {
+		MCPParam::Optional(TEXT("label"), EType::String, TEXT("Transaction label (default MCP Material Edit)")),
+	}, MCPSpec::ContractExempt(TEXT("Opens an editor transaction; nothing it reads fails first")));
+	Registry.RegisterHandler(TEXT("end_material_transaction"), &EndMaterialTransaction, TArray<FMCPParamSpec>(),
+		MCPSpec::ContractExempt(TEXT("Commits whatever editor transaction is open")));
 
 	// #946: texture-set build with automatic virtual/UDIM sampler selection.
-	Registry.RegisterHandler(TEXT("build_material"), &BuildMaterial);
+	// The contract values' empty textures object is refused before anything is built.
+	Registry.RegisterHandler(TEXT("build_material"), &BuildMaterial, {
+		MCPParam::Optional(TEXT("materialPath"), EType::String, TEXT("Existing material to build into")).Alias(TEXT("assetPath")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Name of a new material to create and build")),
+		SpecPackagePath(TEXT("Folder for a new material (default /Game/Materials)")),
+		MCPParam::Required(TEXT("textures"), EType::Object, TEXT("{materialProperty: textureAssetPath}: baseColor, normal, roughness, metallic, specular, emissive, opacity, opacityMask, ambientOcclusion, plus packed orm (R=AO,G=Roughness,B=Metallic) and rma (#946)")),
+		MCPParam::Optional(TEXT("samplerTypes"), EType::Object, TEXT("Per-texture EMaterialSamplerType override, e.g. {normal: 'VirtualNormal'}; omit to let the texture decide (#946)")),
+		MCPParam::Optional(TEXT("clearExisting"), EType::Boolean, TEXT("Delete every existing expression before building (#946)")),
+		MCPParam::Optional(TEXT("assignToMesh"), EType::String, TEXT("StaticMesh or SkeletalMesh asset to put the finished material on (#946)")).Alias(TEXT("meshPath")),
+		MCPParam::Optional(TEXT("meshSlots"), EType::Array, TEXT("Mesh material slot names or indices to assign (default every slot) (#946)")),
+	}, MCPSpec::ExactlyOne({ { TEXT("materialPath") }, { TEXT("name") } }));
 
-	Registry.RegisterHandler(TEXT("create_material_simple"), &CreateMaterialSimple);
-	Registry.RegisterHandler(TEXT("set_material_usage"), &SetMaterialUsage);
+	Registry.RegisterHandler(TEXT("create_material_simple"), &CreateMaterialSimple, {
+		SpecName(TEXT("Material asset name")),
+		SpecPackagePath(TEXT("Folder for the new material (default /Game/Materials)")),
+		SpecOnConflict(),
+		MCPParam::Optional(TEXT("baseColor"), EType::Color, TEXT("Base colour {r,g,b}")),
+		MCPParam::Optional(TEXT("metallic"), EType::Number, TEXT("Metallic constant")),
+		MCPParam::Optional(TEXT("specular"), EType::Number, TEXT("Specular constant")),
+		MCPParam::Optional(TEXT("roughness"), EType::Number, TEXT("Roughness constant")),
+		MCPParam::Optional(TEXT("emissive"), EType::Number, TEXT("Emissive strength")),
+		MCPParam::Optional(TEXT("usages"), EType::Array, TEXT("MATUSAGE flag names to turn on, e.g. InstancedStaticMeshes, Nanite, NiagaraSprites")).Items(EType::String),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a material under the contract values; nothing it reads fails first")));
+	// Both spellings combine: usage adds one more flag to usages.
+	Registry.RegisterHandler(TEXT("set_material_usage"), &SetMaterialUsage, {
+		SpecAnyAssetPath(TEXT("Material asset path")),
+		MCPParam::Optional(TEXT("usages"), EType::Array, TEXT("MATUSAGE flag names (InstancedStaticMeshes, Nanite, VolumetricCloud, ...); get_usage lists every name this engine accepts")).Items(EType::String),
+		MCPParam::Optional(TEXT("usage"), EType::String, TEXT("One MATUSAGE flag name")),
+	}, MCPSpec::AtLeastOne({ { TEXT("usages") }, { TEXT("usage") } }));
 	Registry.RegisterHandler(TEXT("get_material_usage"), &GetMaterialUsage, {
 		SpecAssetPath(TEXT("Material or MaterialInstance asset path")),
 	});
 
 	// #463: MaterialFunction authoring.
-	Registry.RegisterHandler(TEXT("create_material_function"), &CreateMaterialFunction);
+	Registry.RegisterHandler(TEXT("create_material_function"), &CreateMaterialFunction, {
+		SpecName(TEXT("MaterialFunction asset name")),
+		SpecPackagePath(TEXT("Folder for the new function (default /Game/Materials/Functions)")),
+		SpecOnConflict(),
+		MCPParam::Optional(TEXT("description"), EType::String, TEXT("MaterialFunction description (#463)")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a MaterialFunction under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("add_material_function_expression"), &AddMaterialFunctionExpression, {
 		SpecFunctionPath(),
 		MCPParam::Required(TEXT("expressionType"), EType::String, TEXT("Expression type, e.g. Constant3Vector, FunctionInput, FunctionOutput, If")),
@@ -334,7 +468,13 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 
 	// Runtime Virtual Textures, in MaterialHandlers_RVT.cpp.
-	Registry.RegisterHandler(TEXT("create_runtime_virtual_texture"), &CreateRuntimeVirtualTexture);
+	// The contract values' name holds a '/', which is refused before anything is created.
+	Registry.RegisterHandler(TEXT("create_runtime_virtual_texture"), &CreateRuntimeVirtualTexture, {
+		SpecName(TEXT("RuntimeVirtualTexture asset name, with no '/' or '.'")),
+		SpecPackagePath(TEXT("Folder for the new RVT (default /Game/Textures/RVT)")),
+		MCPParam::Optional(TEXT("materialType"), EType::String, TEXT("RVT content layout: BaseColor | BaseColor_Normal_Roughness | BaseColor_Normal_Specular | BaseColor_Normal_Specular_YCoCg | BaseColor_Normal_Specular_Mask_YCoCg | Mask4 | WorldHeight | Displacement; one this project disables is refused")),
+		SpecOnConflict(),
+	});
 	Registry.RegisterHandler(TEXT("read_runtime_virtual_texture"), &ReadRuntimeVirtualTexture, {
 		SpecRvtPath(),
 	});
@@ -344,7 +484,14 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("boundsMode"), EType::String, TEXT("writers (cover every primitive writing into this RVT) | alignActor (match one actor's box and rotation)")),
 		MCPParam::Optional(TEXT("boundsAlignActor"), EType::String, TEXT("Actor label or object path whose rotation and bounds the volume aligns to, typically the landscape")),
 	});
-	Registry.RegisterHandler(TEXT("set_rvt_volume_bounds"), &SetRvtVolumeBounds);
+	// The volume by name, or found from the RVT it is bound to.
+	Registry.RegisterHandler(TEXT("set_rvt_volume_bounds"), &SetRvtVolumeBounds, {
+		MCPParam::Optional(TEXT("rvtPath"), EType::String, TEXT("RuntimeVirtualTexture whose one bound volume to refit")).Alias(TEXT("assetPath")),
+		MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Label of the RuntimeVirtualTextureVolume")),
+		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full object path of the RuntimeVirtualTextureVolume")),
+		MCPParam::Optional(TEXT("boundsMode"), EType::String, TEXT("writers (default: cover every primitive writing into this RVT) | alignActor (match one actor's box and rotation)")),
+		MCPParam::Optional(TEXT("boundsAlignActor"), EType::String, TEXT("Actor label or object path whose rotation and bounds the volume aligns to, typically the landscape")),
+	}, MCPSpec::ExactlyOne({ { TEXT("rvtPath") }, { TEXT("actorLabel") }, { TEXT("actorPath") } }));
 	Registry.RegisterHandler(TEXT("add_rvt_sampler"), &AddRvtSampler, {
 		MCPParam::Required(TEXT("materialPath"), EType::String, TEXT("Material asset path")).Alias(TEXT("assetPath")),
 		MCPParam::Required(TEXT("rvtPath"), EType::String, TEXT("RuntimeVirtualTexture asset path")),
@@ -362,14 +509,79 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		SpecPositionY(),
 		SpecRecompile(),
 	});
-	Registry.RegisterHandler(TEXT("assign_rvt_to_landscape"), &AssignRvtToLandscape);
+	// rvtPaths wins over rvtPath; assignMode=set with neither clears the list.
+	Registry.RegisterHandler(TEXT("assign_rvt_to_landscape"), &AssignRvtToLandscape, {
+		MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Label of the landscape")),
+		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full object path of the landscape")),
+		MCPParam::Optional(TEXT("rvtPaths"), EType::Array, TEXT("RuntimeVirtualTexture asset paths")).Items(EType::String),
+		MCPParam::Optional(TEXT("rvtPath"), EType::String, TEXT("One RuntimeVirtualTexture asset path, instead of rvtPaths")),
+		MCPParam::Optional(TEXT("assignMode"), EType::String, TEXT("set (default: replace the list) | add | remove")),
+	}, ActorChoice);
 
 	// Material Designer layer stacks (#1131), in MaterialHandlers_Designer.cpp.
-	Registry.RegisterHandler(TEXT("read_material_designer"), &ReadMaterialDesigner);
-	Registry.RegisterHandler(TEXT("set_material_designer_value"), &SetMaterialDesignerValue);
-	Registry.RegisterHandler(TEXT("add_material_designer_layer"), &AddMaterialDesignerLayer);
-	Registry.RegisterHandler(TEXT("remove_material_designer_layer"), &RemoveMaterialDesignerLayer);
-	Registry.RegisterHandler(TEXT("create_material_designer"), &CreateMaterialDesigner);
+	Registry.RegisterHandler(TEXT("read_material_designer"), &ReadMaterialDesigner, {
+		SpecDesignerAssetPath,
+		SpecActorLabel, SpecActorPath,
+		SpecComponentName,
+		SpecSlotIndex,
+		SpecSlotName,
+		SpecWorld(TEXT("World holding the actor: editor (default) | pie | auto")),
+		SpecPieInstance,
+		SpecDesignerSlot,
+		MCPParam::Optional(TEXT("layerIndex"), EType::Integer, TEXT("Only this layer of the slot")),
+		MCPParam::Optional(TEXT("maxDepth"), EType::Integer, TEXT("How deep to describe nested stages and values (default 10)")),
+	}, AssetOrActorChoice);
+	// The component by objectPath or componentPath, or a layer (+ stage) of a
+	// target's slot. componentPath and the layer forms also need the target.
+	Registry.RegisterHandler(TEXT("set_material_designer_value"), &SetMaterialDesignerValue, {
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Component property to write, e.g. Value, Offset, Tiling, Rotation, Text, bEnabled, LayerName")),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("The value to write")),
+		MCPParam::Optional(TEXT("objectPath"), EType::String, TEXT("Full object path of the component, as read_material_designer reports it")),
+		MCPParam::Optional(TEXT("componentPath"), EType::String, TEXT("Component path inside the target's model, as read_material_designer reports it")),
+		SpecLayerIndex,
+		SpecLayerName,
+		MCPParam::Optional(TEXT("stage"), EType::String, TEXT("Stage of the addressed layer: base | mask | index")),
+		SpecDesignerAssetPath,
+		SpecActorLabel, SpecActorPath,
+		SpecComponentName,
+		SpecSlotIndex,
+		SpecSlotName,
+		SpecWorld(TEXT("World holding the actor: editor (default) | pie | auto")),
+		SpecPieInstance,
+		SpecDesignerSlot,
+		MCPParam::Optional(TEXT("rebuild"), EType::Boolean, TEXT("Request a material build after the write (default true when no setter ran)")),
+	}, MCPSpec::ExactlyOne({ { TEXT("objectPath") }, { TEXT("componentPath") }, { TEXT("layerIndex") }, { TEXT("layerName") } }));
+	Registry.RegisterHandler(TEXT("add_material_designer_layer"), &AddMaterialDesignerLayer, {
+		SpecDesignerAssetPath,
+		SpecActorLabel, SpecActorPath,
+		SpecComponentName,
+		SpecSlotIndex,
+		SpecSlotName,
+		SpecWorld(TEXT("World holding the actor: editor (default) | pie | auto")),
+		SpecPieInstance,
+		SpecDesignerSlot,
+		MCPParam::Optional(TEXT("materialProperty"), EType::String, TEXT("EDMMaterialPropertyType of the new layer, and the slot when designerSlot is omitted (default BaseColor)")),
+		MCPParam::Optional(TEXT("layerName"), EType::String, TEXT("Name for the new layer")),
+	}, AssetOrActorChoice);
+	// A layer by objectPath, or by layerIndex / layerName in a target's slot.
+	Registry.RegisterHandler(TEXT("remove_material_designer_layer"), &RemoveMaterialDesignerLayer, {
+		MCPParam::Optional(TEXT("objectPath"), EType::String, TEXT("Full object path of the layer, as read_material_designer reports it")),
+		SpecDesignerAssetPath,
+		SpecActorLabel, SpecActorPath,
+		SpecComponentName,
+		SpecSlotIndex,
+		SpecSlotName,
+		SpecWorld(TEXT("World holding the actor: editor (default) | pie | auto")),
+		SpecPieInstance,
+		SpecDesignerSlot,
+		SpecLayerIndex,
+		SpecLayerName,
+	}, MCPSpec::ExactlyOne({ { TEXT("objectPath") }, { TEXT("assetPath") }, { TEXT("actorLabel") }, { TEXT("actorPath") } }));
+	Registry.RegisterHandler(TEXT("create_material_designer"), &CreateMaterialDesigner, {
+		SpecName(TEXT("Material asset name")),
+		SpecPackagePath(TEXT("Folder for the new material (default /Game/Materials)")),
+		SpecOnConflict(),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a Material Designer material under the contract values; nothing it reads fails first")));
 }
 
 UMaterial* FMaterialHandlers::LoadMaterialFromPath(const FString& AssetPath)
@@ -435,8 +647,10 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ResolveMaterialGraphTarget(const TShar
 {
 	OutTarget = FMaterialGraphTarget();
 
-	FString FunctionPath = OptionalString(Params, TEXT("functionPath"));
-	if (FunctionPath.IsEmpty()) FunctionPath = OptionalString(Params, TEXT("materialFunctionPath"));
+	// Every caller is spec'd: materialFunctionPath, path and assetPath are
+	// aliases, renamed to these two before the handler runs.
+	const FString FunctionPath = OptionalString(Params, TEXT("functionPath"));
+	const FString MaterialPath = OptionalString(Params, TEXT("materialPath"));
 	if (!FunctionPath.IsEmpty())
 	{
 		OutTarget.Function = LoadAssetByPath<UMaterialFunction>(FunctionPath);
@@ -444,9 +658,6 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ResolveMaterialGraphTarget(const TShar
 		return nullptr;
 	}
 
-	FString MaterialPath = OptionalString(Params, TEXT("materialPath"));
-	if (MaterialPath.IsEmpty()) MaterialPath = OptionalString(Params, TEXT("path"));
-	if (MaterialPath.IsEmpty()) MaterialPath = OptionalString(Params, TEXT("assetPath"));
 	if (MaterialPath.IsEmpty())
 	{
 		return MCPError(TEXT("Missing required parameter 'materialPath' (or 'path'), or 'functionPath' for a MaterialFunction"));
@@ -742,15 +953,19 @@ namespace
 	// #952: agents reach for `color` as readily as `value` when the parameter is
 	// a colour, and rejecting the synonym is indistinguishable from the whole
 	// action being unsupported. Try both, and report which one was honoured.
+	// A spec'd handler passes bColourSpelling false: its spec folds `colour`
+	// into `color` before it runs.
 	bool TryParseMaterialColorParam(
 		const TSharedPtr<FJsonObject>& Params,
 		FLinearColor& OutColor,
 		FString& OutSourceField,
-		bool bAllowTopLevelComponents = false)
+		bool bAllowTopLevelComponents = false,
+		bool bColourSpelling = true)
 	{
 		static const TCHAR* Candidates[] = { TEXT("value"), TEXT("color"), TEXT("colour") };
 		for (const TCHAR* Candidate : Candidates)
 		{
+			if (!bColourSpelling && FCString::Strcmp(Candidate, TEXT("colour")) == 0) continue;
 			if (TryParseMaterialColorField(Params, Candidate, OutColor))
 			{
 				OutSourceField = Candidate;
@@ -1694,20 +1909,15 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialBaseColor(const TSharedPtr<
 
 TSharedPtr<FJsonValue> FMaterialHandlers::AddMaterialExpression(const TSharedPtr<FJsonObject>& Params)
 {
+	// 'path' and 'assetPath' are the spec's aliases, renamed to materialPath before this runs.
 	FString MaterialPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("materialPath"), TEXT("path"), MaterialPath)) return Err;
-	if (MaterialPath.IsEmpty())
-	{
-		// Also try assetPath as a third key
-		TryGetStringParam(Params, TEXT("assetPath"), MaterialPath);
-		if (MaterialPath.IsEmpty())
-		{
-			return MCPError(TEXT("Missing required parameter 'materialPath' (or 'path')"));
-		}
-	}
+	if (auto Err = RequireString(Params, TEXT("materialPath"), MaterialPath)) return Err;
 
 	FString ExpressionType;
 	if (auto Err = RequireString(Params, TEXT("expressionType"), ExpressionType)) return Err;
+	// Read on the new node, after the load; which ones apply depends on its class.
+	MCPReadParamsAhead(Params, { TEXT("name"), TEXT("parameterName"), TEXT("group"), TEXT("sortPriority"),
+		TEXT("defaultValue"), TEXT("value"), TEXT("channels"), TEXT("positionX"), TEXT("positionY") });
 
 	UMaterial* Material = LoadMaterialFromPath(MaterialPath);
 	if (!Material)
@@ -1726,9 +1936,9 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddMaterialExpression(const TSharedPtr
 	UMaterialExpression* NewExpression = NewObject<UMaterialExpression>(Material, ExpressionClass);
 	Material->GetExpressionCollection().AddExpression(NewExpression);
 
-	// Apply optional properties
+	// Apply optional properties. 'expressionName' is the spec's alias for name.
 	FString ExpressionName;
-	if (TryGetStringParam(Params, TEXT("name"), ExpressionName) || TryGetStringParam(Params, TEXT("expressionName"), ExpressionName))
+	if (TryGetStringParam(Params, TEXT("name"), ExpressionName))
 	{
 		NewExpression->Desc = ExpressionName;
 	}
@@ -2227,6 +2437,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::CreateMaterialInstance(const TSharedPt
 	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
 
 	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/Materials"));
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
 	UMaterialInterface* ParentMaterial = Cast<UMaterialInterface>(
 		StaticLoadObject(UMaterialInterface::StaticClass(), nullptr, *ParentPath));
@@ -2246,7 +2457,6 @@ TSharedPtr<FJsonValue> FMaterialHandlers::CreateMaterialInstance(const TSharedPt
 	UMaterialInstanceConstantFactoryNew* Factory = NewObject<UMaterialInstanceConstantFactoryNew>();
 	Factory->InitialParent = ParentMaterial;
 
-	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 	auto Created = MCPCreateAssetIdempotent<UMaterialInstanceConstant>(Name, PackagePath, OnConflict, TEXT("Material instance"), Factory);
 	if (Created.EarlyReturn) return Created.EarlyReturn;
 
@@ -2264,14 +2474,17 @@ TSharedPtr<FJsonValue> FMaterialHandlers::CreateMaterialInstance(const TSharedPt
 
 TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialParameter(const TSharedPtr<FJsonObject>& Params)
 {
+	// 'path' is the spec's alias, renamed to assetPath before this runs.
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString ParameterName;
 	if (auto Err = RequireString(Params, TEXT("parameterName"), ParameterName)) return Err;
 
 	// parameterType is optional -- auto-detect if not provided (#71, #72)
 	FString ParameterType = OptionalString(Params, TEXT("parameterType"));
+	// Read by the branch the parameter's type selects, after the load.
+	MCPReadParamsAhead(Params, { TEXT("association"), TEXT("value"), TEXT("color"), TEXT("texturePath") });
 
 	UMaterialInstanceConstant* MaterialInstance = LoadMaterialInstanceFromPath(AssetPath);
 	if (!MaterialInstance)
@@ -2331,7 +2544,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialParameter(const TSharedPtr<
 			// the "missing value" rejection reported in #952.
 			FLinearColor Probe;
 			FString ProbeField;
-			ParameterType = TryParseMaterialColorParam(Params, Probe, ProbeField)
+			ParameterType = TryParseMaterialColorParam(Params, Probe, ProbeField, false, false)
 				? TEXT("vector")
 				: TEXT("scalar");
 		}
@@ -2408,7 +2621,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialParameter(const TSharedPtr<
 		// meant to set, so accept them all rather than making the caller guess.
 		FLinearColor ColorValue = FLinearColor::White;
 		FString SourceField;
-		if (!TryParseMaterialColorParam(Params, ColorValue, SourceField))
+		if (!TryParseMaterialColorParam(Params, ColorValue, SourceField, false, false))
 		{
 			return MCPError(TEXT("Missing/unparseable colour for vector parameter - pass it as 'value' or 'color', shaped {r,g,b,a}, [r,g,b,a], or '(R=..,G=..,B=..,A=..)'"));
 		}
@@ -2542,8 +2755,11 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialParameter(const TSharedPtr<
 
 TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterialInstance(const TSharedPtr<FJsonObject>& Params)
 {
-	FString AssetPath = OptionalString(Params, TEXT("assetPath"));
-	if (AssetPath.IsEmpty()) AssetPath = OptionalString(Params, TEXT("path"));
+	// 'path' and 'materialPath' are the spec's aliases, renamed to assetPath before this runs.
+	const FString AssetPath = OptionalString(Params, TEXT("assetPath"));
+	// Read by the component path, after the actor lookup.
+	MCPReadParamsAhead(Params, { TEXT("actorLabel"), TEXT("actorPath"), TEXT("world"), TEXT("pieInstance"),
+		TEXT("componentName"), TEXT("slotIndex"), TEXT("slotName") });
 
 	// #1114: a material on a placed component, including a transient
 	// MaterialInstanceDynamic created at runtime in PIE.
@@ -3175,6 +3391,10 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialStaticSwitch(const TSharedP
 
 TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read by the branch the node's class selects, after the graph load. x and y
+	// are read with the other top-level components by the colour reader.
+	MCPReadParamsAhead(Params, { TEXT("value"), TEXT("color"), TEXT("x"), TEXT("y"), TEXT("parameterName"),
+		TEXT("texturePath"), TEXT("uTiling"), TEXT("vTiling"), TEXT("coordinateIndex"), TEXT("propertyName") });
 	int32 ExpressionIndex = -1;
 	if (!TryGetNumberParam(Params, TEXT("expressionIndex"), ExpressionIndex))
 	{
@@ -3239,7 +3459,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 		// object. All three now share one reader, and `{x,y}` works as documented.
 		FLinearColor Components;
 		FString SourceField;
-		if (TryParseMaterialColorParam(Params, Components, SourceField, /*bAllowTopLevelComponents*/ true))
+		if (TryParseMaterialColorParam(Params, Components, SourceField, /*bAllowTopLevelComponents*/ true, /*bColourSpelling*/ false))
 		{
 			TSharedPtr<FJsonObject> PreviousValue = MakeShared<FJsonObject>();
 			PreviousValue->SetNumberField(TEXT("r"), Const2Expr->R);
@@ -3266,7 +3486,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 		// `color`, an array, UE struct text, or the components at the top level.
 		FLinearColor Color;
 		FString SourceField;
-		if (TryParseMaterialColorParam(Params, Color, SourceField, /*bAllowTopLevelComponents*/ true))
+		if (TryParseMaterialColorParam(Params, Color, SourceField, /*bAllowTopLevelComponents*/ true, /*bColourSpelling*/ false))
 		{
 			RollbackPayload->SetObjectField(TEXT("value"), LinearColorToJson(Const3Expr->Constant));
 			bRollbackExpressible = true;
@@ -3280,7 +3500,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 	{
 		FLinearColor Color;
 		FString SourceField;
-		if (TryParseMaterialColorParam(Params, Color, SourceField, /*bAllowTopLevelComponents*/ true))
+		if (TryParseMaterialColorParam(Params, Color, SourceField, /*bAllowTopLevelComponents*/ true, /*bColourSpelling*/ false))
 		{
 			RollbackPayload->SetObjectField(TEXT("value"), LinearColorToJson(Const4Expr->Constant));
 			bRollbackExpressible = true;
@@ -3317,7 +3537,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetExpressionValue(const TSharedPtr<FJ
 	{
 		FLinearColor Color;
 		FString SourceField;
-		if (TryParseMaterialColorParam(Params, Color, SourceField, /*bAllowTopLevelComponents*/ false))
+		if (TryParseMaterialColorParam(Params, Color, SourceField, /*bAllowTopLevelComponents*/ false, /*bColourSpelling*/ false))
 		{
 			RollbackPayload->SetObjectField(TEXT("value"), LinearColorToJson(VectorParamExpr->DefaultValue));
 			bRollbackExpressible = true;
@@ -3844,6 +4064,8 @@ namespace
 // output type. Omit 'code' (and 'inputs') to read the current node state.
 TSharedPtr<FJsonValue> FMaterialHandlers::SetCustomExpression(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read after the graph load and the node lookup.
+	MCPReadParamsAhead(Params, { TEXT("expressionIndex"), TEXT("code"), TEXT("description"), TEXT("outputType"), TEXT("inputs") });
 	// #1138: functionPath targets a Custom node inside a MaterialFunction.
 	FMaterialGraphTarget Target;
 	if (auto Err = ResolveMaterialGraphTarget(Params, Target)) return Err;
@@ -4072,11 +4294,9 @@ TSharedPtr<FJsonValue> FMaterialHandlers::GetMaterialUsage(const TSharedPtr<FJso
 
 TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialUsage(const TSharedPtr<FJsonObject>& Params)
 {
+	// 'path' is the spec's alias, renamed to assetPath before this runs.
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
-
-	UMaterial* Material = LoadMaterialFromPath(AssetPath);
-	if (!Material) return MCPError(FString::Printf(TEXT("Material not found: %s"), *AssetPath));
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	TArray<FString> UsagesIn;
 	const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
@@ -4089,6 +4309,9 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialUsage(const TSharedPtr<FJso
 	}
 	FString Single;
 	if (TryGetStringParam(Params, TEXT("usage"), Single)) UsagesIn.Add(Single);
+
+	UMaterial* Material = LoadMaterialFromPath(AssetPath);
+	if (!Material) return MCPError(FString::Printf(TEXT("Material not found: %s"), *AssetPath));
 	if (UsagesIn.Num() == 0) return MCPError(TEXT("Missing 'usage' or 'usages' array"));
 
 	// No 'enabled' parameter. This action turns flags on and nothing else; the

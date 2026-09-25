@@ -235,10 +235,18 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// nowhere else. The TS surface for it is generated from a recording of these
 	// (npm run specs:record, then npm run specs:generate), and each alias is
 	// renamed to its parameter by the registry before the handler runs.
-	// Handlers that run commands, Python, builds, PIE or processes, and ones
-	// that would act on the contract test's values, stay unspecified.
+	// A handler that would run a command, a script, a build, PIE, a trace or a
+	// save under the contract test's values is ContractExempt, and its source is
+	// held to its spec instead. execute_python, request_editor_shutdown,
+	// save_current_level, build_project and pie_start_ignoring_blueprint_errors
+	// have no bridge action of their own, so they carry no spec; nor do the
+	// handlers taking a UFUNCTION args bag, for the reason at run_python_file.
 	using EType = EMCPParamType;
 	const TArray<FMCPParamSpec> NoParams;
+	auto ChannelListParam = [](const TCHAR* Name, const TCHAR* Description)
+	{
+		return MCPParam::Optional(Name, EType::Array, Description).Items(EType::String).Or(EType::String);
+	};
 	auto ObjectPathParam = [](const TCHAR* Description)
 	{
 		return MCPParam::Required(TEXT("objectPath"), EType::String, Description).Alias(TEXT("path")).Alias(TEXT("assetPath"));
@@ -285,8 +293,15 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		};
 	};
 
-	Registry.RegisterHandler(TEXT("execute_command"), &ExecuteCommand);
+	Registry.RegisterHandler(TEXT("execute_command"), &ExecuteCommand, {
+		MCPParam::Required(TEXT("command"), EType::String, TEXT("Console command to run in the editor world")),
+	}, MCPSpec::ContractExempt(TEXT("runs a console command")));
 	Registry.RegisterHandler(TEXT("execute_python"), &ExecutePython);
+	// run_python_file and the invoke_* handlers carry no spec: their args take a
+	// name -> value map, an entry list, positional strings or a JSON string, and
+	// a spec can only declare that as array | object | string with untyped
+	// members, whose empty member schema is what #811 removed from the surface.
+	// The handlers accept every one of those shapes themselves.
 	Registry.RegisterHandler(TEXT("run_python_file"), &RunPythonFile);
 	Registry.RegisterHandler(TEXT("set_property"), &SetProperty, {
 		ObjectPathParam(TEXT("Object, asset, class or Blueprint path. A class or Blueprint resolves to its default object")),
@@ -304,7 +319,16 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("includeValues"), EType::Boolean, TEXT("Include current property values (default false)")),
 		MCPParam::Optional(TEXT("propertyNames"), EType::Array, TEXT("Dotted or indexed property paths to report instead of every property")).Items(EType::String),
 	});
-	Registry.RegisterHandler(TEXT("set_config"), &SetConfig);
+	{
+		// Exposed by the project tool, so its spec generates into that module.
+		FMCPHandlerRegistry::FCategoryScope ProjectScope(Registry, TEXT("project"));
+		Registry.RegisterHandler(TEXT("set_config"), &SetConfig, {
+			MCPParam::Optional(TEXT("configName"), EType::String, TEXT("Config to write: Engine, Game, Input... or a file name ending .ini (default DefaultEngine.ini)")).Alias(TEXT("configFile")),
+			MCPParam::Required(TEXT("section"), EType::String, TEXT("INI section")),
+			MCPParam::Required(TEXT("key"), EType::String, TEXT("INI key")),
+			MCPParam::Required(TEXT("value"), EType::String, TEXT("INI value")),
+		}, MCPSpec::ContractExempt(TEXT("writes an INI file under the project's Config folder")));
+	}
 	Registry.RegisterHandler(TEXT("get_viewport_info"), &GetViewportInfo, NoParams);
 	Registry.RegisterHandler(TEXT("hit_test_viewport_pixel"), &HitTestViewportPixel, {
 		MCPParam::Required(TEXT("x"), EType::Number, TEXT("Viewport pixel X")),
@@ -341,8 +365,20 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("severity"), EType::String, TEXT("Severity-name substring: Error | Warning | PerformanceWarning | Info")),
 	});
 	Registry.RegisterHandler(TEXT("get_build_status"), &GetBuildStatus, NoParams);
-	Registry.RegisterHandler(TEXT("pie_control"), &PieControl);
-	Registry.RegisterHandler(TEXT("capture_screenshot"), &CaptureScreenshot);
+	Registry.RegisterHandler(TEXT("pie_control"), &PieControl, {
+		MCPParam::Optional(TEXT("pieAction"), EType::String, TEXT("start | stop | status (default status)")),
+		MCPParam::Optional(TEXT("waitForAssetRegistry"), EType::Boolean, TEXT("start only: block until the AssetRegistry initial scan completes, since PIE silently no-ops during it on a cold editor (default true)")),
+		MCPParam::Optional(TEXT("assetRegistryTimeoutSeconds"), EType::Number, TEXT("start only: how long to wait for that scan (default 180)")),
+	}, MCPSpec::ContractExempt(TEXT("starts and stops Play In Editor")));
+	// The Blueprint-error bypass start, called only by the approval-gated
+	// editor(play_in_editor_ignore_blueprint_errors) handler.
+	Registry.RegisterHandler(TEXT("pie_start_ignoring_blueprint_errors"), &PieStartIgnoringBlueprintErrors);
+	Registry.RegisterHandler(TEXT("capture_screenshot"), &CaptureScreenshot, {
+		MCPParam::Required(TEXT("filename"), EType::String, TEXT("Image path to write; .png is appended without an image extension")).Alias(TEXT("outputPath")),
+		MCPParam::Optional(TEXT("target"), EType::String, TEXT("auto (default) | pie | editor | window")),
+		PieInstanceParam(),
+		MCPParam::Optional(TEXT("worldPath"), EType::String, TEXT("Exact PIE UWorld path or name to capture")),
+	}, MCPSpec::ContractExempt(TEXT("writes an image file")));
 	Registry.RegisterHandler(TEXT("set_viewport_camera"), &SetViewportCamera, {
 		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("Camera location")),
 		MCPParam::Optional(TEXT("rotation"), EType::Rotator, TEXT("Camera rotation")),
@@ -350,8 +386,8 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("viewportType"), EType::String, TEXT("Perspective | Top | Bottom | Left | Right | Front | Back | OrthoFreelook")),
 		MCPParam::Optional(TEXT("orthoZoom"), EType::Number, TEXT("Orthographic zoom, within the engine's own limits")),
 	});
-	Registry.RegisterHandler(TEXT("undo"), &Undo);
-	Registry.RegisterHandler(TEXT("redo"), &Redo);
+	Registry.RegisterHandler(TEXT("undo"), &Undo, NoParams, MCPSpec::ContractExempt(TEXT("undoes the last editor transaction")));
+	Registry.RegisterHandler(TEXT("redo"), &Redo, NoParams, MCPSpec::ContractExempt(TEXT("redoes the last undone editor transaction")));
 	Registry.RegisterHandler(TEXT("get_viewport_state"), &GetViewportState, {
 		ViewportIndexParam(),
 	});
@@ -373,15 +409,23 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("cameraSpeed"), EType::Number, TEXT("Viewport camera speed, greater than 0")),
 		ViewportIndexParam(),
 	});
-	Registry.RegisterHandler(TEXT("set_game_view"), &SetGameView);
+	Registry.RegisterHandler(TEXT("set_game_view"), &SetGameView, {
+		MCPParam::Optional(TEXT("enabled"), EType::Boolean, TEXT("Hide editor-only overlays (default true); false shows them again")),
+		ViewportIndexParam(),
+	}, MCPSpec::ContractExempt(TEXT("toggles game view on a live level viewport")));
 	Registry.RegisterHandler(TEXT("redraw_viewport"), &RedrawViewport, {
 		MCPParam::Optional(TEXT("allViewports"), EType::Boolean, TEXT("Redraw every level viewport rather than one (default false)")),
 		MCPParam::Optional(TEXT("invalidateHitProxies"), EType::Boolean, TEXT("Also invalidate hit proxies, needed before a hit test (default true)")),
 		ViewportIndexParam(),
 	});
-	Registry.RegisterHandler(TEXT("begin_editor_transaction"), &BeginEditorTransaction);
-	Registry.RegisterHandler(TEXT("end_editor_transaction"), &EndEditorTransaction);
-	Registry.RegisterHandler(TEXT("cancel_editor_transaction"), &CancelEditorTransaction);
+	Registry.RegisterHandler(TEXT("begin_editor_transaction"), &BeginEditorTransaction, {
+		MCPParam::Optional(TEXT("description"), EType::String, TEXT("Undo-stack label for the transaction (default MCP Edit)")).Alias(TEXT("label")),
+	}, MCPSpec::ContractExempt(TEXT("opens an undo transaction")));
+	Registry.RegisterHandler(TEXT("end_editor_transaction"), &EndEditorTransaction, NoParams,
+		MCPSpec::ContractExempt(TEXT("commits the open undo transaction")));
+	Registry.RegisterHandler(TEXT("cancel_editor_transaction"), &CancelEditorTransaction, {
+		MCPParam::Optional(TEXT("index"), EType::Number, TEXT("Which open transaction to cancel (default 0)")),
+	}, MCPSpec::ContractExempt(TEXT("cancels the open undo transaction and restores what it touched")));
 	Registry.RegisterHandler(TEXT("get_undo_state"), &GetUndoState, NoParams);
 	Registry.RegisterHandler(TEXT("undo_redo_steps"), &UndoRedoSteps, {
 		MCPParam::Optional(TEXT("steps"), EType::Integer, TEXT("How many steps to apply (default 1)")),
@@ -392,38 +436,74 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 	// Insights trace control, frame timing and standalone runs, in
 	// EditorHandlers_Profiling.cpp.
-	Registry.RegisterHandler(TEXT("start_insights_trace"), &StartInsightsTrace);
-	Registry.RegisterHandler(TEXT("stop_insights_trace"), &StopInsightsTrace);
-	Registry.RegisterHandler(TEXT("pause_insights_trace"), &PauseInsightsTrace);
+	Registry.RegisterHandler(TEXT("start_insights_trace"), &StartInsightsTrace, {
+		ChannelListParam(TEXT("channels"), TEXT("Trace channels or a preset, as an array or a comma-separated string (default 'default'). list_trace_channels lists what this build registers")),
+		MCPParam::Optional(TEXT("traceTarget"), EType::String, TEXT("file (default, writes a .utrace) | network (streams to a trace server) | none (memory only)")),
+		MCPParam::Optional(TEXT("file"), EType::String, TEXT(".utrace path to write, absolute or relative (default a timestamped file under <Project>/Saved/Profiling)")),
+		MCPParam::Optional(TEXT("host"), EType::String, TEXT("Trace server for traceTarget=network (default 127.0.0.1)")),
+		MCPParam::Optional(TEXT("truncate"), EType::Boolean, TEXT("Overwrite the target file if it exists (default true)")),
+		MCPParam::Optional(TEXT("excludeTail"), EType::Boolean, TEXT("Drop events buffered before the trace started (default false)")),
+	}, MCPSpec::ContractExempt(TEXT("starts an Insights trace")));
+	Registry.RegisterHandler(TEXT("stop_insights_trace"), &StopInsightsTrace, NoParams,
+		MCPSpec::ContractExempt(TEXT("stops the running Insights trace")));
+	Registry.RegisterHandler(TEXT("pause_insights_trace"), &PauseInsightsTrace, {
+		MCPParam::Optional(TEXT("paused"), EType::Boolean, TEXT("true pauses the running trace, false resumes it (default true)")),
+	}, MCPSpec::ContractExempt(TEXT("pauses or resumes the running Insights trace")));
 	Registry.RegisterHandler(TEXT("get_insights_trace_status"), &GetInsightsTraceStatus, NoParams);
 	Registry.RegisterHandler(TEXT("list_trace_channels"), &ListTraceChannels, {
 		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring over channel name and description")),
 		MCPParam::Optional(TEXT("enabledOnly"), EType::Boolean, TEXT("Only channels that are currently on (default false)")),
 	});
-	Registry.RegisterHandler(TEXT("set_trace_channels"), &SetTraceChannels);
-	Registry.RegisterHandler(TEXT("begin_profile_region"), &BeginProfileRegion);
+	Registry.RegisterHandler(TEXT("set_trace_channels"), &SetTraceChannels, {
+		ChannelListParam(TEXT("enable"), TEXT("Channels to turn on, as an array or a comma-separated string")),
+		ChannelListParam(TEXT("disable"), TEXT("Channels to turn off, as an array or a comma-separated string")),
+	}, MCPSpec::ContractExempt(TEXT("switches trace channels on and off")));
+	Registry.RegisterHandler(TEXT("begin_profile_region"), &BeginProfileRegion, {
+		MCPParam::Required(TEXT("regionName"), EType::String, TEXT("Name the bracket is keyed by; end_profile_region closes it")),
+		MCPParam::Optional(TEXT("regionCategory"), EType::String, TEXT("Category shown alongside the region in Unreal Insights")),
+	}, MCPSpec::ContractExempt(TEXT("opens a profiling region")));
 	Registry.RegisterHandler(TEXT("end_profile_region"), &EndProfileRegion, {
 		MCPParam::Required(TEXT("regionName"), EType::String, TEXT("Name the region was opened under")),
 	});
-	Registry.RegisterHandler(TEXT("add_trace_bookmark"), &AddTraceBookmark);
+	Registry.RegisterHandler(TEXT("add_trace_bookmark"), &AddTraceBookmark, {
+		MCPParam::Required(TEXT("bookmarkName"), EType::String, TEXT("Label for the timeline marker")),
+	}, MCPSpec::ContractExempt(TEXT("writes a bookmark into the running trace")));
 	Registry.RegisterHandler(TEXT("get_frame_timing"), &GetFrameTiming, {
 		MCPParam::Optional(TEXT("cpuGpuMarginPercent"), EType::Number, TEXT("How far ahead one side must be before the frame is called bound by it (default 10)")),
 	});
 	// trigger_hitch blocks the game thread for up to 5 seconds by design, which
 	// is longer than a default handler budget allows for.
-	Registry.RegisterHandlerWithTimeout(TEXT("trigger_hitch"), &TriggerHitch, 30.0f);
-	Registry.RegisterHandler(TEXT("launch_standalone_game"), &LaunchStandaloneGame);
+	Registry.RegisterHandlerWithTimeout(TEXT("trigger_hitch"), &TriggerHitch, 30.0f, {
+		MCPParam::Optional(TEXT("hitchMilliseconds"), EType::Number, TEXT("How long to stall the game thread (default 250, max 5000)")),
+		MCPParam::Optional(TEXT("bookmark"), EType::Boolean, TEXT("Also drop a trace bookmark at the stall (default true)")),
+	}, MCPSpec::ContractExempt(TEXT("stalls the game thread")));
+	Registry.RegisterHandler(TEXT("launch_standalone_game"), &LaunchStandaloneGame, {
+		MCPParam::Optional(TEXT("mapName"), EType::String, TEXT("Map to open in the standalone process")),
+		ChannelListParam(TEXT("channels"), TEXT("Trace channels or a preset, as an array or a comma-separated string. Passing it (or traceFile) adds -trace and -tracefile")),
+		MCPParam::Optional(TEXT("traceFile"), EType::String, TEXT(".utrace path for the standalone process to write")),
+		MCPParam::Optional(TEXT("windowed"), EType::Boolean, TEXT("Run windowed rather than fullscreen (default true)")),
+		MCPParam::Optional(TEXT("resX"), EType::Number, TEXT("Window width (default 1280)")),
+		MCPParam::Optional(TEXT("resY"), EType::Number, TEXT("Window height (default 720)")),
+		MCPParam::Optional(TEXT("extraArgs"), EType::String, TEXT("Extra command-line arguments, appended verbatim")),
+	}, MCPSpec::ContractExempt(TEXT("launches a game process")));
 	Registry.RegisterHandler(TEXT("get_standalone_status"), &GetStandaloneStatus, NoParams);
-	Registry.RegisterHandler(TEXT("stop_standalone_game"), &StopStandaloneGame);
-	Registry.RegisterHandler(TEXT("reload_handlers"), &ReloadHandlers);
+	Registry.RegisterHandler(TEXT("stop_standalone_game"), &StopStandaloneGame, NoParams,
+		MCPSpec::ContractExempt(TEXT("terminates the standalone game process")));
+	Registry.RegisterHandler(TEXT("reload_handlers"), &ReloadHandlers, NoParams,
+		MCPSpec::ContractExempt(TEXT("reloads the Python bridge handlers from disk")));
 	// save_asset is owned by FAssetHandlers (#768: adds force, file size, mtime).
 	// Registering it here too meant the winner was decided by registration
 	// order in BridgeServer.cpp, which is not a contract.
-	Registry.RegisterHandler(TEXT("save_dirty"), &SaveDirty);
+	Registry.RegisterHandler(TEXT("save_dirty"), &SaveDirty, {
+		MCPParam::Optional(TEXT("includeMaps"), EType::Boolean, TEXT("Include map packages (default true)")),
+		MCPParam::Optional(TEXT("includeContent"), EType::Boolean, TEXT("Include content packages (default true)")),
+		MCPParam::Optional(TEXT("commitDeletes"), EType::Boolean, TEXT("Use the editor's dirty-package save, which deletes the packages of deleted World Partition actors and reports written and deleted files (default false)")),
+	}, MCPSpec::ContractExempt(TEXT("saves every dirty package")));
 	Registry.RegisterHandler(TEXT("list_dirty_packages"), &ListDirtyPackages, NoParams);
 	Registry.RegisterHandler(TEXT("get_world_state"), &GetWorldState, NoParams);
 	Registry.RegisterHandler(TEXT("request_editor_shutdown"), &RequestEditorShutdown);
 	Registry.RegisterHandler(TEXT("list_pie_instances"), &ListPIEInstances, NoParams);
+	// No spec, for the args reason given at run_python_file.
 	Registry.RegisterHandler(TEXT("invoke_object_function"), &InvokeObjectFunction);
 	Registry.RegisterHandlerWithTimeout(TEXT("invoke_object_functions"), &InvokeObjectFunctions, 300.0f);
 	{
@@ -467,14 +547,42 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		WorldParam(),
 		PieInstanceParam(),
 	});
-	Registry.RegisterHandler(TEXT("set_runtime_visibility"), &SetRuntimeVisibility);
+	Registry.RegisterHandler(TEXT("set_runtime_visibility"), &SetRuntimeVisibility, {
+		MCPParam::Required(TEXT("hidden"), EType::Boolean, TEXT("true hides the target, false shows it")),
+		MCPParam::Optional(TEXT("actorLabels"), EType::Array, TEXT("Explicit actor labels; a label matching several actors is refused")).Items(EType::String),
+		MCPParam::Optional(TEXT("actorPaths"), EType::Array, TEXT("Explicit actor object paths, the unambiguous selector")).Items(EType::String),
+		MCPParam::Optional(TEXT("actorClass"), EType::String, TEXT("Every actor of this class in the PIE world, bounded by maxTargets")),
+		MCPParam::Optional(TEXT("componentNames"), EType::Array, TEXT("Only SceneComponents with these names; implies affectComponents")).Items(EType::String),
+		MCPParam::Optional(TEXT("componentClasses"), EType::Array, TEXT("Only SceneComponents of these classes; implies affectComponents")).Items(EType::String),
+		MCPParam::Optional(TEXT("affectActor"), EType::Boolean, TEXT("Hide or show the actor itself (default true only without a component filter)")),
+		MCPParam::Optional(TEXT("affectComponents"), EType::Boolean, TEXT("Hide or show matched components (default true with a component filter)")),
+		MCPParam::Optional(TEXT("propagateToChildren"), EType::Boolean, TEXT("Also take each matched component's descendants (default true)")),
+		MCPParam::Optional(TEXT("matchSubclasses"), EType::Boolean, TEXT("Match subclasses of actorClass and componentClasses (default true)")),
+		MCPParam::Optional(TEXT("maxTargets"), EType::Integer, TEXT("Upper bound on resolved actor and component targets; a larger set is refused rather than truncated")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report the targets without touching them (default TRUE; pass false to apply)")),
+		WorldParam(),
+		PieInstanceParam(),
+	}, MCPSpec::ExactlyOne({ { TEXT("actorLabels") }, { TEXT("actorPaths") }, { TEXT("actorClass") } })
+		.ContractExempt(TEXT("hides and shows live PIE actors")));
 	Registry.RegisterHandler(TEXT("restore_runtime_visibility"), &RestoreRuntimeVisibility, {
 		MCPParam::Required(TEXT("rollbackToken"), EType::String, TEXT("Token from a non-dry-run set_runtime_visibility, valid for that PIE session only")),
 		WorldParam(),
 		PieInstanceParam(),
 	});
 	// #802: resolve a live instance path, and write to a live instance.
-	Registry.RegisterHandler(TEXT("find_object"), &FindLiveObjects);
+	// objectPath is a lookup and wins; className and nameContains search together.
+	Registry.RegisterHandler(TEXT("find_object"), &FindLiveObjects, {
+		MCPParam::Optional(TEXT("objectPath"), EType::String, TEXT("Check one path: reports found and isValid rather than failing when it is gone. Wins over the search filters")),
+		MCPParam::Optional(TEXT("className"), EType::String, TEXT("Class to search for: a short name, a /Script path, a generated class name (WBP_Hud_C) or a Blueprint asset path")),
+		MCPParam::Optional(TEXT("nameContains"), EType::String, TEXT("Case-insensitive substring of the object name")),
+		MCPParam::Optional(TEXT("outerPath"), EType::String, TEXT("Only objects somewhere under this outer, such as one level or world")),
+		MCPParam::Optional(TEXT("exactClass"), EType::Boolean, TEXT("Match className exactly instead of including subclasses (default false)")),
+		MCPParam::Optional(TEXT("includeDefaults"), EType::Boolean, TEXT("Include class default objects and archetypes (default false)")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("World scope: any (default) | editor | pie")),
+		PieInstanceParam(),
+		CursorParam(),
+		LimitParam(TEXT("Objects on this page (default 50, max 1000)")),
+	}, MCPSpec::AtLeastOne({ { TEXT("objectPath") }, { TEXT("className") }, { TEXT("nameContains") } }));
 	{
 		TArray<FMCPParamSpec> Spec = {
 			PropertyNameParam(),
@@ -488,16 +596,33 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		});
 		Registry.RegisterHandler(TEXT("set_object_property"), &SetObjectProperty, Spec);
 	}
-	Registry.RegisterHandler(TEXT("build_lighting"), &BuildLighting);
-	Registry.RegisterHandler(TEXT("build_all"), &BuildAll);
-	Registry.RegisterHandler(TEXT("validate_assets"), &ValidateAssets);
-	Registry.RegisterHandler(TEXT("cook_content"), &CookContent);
+	// build_lighting and create_new_level are exposed by the level tool, which
+	// declares them with this module's specBp under an alias.
+	Registry.RegisterHandler(TEXT("build_lighting"), &BuildLighting, {
+		MCPParam::Optional(TEXT("quality"), EType::String, TEXT("Preview (default) | Medium | High | Production")),
+	}, MCPSpec::ContractExempt(TEXT("builds lighting for the open level")));
+	Registry.RegisterHandler(TEXT("build_all"), &BuildAll, NoParams,
+		MCPSpec::ContractExempt(TEXT("builds geometry, lighting, paths and HLODs")));
+	// Every selector is read before the one-selector check refuses the contract call.
+	Registry.RegisterHandler(TEXT("validate_assets"), &ValidateAssets, {
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Package path validated recursively (default /Game/). Not with assetPath or assetPaths")),
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("One exact package or object path to validate")),
+		MCPParam::Optional(TEXT("assetPaths"), EType::Array, TEXT("Exact package or object paths to validate")).Items(EType::String),
+	});
+	Registry.RegisterHandler(TEXT("cook_content"), &CookContent, {
+		MCPParam::Optional(TEXT("platform"), EType::String, TEXT("Target platform (default Windows)")),
+	}, MCPSpec::ContractExempt(TEXT("starts a content cook")));
 	Registry.RegisterHandler(TEXT("focus_viewport_on_actor"), &FocusViewportOnActor, {
 		ActorLabelParam(),
 		ActorPathParam(),
 	});
-	Registry.RegisterHandler(TEXT("hot_reload"), &HotReload);
-	Registry.RegisterHandler(TEXT("create_new_level"), &CreateNewLevel);
+	Registry.RegisterHandler(TEXT("hot_reload"), &HotReload, NoParams,
+		MCPSpec::ContractExempt(TEXT("recompiles and reloads C++ modules")));
+	Registry.RegisterHandler(TEXT("create_new_level"), &CreateNewLevel, {
+		MCPParam::Required(TEXT("levelPath"), EType::String, TEXT("Long package path of the new level, e.g. /Game/Maps/MyLevel. Validated before the engine is asked")),
+		MCPParam::Optional(TEXT("templateLevel"), EType::String, TEXT("Level to copy; omit, Empty or None for a blank level")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the level exists: skip (default) returns it untouched, error refuses")),
+	}, MCPSpec::ContractExempt(TEXT("creates and opens a level")));
 	Registry.RegisterHandler(TEXT("save_current_level"), &SaveCurrentLevel);
 	Registry.RegisterHandler(TEXT("open_asset"), &OpenAsset, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset to open in its editor")).Alias(TEXT("path")),
@@ -512,19 +637,29 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		PieInstanceParam(),
 	});
 	// New handlers
-	Registry.RegisterHandler(TEXT("run_stat_command"), &RunStatCommand);
+	Registry.RegisterHandler(TEXT("run_stat_command"), &RunStatCommand, {
+		MCPParam::Optional(TEXT("command"), EType::String, TEXT("Full console command; wins over name")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Bare stat name such as unit, fps, game or gpu, prefixed with 'stat ' (default fps)")),
+	}, MCPSpec::ContractExempt(TEXT("runs a stat console command")));
 	Registry.RegisterHandler(TEXT("set_scalability"), &SetScalability, {
 		MCPParam::Optional(TEXT("level"), EType::String, TEXT("Low | Medium | High | Epic | Cinematic (default Epic)")),
 	});
-	Registry.RegisterHandler(TEXT("set_cvars"), &SetCVars);
+	Registry.RegisterHandler(TEXT("set_cvars"), &SetCVars, {
+		MCPParam::Required(TEXT("cvars"), EType::Array, TEXT("Console variables to set, as [{name, value}] or a {name: value} object")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("name"), EType::String, TEXT("Console variable name")),
+			MCPParam::RequiredField(TEXT("value"), EType::Any, TEXT("Value to set; numbers and booleans are written as text")),
+		}).Or(EType::Object),
+	}, MCPSpec::ContractExempt(TEXT("writes console variables")));
 	Registry.RegisterHandler(TEXT("get_cvars"), &GetCVars, {
 		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Console variable to read")),
 		MCPParam::Optional(TEXT("names"), EType::Array, TEXT("Console variables to read")).Items(EType::String),
 		MCPParam::Optional(TEXT("pattern"), EType::String, TEXT("Substring matched against every registered console variable. Pass at least one of name, names and pattern")),
 		LimitParam(TEXT("Max rows for a pattern search (default 100, max 1000)")),
 	});
-	Registry.RegisterHandler(TEXT("build_geometry"), &BuildGeometry);
-	Registry.RegisterHandler(TEXT("build_hlod"), &BuildHlod);
+	Registry.RegisterHandler(TEXT("build_geometry"), &BuildGeometry, NoParams,
+		MCPSpec::ContractExempt(TEXT("rebuilds BSP geometry")));
+	Registry.RegisterHandler(TEXT("build_hlod"), &BuildHlod, NoParams,
+		MCPSpec::ContractExempt(TEXT("builds HLODs")));
 	Registry.RegisterHandler(TEXT("list_crashes"), &ListCrashes, {
 		CursorParam(),
 		LimitParam(TEXT("Crash folders on this page (default 50, max 500)")),
@@ -534,26 +669,65 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 	Registry.RegisterHandler(TEXT("check_for_crashes"), &CheckForCrashes, NoParams);
 	// #693: headless automation test runner.
-	Registry.RegisterHandlerWithTimeout(TEXT("run_automation_tests"), &RunAutomationTests, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("run_automation_tests"), &RunAutomationTests, 300.0f, {
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Substring of the test names to run")),
+		MCPParam::Optional(TEXT("maxTests"), EType::Number, TEXT("Cap on tests to run (default 50)")),
+		MCPParam::Optional(TEXT("latentTimeoutSeconds"), EType::Number, TEXT("How long one test's latent command queue may take before it is reported abandoned (default 5, max 120)")),
+	}, MCPSpec::ContractExempt(TEXT("runs automation tests")));
 	// #14: Build project
 	Registry.RegisterHandler(TEXT("build_project"), &BuildProject);
 	// #49: Generate project files
-	Registry.RegisterHandler(TEXT("generate_project_files"), &GenerateProjectFiles);
+	{
+		FMCPHandlerRegistry::FCategoryScope ProjectScope(Registry, TEXT("project"));
+		Registry.RegisterHandler(TEXT("generate_project_files"), &GenerateProjectFiles, NoParams,
+			MCPSpec::ContractExempt(TEXT("runs the project file generator")));
+	}
 	// #126: fast-forward PIE game time
 	Registry.RegisterHandler(TEXT("set_pie_time_scale"), &SetPieTimeScale, {
 		MCPParam::Required(TEXT("factor"), EType::Number, TEXT("Time-scale factor, greater than 0 (e.g. 500)")),
 	});
-	Registry.RegisterHandler(TEXT("capture_scene_png"), &CaptureScenePng);
-	Registry.RegisterHandler(TEXT("set_realtime"), &SetRealtime);
+	Registry.RegisterHandler(TEXT("capture_scene_png"), &CaptureScenePng, {
+		MCPParam::Required(TEXT("outputPath"), EType::String, TEXT("Absolute or project-relative PNG path to write, e.g. Saved/Screenshots/cap.png")).Alias(TEXT("filename")),
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("Camera location")),
+		MCPParam::Optional(TEXT("rotation"), EType::Rotator, TEXT("Camera rotation")),
+		MCPParam::Optional(TEXT("focusActorLabel"), EType::String, TEXT("Frame the camera on this actor's bounds")),
+		MCPParam::Optional(TEXT("focusActorPath"), EType::String, TEXT("Full object path of the actor to frame. Wins over focusActorLabel")),
+		MCPParam::Optional(TEXT("focusDirection"), EType::Vec3, TEXT("Framing direction from the focus actor (default front and above)")),
+		MCPParam::Optional(TEXT("focusMargin"), EType::Number, TEXT("Positive bounds fill margin; higher pulls back (default 1.5)")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("World scope: editor (default) | pie")),
+		PieInstanceParam(),
+		MCPParam::Optional(TEXT("width"), EType::Number, TEXT("Capture width in pixels (default 1280)")),
+		MCPParam::Optional(TEXT("height"), EType::Number, TEXT("Capture height in pixels (default 720)")),
+		MCPParam::Optional(TEXT("fov"), EType::Number, TEXT("Capture FOV in degrees, greater than 0 and less than 180 (default 90)")),
+		MCPParam::Optional(TEXT("fullyLoadTextures"), EType::Boolean, TEXT("Stream textures in and flush the render thread before the capture (default true)")),
+	}, MCPSpec::ContractExempt(TEXT("spawns a capture actor and writes an image file")));
+	Registry.RegisterHandler(TEXT("set_realtime"), &SetRealtime, {
+		MCPParam::Optional(TEXT("enabled"), EType::Boolean, TEXT("Realtime update on every level viewport (default true)")),
+	}, MCPSpec::ContractExempt(TEXT("toggles realtime on every level viewport")));
 	Registry.RegisterHandler(TEXT("get_pie_pawn"), &GetPiePawn, {
 		MCPParam::Optional(TEXT("playerIndex"), EType::Number, TEXT("0-based player index (default 0)")),
 	});
+	// No spec, for the args reason given at run_python_file.
 	Registry.RegisterHandler(TEXT("invoke_function"), &InvokeFunction);
 	Registry.RegisterHandler(TEXT("invoke_static_function"), &InvokeStaticFunction);
-	Registry.RegisterHandler(TEXT("configure_pie"), &ConfigurePie);
+	Registry.RegisterHandler(TEXT("configure_pie"), &ConfigurePie, {
+		MCPParam::Optional(TEXT("numClients"), EType::Number, TEXT("Number of PIE clients")),
+		MCPParam::Optional(TEXT("netMode"), EType::String, TEXT("standalone | listen | client")),
+		MCPParam::Optional(TEXT("runUnderOneProcess"), EType::Boolean, TEXT("Run every client in the editor process")),
+		MCPParam::Optional(TEXT("launchSeparateServer"), EType::Boolean, TEXT("Launch a separate dedicated server")),
+		MCPParam::Optional(TEXT("newWindowWidth"), EType::Number, TEXT("Play-in-New-Window width")),
+		MCPParam::Optional(TEXT("newWindowHeight"), EType::Number, TEXT("Play-in-New-Window height")),
+	}, MCPSpec::ContractExempt(TEXT("writes the editor's Play settings")));
 	Registry.RegisterHandler(TEXT("get_pie_config"), &GetPieConfig, NoParams);
-	Registry.RegisterHandler(TEXT("pie_set_player_view"), &PieSetPlayerView);
-	Registry.RegisterHandler(TEXT("stage_game_input"), &StageGameInput);
+	Registry.RegisterHandler(TEXT("pie_set_player_view"), &PieSetPlayerView, {
+		MCPParam::Optional(TEXT("pitch"), EType::Number, TEXT("Control-rotation pitch")),
+		MCPParam::Optional(TEXT("yaw"), EType::Number, TEXT("Control-rotation yaw")),
+		MCPParam::Optional(TEXT("roll"), EType::Number, TEXT("Control-rotation roll")),
+	}, MCPSpec::ContractExempt(TEXT("rotates the running PIE player's view")));
+	Registry.RegisterHandler(TEXT("stage_game_input"), &StageGameInput, {
+		MCPParam::Optional(TEXT("inputMode"), EType::String, TEXT("gameOnly (default) | gameAndUI | uiOnly")),
+		MCPParam::Optional(TEXT("showMouseCursor"), EType::Boolean, TEXT("Show the mouse cursor (default false for gameOnly, true otherwise)")),
+	}, MCPSpec::ContractExempt(TEXT("sets the running PIE player's input mode")));
 	// #455: discover UBlueprintFunctionLibrary classes (GeometryScript,
 	// Kismet, anything user-defined). Pair with editor.invoke_function to
 	// drive GeometryScript ops from MCP without hand-writing each handler.
@@ -562,12 +736,21 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("includeFunctions"), EType::Boolean, TEXT("Include each library's static BlueprintCallable functions (default true)")),
 	});
 	// #718: close the open Level Sequence editor before destructive actor ops.
-	Registry.RegisterHandler(TEXT("close_sequence"), &CloseSequence);
+	Registry.RegisterHandler(TEXT("close_sequence"), &CloseSequence, NoParams,
+		MCPSpec::ContractExempt(TEXT("closes the open Sequencer")));
 	// #719: purge cached embedded-Python modules by prefix for tool-dev iteration.
-	Registry.RegisterHandler(TEXT("purge_python_modules"), &PurgePythonModules);
+	Registry.RegisterHandler(TEXT("purge_python_modules"), &PurgePythonModules, {
+		MCPParam::Required(TEXT("prefix"), EType::String, TEXT("Purge sys.modules entries starting with this prefix; must be non-empty")),
+	}, MCPSpec::ContractExempt(TEXT("purges loaded Python modules")));
 	// #727: open a registered editor tab / Project Settings viewer for visual evidence.
-	Registry.RegisterHandler(TEXT("open_tab"), &OpenTab);
-	Registry.RegisterHandler(TEXT("open_settings"), &OpenSettings);
+	Registry.RegisterHandler(TEXT("open_tab"), &OpenTab, {
+		MCPParam::Required(TEXT("tabId"), EType::String, TEXT("Registered editor tab id, e.g. ProjectSettings, OutputLog or ContentBrowserTab1")),
+	}, MCPSpec::ContractExempt(TEXT("opens an editor tab")));
+	Registry.RegisterHandler(TEXT("open_settings"), &OpenSettings, {
+		MCPParam::Optional(TEXT("container"), EType::String, TEXT("Project (default) | Editor")),
+		MCPParam::Optional(TEXT("category"), EType::String, TEXT("Settings category, e.g. Engine")),
+		MCPParam::Optional(TEXT("section"), EType::String, TEXT("Settings section, e.g. Physics, or a combined Engine.Physics")),
+	}, MCPSpec::ContractExempt(TEXT("opens a settings viewer")));
 }
 
 TSharedPtr<FJsonValue> FEditorHandlers::ExecuteCommand(const TSharedPtr<FJsonObject>& Params)
@@ -1620,11 +1803,9 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetRealtime(const TSharedPtr<FJsonObject
 
 TSharedPtr<FJsonValue> FEditorHandlers::SetConfig(const TSharedPtr<FJsonObject>& Params)
 {
+	// configFile reaches it as configName, renamed by the registry (#1057).
 	FString ConfigName;
-	if (!TryGetStringParam(Params, TEXT("configName"), ConfigName))
-	{
-		TryGetStringParam(Params, TEXT("configFile"), ConfigName);
-	}
+	TryGetStringParam(Params, TEXT("configName"), ConfigName);
 	FString Section;
 	if (auto Err = RequireString(Params, TEXT("section"), Section)) return Err;
 	FString Key;
@@ -2240,14 +2421,9 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetBuildStatus(const TSharedPtr<FJsonObj
 }
 TSharedPtr<FJsonValue> FEditorHandlers::CaptureScreenshot(const TSharedPtr<FJsonObject>& Params)
 {
-	// #966: capture_scene_png names this parameter `outputPath` and this action
-	// named it `filename`, for the same thing, so passing one to the other
-	// failed on a call that was otherwise correct. Both are accepted by both.
+	// #966: both capture actions take both names. outputPath reaches this one
+	// as filename, renamed by the registry (#1057).
 	FString Filename = OptionalString(Params, TEXT("filename"));
-	if (Filename.IsEmpty())
-	{
-		Filename = OptionalString(Params, TEXT("outputPath"));
-	}
 	if (Filename.IsEmpty())
 	{
 		return MCPError(TEXT("Missing 'filename' (also accepted as 'outputPath'): where to write the image"));
@@ -3917,14 +4093,9 @@ TSharedPtr<FJsonValue> FEditorHandlers::CaptureScenePng(const TSharedPtr<FJsonOb
 	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
 	if (!World) return MCPError(FString::Printf(TEXT("World not available for scope '%s'"), *WorldScope));
 
-	// #966: capture_screenshot names this parameter `filename` and this action
-	// named it `outputPath`, for the same thing, so passing one to the other
-	// failed on a call that was otherwise correct. Both are accepted by both.
+	// #966: both capture actions take both names. filename reaches this one
+	// as outputPath, renamed by the registry (#1057).
 	FString OutputPath = OptionalString(Params, TEXT("outputPath"));
-	if (OutputPath.IsEmpty())
-	{
-		OutputPath = OptionalString(Params, TEXT("filename"));
-	}
 	if (OutputPath.IsEmpty())
 	{
 		return MCPError(TEXT("Missing 'outputPath' (also accepted as 'filename'): where to write the PNG"));

@@ -31,8 +31,8 @@ void FAudioHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("audio"));
 
 	// #1057: a spec'd handler declares its parameters here and nowhere else; the
-	// TS surface is generated from a recording of these. Creators and importers
-	// stay unspecced, because the contract test would run them.
+	// TS surface is generated from a recording of these. The asset creators are
+	// contract-exempt, because the contract values would create an asset.
 	using EType = EMCPParamType;
 	Registry.RegisterHandler(TEXT("list_sound_assets"), &ListSoundAssets, {
 		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content directory to list (default /Game)")),
@@ -46,9 +46,25 @@ void FAudioHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("maxSeconds"), EType::Number, TEXT("Cap the decoded window in seconds (default the full asset)")),
 		MCPParam::Optional(TEXT("downmixMono"), EType::Boolean, TEXT("Average the channels to mono (default false)")),
 	});
-	Registry.RegisterHandler(TEXT("import_audio"), &ImportAudio);
-	Registry.RegisterHandler(TEXT("create_sound_cue"), &CreateSoundCue);
-	Registry.RegisterHandler(TEXT("create_metasound_source"), &CreateMetaSoundSource);
+	Registry.RegisterHandler(TEXT("import_audio"), &ImportAudio, {
+		MCPParam::Required(TEXT("filePath"), EType::String, TEXT("WAV, OGG or FLAC file on disk")).Alias(TEXT("filename")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Asset name (default the file's base name)")).Alias(TEXT("assetName")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Audio)")).Alias(TEXT("destinationPath")),
+		MCPParam::Optional(TEXT("looping"), EType::Boolean, TEXT("Set bLooping on the imported SoundWave (omit to keep the importer's value)")),
+		MCPParam::Optional(TEXT("replaceExisting"), EType::Boolean, TEXT("Replace an existing asset of that name (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("create_sound_cue"), &CreateSoundCue, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("SoundCue asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Audio/SoundCues)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns the existing asset, error refuses; it never overwrites")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a SoundCue asset named by the contract values")));
+	Registry.RegisterHandler(TEXT("create_metasound_source"), &CreateMetaSoundSource, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("MetaSoundSource asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Audio/MetaSounds)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns the existing asset, error refuses; it never overwrites")),
+		MCPParam::Optional(TEXT("format"), EType::String, TEXT("Output format: mono | stereo (default mono)")),
+		MCPParam::Optional(TEXT("oneShot"), EType::Boolean, TEXT("Declare the one-shot interface (default true)")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a MetaSoundSource asset named by the contract values")));
 	Registry.RegisterHandler(TEXT("play_sound_at_location"), &PlaySoundAtLocation, {
 		MCPParam::Required(TEXT("soundPath"), EType::String, TEXT("Sound asset to play (SoundWave, SoundCue or MetaSoundSource)")).Alias(TEXT("assetPath")).Alias(TEXT("path")),
 		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("World location to play at (default origin)")),
@@ -64,7 +80,24 @@ void FAudioHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 
 	// MetaSound graph authoring (AudioHandlers_MetaSound.cpp)
-	Registry.RegisterHandler(TEXT("metasound_author"), &MetaSoundAuthor);
+	Registry.RegisterHandler(TEXT("metasound_author"), &MetaSoundAuthor, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("MetaSoundSource asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Audio/MetaSounds)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns the existing asset, error refuses; it never overwrites")),
+		MCPParam::Optional(TEXT("format"), EType::String, TEXT("Output format: mono | stereo (default mono)")),
+		MCPParam::Optional(TEXT("oneShot"), EType::Boolean, TEXT("Declare the one-shot interface (default true)")),
+		MCPParam::Optional(TEXT("inputs"), EType::Array, TEXT("Graph inputs to add")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("name"), EType::String, TEXT("Graph input name")),
+			MCPParam::RequiredField(TEXT("dataType"), EType::String, TEXT("MetaSound data type: Float, Int32, Bool, String, Trigger, Audio, Time, ...")),
+			MCPParam::OptionalField(TEXT("default"), EType::Any, TEXT("Literal default for the input")),
+		}),
+		MCPParam::Optional(TEXT("outputs"), EType::Array, TEXT("Graph outputs to add")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("name"), EType::String, TEXT("Graph output name")),
+			MCPParam::RequiredField(TEXT("dataType"), EType::String, TEXT("MetaSound data type")),
+		}),
+		MCPParam::Optional(TEXT("nodes"), EType::Array, TEXT("Nodes to add, each {id, class, namespace?, variant?, majorVersion?, inputs?: {vertex: value}}; id is the local name connections use, namespace defaults to UE and majorVersion to 1")).Items(EType::Object),
+		MCPParam::Optional(TEXT("connections"), EType::Array, TEXT("Edges, each {from, to}. Endpoints are 'nodeId:vertex', or the heads 'input:<name>', 'output:<name>' and 'audioOut:<channel>'")).Items(EType::Object),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a MetaSoundSource asset named by the contract values")));
 	Registry.RegisterHandler(TEXT("metasound_list_node_classes"), &MetaSoundListNodeClasses, {
 		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring over the node class name")),
 	});
@@ -169,7 +202,14 @@ void FAudioHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 
 	// SoundCue graph authoring (AudioHandlers_SoundCue.cpp)
-	Registry.RegisterHandler(TEXT("soundcue_author"), &SoundCueAuthor);
+	Registry.RegisterHandler(TEXT("soundcue_author"), &SoundCueAuthor, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("SoundCue asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Audio/SoundCues)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns the existing asset, error refuses; it never overwrites")),
+		MCPParam::Optional(TEXT("nodes"), EType::Array, TEXT("Nodes to add, each {id, type, soundWavePath?, properties?: {field: value}}; id is the local name connections use, type is a soundcue_add_node nodeType")).Items(EType::Object),
+		MCPParam::Optional(TEXT("connections"), EType::Array, TEXT("Links, each {child, parent?, index?}; an omitted or 'root' parent makes the child the cue root, and index defaults to append")).Items(EType::Object),
+		MCPParam::Optional(TEXT("root"), EType::String, TEXT("Local id of the node to make the cue root, overriding the connections")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a SoundCue asset named by the contract values")));
 	Registry.RegisterHandler(TEXT("soundcue_add_node"), &SoundCueAddNode, {
 		MCPParam::Required(TEXT("cuePath"), EType::String, TEXT("SoundCue asset path")).Alias(TEXT("assetPath")),
 		MCPParam::Required(TEXT("nodeType"), EType::String, TEXT("wave_player | mixer | random | modulator | attenuation | looping | concatenator | delay | switch")),
@@ -187,7 +227,15 @@ void FAudioHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 
 	// Mixing + routing + spatialization (AudioHandlers_Mixing.cpp)
-	Registry.RegisterHandler(TEXT("create_submix"), &CreateSubmix);
+	Registry.RegisterHandler(TEXT("create_submix"), &CreateSubmix, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("SoundSubmix asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Audio/Submixes)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns the existing asset, error refuses; it never overwrites")),
+		MCPParam::Optional(TEXT("parentPath"), EType::String, TEXT("Parent submix (default none)")),
+		MCPParam::Optional(TEXT("outputVolume"), EType::Number, TEXT("Output volume")),
+		MCPParam::Optional(TEXT("wetLevel"), EType::Number, TEXT("Wet level")),
+		MCPParam::Optional(TEXT("dryLevel"), EType::Number, TEXT("Dry level")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a SoundSubmix asset named by the contract values")));
 	Registry.RegisterHandler(TEXT("set_submix_parent"), &SetSubmixParent, {
 		MCPParam::Required(TEXT("submixPath"), EType::String, TEXT("SoundSubmix to reparent")),
 		MCPParam::Optional(TEXT("parentPath"), EType::String, TEXT("New parent submix (empty detaches to root)")),
@@ -199,10 +247,44 @@ void FAudioHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Preset folder (default /Game/Audio/SubmixEffects)")),
 		MCPParam::Optional(TEXT("settings"), EType::Object, TEXT("Effect Settings struct as JSON")),
 	});
-	Registry.RegisterHandler(TEXT("create_sound_class"), &CreateSoundClass);
-	Registry.RegisterHandler(TEXT("create_sound_mix"), &CreateSoundMix);
-	Registry.RegisterHandler(TEXT("create_concurrency"), &CreateConcurrency);
-	Registry.RegisterHandler(TEXT("create_attenuation"), &CreateAttenuation);
+	Registry.RegisterHandler(TEXT("create_sound_class"), &CreateSoundClass, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("SoundClass asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Audio/SoundClasses)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns the existing asset, error refuses; it never overwrites")),
+		MCPParam::Optional(TEXT("properties"), EType::Object, TEXT("FSoundClassProperties as JSON: Volume, Pitch, bIsUISound, ...")),
+		MCPParam::Optional(TEXT("parentPath"), EType::String, TEXT("Parent SoundClass (default none)")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a SoundClass asset named by the contract values")));
+	Registry.RegisterHandler(TEXT("create_sound_mix"), &CreateSoundMix, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("SoundMix asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Audio/SoundMixes)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns the existing asset, error refuses; it never overwrites")),
+		MCPParam::Optional(TEXT("fadeInTime"), EType::Number, TEXT("Fade-in time in seconds")),
+		MCPParam::Optional(TEXT("fadeOutTime"), EType::Number, TEXT("Fade-out time in seconds")),
+		MCPParam::Optional(TEXT("adjusters"), EType::Array, TEXT("Per-SoundClass adjustments; an entry whose class does not load is skipped")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("soundClassPath"), EType::String, TEXT("SoundClass asset the adjustment applies to")),
+			MCPParam::OptionalField(TEXT("volumeAdjuster"), EType::Number, TEXT("Volume multiplier (default 1)")),
+			MCPParam::OptionalField(TEXT("pitchAdjuster"), EType::Number, TEXT("Pitch multiplier (default 1)")),
+			MCPParam::OptionalField(TEXT("applyToChildren"), EType::Boolean, TEXT("Apply to child sound classes (default false)")),
+		}),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a SoundMix asset named by the contract values")));
+	Registry.RegisterHandler(TEXT("create_concurrency"), &CreateConcurrency, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("SoundConcurrency asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Audio/Concurrency)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns the existing asset, error refuses; it never overwrites")),
+		MCPParam::Optional(TEXT("maxCount"), EType::Integer, TEXT("Most concurrent voices")),
+		MCPParam::Optional(TEXT("limitToOwner"), EType::Boolean, TEXT("Count voices per owning actor")),
+		MCPParam::Optional(TEXT("volumeScale"), EType::Number, TEXT("Volume scale applied to each new voice")),
+		MCPParam::Optional(TEXT("resolutionRule"), EType::String, TEXT("EMaxConcurrentResolutionRule name, e.g. StopFarthestThenOldest")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a SoundConcurrency asset named by the contract values")));
+	Registry.RegisterHandler(TEXT("create_attenuation"), &CreateAttenuation, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("SoundAttenuation asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Audio/Attenuation)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns the existing asset, error refuses; it never overwrites")),
+		MCPParam::Optional(TEXT("settings"), EType::Object, TEXT("FSoundAttenuationSettings as JSON, applied before the shortcuts")),
+		MCPParam::Optional(TEXT("falloffDistance"), EType::Number, TEXT("Falloff distance; also turns volume attenuation on")),
+		MCPParam::Optional(TEXT("spatialize"), EType::Boolean, TEXT("bSpatialize")),
+		MCPParam::Optional(TEXT("enableOcclusion"), EType::Boolean, TEXT("bEnableOcclusion")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a SoundAttenuation asset named by the contract values")));
 	Registry.RegisterHandler(TEXT("set_sound_submix"), &SetSoundSubmix, {
 		MCPParam::Required(TEXT("soundPath"), EType::String, TEXT("Sound asset path")).Alias(TEXT("assetPath")),
 		MCPParam::Optional(TEXT("submixPath"), EType::String, TEXT("Base submix to route to (empty detaches)")),
@@ -278,33 +360,30 @@ void FAudioHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 // AssetTools auto-select the sound-import factory from the file extension.
 TSharedPtr<FJsonValue> FAudioHandlers::ImportAudio(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before the file check can fail; filename,
+	// assetName and destinationPath are aliases the registry resolves (#1057).
 	FString FileName;
-	if (auto Err = RequireStringAlt(Params, TEXT("filename"), TEXT("filePath"), FileName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("filePath"), FileName)) return Err;
+	const FString AssetName = OptionalString(Params, TEXT("name"));
+	FString DestinationPath = OptionalString(Params, TEXT("packagePath"));
+	if (DestinationPath.IsEmpty()) DestinationPath = TEXT("/Game/Audio");
+	const bool bHasLooping = HasParam(Params, TEXT("looping"));
+	const bool bLooping = OptionalBool(Params, TEXT("looping"), false);
+	const bool bReplaceExisting = OptionalBool(Params, TEXT("replaceExisting"), true);
+
 	if (!FPaths::FileExists(FileName))
 	{
 		return MCPError(FString::Printf(TEXT("File not found: %s"), *FileName));
 	}
 
-	FString DestinationPath = OptionalString(Params, TEXT("destinationPath"), TEXT("/Game/Audio"));
-	{
-		const FString PkgPath = OptionalString(Params, TEXT("packagePath"));
-		if (!PkgPath.IsEmpty()) DestinationPath = PkgPath;
-	}
-
 	UAssetImportTask* Task = NewObject<UAssetImportTask>();
 	FGCRootScope TaskRoot(Task);
 	Task->bAutomated = true;
-	Task->bReplaceExisting = OptionalBool(Params, TEXT("replaceExisting"), true);
+	Task->bReplaceExisting = bReplaceExisting;
 	Task->bSave = false;
 	Task->Filename = FileName;
 	Task->DestinationPath = DestinationPath;
 	// Factory left null: AssetTools resolves USoundFactory for wav/ogg/flac.
-
-	FString AssetName;
-	if (!TryGetStringParam(Params, TEXT("assetName"), AssetName))
-	{
-		TryGetStringParam(Params, TEXT("name"), AssetName);
-	}
 	if (!AssetName.IsEmpty()) Task->DestinationName = AssetName;
 
 	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
@@ -322,9 +401,9 @@ TSharedPtr<FJsonValue> FAudioHandlers::ImportAudio(const TSharedPtr<FJsonObject>
 	}
 
 	// Optional looping toggle on the resulting SoundWave.
-	if (ImportedWave && HasParam(Params, TEXT("looping")))
+	if (ImportedWave && bHasLooping)
 	{
-		ImportedWave->bLooping = OptionalBool(Params, TEXT("looping"), false);
+		ImportedWave->bLooping = bLooping;
 		SaveAssetPackage(ImportedWave);
 	}
 

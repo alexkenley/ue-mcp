@@ -1755,8 +1755,15 @@ TSharedPtr<FJsonValue> FWidgetHandlers::UnbindWidgetAnimationEvent(const TShared
 
 TSharedPtr<FJsonValue> FWidgetHandlers::SetWidgetNavigation(const TSharedPtr<FJsonObject>& Params)
 {
+	// 'path' is the spec's alias, renamed to assetPath before this runs.
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const TArray<TSharedPtr<FJsonValue>>* GivenRules = nullptr;
+	const bool bHasRules = TryGetArrayParam(Params, TEXT("rules"), GivenRules) && GivenRules;
+	const FString SingleWidgetName = OptionalString(Params, TEXT("widgetName"));
+	const FString SingleDirection = OptionalString(Params, TEXT("direction"));
+	const FString SingleRule = OptionalString(Params, TEXT("rule"), TEXT("Explicit"));
+	const FString SingleWidgetToFocus = OptionalString(Params, TEXT("widgetToFocus"));
 
 	TSharedPtr<FJsonValue> ResolveError;
 	UWidgetBlueprint* WidgetBP = MCPWidget::ResolveWidgetBlueprintOrError(AssetPath, ResolveError);
@@ -1765,27 +1772,25 @@ TSharedPtr<FJsonValue> FWidgetHandlers::SetWidgetNavigation(const TSharedPtr<FJs
 
 	// One shape for both the single and the bulk case: `rules` is an array of
 	// {widgetName, direction, rule, widgetToFocus?}. A single write can also be
-	// spelled with the three top-level params, which is folded into the array.
+	// spelled with the top-level params, which is folded into the array.
 	TArray<TSharedPtr<FJsonValue>> RuleEntries;
-	const TArray<TSharedPtr<FJsonValue>>* GivenRules = nullptr;
-	if (TryGetArrayParam(Params, TEXT("rules"), GivenRules) && GivenRules)
+	if (bHasRules)
 	{
 		RuleEntries = *GivenRules;
 	}
 	else
 	{
-		FString WidgetName;
-		if (auto Err = RequireString(Params, TEXT("widgetName"), WidgetName))
+		if (SingleWidgetName.IsEmpty())
 		{
 			return MCPError(
 				TEXT("Pass either widgetName + direction + rule for one write, or rules[] as an array of ")
 				TEXT("{widgetName, direction, rule, widgetToFocus?} for a bulk write. Neither was given."));
 		}
 		TSharedPtr<FJsonObject> One = MakeShared<FJsonObject>();
-		One->SetStringField(TEXT("widgetName"), WidgetName);
-		One->SetStringField(TEXT("direction"), OptionalString(Params, TEXT("direction")));
-		One->SetStringField(TEXT("rule"), OptionalString(Params, TEXT("rule"), TEXT("Explicit")));
-		One->SetStringField(TEXT("widgetToFocus"), OptionalString(Params, TEXT("widgetToFocus")));
+		One->SetStringField(TEXT("widgetName"), SingleWidgetName);
+		One->SetStringField(TEXT("direction"), SingleDirection);
+		One->SetStringField(TEXT("rule"), SingleRule);
+		One->SetStringField(TEXT("widgetToFocus"), SingleWidgetToFocus);
 		RuleEntries.Add(MakeShared<FJsonValueObject>(One));
 	}
 

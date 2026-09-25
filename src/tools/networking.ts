@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { categoryTool, bp, type ToolDef } from "../types.js";
+import { categoryTool, type ToolDef } from "../types.js";
 import { specBp, schema as specSchema } from "./specs/networking.generated.js";
 
 export const networkingTool: ToolDef = categoryTool(
@@ -7,12 +6,7 @@ export const networkingTool: ToolDef = categoryTool(
   "Networking and replication: actor replication, property replication, net relevancy, dormancy.",
   {
     set_replicates:        specBp("mutate", "Enable or disable actor replication on a Blueprint's CDO. Reports existed=true and unchanged=true when the class already had this value. Rolls back through this same action with the previous flag, with nothing lost.", "set_replicates"),
-    set_property_replicated: bp("mutate", "Mark a Blueprint variable as replicated. replicationType is 'None' | 'Replicated' | 'RepNotify'; repNotify=true is shorthand for RepNotify and replicated=true for Replicated. Params: blueprintPath, variableName (alias: propertyName), replicationType? | replicated? | repNotify? (#768). Reports existed=true and unchanged=true when the variable already had that type. Rolls back through this same action with the type it had; marked lossy when the variable carried a ReplicationCondition other than COND_None, because making a variable replicated resets that and this action has no parameter to restore one.", "set_property_replicated", (p) => ({
-      blueprintPath: p.blueprintPath,
-      variableName: p.variableName ?? p.propertyName,
-      replicationType: p.replicationType
-        ?? (p.repNotify ? "RepNotify" : p.replicated === true ? "Replicated" : p.replicated === false ? "None" : undefined),
-    })),
+    set_property_replicated: specBp("mutate", "Mark a Blueprint variable as replicated. replicationType is 'None' | 'Replicated' | 'RepNotify'; repNotify=true is shorthand for RepNotify and replicated=true for Replicated (#768). Reports existed=true and unchanged=true when the variable already had that type. Rolls back through this same action with the type it had; marked lossy when the variable carried a ReplicationCondition other than COND_None, because making a variable replicated resets that and this action has no parameter to restore one.", "set_property_replicated"),
     configure_net_frequency: specBp("mutate", "Set update frequency. Reports unchanged=true when both frequencies already held these values, and otherwise rolls back to the pair that was there - the record carries both regardless of which one was asked for, so an inverse cannot leave the two inconsistent.", "configure_net_update_frequency"),
     set_dormancy:          specBp("mutate", "Set net dormancy on a Blueprint's CDO: DORM_Never | DORM_Awake | DORM_DormantAll | DORM_DormantPartial | DORM_Initial. An unrecognised spelling is REFUSED and the valid five are named, where it used to leave the value alone and still report success. Reports existed=true and unchanged=true when the class already had that dormancy. Rolls back through this same action with the previous one, with nothing lost.", "set_net_dormancy"),
     set_net_load_on_client: specBp("mutate", "Control whether the actor is loaded on clients (bNetLoadOnClient). A class with no such property reports a warning and unchanged=true rather than the existed it used to claim for a write that never happened. Reports existed=true when the class already had this value, and otherwise rolls back through this same action with the previous flag.", "set_net_load_on_client"),
@@ -25,13 +19,8 @@ export const networkingTool: ToolDef = categoryTool(
   },
   undefined,
   {
-    // #1057: every key a spec'd handler declares, generated from its C++
-    // registration. set_property_replicated shares blueprintPath with them.
+    // #1057: every key the networking handlers declare, generated from their
+    // C++ registrations.
     ...specSchema,
-    propertyName: z.string().optional(),
-    variableName: z.string().optional().describe("set_property_replicated: Blueprint variable name (propertyName is accepted too) (#768)"),
-    replicationType: z.string().optional().describe("set_property_replicated: None | Replicated | RepNotify (#768)"),
-    replicated: z.boolean().optional(),
-    repNotify: z.boolean().optional(),
   },
 );

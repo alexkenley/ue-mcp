@@ -1,6 +1,4 @@
-import { z } from "zod";
-import { categoryTool, bp, type ToolDef } from "../types.js";
-import { Vec3 } from "../schemas.js";
+import { categoryTool, type ToolDef } from "../types.js";
 import { PAGINATION_SCHEMA } from "../pagination.js";
 import { specBp, schema as specSchema } from "./specs/landscape.generated.js";
 
@@ -19,7 +17,7 @@ export const landscapeTool: ToolDef = categoryTool(
     get_component:     specBp("read", "Inspect component.", "get_landscape_component"),
     set_material:      specBp("mutate", "Set landscape material.", "set_landscape_material"),
     add_layer_info:    specBp("mutate", "Register paint layer (creates LayerInfo asset + binds to active landscape). Idempotent: a layer already registered reports existed and emits no record, so a replay cannot delete a layer it did not create. Rolls back through remove_layer on the parent Landscape actor, which un-registers the layer; marked lossy when the LayerInfo ASSET was created here, because remove_layer deliberately leaves it on disk.", "add_landscape_layer_info"),
-    create_layer_info: bp("mutate", "Standalone LayerInfo asset creation - no landscape required. Params: layerName, name? (default LI_<layerName>), packagePath? (default /Game/Landscape/LayerInfos), physMaterial? (asset path), hardness? (#251)", "create_landscape_layer_info", (p) => ({ layerName: p.layerName, name: p.name, packagePath: p.packagePath, physMaterial: p.physMaterial, hardness: p.hardness, onConflict: p.onConflict })),
+    create_layer_info: specBp("mutate", "Standalone LayerInfo asset creation - no landscape required (#251).", "create_landscape_layer_info"),
     create:            specBp("mutate", "Spawn a new ALandscape with a flat heightmap. Defaults match the Editor's Landscape Mode 'create new' (8x8 components, 63 quads/subsection, 2 subsections/component = 1016x1016 quads) (#303).", "create_landscape"),
     get_material_usage_summary: specBp("read", "Per-proxy summary: landscape/hole material paths + component/grass/nanite counts (#150).", "get_landscape_material_usage_summary"),
     list_proxies:      specBp("read", "Enumerate loaded World Partition LandscapeStreamingProxy actors with per-proxy objectPath and worldBounds (origin/extent), sorted by object path, plus loadedProxies + parentLandscapes counts. Unloaded proxies are not spawned as actors, so only loaded ones appear - use this to confirm a proxy is streamed in before trusting a layer/height readback (#733).", "list_landscape_proxies"),
@@ -92,27 +90,15 @@ export const landscapeTool: ToolDef = categoryTool(
     },
     project_geo_coordinates: specBp("read", "Convert between latitude/longitude and a landscape's world space, in both directions, against the same boundsLatLon the landscape was planned for. Each entry in points is either {lat, lon}, answered with the world X/Y and the sampled surface Z so the point lands ON the terrain, or {x, y}, answered with the geographic coordinate that world position corresponds to - which is what turns analyze_terrain's largestFlatArea back into a real place. northAt says which end of the landscape's Y axis is north, defaulting to minY because a DEM raster's first row is its northern edge and that is how import_heightmap lays one down; getting it wrong mirrors every placement about the middle of the map and nothing about the result looks wrong.", "project_geo_coordinates"),
     refresh_physical_material_collision: {
-      ...bp("mutate", "UE 5.8+: safely refresh physical-material collision data in memory on loaded World Partition LandscapeStreamingProxy actors after a LayerInfo PhysMaterial change. Requires complete registered collision coverage and no pending landscape edit-layer work. Preserves and verifies every raw, complex-live, and simple-live height sample, builds material data before one collision recreation, and fails the whole matched batch on any unsafe result. Filters combine: actorLabels[], guids[], and bounds {min,max}; omitting them targets every loaded proxy up to maxActors (default 256, hard max 1024). Unloaded proxies are untouched; pin them first with level(load_actor_descs). Refuses PIE/SIE and non-World-Partition maps. Persistence is deliberately unsupported because Landscape PreSave can mutate edit-layer collision data; this action never saves packages. Params: actorLabels? (string[]), guids? (string[]), bounds? ({min, max}), maxActors? (default 256, max 1024). No inverse: this recomputes derived collision and physical-material data from weightmaps it never writes, so nothing restores the previous build and the response says rollbackPossible=false. 'save' is deliberately absent from this category's schema and from what this action forwards, so persistence cannot be requested through the tool at all; the handler's own refusal of a save=true is there for a direct bridge caller. Returns loaded/matched/refreshed/failed counts and exact affected package paths.", "refresh_landscape_physical_material_collision", (p) => ({ actorLabels: p.actorLabels, guids: p.guids, bounds: p.bounds, maxActors: p.maxActors })),
+      ...specBp("mutate", "UE 5.8+: safely refresh physical-material collision data in memory on loaded World Partition LandscapeStreamingProxy actors after a LayerInfo PhysMaterial change. Requires complete registered collision coverage and no pending landscape edit-layer work. Preserves and verifies every raw, complex-live, and simple-live height sample, builds material data before one collision recreation, and fails the whole matched batch on any unsafe result. Filters combine: actorLabels[], guids[], and bounds {min,max}; omitting them targets every loaded proxy up to maxActors (default 256, hard max 1024). Unloaded proxies are untouched; pin them first with level(load_actor_descs). Refuses PIE/SIE and non-World-Partition maps. Persistence is deliberately unsupported because Landscape PreSave can mutate edit-layer collision data; this action never saves packages, and save accepts only false. No inverse: this recomputes derived collision and physical-material data from weightmaps it never writes, so nothing restores the previous build and the response says rollbackPossible=false. Returns loaded/matched/refreshed/failed counts and exact affected package paths.", "refresh_landscape_physical_material_collision"),
       timeoutMs: 600_000,
     },
   },
   undefined,
   {
-    // #1057: every key a spec'd handler declares, generated from its C++
-    // registration. A key listed again below is shared with the hand-written
-    // create_layer_info and refresh_physical_material_collision, and
-    // tests/unit/handler-specs.test.ts holds the two to one type.
+    // #1057: every landscape action is spec'd, so every key comes from the C++
+    // registrations through the generated module.
     ...specSchema,
-    layerName: z.string().optional().describe("Paint layer name"),
-    name: z.string().optional().describe("create_layer_info: LayerInfo asset name (default LI_<layerName>)"),
-    packagePath: z.string().optional().describe("Content folder for the LayerInfo asset (default /Game/Landscape/LayerInfos)"),
-    physMaterial: z.string().optional().describe("create_layer_info: PhysicalMaterial asset path"),
-    hardness: z.number().optional().describe("create_layer_info: layer hardness"),
-    onConflict: z.string().optional().describe("create_layer_info: skip (default) | error when the asset already exists"),
-    actorLabels: z.array(z.string().min(1)).min(1).max(256).optional().describe("refresh_physical_material_collision: exact editor labels of loaded LandscapeStreamingProxy actors"),
-    guids: z.array(z.string().min(1).max(64)).min(1).max(256).optional().describe("refresh_physical_material_collision: actor GUIDs of loaded LandscapeStreamingProxy actors"),
-    bounds: z.object({ min: Vec3, max: Vec3 }).optional().describe("refresh_physical_material_collision: world-space AABB intersecting proxies to refresh"),
-    maxActors: z.number().int().min(1).max(1024).optional().describe("refresh_physical_material_collision: refuse more matches than this (default 256)"),
     // cursor + limit for the paged list actions. Declared once: the MCP layer
     // strips a key the category never declares, so a paged action whose
     // category omits these silently returns page one forever.

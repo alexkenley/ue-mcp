@@ -63,6 +63,8 @@ private:
 	static TSharedPtr<FJsonValue> ClearLevelScript(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetComponentProperty(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> NudgeComponent(const TSharedPtr<FJsonObject>& Params);
+	// The inverse nudge_component's rollback names: put back an exact relative transform.
+	static TSharedPtr<FJsonValue> RestoreComponentRelativeTransform(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> GetComponentDetails(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetVolumeProperties(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> GetWorldSettings(const TSharedPtr<FJsonObject>& Params);

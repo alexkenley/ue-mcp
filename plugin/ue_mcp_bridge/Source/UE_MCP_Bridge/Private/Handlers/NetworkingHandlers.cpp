@@ -50,8 +50,13 @@ void FNetworkingHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
 		MCPParam::Optional(TEXT("replicateMovement"), EType::Boolean, TEXT("Replicate movement (default false)")),
 	});
-	// Hand-authored in TS: its mapParams folds replicated/repNotify into replicationType.
-	Registry.RegisterHandler(TEXT("set_property_replicated"), &SetVariableReplication);
+	Registry.RegisterHandler(TEXT("set_property_replicated"), &SetVariableReplication, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
+		MCPParam::Required(TEXT("variableName"), EType::String, TEXT("Blueprint variable name")).Alias(TEXT("propertyName")),
+		MCPParam::Optional(TEXT("replicationType"), EType::String, TEXT("None | Replicated | RepNotify (default None). Wins over replicated and repNotify")),
+		MCPParam::Optional(TEXT("replicated"), EType::Boolean, TEXT("Shorthand: true is Replicated, false is None")),
+		MCPParam::Optional(TEXT("repNotify"), EType::Boolean, TEXT("Shorthand: true is RepNotify, and wins over replicated")),
+	});
 	Registry.RegisterHandler(TEXT("set_only_relevant_to_owner"), &SetOwnerOnlyRelevant, {
 		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
 		MCPParam::Optional(TEXT("onlyRelevantToOwner"), EType::Boolean, TEXT("bOnlyRelevantToOwner (default false)")),
@@ -474,10 +479,22 @@ TSharedPtr<FJsonValue> FNetworkingHandlers::SetVariableReplication(const TShared
 	FString BlueprintPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BlueprintPath)) return Err;
 
+	// propertyName is an alias the registry resolves (#1057).
 	FString VariableName;
 	if (auto Err = RequireString(Params, TEXT("variableName"), VariableName)) return Err;
 
-	FString ReplicationType = OptionalString(Params, TEXT("replicationType"), TEXT("None"));
+	// replicationType names the type; replicated and repNotify are the boolean
+	// shorthands (#768), read before the load can fail. An explicit type wins,
+	// then repNotify=true, then replicated; none of them means None.
+	FString ReplicationType = OptionalString(Params, TEXT("replicationType"));
+	const bool bReplicated = OptionalBool(Params, TEXT("replicated"), false);
+	const bool bRepNotify = OptionalBool(Params, TEXT("repNotify"), false);
+	if (ReplicationType.IsEmpty())
+	{
+		if (bRepNotify) ReplicationType = TEXT("RepNotify");
+		else if (bReplicated) ReplicationType = TEXT("Replicated");
+		else ReplicationType = TEXT("None");
+	}
 
 	UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *BlueprintPath);
 	if (!Blueprint)

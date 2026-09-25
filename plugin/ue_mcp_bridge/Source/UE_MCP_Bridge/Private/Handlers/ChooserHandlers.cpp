@@ -918,8 +918,7 @@ void FChooserHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("chooser"));
 
 	// #1057: a spec'd handler declares its parameters here and nowhere else; the
-	// TS surface is generated from a recording of them. chooser_create has no
-	// spec: the contract test would create the asset it is handed.
+	// TS surface is generated from a recording of them.
 	using EType = EMCPParamType;
 	const FMCPParamSpec TableParam = MCPParam::Required(TEXT("table"), EType::String, TEXT("ChooserTable asset path, e.g. /Game/Path/CT_Locomotion")).Alias(TEXT("assetPath"));
 	const FMCPParamSpec OutputParam = MCPParam::Optional(TEXT("output"), EType::String, TEXT("Output asset path for the row (a PoseSearchDatabase, a nested ChooserTable, etc.)"));
@@ -928,7 +927,11 @@ void FChooserHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	const FMCPParamSpec InputsParam = MCPParam::Optional(TEXT("inputs"), EType::Object, TEXT("Cell values keyed by column index (as string) or column name; same value format as cells"));
 	const FMCPParamSpec ChooserPathParam = MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("ChooserTable asset path")).Alias(TEXT("path"));
 
-	Registry.RegisterHandler(TEXT("chooser_create"), &Create);
+	Registry.RegisterHandler(TEXT("chooser_create"), &Create, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("New ChooserTable asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the table exists: skip (default, report it) | error")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a ChooserTable under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("chooser_describe"), &Describe, {
 		TableParam,
 	});

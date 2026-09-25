@@ -1349,6 +1349,8 @@ namespace
 // unreal.find_object from Python to get it.
 TSharedPtr<FJsonValue> FEditorHandlers::FindLiveObjects(const TSharedPtr<FJsonObject>& Params)
 {
+	// The search half reads these only on its own path (#1057).
+	MCPReadParamsAhead(Params, { TEXT("world"), TEXT("pieInstance"), TEXT("cursor"), TEXT("limit") });
 	const FString ObjectPath = OptionalString(Params, TEXT("objectPath"));
 	const FString ClassSpec = OptionalString(Params, TEXT("className"));
 	const FString NameContains = OptionalString(Params, TEXT("nameContains"));

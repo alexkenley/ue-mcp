@@ -84,13 +84,41 @@ void FAssetBulkReadHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("asset"));
 	// Loading hundreds of assets to read them takes longer than the default
 	// handler timeout allows, and a timeout here would look like a hang.
-	Registry.RegisterHandlerWithTimeout(
-		TEXT("bulk_read_asset_properties"), &BulkReadAssetProperties, 300.0f);
+	using EType = EMCPParamType;
+	Registry.RegisterHandlerWithTimeout(TEXT("bulk_read_asset_properties"), &BulkReadAssetProperties, 300.0f, {
+		MCPParam::Required(TEXT("propertyNames"), EType::Array, TEXT("Property paths to read off every matched asset; dotted paths walk nested structs (max 32)")).Items(EType::String),
+		MCPParam::Optional(TEXT("assetPaths"), EType::Array, TEXT("The exact assets to read")).Items(EType::String),
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content folder to sweep, narrowed by classNames")),
+		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include subfolders of directory (default true)")),
+		MCPParam::Optional(TEXT("classNames"), EType::Array, TEXT("Only assets of these classes")).Items(EType::String),
+		MCPParam::Optional(TEXT("matchSubclasses"), EType::Boolean, TEXT("Also match subclasses of classNames (default true)")),
+		MCPParam::Optional(TEXT("where"), EType::Array, TEXT("Predicates evaluated in the editor (max 24)")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("field"), EType::String, TEXT("Dot path into the row, e.g. props.CullDistance.Max, className or suspect")),
+			MCPParam::OptionalField(TEXT("op"), EType::String, TEXT("eq (default), ne, lt, lte, gt, gte, contains, notContains, startsWith, endsWith, in, notIn, exists, notExists, isNull, isNotNull, isTrue, isFalse")),
+			MCPParam::OptionalField(TEXT("value"), EType::Any, TEXT("Operand the op compares against")),
+		}),
+		MCPParam::Optional(TEXT("whereMode"), EType::String, TEXT("all (default) | any")),
+		MCPParam::Optional(TEXT("suspectOnly"), EType::Boolean, TEXT("Only rows where a requested property is absent or null")),
+		MCPParam::Optional(TEXT("groupBy"), EType::String, TEXT("Dot path to group matches by (max 200 groups)")),
+		MCPParam::Optional(TEXT("countBy"), EType::Array, TEXT("Dot paths to build value histograms for (max 8)")).Items(EType::String),
+		MCPParam::Optional(TEXT("sampleLimit"), EType::Integer, TEXT("Sample asset names per group (default 5, max 25)")),
+		MCPParam::Optional(TEXT("countOnly"), EType::Boolean, TEXT("Return the aggregates without rows")),
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return (default 200, max 2000)")),
+		MCPParam::Optional(TEXT("startIndex"), EType::Integer, TEXT("First row index, for paging")),
+		MCPParam::Optional(TEXT("maxAssets"), EType::Integer, TEXT("Refuse to load more candidates than this (default 2000, max 20000)")),
+		MCPParam::Optional(TEXT("outputPath"), EType::String, TEXT("Write every matched row to this JSON file and return the path instead of the rows")),
+	}, MCPSpec::ExactlyOne({ { TEXT("assetPaths") }, { TEXT("directory") } }));
 }
 
 TSharedPtr<FJsonValue> FAssetBulkReadHandlers::BulkReadAssetProperties(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	// Every parameter is read before a check below can refuse (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("propertyNames"), TEXT("assetPaths"), TEXT("directory"), TEXT("recursive"), TEXT("classNames"),
+		TEXT("matchSubclasses"), TEXT("where"), TEXT("whereMode"), TEXT("suspectOnly"), TEXT("groupBy"),
+		TEXT("countBy"), TEXT("sampleLimit"), TEXT("countOnly"), TEXT("limit"), TEXT("startIndex"),
+		TEXT("maxAssets"), TEXT("outputPath") });
 
 	// ── Properties to read ──────────────────────────────────────────────────
 	TArray<FString> PropertyPaths;

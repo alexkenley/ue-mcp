@@ -239,13 +239,16 @@ TSharedPtr<FJsonValue> FFabHandlers::ClearCache(const TSharedPtr<FJsonObject>& P
 
 TSharedPtr<FJsonValue> FFabHandlers::ImportFile(const TSharedPtr<FJsonObject>& Params)
 {
+	// Both parameters are read before anything can fail, whether or not the Fab
+	// plugin is present; sourceFile and destPath are aliases the registry
+	// resolves (#1057).
+	FString Source;
+	if (auto Err = RequireString(Params, TEXT("source"), Source)) return Err;
+	FString Destination;
+	if (auto Err = RequireString(Params, TEXT("destination"), Destination)) return Err;
+
 	if (!IsFabModuleLoaded()) return MCPError(TEXT("Fab plugin not loaded"));
 #if WITH_FAB_PLUGIN
-	FString Source;
-	if (auto Err = RequireStringAlt(Params, TEXT("source"), TEXT("sourceFile"), Source)) return Err;
-	FString Destination;
-	if (auto Err = RequireStringAlt(Params, TEXT("destination"), TEXT("destPath"), Destination)) return Err;
-
 	if (!FPaths::FileExists(Source))
 		return MCPError(FString::Printf(TEXT("Source file not found on disk: %s"), *Source));
 	if (!Destination.StartsWith(TEXT("/")))
@@ -338,15 +341,24 @@ void FFabHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("fab"));
-	// #1057: the three reads take no parameters, declared as an empty spec. The
-	// rest act on the account, the cache or the project and stay unspecced, so
-	// the spec contract test never calls them.
+	// #1057: every handler declares its parameters here. The ones that act on the
+	// account or the cache run as soon as they are called, whatever the values,
+	// so they are contract-exempt.
+	using EType = EMCPParamType;
 	Registry.RegisterHandler(TEXT("fab_status"), &Status, {});
-	Registry.RegisterHandler(TEXT("fab_login"), &Login);
-	Registry.RegisterHandler(TEXT("fab_logout"), &Logout);
-	Registry.RegisterHandler(TEXT("fab_sync_library"), &SyncLibrary);
+	Registry.RegisterHandler(TEXT("fab_login"), &Login, {},
+		MCPSpec::ContractExempt(TEXT("Takes no parameters and opens the EOS account-portal login flow when called")));
+	Registry.RegisterHandler(TEXT("fab_logout"), &Logout, {},
+		MCPSpec::ContractExempt(TEXT("Takes no parameters and clears the stored Fab credentials when called")));
+	Registry.RegisterHandler(TEXT("fab_sync_library"), &SyncLibrary, {
+		MCPParam::Optional(TEXT("batchSize"), EType::Integer, TEXT("Library items to pull per sync request (default the plugin's own)")),
+	}, MCPSpec::ContractExempt(TEXT("Queues a Fab library sync whatever the batch size")));
 	Registry.RegisterHandler(TEXT("fab_list_cached"), &ListCached, {});
 	Registry.RegisterHandler(TEXT("fab_cache_info"), &CacheInfo, {});
-	Registry.RegisterHandler(TEXT("fab_clear_cache"), &ClearCache);
-	Registry.RegisterHandler(TEXT("fab_import_file"), &ImportFile);
+	Registry.RegisterHandler(TEXT("fab_clear_cache"), &ClearCache, {},
+		MCPSpec::ContractExempt(TEXT("Takes no parameters and deletes the Fab download cache when called")));
+	Registry.RegisterHandler(TEXT("fab_import_file"), &ImportFile, {
+		MCPParam::Required(TEXT("source"), EType::String, TEXT("Absolute path of the source file on disk")).Alias(TEXT("sourceFile")),
+		MCPParam::Required(TEXT("destination"), EType::String, TEXT("Destination content path, e.g. /Game/Fab/Imported")).Alias(TEXT("destPath")),
+	});
 }

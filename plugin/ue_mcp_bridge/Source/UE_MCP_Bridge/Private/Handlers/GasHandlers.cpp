@@ -69,8 +69,8 @@ void FGasHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 
 	// #1057: a handler registered with a spec declares its parameters here and
 	// nowhere else; the TS surface for it is generated from a recording of these.
-	// The create_* handlers stay unspecced: the spec contract test would hand
-	// them a name and package path that reach AssetTools.CreateAsset.
+	// The create_* handlers are contract-exempt: the contract test's name and
+	// package path would reach AssetTools.CreateAsset.
 	using EType = EMCPParamType;
 	auto ActorLabel = []()
 	{
@@ -88,14 +88,38 @@ void FGasHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	{
 		return MCPParam::Required(TEXT("abilityClass"), EType::String, Description);
 	};
+	auto BlueprintName = []()
+	{
+		return MCPParam::Required(TEXT("name"), EType::String, TEXT("Blueprint name"));
+	};
+	auto BlueprintFolder = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("packagePath"), EType::String, Description);
+	};
+	auto BlueprintOnConflict = []()
+	{
+		return MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default, returns the existing asset) or error when the asset already exists"));
+	};
+	const FMCPSpecRules CreatesBlueprint = MCPSpec::ContractExempt(
+		TEXT("Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"));
 
-	Registry.RegisterHandler(TEXT("create_gameplay_effect"), &CreateGameplayEffect);
+	Registry.RegisterHandler(TEXT("create_gameplay_effect"), &CreateGameplayEffect, {
+		BlueprintName(), BlueprintFolder(TEXT("Content folder (default /Game/GAS/Effects)")), BlueprintOnConflict(),
+		MCPParam::Optional(TEXT("durationPolicy"), EType::String, TEXT("Echoed back as durationPolicy (default Instant); it is not written onto the effect")),
+	}, CreatesBlueprint);
 	Registry.RegisterHandler(TEXT("get_gas_info"), &GetGasInfo, {
 		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Blueprint asset path to inspect")),
 	});
-	Registry.RegisterHandler(TEXT("create_gameplay_ability"), &CreateGameplayAbility);
-	Registry.RegisterHandler(TEXT("create_attribute_set"), &CreateAttributeSet);
-	Registry.RegisterHandler(TEXT("create_gameplay_cue"), &CreateGameplayCue);
+	Registry.RegisterHandler(TEXT("create_gameplay_ability"), &CreateGameplayAbility, {
+		BlueprintName(), BlueprintFolder(TEXT("Content folder (default /Game/GAS/Abilities)")), BlueprintOnConflict(),
+	}, CreatesBlueprint);
+	Registry.RegisterHandler(TEXT("create_attribute_set"), &CreateAttributeSet, {
+		BlueprintName(), BlueprintFolder(TEXT("Content folder (default /Game/GAS/Attributes)")), BlueprintOnConflict(),
+	}, CreatesBlueprint);
+	Registry.RegisterHandler(TEXT("create_gameplay_cue"), &CreateGameplayCue, {
+		BlueprintName(), BlueprintFolder(TEXT("Content folder (default /Game/GAS/Cues)")), BlueprintOnConflict(),
+		MCPParam::Optional(TEXT("cueType"), EType::String, TEXT("Static (default, GameplayCueNotify_Static) | Actor (GameplayCueNotify_Actor)")),
+	}, CreatesBlueprint);
 	Registry.RegisterHandler(TEXT("add_ability_system_component"), &AddAbilitySystemComponent, {
 		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Blueprint asset path")),
 		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Name of the AbilitySystemComponent (default AbilitySystemComp)")),

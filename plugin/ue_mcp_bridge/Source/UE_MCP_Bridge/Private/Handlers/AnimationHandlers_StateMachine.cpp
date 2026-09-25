@@ -1512,6 +1512,11 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateIKRig(const TSharedPtr<FJsonObj
 
 	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game"));
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	// Read before the load can fail (#1057).
+	FString RetargetRoot;
+	TryGetStringParam(Params, TEXT("retargetRoot"), RetargetRoot);
+	const TArray<TSharedPtr<FJsonValue>>* ChainsArr = nullptr;
+	TryGetArrayParam(Params, TEXT("chains"), ChainsArr);
 
 	// Load the skeletal mesh to get the skeleton
 	USkeletalMesh* SkelMesh = LoadAssetByPath<USkeletalMesh>(SkeletalMeshPath);
@@ -1533,8 +1538,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateIKRig(const TSharedPtr<FJsonObj
 	// Prefer IKRigController to atomically configure the rig (#97, #103)
 	int32 ChainsAdded = 0;
 	TArray<FString> ChainErrors;
-	FString RetargetRoot;
-	TryGetStringParam(Params, TEXT("retargetRoot"), RetargetRoot);
 
 	if (UIKRigController* Controller = UIKRigController::GetController(IKRig))
 	{
@@ -1545,8 +1548,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateIKRig(const TSharedPtr<FJsonObj
 			Controller->SetRetargetRoot(FName(*RetargetRoot));
 		}
 
-		const TArray<TSharedPtr<FJsonValue>>* ChainsArr = nullptr;
-		if (TryGetArrayParam(Params, TEXT("chains"), ChainsArr))
+		if (ChainsArr)
 		{
 			for (const TSharedPtr<FJsonValue>& V : *ChainsArr)
 			{
@@ -2391,14 +2393,18 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddPoseSearchSequence(const TSharedPt
 // disableReselection?, sampleStart?, sampleEnd?, enabled?}), clearExisting? (default true).
 TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchClips(const TSharedPtr<FJsonObject>& Params)
 {
+	// path is an alias the registry resolves to assetPath (#1057).
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Read before the load can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* Clips = nullptr;
+	const bool bHasClips = TryGetArrayParam(Params, TEXT("clips"), Clips) && Clips;
+	const bool bClearExisting = OptionalBool(Params, TEXT("clearExisting"), true);
 
 	UPoseSearchDatabase* Database = Cast<UPoseSearchDatabase>(MCPLoadAssetObject(AssetPath));
 	if (!Database) return MCPError(FString::Printf(TEXT("PoseSearchDatabase not found: %s"), *AssetPath));
 
-	const TArray<TSharedPtr<FJsonValue>>* Clips = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("clips"), Clips) || !Clips)
+	if (!bHasClips)
 	{
 		return MCPError(TEXT("Missing required parameter 'clips' (array of {sequencePath, mirror?, disableReselection?, sampleStart?, sampleEnd?, enabled?})"));
 	}
@@ -2411,7 +2417,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchClips(const TSharedPtr<F
 		if (!Refusal.IsEmpty()) return MCPError(Refusal);
 	}
 
-	const bool bClearExisting = OptionalBool(Params, TEXT("clearExisting"), true);
 	const int32 PrevCount = GetPoseSearchAnimationAssetCount(Database);
 	// Captured before anything is cleared or appended: this action's own inverse
 	// is itself, replaying the list that was there.
@@ -2977,6 +2982,12 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ResetRetargetPose(const TSharedPtr<FJ
 // ─── #701 batch_retarget_animations ─────────────────────────────────
 TSharedPtr<FJsonValue> FAnimationHandlers::BatchRetargetAnimations(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read ahead on every engine, so the older-engine refusal reads what the
+	// spec declares too (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("retargeterPath"), TEXT("sourceMesh"), TEXT("targetMesh"), TEXT("animPaths"), TEXT("outputPath"),
+		TEXT("prefix"), TEXT("suffix"), TEXT("overwrite"), TEXT("requireCompleteMapping"),
+	});
 #if !(ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8))
 	auto Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), false);
@@ -2985,7 +2996,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BatchRetargetAnimations(const TShared
 	return MCPResult(Result);
 #else
 	FString RetargeterPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("retargeterPath"), TEXT("assetPath"), RetargeterPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("retargeterPath"), RetargeterPath)) return Err;
 	FString SourceMeshPath, TargetMeshPath;
 	if (auto Err = RequireString(Params, TEXT("sourceMesh"), SourceMeshPath)) return Err;
 	if (auto Err = RequireString(Params, TEXT("targetMesh"), TargetMeshPath)) return Err;

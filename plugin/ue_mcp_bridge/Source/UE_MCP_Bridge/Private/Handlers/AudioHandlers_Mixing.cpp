@@ -32,19 +32,20 @@ namespace
 		return MCPJsonProperty::SetDottedPropertyFromJson(Obj, Path, Val, OutErr);
 	}
 
-	void SetNumberProp(UObject* Obj, const FString& Path, const TSharedPtr<FJsonObject>& Params, const FString& Key)
+	// Key is a literal at every call, so the source check can name the read (#1057).
+	void SetNumberProp(UObject* Obj, const FString& Path, const TSharedPtr<FJsonObject>& Params, const TCHAR* Key)
 	{
 		double N;
-		if (TryGetNumberParam(Params, *Key, N))
+		if (TryGetNumberParam(Params, Key, N))
 		{
 			FString E; MCPJsonProperty::SetDottedPropertyFromJson(Obj, Path, MakeShared<FJsonValueNumber>(N), E);
 		}
 	}
 
-	void SetBoolProp(UObject* Obj, const FString& Path, const TSharedPtr<FJsonObject>& Params, const FString& Key)
+	void SetBoolProp(UObject* Obj, const FString& Path, const TSharedPtr<FJsonObject>& Params, const TCHAR* Key)
 	{
 		bool B;
-		if (TryGetBoolParam(Params, *Key, B))
+		if (TryGetBoolParam(Params, Key, B))
 		{
 			FString E; MCPJsonProperty::SetDottedPropertyFromJson(Obj, Path, MakeShared<FJsonValueBoolean>(B), E);
 		}

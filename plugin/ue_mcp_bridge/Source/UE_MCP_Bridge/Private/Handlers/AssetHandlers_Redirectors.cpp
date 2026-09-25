@@ -120,7 +120,12 @@ TSharedPtr<FJsonValue> FAssetHandlers::FixupRedirectors(const TSharedPtr<FJsonOb
 	MCP_CHECK_GAME_THREAD();
 
 	const TArray<TSharedPtr<FJsonValue>>* PathsField = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("paths"), PathsField) || !PathsField)
+	const bool bHasPaths = TryGetArrayParam(Params, TEXT("paths"), PathsField);
+	// Read before the checks below can refuse (#1057).
+	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
+	const bool bAllowProjectWide = OptionalBool(Params, TEXT("allowProjectWide"), false);
+	if (!bHasPaths || !PathsField)
 	{
 		return MCPError(TEXT("Missing 'paths' array: the redirector packages, or the folders holding them, to fix up."));
 	}
@@ -129,10 +134,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::FixupRedirectors(const TSharedPtr<FJsonOb
 	{
 		return MCPError(TEXT("'paths' is empty. Name the redirector packages, or the folders holding them."));
 	}
-
-	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
-	const bool bSave = OptionalBool(Params, TEXT("save"), true);
-	const bool bAllowProjectWide = OptionalBool(Params, TEXT("allowProjectWide"), false);
 
 	FAssetRegistryModule& RegistryModule =
 		FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));

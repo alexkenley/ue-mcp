@@ -350,10 +350,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetRuntimeVisibility(const TSharedPtr<FJ
 	{
 		return MCPError(TEXT("Missing required boolean 'hidden'"));
 	}
-	if (HasParam(Params, TEXT("all")))
-	{
-		return MCPError(TEXT("'all' is not supported; use explicit actorLabels/actorPaths or actorClass"));
-	}
 
 	const int32 MaxTargets = OptionalInt(
 		Params, TEXT("maxTargets"), MCPRuntimeVisibilityDefaultMaxTargets);

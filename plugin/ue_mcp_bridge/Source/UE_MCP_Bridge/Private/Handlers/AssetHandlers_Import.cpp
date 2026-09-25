@@ -969,7 +969,25 @@ TSharedPtr<FJsonValue> FAssetHandlers::ListTextureProperties(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FAssetHandlers::SetTextureProperties(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+
+	// Each setting arrives at the top level or inside settings{}; the top level
+	// wins when both carry it. All are read before the load.
+	const TSharedPtr<FJsonObject>* SettingsField = nullptr;
+	const TSharedPtr<FJsonObject> Settings = (TryGetObjectParam(Params, TEXT("settings"), SettingsField) && SettingsField)
+		? *SettingsField : TSharedPtr<FJsonObject>();
+	FString CompressionStr;
+	const bool bHasCompression = TryGetStringParam(Params, TEXT("compressionSettings"), CompressionStr)
+		|| (Settings.IsValid() && Settings->TryGetStringField(TEXT("compressionSettings"), CompressionStr));
+	FString LODGroupStr;
+	const bool bHasLODGroup = TryGetStringParam(Params, TEXT("lodGroup"), LODGroupStr)
+		|| (Settings.IsValid() && Settings->TryGetStringField(TEXT("lodGroup"), LODGroupStr));
+	bool bSRGB = false;
+	const bool bHasSRGB = TryGetBoolParam(Params, TEXT("sRGB"), bSRGB)
+		|| (Settings.IsValid() && Settings->TryGetBoolField(TEXT("sRGB"), bSRGB));
+	bool bNeverStream = false;
+	const bool bHasNeverStream = TryGetBoolParam(Params, TEXT("neverStream"), bNeverStream)
+		|| (Settings.IsValid() && Settings->TryGetBoolField(TEXT("neverStream"), bNeverStream));
 
 	TSharedPtr<FJsonValue> LoadError;
 	UObject* Asset = MCPRequireAssetObject(AssetPath, LoadError);
@@ -991,8 +1009,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetTextureProperties(const TSharedPtr<FJs
 	TArray<FString> ModifiedProperties;
 
 	// Compression settings
-	FString CompressionStr;
-	if (TryGetStringParam(Params, TEXT("compressionSettings"), CompressionStr))
+	if (bHasCompression)
 	{
 		TextureCompressionSettings NewCompression = TC_Default;
 		if (CompressionStr == TEXT("Default"))                    NewCompression = TC_Default;
@@ -1012,8 +1029,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetTextureProperties(const TSharedPtr<FJs
 	}
 
 	// LOD group
-	FString LODGroupStr;
-	if (TryGetStringParam(Params, TEXT("lodGroup"), LODGroupStr))
+	if (bHasLODGroup)
 	{
 		TextureGroup NewGroup = TEXTUREGROUP_World;
 		if (LODGroupStr == TEXT("World"))                    NewGroup = TEXTUREGROUP_World;
@@ -1041,16 +1057,14 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetTextureProperties(const TSharedPtr<FJs
 	}
 
 	// sRGB
-	bool bSRGB;
-	if (TryGetBoolParam(Params, TEXT("sRGB"), bSRGB))
+	if (bHasSRGB)
 	{
 		Texture->SRGB = bSRGB;
 		ModifiedProperties.Add(TEXT("sRGB"));
 	}
 
 	// NeverStream
-	bool bNeverStream;
-	if (TryGetBoolParam(Params, TEXT("neverStream"), bNeverStream))
+	if (bHasNeverStream)
 	{
 		Texture->NeverStream = bNeverStream;
 		ModifiedProperties.Add(TEXT("neverStream"));

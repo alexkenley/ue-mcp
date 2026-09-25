@@ -1858,6 +1858,10 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetBoneRetargeting(const TSharedPtr<F
 	using namespace UE_MCP_SkeletonEdit;
 
 	if (!Params.IsValid()) return SkeletonError(TEXT("invalid_params"), TEXT("Parameters are required"));
+	// Everything but the skeleton is read after it loads (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("skeletonPath"), TEXT("mode"), TEXT("bones"), TEXT("bone"), TEXT("includeChildren"), TEXT("restore"),
+	});
 
 	FString SkeletonPath;
 	TSharedPtr<FJsonValue> LoadError;
@@ -2460,6 +2464,8 @@ TSharedPtr<FJsonValue> FAnimationHandlers::EditCurveMetadata(const TSharedPtr<FJ
 {
 	using namespace UE_MCP_SkeletonEdit;
 
+	// Everything but the skeleton is read after it loads (#1057).
+	MCPReadParamsAhead(Params, { TEXT("skeletonPath"), TEXT("add"), TEXT("remove"), TEXT("rename"), TEXT("flags") });
 #if !WITH_EDITOR
 	return SkeletonError(
 		TEXT("editor_only"),
@@ -2778,6 +2784,10 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RegisterCompatibleSkeleton(const TSha
 	using namespace UE_MCP_SkeletonEdit;
 
 	if (!Params.IsValid()) return SkeletonError(TEXT("invalid_params"), TEXT("Parameters are required"));
+	// Everything but the skeleton is read after it loads (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("skeletonPath"), TEXT("compatibleSkeletonPath"), TEXT("compatibleSkeletonPaths"), TEXT("remove"),
+	});
 
 	FString SkeletonPath;
 	TSharedPtr<FJsonValue> LoadError;

@@ -26,22 +26,11 @@ describe("asset.set_mesh_materials_batch", () => {
     expect(assetTool.schema.assignments.safeParse([{ assetPath: "", materialPath: "/Game/M" }]).success).toBe(false);
   });
 
-  it("routes only the batch parameters to the native bridge", () => {
+  it("forwards its bag as sent, as its C++ spec declares (#1057)", () => {
     const action = assetTool.actions.set_mesh_materials_batch;
     expect(action.bridge).toBe("set_mesh_materials_batch");
-    expect(action.mapParams?.({
-      action: "set_mesh_materials_batch",
-      assignments: [{ assetPath: "/Game/A", materialPath: "/Game/M", slotName: "Trim" }],
-      save: false,
-      dryRun: true,
-      continueOnError: true,
-      unrelated: "ignored",
-    })).toEqual({
-      assignments: [{ assetPath: "/Game/A", materialPath: "/Game/M", slotName: "Trim" }],
-      save: false,
-      dryRun: true,
-      continueOnError: true,
-    });
+    expect(action.mapParams).toBeUndefined();
+    expect(action.description).toContain("Params: assignments, save?, dryRun?, continueOnError?");
   });
 
   it("exposes continueOnError so a partial batch is reachable", () => {

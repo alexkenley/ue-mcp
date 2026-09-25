@@ -142,6 +142,7 @@ private:
 	static TSharedPtr<FJsonValue> GetMessageLog(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> GetBuildStatus(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> PieControl(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> PieStartIgnoringBlueprintErrors(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> CaptureScreenshot(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetViewportCamera(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> Undo(const TSharedPtr<FJsonObject>& Params);

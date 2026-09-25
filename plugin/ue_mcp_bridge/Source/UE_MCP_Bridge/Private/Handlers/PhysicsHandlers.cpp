@@ -20,14 +20,70 @@ void FPhysicsHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("physics"));
-	Registry.RegisterHandler(TEXT("set_collision_profile"), &SetCollisionProfile);
-	Registry.RegisterHandler(TEXT("set_collision_enabled"), &SetCollisionEnabled);
-	Registry.RegisterHandler(TEXT("set_collision"), &SetCollision);
-	Registry.RegisterHandler(TEXT("set_simulate_physics"), &SetPhysicsEnabled);
-	Registry.RegisterHandler(TEXT("set_physics_properties"), &SetBodyProperties);
+
+	// #1057: each handler declares its parameters here and nowhere else; the TS
+	// surface is generated from a recording of these. The contract test calls
+	// each once per actor selector, and the actor lookup fails first.
+	using EType = EMCPParamType;
+	auto ActorLabel = []()
+	{
+		return MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Actor editor label; pass actorLabel or actorPath"));
+	};
+	auto ActorPath = []()
+	{
+		return MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path; the unambiguous selector"));
+	};
+	auto CollisionEnabled = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("collisionEnabled"), EType::String, Description);
+	};
+	const FMCPSpecRules OneActor = MCPSpec::ExactlyOne({ { TEXT("actorLabel") }, { TEXT("actorPath") } });
+
+	Registry.RegisterHandler(TEXT("set_collision_profile"), &SetCollisionProfile, {
+		ActorLabel(), ActorPath(),
+		MCPParam::Required(TEXT("profileName"), EType::String, TEXT("Collision profile (preset) name")),
+	}, OneActor);
+	Registry.RegisterHandler(TEXT("set_collision_enabled"), &SetCollisionEnabled, {
+		ActorLabel(), ActorPath(),
+		MCPParam::Required(TEXT("collisionEnabled"), EType::String, TEXT("NoCollision | QueryOnly | PhysicsOnly | QueryAndPhysics")).Alias(TEXT("collisionType")),
+	}, OneActor);
+	Registry.RegisterHandler(TEXT("set_collision"), &SetCollision, {
+		ActorLabel(), ActorPath(),
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("Blueprint whose component template to edit; needs componentName")),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Primitive component name (prefix match on an actor, default every one); required with assetPath")),
+		MCPParam::Optional(TEXT("collisionProfile"), EType::String, TEXT("Collision profile (preset) name, applied before the overrides")),
+		CollisionEnabled(TEXT("NoCollision | QueryOnly | PhysicsOnly | QueryAndPhysics")),
+		MCPParam::Optional(TEXT("objectType"), EType::String, TEXT("Object-type channel name, e.g. WorldStatic, Pawn, ECC_GameTraceChannel1")),
+		MCPParam::Optional(TEXT("responseToAllChannels"), EType::String, TEXT("Block | Overlap | Ignore, applied to every channel before the per-channel responses")),
+		MCPParam::Optional(TEXT("responses"), EType::Object, TEXT("Per-channel responses, {channelName: Block | Overlap | Ignore}")),
+	}, MCPSpec::ExactlyOne({ { TEXT("actorLabel") }, { TEXT("actorPath") }, { TEXT("assetPath") } }));
+	Registry.RegisterHandler(TEXT("set_simulate_physics"), &SetPhysicsEnabled, {
+		ActorLabel(), ActorPath(),
+		MCPParam::Required(TEXT("simulate"), EType::Boolean, TEXT("Turn physics simulation on or off")).Alias(TEXT("enabled")),
+	}, OneActor);
+	Registry.RegisterHandler(TEXT("set_physics_properties"), &SetBodyProperties, {
+		ActorLabel(), ActorPath(),
+		MCPParam::Optional(TEXT("mass"), EType::Number, TEXT("Mass override in kg")),
+		MCPParam::Optional(TEXT("linearDamping"), EType::Number, TEXT("Linear damping")),
+		MCPParam::Optional(TEXT("angularDamping"), EType::Number, TEXT("Angular damping")),
+		MCPParam::Optional(TEXT("enableGravity"), EType::Boolean, TEXT("Whether gravity applies to the body")),
+	}, OneActor);
 	// #676: perturb a physics body (impulse or force) for over-time observation.
-	Registry.RegisterHandler(TEXT("add_impulse"), &AddImpulse);
-	Registry.RegisterHandler(TEXT("add_force"), &AddImpulse);
+	// add_force is the same handler under a second name; mode picks the push.
+	const TArray<FMCPParamSpec> PushSpec = {
+		ActorLabel(), ActorPath(),
+		MCPParam::Required(TEXT("impulse"), EType::Vec3, TEXT("Impulse or force vector {x,y,z}")).Alias(TEXT("force")).Alias(TEXT("vector")),
+		MCPParam::Optional(TEXT("mode"), EType::String, TEXT("impulse (default) | force")),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Primitive component to push (default: the root, else the first primitive)")),
+		MCPParam::Optional(TEXT("boneName"), EType::String, TEXT("Physics bone to push")),
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("World point to apply the impulse at; ignores mode")),
+		MCPParam::Optional(TEXT("velChange"), EType::Boolean, TEXT("Treat the impulse as a velocity change")),
+		MCPParam::Optional(TEXT("accelChange"), EType::Boolean, TEXT("Treat the force as an acceleration change")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("World scope: auto (default) | pie | editor")),
+		MCPParam::Optional(TEXT("pieInstance"), EType::Number, TEXT("PIE world instance (0 = server/primary); omit for the primary world")),
+	};
+	Registry.RegisterHandler(TEXT("add_impulse"), &AddImpulse, PushSpec, OneActor);
+	Registry.RegisterHandler(TEXT("add_force"), &AddImpulse, PushSpec, OneActor);
 }
 
 namespace
@@ -183,13 +239,10 @@ TSharedPtr<FJsonValue> FPhysicsHandlers::SetPhysicsEnabled(const TSharedPtr<FJso
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
-	// #721: the published TS schema names this parameter "simulate" while the
-	// handler historically read only "enabled", so a schema-conformant call
-	// silently no-opped. Accept either spelling (simulate | enabled) and error
-	// explicitly when neither is present rather than succeeding silently.
+	// #721: enabled is the spec's alias for simulate; the registry renames it
+	// before this runs. Neither present is an error, not a silent success.
 	bool bEnabled = true;
-	if (!TryGetBoolParam(Params, TEXT("simulate"), bEnabled) &&
-		!TryGetBoolParam(Params, TEXT("enabled"), bEnabled))
+	if (!TryGetBoolParam(Params, TEXT("simulate"), bEnabled))
 	{
 		return MCPError(TEXT("Missing 'simulate' (aka 'enabled') parameter (true/false)"));
 	}
@@ -257,14 +310,12 @@ TSharedPtr<FJsonValue> FPhysicsHandlers::SetPhysicsEnabled(const TSharedPtr<FJso
 	else
 	{
 		MCPSetUpdated(Result);
-		// The inverse is this same action with the previous flag. The method
-		// name is the REGISTERED one - gameplay(set_simulate_physics) - and the
-		// parameter is 'enabled', which is the spelling this handler reads
-		// alongside 'simulate'. Addressed by actorPath, which is unique, rather
-		// than by a label that can match several actors.
+		// The inverse is this same action with the previous flag, addressed by
+		// actorPath, which is unique, rather than by a label that can match
+		// several actors.
 		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 		Payload->SetStringField(TEXT("actorPath"), Actor->GetPathName());
-		Payload->SetBoolField(TEXT("enabled"), bPrev);
+		Payload->SetBoolField(TEXT("simulate"), bPrev);
 		MCPSetRollback(Result, TEXT("set_simulate_physics"), Payload);
 		// The previous flag is read from the FIRST simulating component, and
 		// this writes every one of them, so an actor whose components differed
@@ -287,20 +338,14 @@ TSharedPtr<FJsonValue> FPhysicsHandlers::SetCollisionEnabled(const TSharedPtr<FJ
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
-	// The published TS schema documents this parameter as 'collisionEnabled',
-	// which is also what gameplay(set_collision) calls it, while this handler
-	// historically read only 'collisionType'. A schema-conformant call therefore
-	// failed on a parameter the caller had supplied under the documented name.
-	// Both spellings are read, and the error below names both.
+	// collisionType is the spec's alias for collisionEnabled; the registry
+	// renames it before this runs.
 	FString CollisionType;
-	if (!TryGetStringParam(Params, TEXT("collisionType"), CollisionType) || CollisionType.IsEmpty())
+	if (!TryGetStringParam(Params, TEXT("collisionEnabled"), CollisionType) || CollisionType.IsEmpty())
 	{
-		if (!TryGetStringParam(Params, TEXT("collisionEnabled"), CollisionType) || CollisionType.IsEmpty())
-		{
-			return MCPError(TEXT(
-				"Missing 'collisionEnabled' (aka 'collisionType'). Pass one of NoCollision, QueryOnly, PhysicsOnly "
-				"or QueryAndPhysics."));
-		}
+		return MCPError(TEXT(
+			"Missing 'collisionEnabled' (aka 'collisionType'). Pass one of NoCollision, QueryOnly, PhysicsOnly "
+			"or QueryAndPhysics."));
 	}
 
 	// Map string to ECollisionEnabled
@@ -399,12 +444,10 @@ TSharedPtr<FJsonValue> FPhysicsHandlers::SetCollisionEnabled(const TSharedPtr<FJ
 		default: PrevTypeStr = TEXT("NoCollision"); break;
 		}
 		// Addressed by actorPath, which is unique, rather than by a label that
-		// can match several actors. 'collisionType' is this handler's own
-		// parameter name and is read before the 'collisionEnabled' alias, so the
-		// record replays regardless of which spelling the original call used.
+		// can match several actors.
 		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 		Payload->SetStringField(TEXT("actorPath"), Actor->GetPathName());
-		Payload->SetStringField(TEXT("collisionType"), PrevTypeStr);
+		Payload->SetStringField(TEXT("collisionEnabled"), PrevTypeStr);
 		MCPSetRollback(Result, TEXT("set_collision_enabled"), Payload);
 		Result->SetBoolField(TEXT("rollbackLossy"), ComponentsModified > 1);
 		if (ComponentsModified > 1)
@@ -427,6 +470,11 @@ TSharedPtr<FJsonValue> FPhysicsHandlers::SetCollisionEnabled(const TSharedPtr<FJ
 // by name, or every primitive component when omitted. (#545)
 TSharedPtr<FJsonValue> FPhysicsHandlers::SetCollision(const TSharedPtr<FJsonObject>& Params)
 {
+	// The settings are read after the target resolves (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("collisionProfile"), TEXT("collisionEnabled"), TEXT("objectType"),
+		TEXT("responseToAllChannels"), TEXT("responses"),
+	});
 	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
 
 	// Gather the target primitive components from either a placed actor
@@ -770,6 +818,8 @@ TSharedPtr<FJsonValue> FPhysicsHandlers::SetBodyProperties(const TSharedPtr<FJso
 {
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
+	// The body values are read per component, after the actor resolves (#1057).
+	MCPReadParamsAhead(Params, { TEXT("mass"), TEXT("linearDamping"), TEXT("angularDamping"), TEXT("enableGravity") });
 
 	REQUIRE_EDITOR_WORLD(World);
 
@@ -786,9 +836,10 @@ TSharedPtr<FJsonValue> FPhysicsHandlers::SetBodyProperties(const TSharedPtr<FJso
 	// Track which properties were set
 	TArray<FString> PropertiesSet;
 
-	// Capture previous values from first component for rollback payload
+	// Capture previous values from first component for rollback payload. The
+	// actor is addressed by actorPath alone, added below: the spec takes one
+	// selector, never both.
 	TSharedPtr<FJsonObject> PrevPayload = MakeShared<FJsonObject>();
-	PrevPayload->SetStringField(TEXT("actorLabel"), ActorLabel);
 	bool bCapturedPrev = false;
 
 	for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
@@ -930,6 +981,11 @@ TSharedPtr<FJsonValue> FPhysicsHandlers::AddImpulse(const TSharedPtr<FJsonObject
 {
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
+	// The push is read after the actor and its body resolve (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("impulse"), TEXT("mode"), TEXT("componentName"), TEXT("boneName"),
+		TEXT("location"), TEXT("velChange"), TEXT("accelChange"),
+	});
 
 	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("auto"));
 	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
@@ -964,13 +1020,10 @@ TSharedPtr<FJsonValue> FPhysicsHandlers::AddImpulse(const TSharedPtr<FJsonObject
 		return MCPError(FString::Printf(TEXT("Component '%s' is not simulating physics; call set_simulate_physics first"), *Prim->GetName()));
 	}
 
+	// force and vector are the spec's aliases for impulse; the registry renames
+	// them before this runs.
 	FVector Vec = FVector::ZeroVector;
-	if (auto Err = RequireVec3(Params, TEXT("impulse"), Vec))
-	{
-		// Accept 'force' or 'vector' as aliases.
-		Vec = OptionalVec3(Params, TEXT("force"), OptionalVec3(Params, TEXT("vector")));
-		if (Vec.IsNearlyZero()) return Err;
-	}
+	if (auto Err = RequireVec3(Params, TEXT("impulse"), Vec)) return Err;
 
 	const FString Mode = OptionalString(Params, TEXT("mode"), TEXT("impulse")).ToLower();
 	const FString BoneName = OptionalString(Params, TEXT("boneName"));

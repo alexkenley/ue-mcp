@@ -62,14 +62,53 @@ namespace
 
 void FSplineHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
-	// Reports parameters its handlers never read (#1057).
-	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("spline"));
-	Registry.RegisterHandler(TEXT("get_spline_info"), &ReadSpline);
-	Registry.RegisterHandler(TEXT("set_spline_points"), &SetSplinePoints);
+	// Reports parameters its handlers never read (#1057). Filed under level,
+	// the tool that exposes both actions, so their specs generate its surface.
+	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("level"));
+
+	using EType = EMCPParamType;
+	const FMCPParamSpec SpecActorLabel = MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Actor editor label; pass actorLabel or actorPath"));
+	const FMCPParamSpec SpecActorPath = MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path; the unambiguous selector, and it wins over actorLabel"));
+	const FMCPSpecRules OneActor = MCPSpec::ExactlyOne({ { TEXT("actorLabel") }, { TEXT("actorPath") } });
+
+	// The contract world scope is refused before any actor is looked up.
+	Registry.RegisterHandler(TEXT("get_spline_info"), &ReadSpline, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Spline component, when the actor has several")),
+		MCPParam::Optional(TEXT("projectPoint"), EType::Vec3, TEXT("World point to project onto the spline")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("World scope: editor (default) | pie")),
+		MCPParam::Optional(TEXT("pieInstance"), EType::Integer, TEXT("Which PIE world when world is pie: 0 = server or primary, 1..N = clients")),
+	}, OneActor);
+	// The contract actor path names no actor, which is refused before any point is written.
+	Registry.RegisterHandler(TEXT("set_spline_points"), &SetSplinePoints, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Required(TEXT("points"), EType::Array, TEXT("Points in world space: a bare {x, y, z} or the typed form; validated as a batch before anything is cleared")).Items(EType::Object).WithFields({
+			MCPParam::OptionalField(TEXT("x"), EType::Number, TEXT("World X, with y and z")),
+			MCPParam::OptionalField(TEXT("y"), EType::Number, TEXT("World Y")),
+			MCPParam::OptionalField(TEXT("z"), EType::Number, TEXT("World Z")),
+			MCPParam::OptionalField(TEXT("location"), EType::Vec3, TEXT("World position, instead of x, y, z")),
+			MCPParam::OptionalField(TEXT("position"), EType::Vec3, TEXT("World position, instead of x, y, z")),
+			MCPParam::OptionalField(TEXT("worldLocation"), EType::Vec3, TEXT("World position, instead of x, y, z")),
+			MCPParam::OptionalField(TEXT("pointType"), EType::String, TEXT("Linear | Curve (default) | Constant | CurveClamped | CurveCustomTangent")),
+			MCPParam::OptionalField(TEXT("arriveTangent"), EType::Vec3, TEXT("World arrive tangent; pass both tangents or neither")),
+			MCPParam::OptionalField(TEXT("leaveTangent"), EType::Vec3, TEXT("World leave tangent; pass both tangents or neither")),
+			MCPParam::OptionalField(TEXT("rotation"), EType::Vec3, TEXT("World rotation as {x: pitch, y: yaw, z: roll} in degrees")),
+			MCPParam::OptionalField(TEXT("scale"), EType::Vec3, TEXT("Point scale")),
+			MCPParam::OptionalField(TEXT("inputKey"), EType::Number, TEXT("Input key; keys must strictly increase (default the point's index)")),
+		}),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Spline component, when the actor has several; matched exactly")),
+		MCPParam::Optional(TEXT("closedLoop"), EType::Boolean, TEXT("Close the spline")),
+		MCPParam::Optional(TEXT("loopPosition"), EType::Number, TEXT("Input key a closed loop closes at, with loopPositionOverride")),
+		MCPParam::Optional(TEXT("loopPositionOverride"), EType::Boolean, TEXT("Close at loopPosition rather than after the last key")),
+	}, OneActor);
 }
 
 TSharedPtr<FJsonValue> FSplineHandlers::ReadSpline(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("projectPoint"), TEXT("world"), TEXT("pieInstance"),
+	});
+
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
@@ -197,6 +236,11 @@ TSharedPtr<FJsonValue> FSplineHandlers::ReadSpline(const TSharedPtr<FJsonObject>
 
 TSharedPtr<FJsonValue> FSplineHandlers::SetSplinePoints(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("points"), TEXT("componentName"), TEXT("closedLoop"),
+		TEXT("loopPosition"), TEXT("loopPositionOverride"),
+	});
+
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 

@@ -260,11 +260,9 @@ void FWidgetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// nowhere else; the TS surface is generated from a recording of these. The
 	// TS normalizer still folds the legacy spellings into assetPath, widgetName
 	// and parentWidgetName first, and mirrors assetPath into path, so the
-	// aliases below matter to direct bridge callers.
-	// Unspecified: the three create actions, which the contract test would see
-	// create an asset, and every action whose clause is a choice (className OR
-	// assetPath, widgetName | className, rules[] OR widgetName), which a spec
-	// cannot express yet.
+	// aliases below matter to direct bridge callers. The three create actions
+	// are contract-exempt: their values would create an asset before anything
+	// failed.
 	using EType = EMCPParamType;
 	auto AssetPath = []()
 	{
@@ -322,13 +320,36 @@ void FWidgetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	{
 		return MCPParam::Optional(TEXT("className"), EType::String, TEXT("Widget class name that locates the live host widget"));
 	};
+	// Where a create action puts its asset: assetPath, or name in packagePath.
+	auto CreateAssetPath = []()
+	{
+		return MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("Full destination, e.g. /Game/UI/WBP_Example; wins over name + packagePath")).Alias(TEXT("path"));
+	};
+	auto CreateName = []()
+	{
+		return MCPParam::Optional(TEXT("name"), EType::String, TEXT("Bare asset name, placed in packagePath"));
+	};
+	auto CreatePackagePath = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("packagePath"), EType::String, Description);
+	};
+	auto CreateOnConflict = []()
+	{
+		return MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the asset exists: skip (default, report it) | error"));
+	};
 
 	Registry.RegisterHandler(TEXT("list_widget_blueprints"), &ListWidgetBlueprints, {
 		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include sub-paths (default true)")),
 		Cursor(),
 		Limit(TEXT("Rows to return on this page (default 200, max 2000)")),
 	});
-	Registry.RegisterHandler(TEXT("create_widget_blueprint"), &CreateWidgetBlueprint);
+	Registry.RegisterHandler(TEXT("create_widget_blueprint"), &CreateWidgetBlueprint, {
+		CreateAssetPath(),
+		CreateName(),
+		CreatePackagePath(TEXT("Folder for name (default /Game/UI/Widgets)")),
+		MCPParam::Optional(TEXT("parentClass"), EType::String, TEXT("UUserWidget subclass: a short name or a class path (default UserWidget)")),
+		CreateOnConflict(),
+	}, MCPSpec::AtLeastOne({ { TEXT("assetPath") }, { TEXT("name") } }).ContractExempt(TEXT("Creates and saves a Widget Blueprint under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("read_widget_tree"), &ReadWidgetTree, {
 		AssetPath(),
 	});
@@ -340,8 +361,18 @@ void FWidgetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("destinationRootName"), EType::String, TEXT("Name override for the extracted root; descendants keep their names")),
 		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Plan only, no asset is created or saved (default true)")),
 	});
-	Registry.RegisterHandler(TEXT("create_editor_utility_widget"), &CreateEditorUtilityWidget);
-	Registry.RegisterHandler(TEXT("create_editor_utility_blueprint"), &CreateEditorUtilityBlueprint);
+	Registry.RegisterHandler(TEXT("create_editor_utility_widget"), &CreateEditorUtilityWidget, {
+		CreateAssetPath(),
+		CreateName(),
+		CreatePackagePath(TEXT("Folder for name (default /Game/EditorUtilities)")),
+		CreateOnConflict(),
+	}, MCPSpec::AtLeastOne({ { TEXT("assetPath") }, { TEXT("name") } }).ContractExempt(TEXT("Creates and saves an Editor Utility Widget under the contract values; nothing it reads fails first")));
+	Registry.RegisterHandler(TEXT("create_editor_utility_blueprint"), &CreateEditorUtilityBlueprint, {
+		CreateAssetPath(),
+		CreateName(),
+		CreatePackagePath(TEXT("Folder for name (default /Game/EditorUtilities)")),
+		CreateOnConflict(),
+	}, MCPSpec::AtLeastOne({ { TEXT("assetPath") }, { TEXT("name") } }).ContractExempt(TEXT("Creates and saves an Editor Utility Blueprint under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("get_widget_details"), &GetWidgetProperties, {
 		AssetPath(),
 		WidgetName(),
@@ -430,7 +461,14 @@ void FWidgetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		Cursor(),
 		Limit(TEXT("Rows to return on this page (default 200, max 2000)")),
 	});
-	Registry.RegisterHandler(TEXT("get_runtime_widget"), &GetRuntimeWidget);
+	// Both selectors filter together: a given widgetName and className must both match.
+	Registry.RegisterHandler(TEXT("get_runtime_widget"), &GetRuntimeWidget, {
+		MCPParam::Optional(TEXT("widgetName"), EType::String, TEXT("Exact live instance name")),
+		ClassName(),
+		MCPParam::Optional(TEXT("childName"), EType::String, TEXT("Named child inside the UserWidget (#559)")),
+		MCPParam::Optional(TEXT("maxDepth"), EType::Integer, TEXT("Max widget-tree depth to walk (default 6)")),
+		MCPParam::Optional(TEXT("includeLayout"), EType::Boolean, TEXT("Add read-only layout diagnostics (geometry, slot, clipping, viewport, per-node deltas) to every node and report the host UserWidget under host (#775)")),
+	}, MCPSpec::AtLeastOne({ { TEXT("widgetName") }, { TEXT("className") } }));
 	Registry.RegisterHandler(TEXT("inspect_runtime_instances"), &InspectRuntimeInstances, {
 		MCPParam::Optional(TEXT("widgetName"), EType::String, TEXT("Exact live instance name. Provide this or classFilter")),
 		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Class name substring filter")),
@@ -453,7 +491,15 @@ void FWidgetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Widget Blueprint or Editor Utility asset path, e.g. /Game/UI/WBP_Example (#798)")).Alias(TEXT("path")).Alias(TEXT("widgetBlueprintPath")),
 		MCPParam::Optional(TEXT("zOrder"), EType::Number, TEXT("Viewport Z-order (#602)")),
 	});
-	Registry.RegisterHandler(TEXT("invoke_runtime_function"), &InvokeRuntimeWidgetFunction);
+	// Needs a PIE world, and a widget the contract values name nothing of.
+	Registry.RegisterHandler(TEXT("invoke_runtime_function"), &InvokeRuntimeWidgetFunction, {
+		MCPParam::Optional(TEXT("widgetName"), EType::String, TEXT("Exact live instance name")),
+		ClassName(),
+		MCPParam::Optional(TEXT("functionName"), EType::String, TEXT("Parameterless UFUNCTION to call on the live widget (#559), or with childName the child delegate to fire (#812)")),
+		MCPParam::Optional(TEXT("childName"), EType::String, TEXT("Named child inside the UserWidget (#559)")),
+		MCPParam::Optional(TEXT("value"), EType::Any, TEXT("Value for the child interaction: true, false or toggle for a CheckBox, a number for a Slider or SpinBox, text for a text box, an option or index for a ComboBoxString")),
+		MCPParam::Optional(TEXT("commitMethod"), EType::String, TEXT("Text and spin box commit type: OnEnter (default), OnUserMovedFocus, OnCleared, Default (#812)")),
+	}, MCPSpec::AtLeastOne({ { TEXT("widgetName") }, { TEXT("className") } }));
 
 	// UMG animation authoring, navigation rules, focus and accessibility.
 	// Bodies live in WidgetHandlers_Animation.cpp.
@@ -529,7 +575,21 @@ void FWidgetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		AnimEvent(),
 		UserTag(),
 	});
-	Registry.RegisterHandler(TEXT("set_widget_navigation"), &SetWidgetNavigation);
+	// Called once per branch by the contract test: the rules array, then the
+	// single write. Either way the asset load fails first.
+	Registry.RegisterHandler(TEXT("set_widget_navigation"), &SetWidgetNavigation, {
+		AssetPath(),
+		MCPParam::Optional(TEXT("rules"), EType::Array, TEXT("Navigation writes applied as one validated batch")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("widgetName"), EType::String, TEXT("Widget whose navigation is written")),
+			MCPParam::RequiredField(TEXT("direction"), EType::String, TEXT("Up, Down, Left, Right, Next or Previous")),
+			MCPParam::OptionalField(TEXT("rule"), EType::String, TEXT("Escape, Explicit (default), Wrap, Stop, Custom or CustomBoundary")),
+			MCPParam::OptionalField(TEXT("widgetToFocus"), EType::String, TEXT("Target widget name; required for Explicit")),
+		}),
+		MCPParam::Optional(TEXT("widgetName"), EType::String, TEXT("Widget whose navigation a single write sets")),
+		MCPParam::Optional(TEXT("direction"), EType::String, TEXT("Direction of a single write, which it needs: Up, Down, Left, Right, Next or Previous")),
+		MCPParam::Optional(TEXT("rule"), EType::String, TEXT("Rule of a single write: Escape, Explicit (default), Wrap, Stop, Custom or CustomBoundary")),
+		MCPParam::Optional(TEXT("widgetToFocus"), EType::String, TEXT("Target widget of a single Explicit write")),
+	}, MCPSpec::ExactlyOne({ { TEXT("rules") }, { TEXT("widgetName") } }));
 	Registry.RegisterHandler(TEXT("clear_widget_navigation"), &ClearWidgetNavigation, {
 		AssetPath(),
 		WidgetName(),
@@ -557,7 +617,11 @@ void FWidgetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 
 	// CommonUI. Bodies live in WidgetHandlers_CommonUI.cpp.
-	Registry.RegisterHandler(TEXT("get_bind_widget_contract"), &GetBindWidgetContract);
+	// className names the contract; assetPath also checks that blueprint's tree against it.
+	Registry.RegisterHandler(TEXT("get_bind_widget_contract"), &GetBindWidgetContract, {
+		MCPParam::Optional(TEXT("className"), EType::String, TEXT("Native UserWidget parent whose contract to read: a short name, a class path, or a Widget Blueprint path")),
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("Widget Blueprint whose parent's contract to read and whose tree to check against it")).Alias(TEXT("path")),
+	}, MCPSpec::AtLeastOne({ { TEXT("className") }, { TEXT("assetPath") } }));
 	Registry.RegisterHandler(TEXT("audit_commonui"), &AuditCommonUI, {
 		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("Widget Blueprint whose CommonUI wiring to check as well")).Alias(TEXT("path")),
 	});
@@ -630,14 +694,42 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ListWidgetBlueprints(const TSharedPtr<FJ
 	return MCPResult(Result);
 }
 
+/**
+ * Where a widget create action puts its asset: the full assetPath, or name in
+ * packagePath (DefaultPackage when omitted). assetPath wins when both arrive,
+ * which is what the TS normalizer sends after composing one from the other.
+ */
+static TSharedPtr<FJsonValue> WidgetCreateTargetFromParams(
+	const TSharedPtr<FJsonObject>& Params, const TCHAR* DefaultPackage, FString& OutName, FString& OutPackagePath)
+{
+	const FString AssetPath = OptionalString(Params, TEXT("assetPath"));
+	const FString Name = OptionalString(Params, TEXT("name"));
+	const FString PackagePath = OptionalString(Params, TEXT("packagePath"));
+	if (!AssetPath.IsEmpty())
+	{
+		AssetPath.Split(TEXT("/"), &OutPackagePath, &OutName, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+		if (OutName.IsEmpty() || OutPackagePath.IsEmpty())
+		{
+			return MCPError(FString::Printf(TEXT("Invalid assetPath '%s'. Expected '/Game/.../AssetName'"), *AssetPath));
+		}
+		return nullptr;
+	}
+	if (!Name.IsEmpty())
+	{
+		OutName = Name;
+		OutPackagePath = PackagePath.IsEmpty() ? FString(DefaultPackage) : PackagePath;
+		return nullptr;
+	}
+	return MCPError(TEXT("Missing required parameter 'assetPath' (or name, with packagePath)"));
+}
+
 TSharedPtr<FJsonValue> FWidgetHandlers::CreateWidgetBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
-	FString Name;
-	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
-
-	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/UI/Widgets"));
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 	FString ParentClassName = OptionalString(Params, TEXT("parentClass"), TEXT("UserWidget"));
+	FString Name;
+	FString PackagePath;
+	if (auto Err = WidgetCreateTargetFromParams(Params, TEXT("/Game/UI/Widgets"), Name, PackagePath)) return Err;
 
 	// (#134) Resolve parentClass string - accept short names ("UserWidget"),
 	// short names with U prefix, and full class paths. Default to UUserWidget
@@ -740,18 +832,10 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ReadWidgetTree(const TSharedPtr<FJsonObj
 
 TSharedPtr<FJsonValue> FWidgetHandlers::CreateEditorUtilityWidget(const TSharedPtr<FJsonObject>& Params)
 {
-	FString Path;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), Path)) return Err;
-
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 	FString PackagePath;
 	FString AssetName;
-	Path.Split(TEXT("/"), &PackagePath, &AssetName, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
-	if (AssetName.IsEmpty())
-	{
-		return MCPError(TEXT("Invalid path format. Expected '/Game/.../AssetName'"));
-	}
-
-	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	if (auto Err = WidgetCreateTargetFromParams(Params, TEXT("/Game/EditorUtilities"), AssetName, PackagePath)) return Err;
 
 	UClass* EUWBClass = FindObject<UClass>(nullptr, TEXT("/Script/Blutility.EditorUtilityWidgetBlueprint"));
 	if (!EUWBClass)
@@ -788,18 +872,10 @@ TSharedPtr<FJsonValue> FWidgetHandlers::CreateEditorUtilityWidget(const TSharedP
 
 TSharedPtr<FJsonValue> FWidgetHandlers::CreateEditorUtilityBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
-	FString Path;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), Path)) return Err;
-
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 	FString PackagePath;
 	FString AssetName;
-	Path.Split(TEXT("/"), &PackagePath, &AssetName, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
-	if (AssetName.IsEmpty())
-	{
-		return MCPError(TEXT("Invalid path format. Expected '/Game/.../AssetName'"));
-	}
-
-	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	if (auto Err = WidgetCreateTargetFromParams(Params, TEXT("/Game/EditorUtilities"), AssetName, PackagePath)) return Err;
 
 	UClass* EUBClass = FindObject<UClass>(nullptr, TEXT("/Script/Blutility.EditorUtilityBlueprint"));
 	if (!EUBClass)
@@ -2662,24 +2738,24 @@ TSharedPtr<FJsonValue> FWidgetHandlers::GetRuntimeWidget(const TSharedPtr<FJsonO
 {
 	using namespace WidgetRuntime_Internal;
 
+	FString WidgetName;
+	TryGetStringParam(Params, TEXT("widgetName"), WidgetName);
+	FString ClassFilter;
+	TryGetStringParam(Params, TEXT("className"), ClassFilter);
+	const int32 MaxDepth = OptionalInt(Params, TEXT("maxDepth"), 6);
+	const FString ChildName = OptionalString(Params, TEXT("childName"), TEXT(""));
+	const bool bIncludeLayout = OptionalBool(Params, TEXT("includeLayout"), false);
+
 	UWorld* World = ResolveWidgetRuntimeWorld();
 	if (!World)
 	{
 		return MCPError(TEXT("No PIE world available. Is Play-In-Editor running?"));
 	}
 
-	FString WidgetName;
-	TryGetStringParam(Params, TEXT("widgetName"), WidgetName);
-	FString ClassFilter;
-	TryGetStringParam(Params, TEXT("className"), ClassFilter);
 	if (WidgetName.IsEmpty() && ClassFilter.IsEmpty())
 	{
 		return MCPError(TEXT("Provide widgetName (exact instance name) or className (first match)."));
 	}
-
-	const int32 MaxDepth = OptionalInt(Params, TEXT("maxDepth"), 6);
-	const FString ChildName = OptionalString(Params, TEXT("childName"), TEXT(""));
-	const bool bIncludeLayout = OptionalBool(Params, TEXT("includeLayout"), false);
 
 	UUserWidget* Found = nullptr;
 	for (TObjectIterator<UUserWidget> It; It; ++It)
@@ -2924,14 +3000,19 @@ TSharedPtr<FJsonValue> FWidgetHandlers::AddWidgetToViewport(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FWidgetHandlers::InvokeRuntimeWidgetFunction(const TSharedPtr<FJsonObject>& Params)
 {
 	using namespace WidgetRuntime_Internal;
+	FString WidgetName = OptionalString(Params, TEXT("widgetName"));
+	FString ClassFilter = OptionalString(Params, TEXT("className"));
+	const FString ChildName = OptionalString(Params, TEXT("childName"));
+	const FString FunctionName = OptionalString(Params, TEXT("functionName"));
+	// Read by the child interaction, on the paths that take them.
+	MCPReadParamsAhead(Params, { TEXT("value"), TEXT("commitMethod") });
+
 	UWorld* World = ResolveWidgetRuntimeWorld();
 	if (!World)
 	{
 		return MCPError(TEXT("No PIE world available. Is Play-In-Editor running?"));
 	}
 
-	FString WidgetName = OptionalString(Params, TEXT("widgetName"));
-	FString ClassFilter = OptionalString(Params, TEXT("className"));
 	if (WidgetName.IsEmpty() && ClassFilter.IsEmpty())
 	{
 		return MCPError(TEXT("Provide widgetName (exact instance name) or className (first match)."));
@@ -2952,9 +3033,6 @@ TSharedPtr<FJsonValue> FWidgetHandlers::InvokeRuntimeWidgetFunction(const TShare
 	{
 		return MCPError(TEXT("Runtime widget not found. Try list_runtime_widgets."));
 	}
-
-	const FString ChildName = OptionalString(Params, TEXT("childName"));
-	const FString FunctionName = OptionalString(Params, TEXT("functionName"));
 
 	// Child-interaction path: childName names an interactive child widget. The
 	// simulation lives in WidgetHandlers_Interaction.cpp and covers buttons,

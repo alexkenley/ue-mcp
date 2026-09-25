@@ -1379,7 +1379,9 @@ TSharedPtr<FJsonValue> FAssetHandlers::CompileCustomizableObject(const TSharedPt
 {
 	MCP_CHECK_GAME_THREAD();
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// MCPGraphCompileOption reads these per compile option, after the load.
+	MCPReadParamsAhead(Params, { TEXT("optimizationLevel"), TEXT("textureCompression") });
 
 	UClass* ObjectClass = FindObject<UClass>(nullptr, TEXT("/Script/CustomizableObject.CustomizableObject"));
 	if (!ObjectClass)

@@ -32,6 +32,8 @@
 #include "Handlers/StateTreeHandlers.h"
 #include "Handlers/GameplayHandlers.h"
 #include "Handlers/GasHandlers.h"
+#include "Handlers/PhysicsHandlers.h"
+#include "Handlers/MassHandlers.h"
 #include "Handlers/DialogHandlers.h"
 #include "Handlers/EditorHandlers.h"
 #include "Handlers/SequencerHandlers.h"
@@ -41,14 +43,21 @@
 #include "Handlers/WidgetHandlers.h"
 #include "Handlers/AssetHandlers.h"
 #include "Handlers/AssetHandlers_Geometry.h"
+#include "Handlers/AssetHandlers_BulkRead.h"
+#include "Handlers/AssetHandlers_MeshBoolean.h"
+#include "Handlers/SkeletalMeshHandlers.h"
+#include "Handlers/LockHandlers.h"
+#include "Handlers/DiffHandlers.h"
 #include "Handlers/BlueprintHandlers.h"
 #include "Handlers/BlueprintHandlers_Collision.h"
 #include "Handlers/ChooserHandlers.h"
 #include "Handlers/DemoHandlers.h"
+#include "Handlers/EpicHandlers.h"
 #include "Handlers/ReflectionHandlers.h"
 #include "Handlers/FoliageHandlers.h"
 #include "Handlers/LandscapeHandlers.h"
 #include "Handlers/LevelHandlers.h"
+#include "Handlers/SplineHandlers.h"
 #include "Misc/AutomationTest.h"
 
 namespace MCPHandlerSpecTests
@@ -189,6 +198,8 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FStateTreeHandlers::RegisterHandlers(Registry);
 	FGameplayHandlers::RegisterHandlers(Registry);
 	FGasHandlers::RegisterHandlers(Registry);
+	FPhysicsHandlers::RegisterHandlers(Registry);
+	FMassHandlers::RegisterHandlers(Registry);
 	FEditorHandlers::RegisterHandlers(Registry);
 	FSequencerHandlers::RegisterHandlers(Registry);
 	FDialogHandlers::RegisterHandlers(Registry);
@@ -196,19 +207,27 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FNiagaraHandlers::RegisterHandlers(Registry);
 	FMaterialHandlers::RegisterHandlers(Registry);
 	FWidgetHandlers::RegisterHandlers(Registry);
-	// asset's create actions are spec'd only where a validation the contract
+	// asset's create actions are called only where a validation the contract
 	// values fail (an unresolvable class or struct, a name holding '/', an
-	// invalid package name) runs before anything is created.
+	// invalid package name) runs before anything is created; the rest are
+	// contract-exempt.
 	FAssetHandlers::RegisterHandlers(Registry);
 	FAssetGeometryHandlers::RegisterHandlers(Registry);
+	FAssetBulkReadHandlers::RegisterHandlers(Registry);
+	FAssetMeshBooleanHandlers::RegisterHandlers(Registry);
+	FSkeletalMeshHandlers::RegisterHandlers(Registry);
+	FLockHandlers::RegisterHandlers(Registry);
+	FDiffHandlers::RegisterHandlers(Registry);
 	FBlueprintHandlers::RegisterHandlers(Registry);
 	FCollisionQueryHandlers::RegisterHandlers(Registry);
 	FChooserHandlers::RegisterHandlers(Registry);
 	FDemoHandlers::RegisterHandlers(Registry);
+	FEpicHandlers::RegisterHandlers(Registry);
 	FReflectionHandlers::RegisterHandlers(Registry);
 	FFoliageHandlers::RegisterHandlers(Registry);
 	FLandscapeHandlers::RegisterHandlers(Registry);
 	FLevelHandlers::RegisterHandlers(Registry);
+	FSplineHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
 	TestTrue(TEXT("handlers register with a parameter spec"), Specs.Num() > 0);

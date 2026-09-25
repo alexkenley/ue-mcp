@@ -193,8 +193,27 @@ void FMassHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("mass"));
-	Registry.RegisterHandler(TEXT("ensure_mass_entity_config"), &EnsureEntityConfig);
-	Registry.RegisterHandler(TEXT("read_mass_entity_config"), &ReadEntityConfig);
+
+	// #1057: each handler declares its parameters here and nowhere else; the TS
+	// surface is generated from a recording of these. The contract test's
+	// onConflict value is refused before ensure_mass_entity_config loads or
+	// creates anything.
+	using EType = EMCPParamType;
+	Registry.RegisterHandler(TEXT("ensure_mass_entity_config"), &EnsureEntityConfig, {
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("MassEntityConfigAsset path, /Game/Folder/Name[.Name]")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Asset name, when assetPath is not given")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Content folder for name (default /Game)")),
+		MCPParam::Required(TEXT("traits"), EType::Array, TEXT("Ordered trait list; the order is the asset's order and a class may appear once"))
+			.Items(EType::Object).WithFields({
+				MCPParam::OptionalField(TEXT("class"), EType::String, TEXT("Concrete UMassEntityTraitBase subclass, short name or /Script path; this or traitClass")),
+				MCPParam::OptionalField(TEXT("traitClass"), EType::String, TEXT("Same as class")),
+				MCPParam::OptionalField(TEXT("properties"), EType::Object, TEXT("Fields written onto the trait instance; dotted paths allowed")),
+			}),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip | error | update (default): what an existing asset gets")),
+	}, MCPSpec::ExactlyOne({ { TEXT("assetPath") }, { TEXT("name") } }));
+	Registry.RegisterHandler(TEXT("read_mass_entity_config"), &ReadEntityConfig, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MassEntityConfigAsset path")),
+	});
 }
 
 TSharedPtr<FJsonValue> FMassHandlers::ReadEntityConfig(const TSharedPtr<FJsonObject>& Params)
@@ -259,6 +278,9 @@ TSharedPtr<FJsonValue> FMassHandlers::ReadEntityConfig(const TSharedPtr<FJsonObj
 
 TSharedPtr<FJsonValue> FMassHandlers::EnsureEntityConfig(const TSharedPtr<FJsonObject>& Params)
 {
+	// name and packagePath are read only without an assetPath, and the rest
+	// after the path validates (#1057).
+	MCPReadParamsAhead(Params, { TEXT("name"), TEXT("packagePath"), TEXT("onConflict"), TEXT("traits") });
 	FString Name;
 	FString PackagePath;
 	if (!SplitAssetPath(Params, Name, PackagePath))

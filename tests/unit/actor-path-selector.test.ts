@@ -115,10 +115,11 @@ describe("actorPath survives the param mappers", () => {
 
   it("sends both selectors when both are given, and lets the bridge prefer the path", async () => {
     // The precedence rule lives in the handler, which is the only place that
-    // can see the world. The client must not resolve it by dropping one.
+    // can see the world. The client must not resolve it by dropping one. An
+    // action whose spec makes the pair a choice refuses both instead.
     const { call, ctx } = bridgeContext();
     await levelTool.handler(ctx, {
-      action: "get_spline_info",
+      action: "move_actor",
       actorLabel: "BP_SnappyRoad2",
       actorPath: ACTOR_PATH,
     });

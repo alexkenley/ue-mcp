@@ -872,6 +872,9 @@ namespace MCPMaterialDesigner
 TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterialDesigner(const TSharedPtr<FJsonObject>& Params)
 {
 	using namespace MCPMaterialDesigner;
+	// Read by the target resolver and after it, on the path each one selects.
+	MCPReadParamsAhead(Params, { TEXT("assetPath"), TEXT("actorLabel"), TEXT("actorPath"), TEXT("world"), TEXT("pieInstance"),
+		TEXT("componentName"), TEXT("slotIndex"), TEXT("slotName"), TEXT("designerSlot"), TEXT("layerIndex"), TEXT("maxDepth") });
 	FDesignerClasses C;
 	FString ClassError;
 	if (!C.Load(ClassError)) return MCPError(ClassError);
@@ -994,6 +997,10 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterialDesigner(const TSharedPtr<
 TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialDesignerValue(const TSharedPtr<FJsonObject>& Params)
 {
 	using namespace MCPMaterialDesigner;
+	// Read by the component resolver and after it, on the path each one selects.
+	MCPReadParamsAhead(Params, { TEXT("objectPath"), TEXT("componentPath"), TEXT("layerIndex"), TEXT("layerName"), TEXT("stage"),
+		TEXT("assetPath"), TEXT("actorLabel"), TEXT("actorPath"), TEXT("world"), TEXT("pieInstance"),
+		TEXT("componentName"), TEXT("slotIndex"), TEXT("slotName"), TEXT("designerSlot"), TEXT("rebuild") });
 	FString PropertyName;
 	if (auto Err = RequireString(Params, TEXT("propertyName"), PropertyName)) return Err;
 	TSharedPtr<FJsonValue> Value = TryGetParam(Params, TEXT("value"));
@@ -1108,6 +1115,9 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialDesignerValue(const TShared
 TSharedPtr<FJsonValue> FMaterialHandlers::AddMaterialDesignerLayer(const TSharedPtr<FJsonObject>& Params)
 {
 	using namespace MCPMaterialDesigner;
+	// Read by the target resolver and after it, on the path each one selects.
+	MCPReadParamsAhead(Params, { TEXT("assetPath"), TEXT("actorLabel"), TEXT("actorPath"), TEXT("world"), TEXT("pieInstance"),
+		TEXT("componentName"), TEXT("slotIndex"), TEXT("slotName"), TEXT("designerSlot"), TEXT("materialProperty"), TEXT("layerName") });
 	FDesignerClasses C;
 	FString ClassError;
 	if (!C.Load(ClassError)) return MCPError(ClassError);
@@ -1180,6 +1190,10 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddMaterialDesignerLayer(const TShared
 TSharedPtr<FJsonValue> FMaterialHandlers::RemoveMaterialDesignerLayer(const TSharedPtr<FJsonObject>& Params)
 {
 	using namespace MCPMaterialDesigner;
+	// Read by the layer resolver, on the path each one selects.
+	MCPReadParamsAhead(Params, { TEXT("objectPath"), TEXT("assetPath"), TEXT("actorLabel"), TEXT("actorPath"), TEXT("world"),
+		TEXT("pieInstance"), TEXT("componentName"), TEXT("slotIndex"), TEXT("slotName"), TEXT("designerSlot"),
+		TEXT("layerIndex"), TEXT("layerName") });
 	FDesignerClasses C;
 	FString ClassError;
 	if (!C.Load(ClassError)) return MCPError(ClassError);

@@ -56,6 +56,9 @@ private:
 	static TSharedPtr<FJsonValue> SearchAssets(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ReadAsset(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ReadAssetProperties(const TSharedPtr<FJsonObject>& Params);
+	// read_asset_properties with includeValues defaulting to true.
+	static TSharedPtr<FJsonValue> GetAssetProperties(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> ReadAssetPropertiesImpl(const TSharedPtr<FJsonObject>& Params, bool bIncludeValuesByDefault);
 	static TSharedPtr<FJsonValue> DuplicateAsset(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> RenameAsset(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> MoveAsset(const TSharedPtr<FJsonObject>& Params);
@@ -241,4 +244,8 @@ private:
 	static TSharedPtr<FJsonValue> CreateUserDefinedStruct(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ListStructFields(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> EditUserDefinedStruct(const TSharedPtr<FJsonObject>& Params);
+	// edit_user_defined_struct with op fixed to rename_field.
+	static TSharedPtr<FJsonValue> RenameStructField(const TSharedPtr<FJsonObject>& Params);
+	// ForcedOp names the op instead of reading it from Params; nullptr reads it.
+	static TSharedPtr<FJsonValue> EditUserDefinedStructImpl(const TSharedPtr<FJsonObject>& Params, const TCHAR* ForcedOp);
 };

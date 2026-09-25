@@ -1516,6 +1516,8 @@ namespace
 
 TSharedPtr<FJsonValue> FNiagaraHandlers::GetCustomHlsl(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read on the system path and after the graph resolves.
+	MCPReadParamsAhead(Params, { TEXT("stackContext"), TEXT("emitterName"), TEXT("emitterIndex"), TEXT("nodeIndex") });
 	UNiagaraSystem* System = nullptr;
 	UNiagaraEmitter* Emitter = nullptr;
 	FGuid Version;
@@ -1574,6 +1576,8 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::SetCustomHlsl(const TSharedPtr<FJsonObj
 {
 	FString Hlsl;
 	if (auto Err = RequireString(Params, TEXT("hlsl"), Hlsl)) return Err;
+	// Read on the system path and after the graph resolves.
+	MCPReadParamsAhead(Params, { TEXT("stackContext"), TEXT("emitterName"), TEXT("emitterIndex"), TEXT("nodeIndex") });
 
 	UNiagaraSystem* System = nullptr;
 	UNiagaraEmitter* Emitter = nullptr;

@@ -145,7 +145,16 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// (npm run specs:record, then npm run specs:generate), and each alias is
 	// resolved to its parameter by the registry before the handler runs.
 	using EType = EMCPParamType;
-	Registry.RegisterHandler(TEXT("list_assets"), &ListAssets);
+	// Shared by the paged reads.
+	const FMCPParamSpec SpecCursor = MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the nextCursor from the previous page, unmodified"));
+	Registry.RegisterHandler(TEXT("list_assets"), &ListAssets, {
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content path to list (default /Game)")),
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Asset class name, exact or substring")).Alias(TEXT("typeFilter")),
+		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include subfolders (default true)")),
+		SpecCursor,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows per page, 1 to 5000 (default 500)")).Alias(TEXT("maxResults")),
+		MCPParam::Optional(TEXT("offset"), EType::Number, TEXT("Refused: the row offset was replaced by cursor paging, because a row number cannot report that the folder changed. Use cursor and limit")),
+	});
 	Registry.RegisterHandler(TEXT("read_uv_channels"), &ReadUvChannels, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")).Alias(TEXT("path")),
 		MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("Source LOD to act on (default 0)")),
@@ -235,24 +244,184 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// StaticMesh back, which is minutes rather than milliseconds on a dense
 	// mesh. The default handler timeout would report a hang while the editor
 	// was still working.
-	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_simplify"), &SimplifyMesh, 300.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_remesh"), &RemeshMesh, 300.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_mirror"), &MirrorMesh, 300.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_hole_fill"), &FillMeshHoles, 300.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("generate_mesh_collision"), &GenerateMeshCollision, 300.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_fracture"), &FractureMesh, 600.0f);
+	const FMCPParamSpec SpecGeoAssetPath = MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh to read")).Alias(TEXT("path"));
+	const FMCPParamSpec SpecGeoInPlace = MCPParam::Optional(TEXT("inPlace"), EType::Boolean, TEXT("Overwrite assetPath instead of writing a separate asset (default false); not with outputPath, and the one form with no rollback"));
+	const FMCPParamSpec SpecGeoBackupPath = MCPParam::Optional(TEXT("backupPath"), EType::String, TEXT("Copy the source here before an inPlace edit, the only way back to the original geometry"));
+	const FMCPParamSpec SpecGeoLodType = MCPParam::Optional(TEXT("lodType"), EType::String, TEXT("MaxAvailable (default, ignores lodIndex) | HiResSourceModel | SourceModel | RenderData"));
+	const FMCPParamSpec SpecGeoLodIndex = MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("LOD to read when lodType names one (default 0)"));
+	const FMCPParamSpec SpecGeoOnConflict = MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the output asset exists: error (default) | replace"));
+	const FMCPParamSpec SpecGeoCopyMaterials = MCPParam::Optional(TEXT("copyMaterialsFromSource"), EType::Boolean, TEXT("Copy the source's material slots onto the written asset (default true)"));
+	const FMCPParamSpec SpecGeoCopyCollision = MCPParam::Optional(TEXT("copyCollisionFromSource"), EType::Boolean, TEXT("Copy the source's simple collision and trace flag onto the written asset (default true)"));
+	const FMCPParamSpec SpecGeoNanite = MCPParam::Optional(TEXT("nanite"), EType::String, TEXT("inherit (default, match the source) | enable | disable"));
+	const FMCPParamSpec SpecGeoRecomputeNormals = MCPParam::Optional(TEXT("recomputeNormals"), EType::Boolean, TEXT("Recompute normals on the written mesh (default false)"));
+	const FMCPParamSpec SpecGeoRecomputeTangents = MCPParam::Optional(TEXT("recomputeTangents"), EType::Boolean, TEXT("Recompute tangents on the written mesh (default false)"));
+	const FMCPParamSpec SpecGeoRemoveDegenerates = MCPParam::Optional(TEXT("removeDegenerates"), EType::Boolean, TEXT("Drop degenerate triangles when writing back into an existing mesh (default false)"));
+	const FMCPParamSpec SpecGeoSave = MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the written asset (default true)"));
+	const FMCPParamSpec SpecGeoDryRun = MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Run the operation and report the result without writing (default false)"));
+	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_simplify"), &SimplifyMesh, 300.0f, {
+		SpecGeoAssetPath,
+		MCPParam::Optional(TEXT("simplifyMode"), EType::String, TEXT("triangleCount (default) | vertexCount | tolerance | edgeLength | clusterEdgeLength | planar | polygroup | editorTriangleCount | editorVertexCount")),
+		MCPParam::Optional(TEXT("triangleCount"), EType::Integer, TEXT("Triangle count to reduce to (simplifyMode triangleCount or editorTriangleCount)")),
+		MCPParam::Optional(TEXT("vertexCount"), EType::Integer, TEXT("Vertex count to reduce to, at least 4 (simplifyMode vertexCount or editorVertexCount)")),
+		MCPParam::Optional(TEXT("tolerance"), EType::Number, TEXT("Furthest in centimetres the surface may drift (simplifyMode tolerance)")),
+		MCPParam::Optional(TEXT("edgeLength"), EType::Number, TEXT("Target edge length in centimetres (simplifyMode edgeLength or clusterEdgeLength)")),
+		MCPParam::Optional(TEXT("angleThreshold"), EType::Number, TEXT("How far from coplanar still counts as coplanar (simplifyMode planar or polygroup, default 0.001)")),
+		MCPParam::Optional(TEXT("method"), EType::String, TEXT("StandardQEM | VolumePreserving | AttributeAware (default) | AttributeAwareV2")),
+		MCPParam::Optional(TEXT("allowSeamCollapse"), EType::Boolean, TEXT("Let the simplifier collapse UV, normal and material seams (default true)")),
+		MCPParam::Optional(TEXT("preserveVertexPositions"), EType::Boolean, TEXT("Keep surviving vertices where they are (default false)")),
+		MCPParam::Optional(TEXT("autoCompact"), EType::Boolean, TEXT("Close the gaps the collapse leaves in the index space (default true)")),
+		MCPParam::Optional(TEXT("outputPath"), EType::String, TEXT("Asset to write (default '<assetPath>_Simplified')")),
+		SpecGeoInPlace, SpecGeoBackupPath, SpecGeoLodType, SpecGeoLodIndex, SpecGeoOnConflict,
+		SpecGeoCopyMaterials, SpecGeoCopyCollision, SpecGeoNanite,
+		SpecGeoRecomputeNormals, SpecGeoRecomputeTangents, SpecGeoRemoveDegenerates, SpecGeoSave, SpecGeoDryRun,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_remesh"), &RemeshMesh, 300.0f, {
+		SpecGeoAssetPath,
+		MCPParam::Optional(TEXT("remeshMode"), EType::String, TEXT("uniform (default, even edge lengths) | adaptive (denser where the surface curves)")),
+		MCPParam::Optional(TEXT("targetType"), EType::String, TEXT("TriangleCount (default) | TargetEdgeLength")),
+		MCPParam::Optional(TEXT("targetTriangleCount"), EType::Integer, TEXT("Approximate triangle count to aim for (targetType TriangleCount, default 1000)")),
+		MCPParam::Optional(TEXT("targetEdgeLength"), EType::Number, TEXT("Edge length in centimetres to aim for (targetType TargetEdgeLength, default 1)")),
+		MCPParam::Optional(TEXT("smoothingType"), EType::String, TEXT("Uniform | UVPreserving | Mixed (default)")),
+		MCPParam::Optional(TEXT("smoothingRate"), EType::Number, TEXT("0 to 1, how far vertices move toward their neighbours each pass (default 0.25)")),
+		MCPParam::Optional(TEXT("boundaryConstraint"), EType::String, TEXT("Fixed | Refine | Free (default) | Ignore")),
+		MCPParam::Optional(TEXT("iterations"), EType::Integer, TEXT("Remeshing passes (default: the engine's)")),
+		MCPParam::Optional(TEXT("discardAttributes"), EType::Boolean, TEXT("Throw away UVs, normals and material IDs so the remesher moves freely (default false)")),
+		MCPParam::Optional(TEXT("reprojectToInputMesh"), EType::Boolean, TEXT("Pull new vertices back onto the original surface each pass (default true)")),
+		MCPParam::Optional(TEXT("relativeDensity"), EType::Number, TEXT("-2 to 2, bias toward more or fewer triangles in curved regions (remeshMode adaptive, default 0)")),
+		MCPParam::Optional(TEXT("outputPath"), EType::String, TEXT("Asset to write (default '<assetPath>_Remeshed')")),
+		SpecGeoInPlace, SpecGeoBackupPath, SpecGeoLodType, SpecGeoLodIndex, SpecGeoOnConflict,
+		SpecGeoCopyMaterials, SpecGeoCopyCollision, SpecGeoNanite,
+		SpecGeoRecomputeNormals, SpecGeoRecomputeTangents, SpecGeoRemoveDegenerates, SpecGeoSave, SpecGeoDryRun,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_mirror"), &MirrorMesh, 300.0f, {
+		SpecGeoAssetPath,
+		MCPParam::Optional(TEXT("axis"), EType::String, TEXT("x (default) | y | z | custom: the mirror plane's normal, through planeOrigin")),
+		MCPParam::Optional(TEXT("planeOrigin"), EType::Vec3, TEXT("A point on the mirror plane (default the mesh origin)")),
+		MCPParam::Optional(TEXT("planeNormal"), EType::Vec3, TEXT("The mirror plane's normal when axis is custom; a zero vector is refused")),
+		MCPParam::Optional(TEXT("applyPlaneCut"), EType::Boolean, TEXT("Remove the geometry on the far side of the plane before reflecting (default true)")),
+		MCPParam::Optional(TEXT("flipCutSide"), EType::Boolean, TEXT("Keep the other side of the plane instead (default false)")),
+		MCPParam::Optional(TEXT("weldAlongPlane"), EType::Boolean, TEXT("Weld the two halves along the plane (default true)")),
+		MCPParam::Optional(TEXT("outputPath"), EType::String, TEXT("Asset to write (default '<assetPath>_Mirrored')")),
+		SpecGeoInPlace, SpecGeoBackupPath, SpecGeoLodType, SpecGeoLodIndex, SpecGeoOnConflict,
+		SpecGeoCopyMaterials, SpecGeoCopyCollision, SpecGeoNanite,
+		SpecGeoRecomputeNormals, SpecGeoRecomputeTangents, SpecGeoRemoveDegenerates, SpecGeoSave, SpecGeoDryRun,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_hole_fill"), &FillMeshHoles, 300.0f, {
+		SpecGeoAssetPath,
+		MCPParam::Optional(TEXT("fillMethod"), EType::String, TEXT("Automatic (default) | MinimalFill | PolygonTriangulation | TriangleFan | PlanarProjection")),
+		MCPParam::Optional(TEXT("weldFirst"), EType::Boolean, TEXT("Weld coincident boundary edges before filling (default true)")),
+		MCPParam::Optional(TEXT("weldTolerance"), EType::Number, TEXT("How close two boundary edges must be to weld (default 1e-6)")),
+		MCPParam::Optional(TEXT("removeDegenerateFirst"), EType::Boolean, TEXT("Drop zero-area triangles before welding and filling (default false)")),
+		MCPParam::Optional(TEXT("deleteIsolatedTriangles"), EType::Boolean, TEXT("Delete floating disconnected triangles, whose holes no fill can close (default true)")),
+		MCPParam::Optional(TEXT("outputPath"), EType::String, TEXT("Asset to write (default '<assetPath>_Filled')")),
+		SpecGeoInPlace, SpecGeoBackupPath, SpecGeoLodType, SpecGeoLodIndex, SpecGeoOnConflict,
+		SpecGeoCopyMaterials, SpecGeoCopyCollision, SpecGeoNanite,
+		SpecGeoRecomputeNormals, SpecGeoRecomputeTangents, SpecGeoRemoveDegenerates, SpecGeoSave, SpecGeoDryRun,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("generate_mesh_collision"), &GenerateMeshCollision, 300.0f, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh whose collision to build or clear")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("op"), EType::String, TEXT("generate (default) | clear")),
+		MCPParam::Optional(TEXT("method"), EType::String, TEXT("AlignedBoxes | OrientedBoxes | MinimalSpheres | Capsules | ConvexHulls (default) | SweptHulls | MinVolumeShapes | LevelSets")),
+		MCPParam::Optional(TEXT("maxConvexHulls"), EType::Integer, TEXT("Convex hulls the decomposition may produce (default 1)")),
+		MCPParam::Optional(TEXT("hullTargetFaceCount"), EType::Integer, TEXT("Faces to simplify each hull down to (default 25)")),
+		MCPParam::Optional(TEXT("maxShapeCount"), EType::Integer, TEXT("Cap on the shapes produced (default 0, uncapped)")),
+		MCPParam::Optional(TEXT("minThickness"), EType::Number, TEXT("Thinnest a shape may be, in centimetres (default 1)")),
+		MCPParam::Optional(TEXT("autoDetectSpheres"), EType::Boolean, TEXT("Use a sphere where one fits (default true)")),
+		MCPParam::Optional(TEXT("autoDetectBoxes"), EType::Boolean, TEXT("Use a box where one fits (default true)")),
+		MCPParam::Optional(TEXT("autoDetectCapsules"), EType::Boolean, TEXT("Use a capsule where one fits (default true)")),
+		MCPParam::Optional(TEXT("simplifyHulls"), EType::Boolean, TEXT("Simplify each hull down to hullTargetFaceCount (default true)")),
+		MCPParam::Optional(TEXT("removeFullyContainedShapes"), EType::Boolean, TEXT("Drop shapes entirely inside another (default true)")),
+		MCPParam::Optional(TEXT("decompositionErrorTolerance"), EType::Number, TEXT("Volume error the decomposition may accept before splitting further (default 0)")),
+		MCPParam::Optional(TEXT("decompositionSearchFactor"), EType::Number, TEXT("0 to 1, how hard the decomposition searches for a better split (default 0.5)")),
+		MCPParam::Optional(TEXT("sweptHullAxis"), EType::String, TEXT("X | Y | Z (default) | SmallestBoxDimension | SmallestVolume (method SweptHulls)")),
+		MCPParam::Optional(TEXT("markAsCustomized"), EType::Boolean, TEXT("Mark the collision customized so a reimport keeps it (default true)")),
+		SpecGeoLodType, SpecGeoLodIndex, SpecGeoSave, SpecGeoDryRun,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("apply_mesh_fracture"), &FractureMesh, 600.0f, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh to cut; it is never modified")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("pattern"), EType::String, TEXT("slice (default) | grid | random")),
+		MCPParam::Optional(TEXT("axis"), EType::String, TEXT("x | y | z (default): the axis slice cuts run across")),
+		MCPParam::Optional(TEXT("pieces"), EType::Integer, TEXT("Pieces along axis for slice, at least 2 (default 4)")),
+		MCPParam::Optional(TEXT("gridX"), EType::Integer, TEXT("Pieces along X for grid (default 2)")),
+		MCPParam::Optional(TEXT("gridY"), EType::Integer, TEXT("Pieces along Y for grid (default 2)")),
+		MCPParam::Optional(TEXT("gridZ"), EType::Integer, TEXT("Pieces along Z for grid (default 1)")),
+		MCPParam::Optional(TEXT("planeCount"), EType::Integer, TEXT("Random planes to cut with (default 3)")),
+		MCPParam::Optional(TEXT("seed"), EType::Integer, TEXT("Seed for plane placement and jitter (default 0); the same seed gives the same pieces")),
+		MCPParam::Optional(TEXT("jitter"), EType::Number, TEXT("0 to 0.45, how far a slice or grid cut may wander from even spacing (default 0)")),
+		MCPParam::Optional(TEXT("gapWidth"), EType::Number, TEXT("How far apart the halves of each cut are pushed, in centimetres (default 0.01)")),
+		MCPParam::Optional(TEXT("fillHoles"), EType::Boolean, TEXT("Cap each piece where the plane cut it (default true)")),
+		MCPParam::Optional(TEXT("minPieceTriangles"), EType::Integer, TEXT("Discard pieces with fewer triangles than this (default 4)")),
+		MCPParam::Optional(TEXT("outputBasePath"), EType::String, TEXT("Pieces are written as outputBasePath_00, _01 and on (default '<assetPath>_Piece')")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When a piece asset exists: error (default) | replace")),
+		SpecGeoCopyMaterials, SpecGeoNanite, SpecGeoRecomputeNormals, SpecGeoRecomputeTangents,
+		SpecGeoLodType, SpecGeoLodIndex, SpecGeoSave, SpecGeoDryRun,
+	});
 
 	// Asset hygiene (AssetHandlers_Hygiene.cpp). Both walk the asset registry
 	// across a whole content directory, so both are bounded by their own
 	// maxAssets rather than by the default timeout.
-	Registry.RegisterHandlerWithTimeout(TEXT("audit_asset_hygiene"), &AuditAssetHygiene, 300.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("fix_asset_hygiene"), &FixAssetHygiene, 300.0f);
+	const FMCPParamSpec SpecHygDirectory = MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content path to sweep, added to directories (default /Game)"));
+	const FMCPParamSpec SpecHygDirectories = MCPParam::Optional(TEXT("directories"), EType::Array, TEXT("Content paths to sweep, mount-rooted such as /Game/Characters (default /Game)")).Items(EType::String);
+	const FMCPParamSpec SpecHygRecursive = MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include subfolders (default true)"));
+	const FMCPParamSpec SpecHygMaxAssets = MCPParam::Optional(TEXT("maxAssets"), EType::Integer, TEXT("Assets the sweep walks before it reports scanTruncated (default 20000, max 200000)"));
+	const FMCPParamSpec SpecHygClassNames = MCPParam::Optional(TEXT("classNames"), EType::Array, TEXT("Only these asset class names")).Items(EType::String);
+	const FMCPParamSpec SpecHygExcludePaths = MCPParam::Optional(TEXT("excludePaths"), EType::Array, TEXT("Skip packages whose name starts with one of these")).Items(EType::String);
+	const FMCPParamSpec SpecHygKeepPaths = MCPParam::Optional(TEXT("keepPaths"), EType::Array, TEXT("Never report or touch packages whose name starts with one of these, such as a folder loaded by name from config")).Items(EType::String);
+	const FMCPParamSpec SpecHygNamingRules = MCPParam::Optional(TEXT("namingRules"), EType::Array, TEXT("Naming convention entries")).Items(EType::Object).WithFields({
+		MCPParam::RequiredField(TEXT("class"), EType::String, TEXT("Asset class name the registry reports, such as StaticMesh or WidgetBlueprint, not a class path")),
+		MCPParam::OptionalField(TEXT("prefix"), EType::String, TEXT("Name prefix the class requires")),
+		MCPParam::OptionalField(TEXT("suffix"), EType::String, TEXT("Name suffix the class requires")),
+	});
+	const FMCPParamSpec SpecHygNamingRuleMode = MCPParam::Optional(TEXT("namingRuleMode"), EType::String, TEXT("merge (default, the caller's rules over the built-in table) | replace"));
+	const FMCPParamSpec SpecHygIgnoreRedirectorReferencers = MCPParam::Optional(TEXT("ignoreRedirectorReferencers"), EType::Boolean, TEXT("Do not count a redirector stub as a referencer (default true)"));
+	Registry.RegisterHandlerWithTimeout(TEXT("audit_asset_hygiene"), &AuditAssetHygiene, 300.0f, {
+		SpecHygDirectory, SpecHygDirectories, SpecHygRecursive, SpecHygMaxAssets,
+		MCPParam::Optional(TEXT("maxIssues"), EType::Integer, TEXT("Findings of each kind to list (default 200); the counts are always complete")),
+		MCPParam::Optional(TEXT("checks"), EType::Array, TEXT("unreferenced | brokenReferences | duplicates | naming | redirectors (default all five)")).Items(EType::String),
+		SpecHygClassNames, SpecHygExcludePaths, SpecHygKeepPaths,
+		MCPParam::Optional(TEXT("duplicateMethod"), EType::String, TEXT("content (same class, size and saved hash) | name (same name and class in several folders) | both (default)")),
+		SpecHygNamingRules, SpecHygNamingRuleMode,
+		MCPParam::Optional(TEXT("includeWorlds"), EType::Boolean, TEXT("Report maps as unreferenced too (default false)")),
+		SpecHygIgnoreRedirectorReferencers,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("fix_asset_hygiene"), &FixAssetHygiene, 300.0f, {
+		MCPParam::Required(TEXT("fix"), EType::String, TEXT("naming (rename to the convention) | unreferenced (quarantine or delete)")),
+		MCPParam::Optional(TEXT("assetPaths"), EType::Array, TEXT("The exact assets to act on, the safest way to drive it")).Items(EType::String),
+		SpecHygDirectory, SpecHygDirectories, SpecHygRecursive, SpecHygMaxAssets,
+		SpecHygClassNames, SpecHygExcludePaths, SpecHygKeepPaths,
+		SpecHygNamingRules, SpecHygNamingRuleMode,
+		MCPParam::Optional(TEXT("unreferencedAction"), EType::String, TEXT("quarantine (default, undoable) | delete (permanent, no rollback)")),
+		MCPParam::Optional(TEXT("quarantineFolder"), EType::String, TEXT("Where quarantined assets move, keeping their folder shape (default /Game/Quarantine)")),
+		SpecHygIgnoreRedirectorReferencers,
+		MCPParam::Optional(TEXT("maxFixes"), EType::Integer, TEXT("Refuse the call past this many assets (default 100)")),
+		MCPParam::Optional(TEXT("continueOnError"), EType::Boolean, TEXT("Apply the candidates that passed preflight instead of aborting (default false)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save what changed (default true)")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Name every asset and destination without changing anything (default TRUE)")),
+	});
 
 	Registry.RegisterHandler(TEXT("search_assets"), &SearchAssets);
 	Registry.RegisterHandler(TEXT("read_asset"), &ReadAsset, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset path")).Alias(TEXT("path")),
 	});
-	Registry.RegisterHandler(TEXT("read_asset_properties"), &ReadAssetProperties);
+	Registry.RegisterHandler(TEXT("read_asset_properties"), &ReadAssetProperties, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset path; a Blueprint path reads its generated-class CDO")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("propertyName"), EType::String, TEXT("One property to read; dotted and indexed paths walk structs, arrays and instanced subobjects")),
+		MCPParam::Optional(TEXT("includeValues"), EType::Boolean, TEXT("Include each property's value (default false)")),
+		MCPParam::Optional(TEXT("valueFormat"), EType::String, TEXT("text (default, Unreal export text) | json (structured values)")),
+		MCPParam::Optional(TEXT("expandDepth"), EType::Integer, TEXT("Inline the properties of subobjects the asset owns to this depth, 0-5 (default 0)")),
+		MCPParam::Optional(TEXT("expandExternal"), EType::Boolean, TEXT("Also follow references to other assets when expanding (default false)")),
+		MCPParam::Optional(TEXT("maxExpandedObjects"), EType::Integer, TEXT("Cap on expanded objects (default 64)")),
+	});
+	// get_properties: the same read with values on by default.
+	Registry.RegisterHandler(TEXT("get_asset_properties"), &GetAssetProperties, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset path; a Blueprint path reads its generated-class CDO")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("propertyName"), EType::String, TEXT("One property to read; dotted and indexed paths walk structs, arrays and instanced subobjects")),
+		MCPParam::Optional(TEXT("includeValues"), EType::Boolean, TEXT("Include each property's value (default true)")),
+		MCPParam::Optional(TEXT("valueFormat"), EType::String, TEXT("text (default, Unreal export text) | json (structured values)")),
+		MCPParam::Optional(TEXT("expandDepth"), EType::Integer, TEXT("Inline the properties of subobjects the asset owns to this depth, 0-5 (default 0)")),
+		MCPParam::Optional(TEXT("expandExternal"), EType::Boolean, TEXT("Also follow references to other assets when expanding (default false)")),
+		MCPParam::Optional(TEXT("maxExpandedObjects"), EType::Integer, TEXT("Cap on expanded objects (default 64)")),
+	});
 	Registry.RegisterHandler(TEXT("duplicate_asset"), &DuplicateAsset, {
 		MCPParam::Required(TEXT("sourcePath"), EType::String, TEXT("Asset to duplicate")),
 		MCPParam::Required(TEXT("destinationPath"), EType::String, TEXT("Object path of the copy")),
@@ -285,7 +454,12 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 	// #908: bounded redirector clean-up after a move. Timeout raised because a
 	// fix-up loads and resaves every referencing package.
-	Registry.RegisterHandlerWithTimeout(TEXT("fixup_redirectors"), &FixupRedirectors, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("fixup_redirectors"), &FixupRedirectors, 300.0f, {
+		MCPParam::Required(TEXT("paths"), EType::Array, TEXT("Redirector packages, or the folders holding them")).Items(EType::String),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report the redirectors, referencers and packages it would load and save, and stop (default false)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Run the explicit save pass (default true); the editor's own fix-up writes what it can regardless")),
+		MCPParam::Optional(TEXT("allowProjectWide"), EType::Boolean, TEXT("Permit a path naming a whole content root (default false)")),
+	});
 	Registry.RegisterHandler(TEXT("create_data_asset"), &CreateDataAsset, {
 		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name")),
 		MCPParam::Required(TEXT("className"), EType::String, TEXT("UDataAsset subclass: class name with or without the C++ prefix, or a /Script/Module.Class path")).Alias(TEXT("class")),
@@ -297,7 +471,12 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// preflights every item on a transient copy before touching a package can
 	// legitimately outrun the default game-thread budget, so both carry an
 	// explicit timeout.
-	Registry.RegisterHandlerWithTimeout(TEXT("bulk_upsert_data_assets"), &BulkUpsertDataAssets, 120.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("bulk_upsert_data_assets"), &BulkUpsertDataAssets, 120.0f, {
+		MCPParam::Required(TEXT("items"), EType::Array, TEXT("DataAsset descriptors: [{name, packagePath, className, properties?}], max 500")).Items(EType::Object),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("update (default) | skip | error")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Run the full preflight and report the planned statuses without writing (default false)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the changed packages (default true)")),
+	});
 	Registry.RegisterHandlerWithTimeout(TEXT("bulk_restore_data_assets"), &BulkRestoreDataAssets, 120.0f);
 	// #726: generic create-any-concrete-UObject-class asset (physical materials,
 	// curves, settings objects) - not restricted to UDataAsset subclasses.
@@ -367,7 +546,11 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("node"), EType::String, TEXT("Node to remove: nodeGuid, path, name or unique title")),
 		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the asset after the edit (default true)")),
 	});
-	Registry.RegisterHandlerWithTimeout(TEXT("compile_customizable_object"), &CompileCustomizableObject, 600.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("compile_customizable_object"), &CompileCustomizableObject, 600.0f, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("CustomizableObject asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("optimizationLevel"), EType::String, TEXT("Optimization level enum name, e.g. None or Maximum (default: the compile function's own)")),
+		MCPParam::Optional(TEXT("textureCompression"), EType::String, TEXT("None | Fast | HighQuality")),
+	});
 	Registry.RegisterHandler(TEXT("create_customizable_object"), &CreateCustomizableObject, {
 		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name")),
 		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game)")),
@@ -382,7 +565,11 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("saveMapPackages"), EType::Boolean, TEXT("Include map packages (default true)")),
 		MCPParam::Optional(TEXT("saveContentPackages"), EType::Boolean, TEXT("Include content packages (default true)")),
 	});
-	Registry.RegisterHandler(TEXT("list_textures"), &ListTextures);
+	Registry.RegisterHandler(TEXT("list_textures"), &ListTextures, {
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Only textures whose object path starts with this (default /Game/)")),
+		SpecCursor,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows per page, 1 to 2000 (default 50)")).Alias(TEXT("maxResults")),
+	});
 
 	// FBX import handlers
 	Registry.RegisterHandler(TEXT("import_static_mesh"), &ImportStaticMesh, {
@@ -439,7 +626,12 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("noCompression"), EType::Boolean, TEXT("Factory option: import uncompressed")),
 		MCPParam::Optional(TEXT("noAlpha"), EType::Boolean, TEXT("Factory option: drop the alpha channel")),
 	});
-	Registry.RegisterHandler(TEXT("import_texture_batch"), &ImportTextureBatch);
+	Registry.RegisterHandler(TEXT("import_texture_batch"), &ImportTextureBatch, {
+		MCPParam::Required(TEXT("items"), EType::Array, TEXT("Textures to import: [{filePath, packagePath?, name?, replaceExisting?}]")).Items(EType::Object),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Folder for items that name none (default /Game/Textures)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the imported textures (default true)")),
+		MCPParam::Optional(TEXT("automated"), EType::Boolean, TEXT("Suppress interactive dialogs (default true)")),
+	}, MCPSpec::ContractExempt(TEXT("Runs an import batch under the contract values; an empty batch is not refused")));
 	Registry.RegisterHandler(TEXT("create_render_target_2d"), &CreateRenderTarget2D, {
 		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name, without '/' or '.'")),
 		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game)")),
@@ -463,7 +655,14 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("get_texture_info"), &ListTextureProperties, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Texture2D asset path")).Alias(TEXT("path")),
 	});
-	Registry.RegisterHandler(TEXT("set_texture_settings"), &SetTextureProperties);
+	Registry.RegisterHandler(TEXT("set_texture_settings"), &SetTextureProperties, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Texture2D asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("settings"), EType::Object, TEXT("The four settings below as one object; a key also given at the top level wins over it")),
+		MCPParam::Optional(TEXT("compressionSettings"), EType::String, TEXT("Default, Normalmap, Grayscale, Displacementmap, VectorDisplacementmap, HDR, EditorIcon, Alpha, DistanceFieldFont, HDR_Compressed or BC7")),
+		MCPParam::Optional(TEXT("lodGroup"), EType::String, TEXT("Texture LOD group: World, WorldNormalMap, Character, UI, Lightmap, Effects and the rest")),
+		MCPParam::Optional(TEXT("sRGB"), EType::Boolean, TEXT("Treat the texture as sRGB")),
+		MCPParam::Optional(TEXT("neverStream"), EType::Boolean, TEXT("Keep every mip resident")),
+	});
 
 	// Mesh handlers
 	Registry.RegisterHandler(TEXT("set_mesh_material"), &SetMeshMaterial, {
@@ -471,8 +670,21 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("materialPath"), EType::String, TEXT("Material to assign")),
 		MCPParam::Optional(TEXT("slotIndex"), EType::Number, TEXT("Material slot index (default 0)")),
 	});
-	Registry.RegisterHandler(TEXT("set_mesh_materials_batch"), &SetMeshMaterialsBatch);
-	Registry.RegisterHandler(TEXT("recenter_pivot"), &RecenterPivot);
+	Registry.RegisterHandler(TEXT("set_mesh_materials_batch"), &SetMeshMaterialsBatch, {
+		MCPParam::Required(TEXT("assignments"), EType::Array, TEXT("Slot assignments, max 500")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")),
+			MCPParam::RequiredField(TEXT("materialPath"), EType::String, TEXT("Material to assign")),
+			MCPParam::OptionalField(TEXT("slotName"), EType::String, TEXT("Slot by name, which survives a reimport reordering slot indices")),
+			MCPParam::OptionalField(TEXT("slotIndex"), EType::Integer, TEXT("Slot by index (default 0); refused when it disagrees with slotName")),
+		}),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save each changed mesh (default true)")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Preflight and report without writing (default false)")),
+		MCPParam::Optional(TEXT("continueOnError"), EType::Boolean, TEXT("Apply the assignments that passed preflight instead of aborting the batch (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("recenter_pivot"), &RecenterPivot, {
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("StaticMesh to recenter")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("assetPaths"), EType::Array, TEXT("StaticMeshes to recenter together; the first sets the reference pivot")).Items(EType::String),
+	}, MCPSpec::ExactlyOne({ { TEXT("assetPath") }, { TEXT("assetPaths") } }));
 
 	// Socket handlers
 	Registry.RegisterHandler(TEXT("add_socket"), &AddSocket, {
@@ -503,11 +715,23 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("elements"), EType::Array, TEXT("Values to append, validated before any is written")),
 		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the package after the write (default true)")),
 	});
-	Registry.RegisterHandler(TEXT("bulk_set_asset_properties"), &BulkSetAssetProperties);
+	Registry.RegisterHandler(TEXT("bulk_set_asset_properties"), &BulkSetAssetProperties, {
+		MCPParam::Required(TEXT("items"), EType::Array, TEXT("Asset updates: [{assetPath, properties}], max 500")).Items(EType::Object),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the changed packages (default true)")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Preflight and report without writing (default false)")),
+		MCPParam::Optional(TEXT("continueOnError"), EType::Boolean, TEXT("Apply the items that passed preflight instead of aborting the batch (default false)")),
+	});
 	Registry.RegisterHandler(TEXT("set_texture_settings_by_type"), &SetTextureSettingsByType, {
 		MCPParam::Required(TEXT("groups"), EType::Object, TEXT("Texture paths per profile: {normal?, grayscale?, baseColor?, hdr?}")),
 	});
-	Registry.RegisterHandler(TEXT("create_interchange_pipeline"), &CreateInterchangePipeline);
+	Registry.RegisterHandler(TEXT("create_interchange_pipeline"), &CreateInterchangePipeline, {
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("Object path of the new pipeline")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Pipeline asset name, placed in packagePath")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Folder for name (default /Game/Import)")),
+		MCPParam::Optional(TEXT("meshType"), EType::String, TEXT("skeletal (default) | static")),
+		MCPParam::Optional(TEXT("options"), EType::Object, TEXT("Dotted-path overrides on the new pipeline, e.g. {'MeshPipeline.bBuildNanite': true}")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns an existing pipeline; error refuses")),
+	}, MCPSpec::ExactlyOne({ { TEXT("assetPath") }, { TEXT("name") } }).ContractExempt(TEXT("Creates and saves a pipeline asset from the contract path before anything fails")));
 	Registry.RegisterHandler(TEXT("remove_socket"), &RemoveSocket, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh, SkeletalMesh or Skeleton asset path")),
 		MCPParam::Required(TEXT("socketName"), EType::String, TEXT("Socket to remove")),
@@ -595,7 +819,11 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 
 	// CurveTable handlers
-	Registry.RegisterHandler(TEXT("create_curvetable"), &CreateCurveTable);
+	Registry.RegisterHandler(TEXT("create_curvetable"), &CreateCurveTable, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/CurveTables)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns an existing table; error refuses")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a CurveTable from the contract name before anything fails")));
 	Registry.RegisterHandler(TEXT("read_curvetable"), &ReadCurveTable, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("CurveTable asset path")).Alias(TEXT("path")),
 		MCPParam::Optional(TEXT("rowFilter"), EType::String, TEXT("Case-insensitive substring filter on row names")),
@@ -656,7 +884,12 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 
 	// StringTable handlers
-	Registry.RegisterHandler(TEXT("create_stringtable"), &CreateStringTable);
+	Registry.RegisterHandler(TEXT("create_stringtable"), &CreateStringTable, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/StringTables)")),
+		MCPParam::Optional(TEXT("namespace"), EType::String, TEXT("StringTable namespace")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns an existing table; error refuses")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a StringTable from the contract name before anything fails")));
 	Registry.RegisterHandler(TEXT("read_stringtable"), &ReadStringTable, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StringTable asset path")).Alias(TEXT("path")),
 		MCPParam::Optional(TEXT("keyFilter"), EType::String, TEXT("Case-insensitive substring filter on keys")),
@@ -693,7 +926,12 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 
 	// v0.7.8 stubs - FTS5-backed asset search
-	Registry.RegisterHandler(TEXT("search_assets_fts"), &SearchAssetsFTS);
+	Registry.RegisterHandler(TEXT("search_assets_fts"), &SearchAssetsFTS, {
+		MCPParam::Required(TEXT("query"), EType::String, TEXT("Words scored against each asset's name, class and path")),
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Only assets whose class name contains this")),
+		SpecCursor,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows per page, 1 to 2000 (default 50)")).Alias(TEXT("maxResults")),
+	});
 	Registry.RegisterHandler(TEXT("reindex_assets_fts"), &ReindexAssetsFTS, {
 		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content path to rescan (default /Game)")),
 	});
@@ -738,7 +976,7 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 	Registry.RegisterHandler(TEXT("get_primary_asset_ids"), &GetPrimaryAssetIds, {
 		MCPParam::Optional(TEXT("type"), EType::String, TEXT("FPrimaryAssetType to list (omit for every type)")),
-		MCPParam::Optional(TEXT("maxResults"), EType::Number, TEXT("Most ids to return (default 1000)")),
+		MCPParam::Optional(TEXT("maxResults"), EType::Integer, TEXT("Most ids to return (default 1000)")),
 	});
 
 	// v1.0.0-rc.2 - #155 (asset gaps)
@@ -774,7 +1012,10 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("sourcePath"), EType::String, TEXT("Content folder to move")),
 		MCPParam::Required(TEXT("destinationPath"), EType::String, TEXT("Content folder to move it to")),
 	});
-	Registry.RegisterHandler(TEXT("create_folder"), &CreateFolder);
+	Registry.RegisterHandler(TEXT("create_folder"), &CreateFolder, {
+		MCPParam::Optional(TEXT("path"), EType::String, TEXT("Content folder to create, e.g. /Game/Foo")),
+		MCPParam::Optional(TEXT("paths"), EType::Array, TEXT("Content folders to create; combined with path")).Items(EType::String),
+	}, MCPSpec::AtLeastOne({ { TEXT("path") }, { TEXT("paths") } }).ContractExempt(TEXT("Creates the folder the contract path names")));
 	Registry.RegisterHandler(TEXT("delete_folder"), &DeleteFolder, {
 		MCPParam::Optional(TEXT("path"), EType::String, TEXT("Content folder to delete")),
 		MCPParam::Optional(TEXT("paths"), EType::Array, TEXT("Content folders to delete")).Items(EType::String),
@@ -783,7 +1024,12 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("migrate"), &MigrateAssets);
 
 	// #686 - UserDefinedEnum authoring
-	Registry.RegisterHandler(TEXT("create_user_defined_enum"), &CreateUserDefinedEnum);
+	Registry.RegisterHandler(TEXT("create_user_defined_enum"), &CreateUserDefinedEnum, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game)")),
+		MCPParam::Optional(TEXT("values"), EType::Array, TEXT("Initial enumerator display names")).Items(EType::String),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns an existing enum; error refuses")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves an enum package from the contract name before anything fails")));
 	Registry.RegisterHandler(TEXT("list_enum_values"), &ListEnumValues, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("UEnum or UserDefinedEnum asset path")).Alias(TEXT("path")),
 	});
@@ -796,11 +1042,33 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	});
 
 	// #735: UserDefinedStruct authoring
-	Registry.RegisterHandler(TEXT("create_user_defined_struct"), &CreateUserDefinedStruct);
+	Registry.RegisterHandler(TEXT("create_user_defined_struct"), &CreateUserDefinedStruct, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game)")),
+		MCPParam::Optional(TEXT("structFields"), EType::Array, TEXT("Initial members; with none the struct keeps its one default member")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("name"), EType::String, TEXT("Member display name")),
+			MCPParam::OptionalField(TEXT("type"), EType::String, TEXT("MakePinType string: bool (default), int, int64, float, string, name, text, byte, a struct such as Vector, an enum, or an object class such as Actor")),
+		}),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns an existing struct; error refuses")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a struct package from the contract name before anything fails")));
 	Registry.RegisterHandler(TEXT("list_struct_fields"), &ListStructFields, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("UserDefinedStruct asset path")).Alias(TEXT("path")),
 	});
-	Registry.RegisterHandler(TEXT("edit_user_defined_struct"), &EditUserDefinedStruct);
+	Registry.RegisterHandler(TEXT("edit_user_defined_struct"), &EditUserDefinedStruct, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("UserDefinedStruct asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("op"), EType::String, TEXT("add_field | rename_field | set_field_type | remove_field")),
+		MCPParam::Optional(TEXT("fieldName"), EType::String, TEXT("Member by friendly or internal name; add_field names the new member with it")),
+		MCPParam::Optional(TEXT("fieldGuid"), EType::String, TEXT("Member by GUID, stable across renames; wins over fieldName")),
+		MCPParam::Optional(TEXT("newDisplayName"), EType::String, TEXT("New display name for rename_field; add_field falls back to it for the name")),
+		MCPParam::Optional(TEXT("type"), EType::String, TEXT("MakePinType string for add_field (default bool) and set_field_type")),
+	});
+	// rename_struct_field: edit_user_defined_struct with op=rename_field.
+	Registry.RegisterHandler(TEXT("rename_struct_field"), &RenameStructField, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("UserDefinedStruct asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("fieldName"), EType::String, TEXT("Member by friendly or internal name")),
+		MCPParam::Optional(TEXT("fieldGuid"), EType::String, TEXT("Member by GUID, stable across renames")),
+		MCPParam::Required(TEXT("newDisplayName"), EType::String, TEXT("New display name; the member GUID is kept")),
+	}, MCPSpec::ExactlyOne({ { TEXT("fieldName") }, { TEXT("fieldGuid") } }));
 }
 
 // ---------------------------------------------------------------------------
@@ -967,6 +1235,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReindexAssetsFTS(const TSharedPtr<FJsonOb
 
 TSharedPtr<FJsonValue> FAssetHandlers::ListAssets(const TSharedPtr<FJsonObject>& Params)
 {
+	// The offset refusal below returns before the page request reads these.
+	MCPReadParamsAhead(Params, { TEXT("cursor"), TEXT("limit") });
 	const FString Directory = OptionalString(Params, TEXT("directory"), TEXT("/Game"));
 	const bool bRecursive = OptionalBool(Params, TEXT("recursive"), true);
 	const FString ClassFilter = OptionalString(Params, TEXT("classFilter"));
@@ -1399,17 +1669,35 @@ static void MCPDescribePropertyWritePersistence(
 
 TSharedPtr<FJsonValue> FAssetHandlers::ReadAssetProperties(const TSharedPtr<FJsonObject>& Params)
 {
+	return ReadAssetPropertiesImpl(Params, false);
+}
+
+TSharedPtr<FJsonValue> FAssetHandlers::GetAssetProperties(const TSharedPtr<FJsonObject>& Params)
+{
+	return ReadAssetPropertiesImpl(Params, true);
+}
+
+TSharedPtr<FJsonValue> FAssetHandlers::ReadAssetPropertiesImpl(const TSharedPtr<FJsonObject>& Params, bool bIncludeValuesByDefault)
+{
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Read before the load; the propertyName path returns before the others are used.
+	MCPReadParamsAhead(Params, { TEXT("propertyName"), TEXT("includeValues"), TEXT("expandDepth"), TEXT("expandExternal"), TEXT("maxExpandedObjects") });
+
+	FString ValueFormat;
+	TryGetStringParam(Params, TEXT("valueFormat"), ValueFormat);
+	if (!ValueFormat.IsEmpty()
+		&& !ValueFormat.Equals(TEXT("json"), ESearchCase::IgnoreCase)
+		&& !ValueFormat.Equals(TEXT("text"), ESearchCase::IgnoreCase))
+	{
+		return MCPError(FString::Printf(TEXT("Unknown valueFormat '%s'. Use text (the default) or json."), *ValueFormat));
+	}
+	const bool bJsonValues = ValueFormat.Equals(TEXT("json"), ESearchCase::IgnoreCase);
 
 	TSharedPtr<FJsonValue> LoadError;
 	UObject* Asset = MCPRequireAssetObject(AssetPath, LoadError);
 	if (!Asset) return LoadError;
 	Asset = MCPResolveAssetToCDO(Asset); // #568
-
-	FString ValueFormat;
-	TryGetStringParam(Params, TEXT("valueFormat"), ValueFormat);
-	const bool bJsonValues = ValueFormat.Equals(TEXT("json"), ESearchCase::IgnoreCase);
 
 	// Helper lambda to export a property value as string (#48 - reads arrays, structs, sub-objects)
 	auto ExportPropertyValue = [](FProperty* Prop, const void* Container, UObject* Outer) -> FString
@@ -1488,7 +1776,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadAssetProperties(const TSharedPtr<FJso
 	}
 
 	// Return all properties with their values
-	bool bIncludeValues = OptionalBool(Params, TEXT("includeValues"));
+	bool bIncludeValues = OptionalBool(Params, TEXT("includeValues"), bIncludeValuesByDefault);
 
 	// #755: an object property returned only a reference path, so reading a
 	// data asset's nested payload (a LearningNeuralNetworkData subobject, an

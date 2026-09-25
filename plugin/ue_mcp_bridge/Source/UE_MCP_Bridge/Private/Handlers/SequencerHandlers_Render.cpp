@@ -84,8 +84,9 @@ TSharedPtr<FJsonValue> FSequencerHandlers::RenderSequenceFrames(const TSharedPtr
 
 	if (auto PieErr = MCPRefuseDuringPlayInEditor(TEXT("render_sequence_frames"))) return PieErr;
 
-	const FString RequestedPath = OptionalString(Params, TEXT("sequencePath"), OptionalString(Params, TEXT("assetPath")));
-	if (RequestedPath.IsEmpty()) return MCPError(TEXT("Missing 'sequencePath' (also accepted as 'assetPath')"));
+	// assetPath and path reach it as sequencePath, renamed by the registry (#1057).
+	const FString RequestedPath = OptionalString(Params, TEXT("sequencePath"));
+	if (RequestedPath.IsEmpty()) return MCPError(TEXT("Missing 'sequencePath' (also accepted as 'assetPath' or 'path')"));
 	ULevelSequence* Sequence = LoadAssetByPath<ULevelSequence>(RequestedPath);
 	if (!Sequence) return MCPAssetLoadError(RequestedPath, TEXT("LevelSequence"));
 	UMovieScene* MovieScene = Sequence->GetMovieScene();

@@ -264,9 +264,21 @@ const OTHER_CATEGORIES = [...new Set(Object.values(SNAPSHOT.handlers).map((s) =>
   .filter((c) => c !== "animation")
   .sort();
 
+/**
+ * The tool a category's spec'd methods are held to: the one named after it,
+ * or, for a C++ category with no tool of its own (physics and mass, exposed
+ * by gameplay), the one tool whose actions dispatch its methods.
+ */
+function toolForCategory(category: string, methods: string[]): ToolDef | undefined {
+  const named = ALL_TOOLS.find((t) => t.name === category);
+  if (named) return named;
+  const owners = new Set(methods.flatMap((m) => DISPATCHERS.get(m) ?? []).map((d) => d.split(".")[0]));
+  return owners.size === 1 ? ALL_TOOLS.find((t) => owners.has(t.name)) : undefined;
+}
+
 describe.each(OTHER_CATEGORIES)("the %s category", (category) => {
-  const tool = ALL_TOOLS.find((t) => t.name === category)!;
   const methods = Object.entries(SNAPSHOT.handlers).filter(([, s]) => s.category === category);
+  const tool = toolForCategory(category, methods.map(([method]) => method))!;
 
   it("is a tool, and every spec'd method is dispatched by an action or is a C++ alias of one that is", () => {
     expect(tool, category).toBeDefined();

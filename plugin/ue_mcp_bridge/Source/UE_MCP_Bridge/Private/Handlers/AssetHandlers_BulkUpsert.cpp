@@ -430,7 +430,15 @@ TSharedPtr<FJsonValue> FAssetHandlers::BulkRestoreDataAssets(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FAssetHandlers::BulkUpsertDataAssets(const TSharedPtr<FJsonObject>& Params)
 {
 	const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("items"), Items) || !Items)
+	const bool bHasItems = TryGetArrayParam(Params, TEXT("items"), Items);
+	// Every parameter is read before anything can fail (#1057).
+	bool bDryRun = false;
+	TryGetBoolParam(Params, TEXT("dryRun"), bDryRun);
+	bool bSave = true;
+	TryGetBoolParam(Params, TEXT("save"), bSave);
+	FString OnConflict = TEXT("update");
+	TryGetStringParam(Params, TEXT("onConflict"), OnConflict);
+	if (!bHasItems || !Items)
 	{
 		return MCPError(TEXT("Missing 'items' array"));
 	}
@@ -446,12 +454,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::BulkUpsertDataAssets(const TSharedPtr<FJs
 			Items->Num()));
 	}
 
-	bool bDryRun = false;
-	TryGetBoolParam(Params, TEXT("dryRun"), bDryRun);
-	bool bSave = true;
-	TryGetBoolParam(Params, TEXT("save"), bSave);
-	FString OnConflict = TEXT("update");
-	TryGetStringParam(Params, TEXT("onConflict"), OnConflict);
 	OnConflict.TrimStartAndEndInline();
 	OnConflict.ToLowerInline();
 	if (OnConflict != TEXT("update") && OnConflict != TEXT("skip") && OnConflict != TEXT("error"))
