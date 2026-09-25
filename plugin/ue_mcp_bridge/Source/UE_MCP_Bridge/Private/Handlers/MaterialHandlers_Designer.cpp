@@ -12,6 +12,7 @@
 
 #include "MaterialHandlers.h"
 
+#include "HandlerAssetCreate.h"
 #include "HandlerFunctionCall.h"
 #include "HandlerJsonProperty.h"
 #include "HandlerUtils.h"
@@ -22,7 +23,9 @@
 #include "Materials/MaterialInterface.h"
 #include "ScopedTransaction.h"
 #include "UObject/Class.h"
+#include "Factories/Factory.h"
 #include "UObject/EnumProperty.h"
+#include "UObject/Package.h"
 #include "UObject/TextProperty.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
@@ -1253,5 +1256,73 @@ TSharedPtr<FJsonValue> FMaterialHandlers::RemoveMaterialDesignerLayer(const TSha
 	Payload->SetNumberField(TEXT("steps"), 1);
 	Payload->SetStringField(TEXT("direction"), TEXT("undo"));
 	MCPSetRollback(Result, TEXT("undo_redo_steps"), Payload);
+	return MCPResult(Result);
+}
+
+TSharedPtr<FJsonValue> FMaterialHandlers::CreateMaterialDesigner(const TSharedPtr<FJsonObject>& Params)
+{
+	using namespace MCPMaterialDesigner;
+	FString Name;
+	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
+	const FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/Materials"));
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+
+	FDesignerClasses C;
+	FString ClassError;
+	if (!C.Load(ClassError)) return MCPError(ClassError);
+
+	// The Material Designer's own factory builds the instance together with
+	// its model; a bare NewObject leaves MaterialModelBase empty.
+	UClass* FactoryClass = FindObject<UClass>(nullptr, TEXT("/Script/DynamicMaterialEditor.DynamicMaterialInstanceFactory"));
+	if (!FactoryClass || !FactoryClass->IsChildOf(UFactory::StaticClass()))
+	{
+		return MCPError(TEXT("Material Designer is not available: DynamicMaterialEditor.DynamicMaterialInstanceFactory is not loaded. Enable the DynamicMaterial plugin and restart the editor."));
+	}
+	UFactory* Factory = NewObject<UFactory>(GetTransientPackage(), FactoryClass);
+
+	auto Created = MCPCreateAssetIdempotent<UObject>(Name, PackagePath, OnConflict, TEXT("Material Designer material"), C.Instance, Factory);
+	if (Created.EarlyReturn) return Created.EarlyReturn;
+	UObject* Instance = Created.Asset;
+
+	UObject* Model = ResolveModel(Instance, C);
+	if (!Model)
+	{
+		return MCPError(FString::Printf(TEXT("The Material Designer factory created '%s' without a model."), *Instance->GetPathName()));
+	}
+	UObject* EditorOnlyData = ResolveEditorOnlyData(Model, C);
+
+	// A new model can start with no slots until the Material Designer wizard
+	// runs; seed the Base Color slot so layers can be added straight away.
+	bool bSeeded = false;
+	if (EditorOnlyData && GetObjectArrayProp(EditorOnlyData, TEXT("Slots")).Num() == 0)
+	{
+		FDesignerCall AddSlot;
+		if (AddSlot.Bind(EditorOnlyData, TEXT("AddSlotForMaterialProperty")) && AddSlot.Inputs().Num() == 1)
+		{
+			FProperty* PropertyParam = AddSlot.Inputs()[0];
+			int64 BaseColor = 0;
+			if (MatchEnum(EnumOf(PropertyParam), TEXT("BaseColor"), BaseColor))
+			{
+				SetIntegral(PropertyParam, AddSlot.ValuePtr(PropertyParam), BaseColor);
+				AddSlot.Invoke();
+				bSeeded = AddSlot.ReturnObject() != nullptr;
+			}
+		}
+	}
+	const bool bBuildRequested = EditorOnlyData ? RequestBuild(EditorOnlyData) : false;
+	const bool bSaved = SaveAssetPackage(Instance);
+
+	auto Result = MCPSuccess();
+	MCPSetCreated(Result);
+	Result->SetStringField(TEXT("path"), Instance->GetPathName());
+	Result->SetStringField(TEXT("objectPath"), Instance->GetPathName());
+	Result->SetStringField(TEXT("modelPath"), Model->GetPathName());
+	Result->SetStringField(TEXT("name"), Name);
+	Result->SetStringField(TEXT("packagePath"), PackagePath);
+	Result->SetNumberField(TEXT("slotCount"), EditorOnlyData ? GetObjectArrayProp(EditorOnlyData, TEXT("Slots")).Num() : 0);
+	Result->SetBoolField(TEXT("seededBaseColorSlot"), bSeeded);
+	Result->SetBoolField(TEXT("buildRequested"), bBuildRequested);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	MCPSetDeleteAssetRollback(Result, Instance->GetPathName());
 	return MCPResult(Result);
 }

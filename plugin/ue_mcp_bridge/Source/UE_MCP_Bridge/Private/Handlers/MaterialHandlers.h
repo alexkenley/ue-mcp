@@ -171,4 +171,5 @@ private:
 	static TSharedPtr<FJsonValue> SetMaterialDesignerValue(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> AddMaterialDesignerLayer(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> RemoveMaterialDesignerLayer(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> CreateMaterialDesigner(const TSharedPtr<FJsonObject>& Params);
 };

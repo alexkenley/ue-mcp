@@ -4,6 +4,7 @@ import { materialTool } from "../../src/tools/material.js";
 
 describe("material designer layer stacks (#1131)", () => {
   const cases = [
+    ["create_designer", "create_material_designer", "mutate"],
     ["read_designer", "read_material_designer", "read"],
     ["set_designer_value", "set_material_designer_value", "mutate"],
     ["add_designer_layer", "add_material_designer_layer", "mutate"],

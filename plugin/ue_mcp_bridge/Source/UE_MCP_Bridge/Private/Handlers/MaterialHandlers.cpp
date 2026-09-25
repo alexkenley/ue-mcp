@@ -128,6 +128,7 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("set_material_designer_value"), &SetMaterialDesignerValue);
 	Registry.RegisterHandler(TEXT("add_material_designer_layer"), &AddMaterialDesignerLayer);
 	Registry.RegisterHandler(TEXT("remove_material_designer_layer"), &RemoveMaterialDesignerLayer);
+	Registry.RegisterHandler(TEXT("create_material_designer"), &CreateMaterialDesigner);
 }
 
 UMaterial* FMaterialHandlers::LoadMaterialFromPath(const FString& AssetPath)
