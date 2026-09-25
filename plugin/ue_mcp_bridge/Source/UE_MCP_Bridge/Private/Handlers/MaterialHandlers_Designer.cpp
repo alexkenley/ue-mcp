@@ -350,7 +350,9 @@ namespace MCPMaterialDesigner
 	inline UObject* FindAnyObject(const FString& Path)
 	{
 		if (Path.IsEmpty()) return nullptr;
-		if (UObject* Found = FindObject<UObject>(nullptr, *Path)) return Found;
+		// A package path finds the UPackage; the asset inside it is what is meant.
+		UObject* Found = FindObject<UObject>(nullptr, *Path);
+		if (Found && !Found->IsA<UPackage>()) return Found;
 		return MCPLoadAssetObject(Path);
 	}
 
@@ -417,6 +419,10 @@ namespace MCPMaterialDesigner
 		}
 
 		Out.Model = ResolveModel(Start, C);
+		if (!Out.Model && Start->IsA(C.Instance))
+		{
+			return MCPError(FString::Printf(TEXT("DynamicMaterialInstance '%s' has no Material Designer model (MaterialModelBase is None), so it has no layer stack. Create a working one with material(action=\"create_designer\")."), *Start->GetPathName()));
+		}
 		if (!Out.Model)
 		{
 			return MCPError(FString::Printf(TEXT("'%s' (%s) is not a Material Designer material or model and is not inside one."), *Start->GetPathName(), *Start->GetClass()->GetName()));
