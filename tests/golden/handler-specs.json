@@ -1,5 +1,5 @@
 {
-  "handlerCount": 831,
+  "handlerCount": 832,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -3821,6 +3821,62 @@
           "description": "Capture previousPositions regardless of previousPositionsLimit (default false)"
         }
       ]
+    },
+    "bake_control_rig_edit": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "sequencePath",
+          "type": "string",
+          "required": true,
+          "description": "LevelSequence holding the Control Rig edit session"
+        },
+        {
+          "name": "bindingTag",
+          "type": "string",
+          "required": true,
+          "description": "Edit-session natural key from begin_control_rig_edit"
+        },
+        {
+          "name": "outputAssetPath",
+          "type": "string",
+          "required": true,
+          "description": "Destination AnimSequence asset path"
+        },
+        {
+          "name": "frameRate",
+          "type": "number",
+          "required": false,
+          "description": "Frames per second of the bake (default the sequence's display rate)"
+        },
+        {
+          "name": "reduceKeys",
+          "type": "boolean",
+          "required": false,
+          "description": "Key reduction is not supported yet; omit or pass false",
+          "literal": false
+        },
+        {
+          "name": "tolerance",
+          "type": "number",
+          "required": false,
+          "description": "Key-reduction tolerance (default 0.001)"
+        },
+        {
+          "name": "createLink",
+          "type": "boolean",
+          "required": false,
+          "description": "Sequencer links are not supported yet; omit or pass false",
+          "literal": false
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip returns an existing output, error (default) refuses; it never overwrites"
+        }
+      ],
+      "contractExempt": "5.8 only: before 5.8 the handler is a stub that reads nothing, and on 5.8 it bakes and saves a new AnimSequence"
     },
     "bake_root_motion_from_bone": {
       "category": "animation",

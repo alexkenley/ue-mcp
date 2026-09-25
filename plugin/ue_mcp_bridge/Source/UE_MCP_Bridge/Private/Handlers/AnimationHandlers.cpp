@@ -482,13 +482,22 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		OnConflict(TEXT("skip (default) returns the existing asset, error refuses; it never overwrites")),
 	});
 	// Unspecced: the Control Rig edit session is 5.8 only and the older-engine
-	// stubs read nothing; operations and the bake's literal-false flags also
-	// carry constraints the spec types cannot express.
+	// stubs read nothing; operations also carry per-element shapes not yet
+	// declared.
 	Registry.RegisterHandler(TEXT("begin_control_rig_edit"), &BeginControlRigEdit);
 	Registry.RegisterHandler(TEXT("read_control_rig_edit"), &ReadControlRigEdit);
 	Registry.RegisterHandler(TEXT("capture_control_rig_pose"), &CaptureControlRigPose);
 	Registry.RegisterHandler(TEXT("apply_control_rig_edits"), &ApplyControlRigEdits);
-	Registry.RegisterHandler(TEXT("bake_control_rig_edit"), &BakeControlRigEdit);
+	Registry.RegisterHandler(TEXT("bake_control_rig_edit"), &BakeControlRigEdit, {
+		MCPParam::Required(TEXT("sequencePath"), EType::String, TEXT("LevelSequence holding the Control Rig edit session")),
+		MCPParam::Required(TEXT("bindingTag"), EType::String, TEXT("Edit-session natural key from begin_control_rig_edit")),
+		MCPParam::Required(TEXT("outputAssetPath"), EType::String, TEXT("Destination AnimSequence asset path")),
+		MCPParam::Optional(TEXT("frameRate"), EType::Number, TEXT("Frames per second of the bake (default the sequence's display rate)")),
+		MCPParam::Optional(TEXT("reduceKeys"), EType::Boolean, TEXT("Key reduction is not supported yet; omit or pass false")).Literal(false),
+		MCPParam::Optional(TEXT("tolerance"), EType::Number, TEXT("Key-reduction tolerance (default 0.001)")),
+		MCPParam::Optional(TEXT("createLink"), EType::Boolean, TEXT("Sequencer links are not supported yet; omit or pass false")).Literal(false),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip returns an existing output, error (default) refuses; it never overwrites")),
+	}, MCPSpec::ContractExempt(TEXT("5.8 only: before 5.8 the handler is a stub that reads nothing, and on 5.8 it bakes and saves a new AnimSequence")));
 	Registry.RegisterHandler(TEXT("analyze_animation"), &AnalyzeAnimation, {
 		AssetPath(TEXT("AnimSequence asset path")),
 		MCPParam::Optional(TEXT("skeletalMeshPath"), EType::String, TEXT("SkeletalMesh whose proportions to sample with; must be compatible with the sequence's skeleton")),

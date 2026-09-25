@@ -718,6 +718,62 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "bake_control_rig_edit": {
+    "category": "animation",
+    "params": [
+      {
+        "name": "sequencePath",
+        "type": "string",
+        "required": true,
+        "description": "LevelSequence holding the Control Rig edit session"
+      },
+      {
+        "name": "bindingTag",
+        "type": "string",
+        "required": true,
+        "description": "Edit-session natural key from begin_control_rig_edit"
+      },
+      {
+        "name": "outputAssetPath",
+        "type": "string",
+        "required": true,
+        "description": "Destination AnimSequence asset path"
+      },
+      {
+        "name": "frameRate",
+        "type": "number",
+        "required": false,
+        "description": "Frames per second of the bake (default the sequence's display rate)"
+      },
+      {
+        "name": "reduceKeys",
+        "type": "boolean",
+        "required": false,
+        "description": "Key reduction is not supported yet; omit or pass false",
+        "literal": false
+      },
+      {
+        "name": "tolerance",
+        "type": "number",
+        "required": false,
+        "description": "Key-reduction tolerance (default 0.001)"
+      },
+      {
+        "name": "createLink",
+        "type": "boolean",
+        "required": false,
+        "description": "Sequencer links are not supported yet; omit or pass false",
+        "literal": false
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip returns an existing output, error (default) refuses; it never overwrites"
+      }
+    ],
+    "contractExempt": "5.8 only: before 5.8 the handler is a stub that reads nothing, and on 5.8 it bakes and saves a new AnimSequence"
+  },
   "bake_root_motion_from_bone": {
     "category": "animation",
     "params": [
@@ -2931,6 +2987,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   apply_animation_modifier: "Params: assetPath (or path), modifierClass (or modifier), props?",
   author_blend_profile: "Params: skeletonPath, profileName, operation?, newProfileName?, mode?, entries?, removeEntries?",
   auto_align_retarget_pose: "Params: retargeterPath (or assetPath), side?",
+  bake_control_rig_edit: "Params: sequencePath, bindingTag, outputAssetPath, frameRate?, reduceKeys?, tolerance?, createLink?, onConflict?",
   bake_root_motion_from_bone: "Params: assetPath (or path), sourceBone, rootBone?, axes?, interpolation?",
   begin_skeleton_edit: "Params: skeletalMeshPath, sessionTag?",
   bind_anim_node_function: "Params: assetPath (or path), nodeGuid (or nodeId), functionName (or function), graphName?, binding?",
@@ -3029,6 +3086,7 @@ export const schema: Record<string, z.ZodType> = {
   axisVertical: z.string().optional().describe("Vertical axis name (default Direction)"),
   baseCostBias: z.number().optional().describe("Flat cost added to every pose"),
   binding: z.string().optional().describe("update (default) | becomeRelevant | initialUpdate"),
+  bindingTag: z.string().optional().describe("Edit-session natural key from begin_control_rig_edit"),
   blendDuration: z.number().optional().describe("Crossfade in seconds (engine default 0.2) (add_transition). Crossfade in seconds (set_transition_blend)"),
   blendIn: z.number().optional().describe("Blend-in time in seconds"),
   blendLogic: z.string().optional().describe("Standard | Inertialization"),
@@ -3044,6 +3102,7 @@ export const schema: Record<string, z.ZodType> = {
   connectToOutput: z.boolean().optional().describe("Wire the node to the Output Pose (default true) (add_motion_matching_node). Wire the node to the graph's result pose (default true) (add_sequence_evaluator)"),
   contextSource: z.string().optional().describe("What the chooser reads its columns from: self (default, the anim instance) | pawn (the owning pawn)"),
   continuingPoseCostBias: z.number().optional().describe("Bias to keep playing the current clip"),
+  createLink: z.literal(false).optional().describe("Sequencer links are not supported yet; omit or pass false"),
   cursor: z.string().optional().describe("Resume a paged read: the nextCursor the previous page returned, unmodified"),
   curveName: z.string().optional().describe("Float curve to add (add_curve). Float curve to remove (remove_anim_curve)"),
   cycleOffsetFrames: z.number().int().optional().describe("Rotate the reversed loop to start this many frames in"),
@@ -3063,7 +3122,7 @@ export const schema: Record<string, z.ZodType> = {
   fields: z.array(z.string()).optional().describe("Result keys to return; assetPath is always kept and an unknown name is refused with the valid list"),
   force: z.boolean().optional().describe("Remove a bone despite dependents, which are listed in the refusal"),
   forceRootLock: z.boolean().optional().describe("Lock the root bone even without root motion"),
-  frameRate: z.number().optional().describe("Frames per second (default 30)"),
+  frameRate: z.number().optional().describe("Frames per second of the bake (default the sequence's display rate) (bake_control_rig_edit). Frames per second (default 30) (create_sequence)"),
   frames: z.array(z.number()).optional().describe("Explicit frames to sample, integers in [0, frame count] (analyze_animation). Frames to sample (default: first, middle and last) (read_bone_track)"),
   fromState: z.string().optional().describe("State the transition leaves (add_transition, set_transition_blend). With toState, removes every transition between the two (remove_transition). With toState, the transition to condition when transitionGuid is omitted (set_transition_condition)"),
   function: z.string().optional().describe("Alias for functionName"),
@@ -3108,8 +3167,9 @@ export const schema: Record<string, z.ZodType> = {
   notifyStateClass: z.string().optional().describe("UAnimNotifyState subclass: a class name, a bare suffix such as TimedParticleEffect, or a full path (add_anim_notify_state). Notify state class to match. Pass at least one of notifyName and notifyStateClass; both filters apply together (remove_anim_notify_state)"),
   numberOfPrincipalComponents: z.number().optional().describe("PCA components for PCAKDTree mode"),
   numFrames: z.number().optional().describe("Frame count (default 30)"),
-  onConflict: z.string().optional().describe("skip (default) returns an existing section untouched, error refuses (add_montage_section). skip (default) returns an existing state untouched, error refuses (add_state). skip (default) returns an existing asset untouched, error refuses (create_anim_blueprint, create_anim_composite, create_anim_montage, create_blendspace, create_blendspace_1d, create_pose_search_database, create_pose_search_schema, create_sequence). skip (default) returns the existing asset, error refuses; it never overwrites (create_control_rig). skip (default) | error. It never overwrites (create_skeleton). skip (default) returns an existing destination untouched, error refuses; it never overwrites (reverse_sequence)"),
+  onConflict: z.string().optional().describe("skip (default) returns an existing section untouched, error refuses (add_montage_section). skip (default) returns an existing state untouched, error refuses (add_state). skip returns an existing output, error (default) refuses; it never overwrites (bake_control_rig_edit). skip (default) returns an existing asset untouched, error refuses (create_anim_blueprint, create_anim_composite, create_anim_montage, create_blendspace, create_blendspace_1d, create_pose_search_database, create_pose_search_schema, create_sequence). skip (default) returns the existing asset, error refuses; it never overwrites (create_control_rig). skip (default) | error. It never overwrites (create_skeleton). skip (default) returns an existing destination untouched, error refuses; it never overwrites (reverse_sequence)"),
   operation: z.string().optional().describe("upsert (default) | remove | rename"),
+  outputAssetPath: z.string().optional().describe("Destination AnimSequence asset path"),
   outputDirectory: z.string().optional().describe("Directory under Project/Saved/Codex/AnimationQA for analysis artifacts; must not already contain them"),
   packagePath: z.string().optional().describe("Destination folder (default /Game/Animations) (create_anim_blueprint, create_anim_composite, create_anim_montage, create_blendspace, create_blendspace_1d, create_sequence). Destination folder (default the source's folder) (create_control_rig). Destination folder (default /Game/MotionMatching) (create_pose_search_database, create_pose_search_schema). Destination folder (default /Game) (create_skeleton). Folder of the reversed copy (default the source's folder) (reverse_sequence)"),
   parentClass: z.string().optional().describe("Parent AnimInstance class name"),
@@ -3122,6 +3182,7 @@ export const schema: Record<string, z.ZodType> = {
   props: z.record(z.unknown()).optional().describe("EditAnywhere property values to set on the modifier before it runs"),
   rateScale: z.number().optional().describe("Playback rate scale"),
   recursive: z.boolean().optional().describe("Include subfolders (default true) (list_anim_assets, list_skeletal_meshes, scan_animation_tracks). With directory: include subfolders (default true) (read_anim_sequence)"),
+  reduceKeys: z.literal(false).optional().describe("Key reduction is not supported yet; omit or pass false"),
   removeEntries: z.array(z.string()).optional().describe("Bone names to drop from the profile"),
   resolveFromMontages: z.boolean().optional().describe("Resolve a montage to its first AnimSequence (default true)"),
   retargeterPath: z.string().optional().describe("Existing IKRetargeter to edit"),
@@ -3137,7 +3198,7 @@ export const schema: Record<string, z.ZodType> = {
   sectionName: z.string().optional().describe("Composite section to add (add_montage_section). Composite section to remove (remove_montage_section)"),
   segmentIndex: z.number().optional().describe("Segment to anchor the section to, so it moves with that segment (#826) (add_montage_section). Segment to remove (remove_montage_segment). Replace only this segment; without it every segment in the slot is replaced (#626) (set_montage_sequence)"),
   sequenceLength: z.number().optional().describe("Montage length in seconds"),
-  sequencePath: z.string().optional().describe("AnimSequence, AnimComposite, AnimMontage or BlendSpace to append (add_pose_search_sequence). AnimSequence to evaluate (add_sequence_evaluator)"),
+  sequencePath: z.string().optional().describe("AnimSequence, AnimComposite, AnimMontage or BlendSpace to append (add_pose_search_sequence). AnimSequence to evaluate (add_sequence_evaluator). LevelSequence holding the Control Rig edit session (bake_control_rig_edit)"),
   sessionTag: z.string().optional().describe("Stable key every later call addresses (default Skel_<MeshName>) (begin_skeleton_edit). The open skeleton edit session to address; wins over skeletalMeshPath (cancel_skeleton_edit, commit_skeleton_edit, edit_skeleton_bones)"),
   shouldLoop: z.boolean().optional().describe("bShouldLoop"),
   side: z.string().optional().describe("source | target (default target)"),
@@ -3157,6 +3218,7 @@ export const schema: Record<string, z.ZodType> = {
   targetBone: z.string().optional().describe("Bone the virtual bone points at"),
   targetTrackCount: z.number().optional().describe("Flag sequences with more than this many bone tracks"),
   teleportToExplicitTime: z.boolean().optional().describe("bTeleportToExplicitTime (default false, so time advances and root motion extracts)"),
+  tolerance: z.number().optional().describe("Key-reduction tolerance (default 0.001)"),
   toState: z.string().optional().describe("State the transition enters (add_transition, set_transition_blend). With fromState, removes every transition between the two (remove_transition). With fromState, the transition to condition when transitionGuid is omitted (set_transition_condition)"),
   trackIndex: z.number().int().optional().describe("Slot track index (default 0)"),
   trajectoryHistoryCount: z.number().optional().describe("Generated trajectory history samples"),
