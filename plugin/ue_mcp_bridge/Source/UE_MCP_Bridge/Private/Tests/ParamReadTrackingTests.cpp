@@ -73,6 +73,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FMCPParamReadTrackingTest::RunTest(const FString& Parameters)
 {
+	// The run itself may be a tracked dispatch (run_automation_tests is an editor action).
+	const FMCPParamReadScope* const OuterScope = FMCPParamReadScope::Active();
 	using namespace MCPParamReadTests;
 
 	TestTrue(TEXT("animation is a reporting category"), FMCPHandlerRegistry::ReportsUnreadParams(TEXT("animation")));
@@ -136,7 +138,7 @@ bool FMCPParamReadTrackingTest::RunTest(const FString& Parameters)
 	}
 
 	// The scope closes with the dispatch, and without one a read notes nothing.
-	TestNull(TEXT("no scope outlives its dispatch"), FMCPParamReadScope::Active());
+	TestTrue(TEXT("no scope outlives its dispatch"), FMCPParamReadScope::Active() == OuterScope);
 	TestEqual(TEXT("helpers still read with no scope open"),
 		OptionalString(MakeProbeParams(), TEXT("readKey")), FString(TEXT("value")));
 	return true;
