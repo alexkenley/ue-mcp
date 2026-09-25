@@ -127,21 +127,27 @@ Registry.RegisterHandler(TEXT("set_montage_slot"), &SetMontageSlot, {
 
 From there the contract travels one way:
 
-1. **The registry** validates the spec at registration and refuses the dispatcher's routing names (`action`, `timeoutMs`, `select`, `omit`, `editor`, `toEditor`), a name declared twice, and an item type on anything but an array. A refused spec is logged and dropped; the handler still registers. At dispatch it renames each declared alias to its parameter's name, so the handler reads the declared names only.
+1. **The registry** validates the spec at registration and refuses the dispatcher's routing names (`action`, `timeoutMs`, `select`, `omit`, `editor`, `toEditor`), a name declared twice, an item type on anything but an array, a value shape that does not fit its type, and a choice that names an undeclared or required parameter. A refused spec is logged and dropped; the handler still registers. At dispatch it renames each declared alias to its parameter's name, so the handler reads the declared names only.
 2. **The bridge** publishes every spec in `get_bridge_capabilities.handlerSpecs`, keyed by method.
 3. **`npm run specs:record`** writes that answer from a `tests/ue_mcp` editor to `tests/golden/handler-specs.json`.
 4. **`npm run specs:generate`** renders the recording into `src/tools/specs/<category>.generated.ts`: one zod entry per declared name and alias, and the `Params:` clause of each method.
-5. **The category** declares the action with `specBp(effect, summary, method)`. The summary and the effect are the only things written by hand; there is no `mapParams`, because a rename is an alias in the spec.
+5. **The category** declares the action with `specBp(effect, summary, method)`. The summary and the effect are the only things written by hand; there is no `mapParams`, because a rename is an alias in the spec. A spec's choices travel on the action, and `prepareCall` refuses a call that does not satisfy them before anything is sent, on the MCP route and the flow route alike.
 
 The advertised surface always comes from the recording, whether an editor is connected or not, so the startup contract does not depend on which plugin answered. When one is connected, `project(get_status)` compares its `handlerSpecs` against the recording and reports any difference under `deployedPlugin.handlerSpecDrift`.
 
-Three tests hold the chain: `tests/unit/handler-specs.test.ts` (the generated modules are exactly what the recording renders to, every spec'd action takes its clause from the spec, and a key shared with hand-written actions has one type), `tests/live/handler-specs.test.ts` (the running plugin still publishes what was recorded), and the C++ suite's `UE.MCP.Bridge.HandlerSpec.Contract` (each spec'd handler, called with every declared parameter, reads exactly those and nothing else).
+Four tests hold the chain: `tests/unit/handler-specs.test.ts` (the generated modules are exactly what the recording renders to, every spec'd action takes its clause from the spec, and a key shared with hand-written actions has one type), `tests/live/handler-specs.test.ts` (the running plugin still publishes what was recorded), the C++ suite's `UE.MCP.Bridge.HandlerSpec.Contract` (each spec'd handler, called with every declared parameter, reads exactly those and nothing else), and `tests/unit/handler-spec-exempt.test.ts` (a contract-exempt handler's source reads exactly what its spec declares).
 
-Every category now declares specs: 826 bridge handlers carry one. Handlers without a spec are declared by hand as before, and these kinds stay that way on purpose:
+##### What a spec can say
 
-- **A required choice.** `actorLabel OR actorPath`, or `settings OR propertyName + propertyValue`, is published as a choice group that `describe_action` reports. A spec has no way to say "one of these", so declaring both sides optional would advertise a weaker contract than the hand-written clause.
-- **A value shape no spec type describes.** A number-or-object union, or a colour object, has no `EMCPParamType`.
-- **A handler that would write before it fails.** The contract test calls every spec'd handler with values that name nothing. A create action or an actor spawn that does not first load something that is missing would create or spawn under those values, so it is left unspecified.
+Beyond a list of named, typed parameters:
+
+- **A required choice.** `MCPSpec::ExactlyOne({ { TEXT("settings") }, { TEXT("propertyName"), TEXT("propertyValue") } })` says a call supplies one branch and never two; `MCPSpec::AtLeastOne(...)` says one or more. Each branch is a set of names that go together, and every name in a choice is a declared, optional parameter, since the group is what is required. The clause reads as the hand-written ones did (`settings OR propertyName + propertyValue`, `at least one of actorLabels/labelPrefix/tag`), `describe_action` reports each choice as a choice group, and a call that satisfies none, two sides of an exactly-one choice, or half a branch is refused with the choice spelled out. The contract test calls such a handler once per branch.
+- **A value shape.** `EMCPParamType::Color` is `{r, g, b, a?}`. `.Or(EMCPParamType::Color)` makes a union (a number or a colour), `.Nullable()` makes null a value of its own (clear the reference), `.Literal(false)` accepts one value only, and `.WithFields({ MCPParam::RequiredField(...), ... })` declares the fields of an object, or of each element of an array of objects.
+- **A contract exemption.** `MCPSpec::ContractExempt(TEXT("why"))` marks a handler whose contract values would reach a create, spawn, save or run before anything failed. Its spec is recorded and generates the surface like any other; the contract test does not call it, and the source check above holds it to its spec instead: the names its body reads through the `HandlerUtils.h` helpers, and through any function it hands `Params` to, must be the declared names, and a read whose key is not a literal fails the check rather than passing it.
+
+A choice or an exemption goes in the last argument, after the parameter list: `RegisterHandler(name, fn, { ... }, MCPSpec::ExactlyOne(...).ContractExempt(...))`, or `RegisterHandlerWithTimeout(name, fn, seconds, { ... }, rules)`. Each addition is written into the recording only when it is used (`choices`, `contractExempt`, and on a parameter `nullable`, `orTypes`, `literal`, `fields`), so a spec that uses none of them records exactly what it did before they existed.
+
+Handlers without a spec are declared by hand as before. What keeps one that way now is a shape none of the above covers (a union of several object shapes, say), or a handler not yet migrated.
 
 #### Socket and thread ownership
 
