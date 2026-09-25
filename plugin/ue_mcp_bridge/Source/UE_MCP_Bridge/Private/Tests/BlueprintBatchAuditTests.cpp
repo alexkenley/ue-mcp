@@ -1,5 +1,6 @@
-// #1166: export_blueprint_batch writes what it reports. Assets live in a
-// private temp mount.
+// #1166: export_blueprint_batch writes what it reports, and
+// audit_blueprint_dead_code finds each kind of dead logic in a Blueprint built
+// to hold one of each. Assets live in a private temp mount.
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "HandlerRegistry.h"
@@ -117,6 +118,79 @@ TSharedPtr<FJsonObject> ParamsFor(const FString& PackageName)
 	Params->SetArrayField(TEXT("assetPaths"), Paths);
 	return Params;
 }
+
+/** Names listed under Key in the audit row, or empty. */
+TArray<FString> SampleNames(const TSharedPtr<FJsonObject>& Row, const TCHAR* Key)
+{
+	TArray<FString> Names;
+	const TArray<TSharedPtr<FJsonValue>>* Samples = nullptr;
+	if (!Row->TryGetArrayField(Key, Samples)) return Names;
+	for (const TSharedPtr<FJsonValue>& Sample : *Samples)
+	{
+		FString Name;
+		if (Sample->AsObject()->TryGetStringField(TEXT("name"), Name)) Names.Add(Name);
+	}
+	return Names;
+}
+
+int32 Count(const TSharedPtr<FJsonObject>& Row, const TCHAR* Key)
+{
+	const TSharedPtr<FJsonObject>* Counts = nullptr;
+	if (!Row->TryGetObjectField(TEXT("counts"), Counts)) return -1;
+	int32 Value = -1;
+	(*Counts)->TryGetNumberField(Key, Value);
+	return Value;
+}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPBlueprintAuditDeadCodeTest,
+	"UE.MCP.Blueprint.BatchAudit.AuditDeadCode",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FMCPBlueprintAuditDeadCodeTest::RunTest(const FString& Parameters)
+{
+	using namespace MCPBlueprintBatchAuditTests;
+	FFixture Fixture;
+	if (!TestNotNull(TEXT("Blueprint fixture created"), Fixture.Blueprint)) return false;
+	if (!BuildDeadCode(*this, Fixture.Blueprint)) return false;
+
+	auto Params = ParamsFor(Fixture.PackageName);
+	Params->SetBoolField(TEXT("scanReferencers"), false);
+	const TSharedPtr<FJsonObject> Result = Run(*this, TEXT("audit_blueprint_dead_code"), Params);
+	if (!TestTrue(TEXT("audit succeeds"), Succeeded(Result))) return false;
+
+	const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
+	if (!TestTrue(TEXT("audit lists Blueprints"), Result->TryGetArrayField(TEXT("blueprints"), Rows)) || Rows->Num() != 1)
+	{
+		AddError(TEXT("expected exactly one Blueprint row"));
+		return false;
+	}
+	const TSharedPtr<FJsonObject> Row = (*Rows)[0]->AsObject();
+
+	const TArray<FString> Functions = SampleNames(Row, TEXT("unusedFunctions"));
+	TestTrue(TEXT("the uncalled function is reported"), Functions.Contains(TEXT("DeadFn")));
+	TestFalse(TEXT("the called function is not"), Functions.Contains(TEXT("UsedFn")));
+	TestTrue(TEXT("the unused variable is reported"), SampleNames(Row, TEXT("unusedVariables")).Contains(TEXT("UnusedVar")));
+	TestTrue(TEXT("the write-only variable is reported"), SampleNames(Row, TEXT("writeOnlyVariables")).Contains(TEXT("WriteOnlyVar")));
+	TestFalse(TEXT("a written variable is not reported as unused"), SampleNames(Row, TEXT("unusedVariables")).Contains(TEXT("WriteOnlyVar")));
+	TestTrue(TEXT("both exec nodes with no incoming wire are unreachable"), Count(Row, TEXT("unreachableNodes")) >= 2);
+	TestTrue(TEXT("the pure node feeding nothing is reported"), Count(Row, TEXT("unconnectedPureNodes")) >= 1);
+
+	// A cap on samples never changes a count.
+	auto Capped = ParamsFor(Fixture.PackageName);
+	Capped->SetBoolField(TEXT("scanReferencers"), false);
+	Capped->SetNumberField(TEXT("maxSamples"), 0);
+	const TSharedPtr<FJsonObject> CappedResult = Run(*this, TEXT("audit_blueprint_dead_code"), Capped);
+	if (!TestTrue(TEXT("capped audit succeeds"), Succeeded(CappedResult))) return false;
+	const TArray<TSharedPtr<FJsonValue>>* CappedRows = nullptr;
+	if (CappedResult->TryGetArrayField(TEXT("blueprints"), CappedRows) && CappedRows->Num() == 1)
+	{
+		const TSharedPtr<FJsonObject> CappedRow = (*CappedRows)[0]->AsObject();
+		TestEqual(TEXT("counts survive maxSamples=0"),
+			Count(CappedRow, TEXT("unreachableNodes")), Count(Row, TEXT("unreachableNodes")));
+		TestEqual(TEXT("no samples under maxSamples=0"), SampleNames(CappedRow, TEXT("unusedFunctions")).Num(), 0);
+	}
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPBlueprintExportBatchTest,

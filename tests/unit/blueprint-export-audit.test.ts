@@ -37,6 +37,19 @@ const EXPORT_ARGS = {
   includeT3D: true,
 };
 
+const AUDIT_ARGS = {
+  directory: "/Game/AI",
+  assetPaths: ["/Game/BP_A"],
+  recursive: false,
+  includeLevelScripts: true,
+  scanReferencers: false,
+  maxBlueprints: 300,
+  maxSamples: 5,
+  limit: 25,
+  dumpToFile: true,
+  outputPath: "UE_MCP/dead_code.json",
+};
+
 describe("blueprint.export_batch (#1166)", () => {
   it("forwards every selection, output and cap parameter by the name the handler reads", async () => {
     const [method, params] = await forwarded("export_batch", EXPORT_ARGS);
@@ -57,16 +70,39 @@ describe("blueprint.export_batch (#1166)", () => {
   });
 });
 
+describe("blueprint.audit_dead_code (#1166)", () => {
+  it("forwards every scope, cap and dump parameter by the name the handler reads", async () => {
+    const [method, params] = await forwarded("audit_dead_code", AUDIT_ARGS);
+    expect(method).toBe("audit_blueprint_dead_code");
+    expect(params).toEqual(AUDIT_ARGS);
+  });
+
+  it("is declared a read", () => {
+    expect(blueprintTool.actions.audit_dead_code.effect).toBe("read");
+  });
+
+  it("declares the new parameters with the right types", () => {
+    const s = blueprintTool.schema;
+    expect(s.scanReferencers.safeParse(false).success).toBe(true);
+    expect(s.maxSamples.safeParse(0).success).toBe(true);
+    expect(s.maxSamples.safeParse(-1).success).toBe(false);
+    expect(s.maxAssets.safeParse(0).success).toBe(false);
+    expect(s.includeT3D.safeParse(true).success).toBe(true);
+    expect(s.outputDir.safeParse("Saved/X").success).toBe(true);
+    expect(s.recursive.safeParse(true).success).toBe(true);
+  });
+});
+
 describe("TS and C++ agree on #1166 (#1057)", () => {
   const reads = cppParamReads(AUDIT_CPP);
 
-  it("the handler reads every key the action forwards", () => {
-    const sent = new Set(Object.keys(EXPORT_ARGS));
+  it("the handler reads every key either action forwards", () => {
+    const sent = new Set([...Object.keys(EXPORT_ARGS), ...Object.keys(AUDIT_ARGS)]);
     expect([...sent].filter((k) => !reads.has(k))).toEqual([]);
   });
 
   it("forwards every key the handler reads", () => {
-    const sent = new Set(Object.keys(EXPORT_ARGS));
+    const sent = new Set([...Object.keys(EXPORT_ARGS), ...Object.keys(AUDIT_ARGS)]);
     expect([...reads].filter((k) => !sent.has(k))).toEqual([]);
   });
 
@@ -74,8 +110,8 @@ describe("TS and C++ agree on #1166 (#1057)", () => {
     expect(AUDIT_CPP).not.toMatch(/(?<![\w.>])Params->(TryGet\w*Field|Get\w*Field|HasField)/);
   });
 
-  it("registers the method with a timeout the client mirrors", () => {
-    for (const method of ["export_blueprint_batch"]) {
+  it("registers both methods with a timeout the client mirrors", () => {
+    for (const method of ["export_blueprint_batch", "audit_blueprint_dead_code"]) {
       expect(REGISTRATION_CPP).toContain(`TEXT("${method}")`);
       expect(REGISTERED_HANDLER_TIMEOUT_SECONDS[method]).toBe(600);
     }

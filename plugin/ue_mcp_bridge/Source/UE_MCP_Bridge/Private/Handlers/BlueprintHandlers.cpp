@@ -173,8 +173,9 @@ void FBlueprintHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandlerWithTimeout(TEXT("search_blueprint_nodes"), &SearchNodes, SearchCallSitesTimeoutSeconds);
 	Registry.RegisterHandlerWithTimeout(TEXT("get_blueprint_connections"), &GetConnections, SearchCallSitesTimeoutSeconds);
 
-	// #1166: batch export to disk (BlueprintHandlers_Audit.cpp).
+	// #1166: batch export to disk and the dead-code audit (BlueprintHandlers_Audit.cpp).
 	Registry.RegisterHandlerWithTimeout(TEXT("export_blueprint_batch"), &ExportBlueprintBatch, SearchCallSitesTimeoutSeconds);
+	Registry.RegisterHandlerWithTimeout(TEXT("audit_blueprint_dead_code"), &AuditDeadCode, SearchCallSitesTimeoutSeconds);
 
 	// V9 Blueprint depth (BlueprintHandlers_Depth.cpp). Interface removal and
 	// listing, function flags and metadata, parameter CRUD across functions,
