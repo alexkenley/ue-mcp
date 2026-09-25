@@ -8,6 +8,7 @@
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
 #include "EdGraph/EdGraph.h"
+#include "HandlerUtils.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
@@ -175,18 +176,8 @@ inline bool WriteJsonObjectToFile(
 	FString& OutResolvedPath,
 	FString& OutError)
 {
-	OutResolvedPath = RequestedPath.IsEmpty() ? MakeDefaultGraphDumpPath(AssetPath, GraphName) : RequestedPath;
-	if (FPaths::IsRelative(OutResolvedPath))
-	{
-		OutResolvedPath = FPaths::Combine(FPaths::ProjectSavedDir(), OutResolvedPath);
-	}
-
-	const FString Directory = FPaths::GetPath(OutResolvedPath);
-	if (!Directory.IsEmpty() && !IFileManager::Get().MakeDirectory(*Directory, true))
-	{
-		OutError = FString::Printf(TEXT("Failed to create dump directory: %s"), *Directory);
-		return false;
-	}
+	OutResolvedPath = MCPResolveDumpPath(
+		RequestedPath.IsEmpty() ? MakeDefaultGraphDumpPath(AssetPath, GraphName) : RequestedPath);
 
 	FString JsonText;
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonText);
@@ -196,13 +187,7 @@ inline bool WriteJsonObjectToFile(
 		return false;
 	}
 
-	if (!FFileHelper::SaveStringToFile(JsonText, *OutResolvedPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
-	{
-		OutError = FString::Printf(TEXT("Failed to write graph dump: %s"), *OutResolvedPath);
-		return false;
-	}
-
-	return true;
+	return MCPWriteDumpFile(OutResolvedPath, JsonText, TEXT("graph dump"), OutError);
 }
 
 // Resolve the named component template on a blueprint, honouring inheritance.

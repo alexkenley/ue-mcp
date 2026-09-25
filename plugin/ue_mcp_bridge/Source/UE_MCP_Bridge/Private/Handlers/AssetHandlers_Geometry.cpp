@@ -387,9 +387,8 @@ FString MakeDefaultGeometryDumpPath(const FString& AssetPath, int32 LodIndex)
 	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UE_MCP"), TEXT("MeshGeometry"), BaseName + TEXT(".json"));
 }
 
-/** Serialise a result object to disk. Mirrors the read_blueprint_graph dump
- *  convention: relative paths resolve under Saved/, the directory is created,
- *  and the resolved path is echoed back. */
+/** Serialise a result object to disk under the shared dump convention in
+ *  HandlerUtils.h (MCPResolveDumpPath / MCPWriteDumpFile). */
 bool WriteGeometryJsonToFile(
 	const TSharedPtr<FJsonObject>& JsonObject,
 	const FString& RequestedPath,
@@ -398,18 +397,8 @@ bool WriteGeometryJsonToFile(
 	FString& OutResolvedPath,
 	FString& OutError)
 {
-	OutResolvedPath = RequestedPath.IsEmpty() ? MakeDefaultGeometryDumpPath(AssetPath, LodIndex) : RequestedPath;
-	if (FPaths::IsRelative(OutResolvedPath))
-	{
-		OutResolvedPath = FPaths::Combine(FPaths::ProjectSavedDir(), OutResolvedPath);
-	}
-
-	const FString Directory = FPaths::GetPath(OutResolvedPath);
-	if (!Directory.IsEmpty() && !IFileManager::Get().MakeDirectory(*Directory, true))
-	{
-		OutError = FString::Printf(TEXT("Failed to create dump directory: %s"), *Directory);
-		return false;
-	}
+	OutResolvedPath = MCPResolveDumpPath(
+		RequestedPath.IsEmpty() ? MakeDefaultGeometryDumpPath(AssetPath, LodIndex) : RequestedPath);
 
 	FString JsonText;
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonText);
@@ -419,13 +408,7 @@ bool WriteGeometryJsonToFile(
 		return false;
 	}
 
-	if (!FFileHelper::SaveStringToFile(JsonText, *OutResolvedPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
-	{
-		OutError = FString::Printf(TEXT("Failed to write mesh geometry dump: %s"), *OutResolvedPath);
-		return false;
-	}
-
-	return true;
+	return MCPWriteDumpFile(OutResolvedPath, JsonText, TEXT("mesh geometry dump"), OutError);
 }
 
 /** Welded-vertex key so a UV seam does not read as a hole. */
