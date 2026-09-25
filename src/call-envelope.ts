@@ -21,6 +21,7 @@
  * exactly what it always meant.
  */
 import { z } from "zod";
+import { getParseErrorMessage, normalizeObjectSchema, safeParse as sdkSafeParse } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { McpError as SdkMcpError, ErrorCode as SdkErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { ROUTING_PARAM_NAMES } from "./routing-params.js";
 import { EDITOR_TARGET_PARAM, MIGRATE_TARGET_PARAM, type ToolDef } from "./types.js";
@@ -96,23 +97,23 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-const objects = new WeakMap<Record<string, z.ZodType>, z.ZodTypeAny>();
+const objects = new WeakMap<Record<string, z.ZodType>, unknown>();
 
-/** The zod object the SDK used to build from a flat shape, built once per shape. */
-function flatObject(shape: Record<string, z.ZodType>): z.ZodTypeAny {
+/** The object the SDK builds from a flat shape, built by the SDK's own helper so parsing and error text match it exactly. */
+function flatObject(shape: Record<string, z.ZodType>): unknown {
   let obj = objects.get(shape);
   if (!obj) {
-    obj = z.object(shape);
+    obj = normalizeObjectSchema(shape as never);
     objects.set(shape, obj);
   }
   return obj;
 }
 
-/** Why a flat bag fails a category's shape, worded as the MCP SDK worded it, or null. */
+/** Why a flat bag fails a category's shape, worded as the MCP SDK words it, or null. */
 export function flatValidationMessage(tool: ToolDef, flat: Record<string, unknown>): { data?: Record<string, unknown>; message?: string } {
-  const parsed = flatObject(tool.schema).safeParse(flat);
+  const parsed = sdkSafeParse(flatObject(tool.schema) as never, flat) as { success: boolean; data?: unknown; error?: unknown };
   if (parsed.success) return { data: parsed.data as Record<string, unknown> };
-  return { message: `Input validation error: Invalid arguments for tool ${tool.name}: ${parsed.error.message}` };
+  return { message: `Input validation error: Invalid arguments for tool ${tool.name}: ${getParseErrorMessage(parsed.error)}` };
 }
 
 /**
