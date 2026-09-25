@@ -1172,7 +1172,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetBoneTransforms(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FAnimationHandlers::AddCurve(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString CurveName;
 	if (auto Err = RequireString(Params, TEXT("curveName"), CurveName)) return Err;
@@ -1584,7 +1584,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateAnimComposite(const TSharedPtr<
 TSharedPtr<FJsonValue> FAnimationHandlers::ListAnimModifiers(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UAnimSequence* Seq = LoadAssetByPath<UAnimSequence>(AssetPath);
 	if (!Seq) return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *AssetPath));
@@ -1641,6 +1641,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadBoneTrack(const TSharedPtr<FJsonO
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString BoneName;
 	if (auto Err = RequireString(Params, TEXT("boneName"), BoneName)) return Err;
+	// Read before anything can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* FramesArr = nullptr;
+	const bool bHasFrames = TryGetArrayParam(Params, TEXT("frames"), FramesArr) && FramesArr != nullptr;
 
 	UAnimSequence* Seq = LoadAssetByPath<UAnimSequence>(AssetPath);
 	if (!Seq) return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *AssetPath));
@@ -1653,8 +1656,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadBoneTrack(const TSharedPtr<FJsonO
 
 	// Frame selection
 	TArray<int32> FramesToSample;
-	const TArray<TSharedPtr<FJsonValue>>* FramesArr = nullptr;
-	if (TryGetArrayParam(Params, TEXT("frames"), FramesArr))
+	if (bHasFrames)
 	{
 		for (const auto& V : *FramesArr)
 		{
