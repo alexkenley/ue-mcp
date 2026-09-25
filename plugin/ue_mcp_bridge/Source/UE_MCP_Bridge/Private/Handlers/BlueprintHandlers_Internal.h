@@ -8,6 +8,9 @@
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
 #include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
+#include "EdGraph/EdGraphPin.h"
+#include "EdGraphUtilities.h"
 #include "HandlerUtils.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -189,6 +192,120 @@ inline bool WriteJsonObjectToFile(
 	}
 
 	return MCPWriteDumpFile(OutResolvedPath, JsonText, TEXT("graph dump"), OutError);
+}
+
+// ── Graph node JSON and T3D ─────────────────────────────────────────────────
+//
+// read_graph, read_node_property, export_nodes_t3d and export_batch describe
+// the same nodes, so the node shape and the export live here (#1166).
+
+/** A pin's literal defaults. An FText literal lives in DefaultTextValue, so
+ *  defaultValue falls back to it rather than reading as empty (#743). */
+inline void MCPWritePinDefaults(const TSharedPtr<FJsonObject>& PinObj, const UEdGraphPin* Pin)
+{
+	if (!PinObj.IsValid() || !Pin) return;
+
+	const bool bHasText = !Pin->DefaultTextValue.IsEmpty();
+	if (bHasText)
+	{
+		PinObj->SetStringField(TEXT("defaultTextValue"), Pin->DefaultTextValue.ToString());
+	}
+	PinObj->SetStringField(TEXT("defaultValue"),
+		Pin->DefaultValue.IsEmpty() && bHasText
+			? Pin->DefaultTextValue.ToString()
+			: Pin->DefaultValue);
+
+	if (Pin->DefaultObject)
+	{
+		PinObj->SetStringField(TEXT("defaultObject"), Pin->DefaultObject->GetPathName());
+	}
+}
+
+struct FMCPGraphNodeJsonOptions
+{
+	bool bPins = true;
+	bool bDefaults = true;
+	bool bComments = true;
+	/** Each pin also lists what it is wired to, as {nodeId, pin}. */
+	bool bLinks = false;
+};
+
+/** One node the way read_graph reports it. */
+inline TSharedPtr<FJsonObject> MCPDescribeGraphNode(const UEdGraphNode* Node, const FMCPGraphNodeJsonOptions& Options)
+{
+	TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
+	if (!Node) return NodeObj;
+	NodeObj->SetStringField(TEXT("id"), Node->NodeGuid.ToString());
+	NodeObj->SetStringField(TEXT("class"), Node->GetClass()->GetName());
+	NodeObj->SetStringField(TEXT("title"), Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+	NodeObj->SetNumberField(TEXT("posX"), Node->NodePosX);
+	NodeObj->SetNumberField(TEXT("posY"), Node->NodePosY);
+	if (Options.bComments)
+	{
+		NodeObj->SetStringField(TEXT("comment"), Node->NodeComment);
+	}
+	if (!Options.bPins) return NodeObj;
+
+	TArray<TSharedPtr<FJsonValue>> Pins;
+	for (const UEdGraphPin* Pin : Node->Pins)
+	{
+		if (!Pin) continue;
+		TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
+		PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
+		PinObj->SetStringField(TEXT("type"), Pin->PinType.PinCategory.ToString());
+		PinObj->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("Input") : TEXT("Output"));
+		if (Options.bDefaults)
+		{
+			MCPWritePinDefaults(PinObj, Pin);
+		}
+		PinObj->SetBoolField(TEXT("connected"), Pin->LinkedTo.Num() > 0);
+		if (Options.bLinks)
+		{
+			TArray<TSharedPtr<FJsonValue>> Links;
+			for (const UEdGraphPin* Linked : Pin->LinkedTo)
+			{
+				const UEdGraphNode* Other = Linked ? Linked->GetOwningNodeUnchecked() : nullptr;
+				if (!Other) continue;
+				TSharedPtr<FJsonObject> Link = MakeShared<FJsonObject>();
+				Link->SetStringField(TEXT("nodeId"), Other->NodeGuid.ToString());
+				Link->SetStringField(TEXT("pin"), Linked->PinName.ToString());
+				Links.Add(MakeShared<FJsonValueObject>(Link));
+			}
+			PinObj->SetArrayField(TEXT("linkedTo"), Links);
+		}
+		Pins.Add(MakeShared<FJsonValueObject>(PinObj));
+	}
+	NodeObj->SetArrayField(TEXT("pins"), Pins);
+	return NodeObj;
+}
+
+/** The editor's Copy of the given nodes. Only nodes reporting CanDuplicateNode
+ *  are written, because the paste side refuses the rest; the others (and null
+ *  entries) are counted in OutSkipped. Returns how many nodes were written.
+ *  Exports the listed nodes only, never the graph's inners, so a node detached
+ *  from Graph->Nodes but still in memory is not included. */
+inline int32 MCPExportNodesToT3D(const TArray<UEdGraphNode*>& Nodes, FString& OutText, int32& OutSkipped)
+{
+	TSet<UObject*> NodeSet;
+	OutSkipped = 0;
+	for (UEdGraphNode* Node : Nodes)
+	{
+		if (Node && Node->CanDuplicateNode())
+		{
+			Node->PrepareForCopying();
+			NodeSet.Add(Node);
+		}
+		else
+		{
+			++OutSkipped;
+		}
+	}
+	OutText.Reset();
+	if (NodeSet.Num() > 0)
+	{
+		FEdGraphUtilities::ExportNodesToText(NodeSet, OutText);
+	}
+	return NodeSet.Num();
 }
 
 // Resolve the named component template on a blueprint, honouring inheritance.

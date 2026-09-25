@@ -122,6 +122,8 @@ private:
 	static TSharedPtr<FJsonValue> SearchCallSites(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SearchNodes(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> GetConnections(const TSharedPtr<FJsonObject>& Params);
+	// #1166: many Blueprints to disk in one call. Defined in BlueprintHandlers_Audit.cpp.
+	static TSharedPtr<FJsonValue> ExportBlueprintBatch(const TSharedPtr<FJsonObject>& Params);
 
 	// #419: SetCapsuleSize on CapsuleComponent BP templates (UFUNCTION setter
 	// path; raw property writes leave the visualizer stale)

@@ -63,7 +63,8 @@ const BASELINE = {
   // 128: render_sequence_frames writes files, which nothing can delete (#1098).
   // 129: landscape(merge_edit_layers) re-derives merged maps and has no inverse (#1156).
   // 130: asset(compile_customizable_object) compiles derived data and has no inverse (#1059).
-  mutationsWithoutRollback: 130,
+  // 131: blueprint(export_batch) writes files, which nothing can delete (#1166).
+  mutationsWithoutRollback: 131,
   // Zero, and held there by a flat assertion. Every mutation with no inverse
   // now says so in its own result body with the reason, which is the half a
   // caller can act on.
