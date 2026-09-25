@@ -58,7 +58,7 @@ inline TSharedPtr<FJsonObject> MCPSaveDirtyCommittingDeletes(bool bSaveMaps, boo
 
 		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 		Row->SetStringField(TEXT("package"), Entry.Package);
-		if (!Entry.File.IsEmpty()) Row->SetStringField(TEXT("file"), Entry.File);
+		if (!Entry.File.IsEmpty()) Row->SetStringField(TEXT("file"), FPaths::ConvertRelativePathToFull(Entry.File));
 		if (Entry.bEmpty) Row->SetBoolField(TEXT("emptyPackage"), true);
 		const TSharedPtr<FJsonValue> Value = MakeShared<FJsonValueObject>(Row);
 
