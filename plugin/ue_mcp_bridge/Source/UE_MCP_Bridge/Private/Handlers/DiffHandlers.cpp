@@ -162,8 +162,6 @@ void FDiffHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("diff"));
-	Registry.RegisterHandler(TEXT("diff_asset"), &FDiffHandlers::DiffAsset);
-
 	// #1057: diff_blueprint is exposed as blueprint(diff), so its spec is
 	// recorded under blueprint and generates that tool's surface.
 	{
@@ -174,6 +172,14 @@ void FDiffHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 			MCPParam::Required(TEXT("otherPath"), EType::String, TEXT("Blueprint to compare against (B)")),
 			MCPParam::Optional(TEXT("fromRevision"), EType::String, TEXT("Reserved for source-control revision diffing, which is not implemented; passing it is refused")),
 			MCPParam::Optional(TEXT("toRevision"), EType::String, TEXT("Reserved for source-control revision diffing, which is not implemented; passing it is refused")),
+		});
+	}
+	{
+		// Exposed as asset(diff), so its spec generates into the asset surface.
+		FMCPHandlerRegistry::FCategoryScope AssetScope(Registry, TEXT("asset"));
+		Registry.RegisterHandler(TEXT("diff_asset"), &FDiffHandlers::DiffAsset, {
+			MCPParam::Required(TEXT("assetPath"), EMCPParamType::String, TEXT("Blueprint, Skeleton or SkeletalMesh to diff from")).Alias(TEXT("path")),
+			MCPParam::Required(TEXT("otherPath"), EMCPParamType::String, TEXT("Asset of the same class to compare against")),
 		});
 	}
 }
@@ -575,7 +581,9 @@ TSharedPtr<FJsonValue> FDiffHandlers::DiffSkeleton(const TSharedPtr<FJsonObject>
 TSharedPtr<FJsonValue> FDiffHandlers::DiffAsset(const TSharedPtr<FJsonObject>& Params)
 {
 	FString PathA;
-	if (TSharedPtr<FJsonValue> Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), PathA)) return Err;
+	if (TSharedPtr<FJsonValue> Err = RequireString(Params, TEXT("assetPath"), PathA)) return Err;
+	// The per-class diff reads it after the load (#1057).
+	MCPReadParamsAhead(Params, { TEXT("otherPath") });
 
 	if (UObject* Asset = LoadAssetByPath<UObject>(PathA))
 	{

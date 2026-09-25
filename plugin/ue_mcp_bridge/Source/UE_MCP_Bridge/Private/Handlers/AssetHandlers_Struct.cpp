@@ -106,7 +106,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateUserDefinedStruct(const TSharedPtr<
 
 	const TArray<TSharedPtr<FJsonValue>>* Fields = nullptr;
 	int32 AddedCount = 0;
-	if (TryGetArrayParam(Params, TEXT("fields"), Fields) && Fields)
+	if (TryGetArrayParam(Params, TEXT("structFields"), Fields) && Fields)
 	{
 		for (const TSharedPtr<FJsonValue>& Entry : *Fields)
 		{
@@ -188,10 +188,30 @@ TSharedPtr<FJsonValue> FAssetHandlers::ListStructFields(const TSharedPtr<FJsonOb
 
 TSharedPtr<FJsonValue> FAssetHandlers::EditUserDefinedStruct(const TSharedPtr<FJsonObject>& Params)
 {
+	return EditUserDefinedStructImpl(Params, nullptr);
+}
+
+TSharedPtr<FJsonValue> FAssetHandlers::RenameStructField(const TSharedPtr<FJsonObject>& Params)
+{
+	return EditUserDefinedStructImpl(Params, TEXT("rename_field"));
+}
+
+TSharedPtr<FJsonValue> FAssetHandlers::EditUserDefinedStructImpl(const TSharedPtr<FJsonObject>& Params, const TCHAR* ForcedOp)
+{
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString Op;
-	if (auto Err = RequireString(Params, TEXT("op"), Op)) return Err;
+	if (ForcedOp)
+	{
+		Op = ForcedOp;
+		// Read before the load; each op reads its own subset where it uses them.
+		MCPReadParamsAhead(Params, { TEXT("fieldName"), TEXT("fieldGuid"), TEXT("newDisplayName") });
+	}
+	else
+	{
+		if (auto Err = RequireString(Params, TEXT("op"), Op)) return Err;
+		MCPReadParamsAhead(Params, { TEXT("fieldName"), TEXT("fieldGuid"), TEXT("newDisplayName"), TEXT("type") });
+	}
 
 	UUserDefinedStruct* Struct = LoadAssetByPath<UUserDefinedStruct>(AssetPath);
 	if (!Struct) return MCPError(FString::Printf(TEXT("UserDefinedStruct not found (native structs are not editable): %s"), *AssetPath));

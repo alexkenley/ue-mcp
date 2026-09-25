@@ -1,5 +1,5 @@
 {
-  "handlerCount": 862,
+  "handlerCount": 869,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -1725,38 +1725,6 @@
         }
       ]
     },
-    "add_runtime_cell_transformer": {
-      "category": "level",
-      "params": [
-        {
-          "name": "transformerClass",
-          "type": "string",
-          "required": true,
-          "description": "WorldPartitionRuntimeCellTransformer subclass: short name, Module.Class or /Script path",
-          "aliases": [
-            "className"
-          ]
-        },
-        {
-          "name": "properties",
-          "type": "object",
-          "required": false,
-          "description": "Property name to value, applied to the new transformer instance"
-        },
-        {
-          "name": "position",
-          "type": "integer",
-          "required": false,
-          "description": "Stack index to insert at; -1 (default) appends"
-        },
-        {
-          "name": "skipIfPresent",
-          "type": "boolean",
-          "required": false,
-          "description": "Report an existing transformer of this class instead of adding a duplicate (default true)"
-        }
-      ]
-    },
     "add_rvt_output": {
       "category": "material",
       "params": [
@@ -2675,42 +2643,6 @@
         }
       ]
     },
-    "add_streaming_sublevel": {
-      "category": "level",
-      "params": [
-        {
-          "name": "levelPath",
-          "type": "string",
-          "required": true,
-          "description": "Map package to add as a streaming sub-level"
-        },
-        {
-          "name": "streamingClass",
-          "type": "string",
-          "required": false,
-          "description": "LevelStreamingDynamic (default) | LevelStreamingAlwaysLoaded"
-        },
-        {
-          "name": "location",
-          "type": "vec3",
-          "required": false,
-          "description": "Sub-level offset"
-        },
-        {
-          "name": "initiallyLoaded",
-          "type": "boolean",
-          "required": false,
-          "description": "Load the sub-level with the persistent level"
-        },
-        {
-          "name": "initiallyVisible",
-          "type": "boolean",
-          "required": false,
-          "description": "Make the sub-level visible when loaded"
-        }
-      ],
-      "contractExempt": "Hands the contract path to AddLevelToWorld, which loads the package; nothing it reads fails first"
-    },
     "add_submix_effect": {
       "category": "audio",
       "params": [
@@ -3508,6 +3440,736 @@
         }
       ]
     },
+    "apply_mesh_fracture": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh to cut; it is never modified",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "pattern",
+          "type": "string",
+          "required": false,
+          "description": "slice (default) | grid | random"
+        },
+        {
+          "name": "axis",
+          "type": "string",
+          "required": false,
+          "description": "x | y | z (default): the axis slice cuts run across"
+        },
+        {
+          "name": "pieces",
+          "type": "integer",
+          "required": false,
+          "description": "Pieces along axis for slice, at least 2 (default 4)"
+        },
+        {
+          "name": "gridX",
+          "type": "integer",
+          "required": false,
+          "description": "Pieces along X for grid (default 2)"
+        },
+        {
+          "name": "gridY",
+          "type": "integer",
+          "required": false,
+          "description": "Pieces along Y for grid (default 2)"
+        },
+        {
+          "name": "gridZ",
+          "type": "integer",
+          "required": false,
+          "description": "Pieces along Z for grid (default 1)"
+        },
+        {
+          "name": "planeCount",
+          "type": "integer",
+          "required": false,
+          "description": "Random planes to cut with (default 3)"
+        },
+        {
+          "name": "seed",
+          "type": "integer",
+          "required": false,
+          "description": "Seed for plane placement and jitter (default 0); the same seed gives the same pieces"
+        },
+        {
+          "name": "jitter",
+          "type": "number",
+          "required": false,
+          "description": "0 to 0.45, how far a slice or grid cut may wander from even spacing (default 0)"
+        },
+        {
+          "name": "gapWidth",
+          "type": "number",
+          "required": false,
+          "description": "How far apart the halves of each cut are pushed, in centimetres (default 0.01)"
+        },
+        {
+          "name": "fillHoles",
+          "type": "boolean",
+          "required": false,
+          "description": "Cap each piece where the plane cut it (default true)"
+        },
+        {
+          "name": "minPieceTriangles",
+          "type": "integer",
+          "required": false,
+          "description": "Discard pieces with fewer triangles than this (default 4)"
+        },
+        {
+          "name": "outputBasePath",
+          "type": "string",
+          "required": false,
+          "description": "Pieces are written as outputBasePath_00, _01 and on (default '<assetPath>_Piece')"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When a piece asset exists: error (default) | replace"
+        },
+        {
+          "name": "copyMaterialsFromSource",
+          "type": "boolean",
+          "required": false,
+          "description": "Copy the source's material slots onto the written asset (default true)"
+        },
+        {
+          "name": "nanite",
+          "type": "string",
+          "required": false,
+          "description": "inherit (default, match the source) | enable | disable"
+        },
+        {
+          "name": "recomputeNormals",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompute normals on the written mesh (default false)"
+        },
+        {
+          "name": "recomputeTangents",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompute tangents on the written mesh (default false)"
+        },
+        {
+          "name": "lodType",
+          "type": "string",
+          "required": false,
+          "description": "MaxAvailable (default, ignores lodIndex) | HiResSourceModel | SourceModel | RenderData"
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "LOD to read when lodType names one (default 0)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the written asset (default true)"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Run the operation and report the result without writing (default false)"
+        }
+      ]
+    },
+    "apply_mesh_hole_fill": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh to read",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "fillMethod",
+          "type": "string",
+          "required": false,
+          "description": "Automatic (default) | MinimalFill | PolygonTriangulation | TriangleFan | PlanarProjection"
+        },
+        {
+          "name": "weldFirst",
+          "type": "boolean",
+          "required": false,
+          "description": "Weld coincident boundary edges before filling (default true)"
+        },
+        {
+          "name": "weldTolerance",
+          "type": "number",
+          "required": false,
+          "description": "How close two boundary edges must be to weld (default 1e-6)"
+        },
+        {
+          "name": "removeDegenerateFirst",
+          "type": "boolean",
+          "required": false,
+          "description": "Drop zero-area triangles before welding and filling (default false)"
+        },
+        {
+          "name": "deleteIsolatedTriangles",
+          "type": "boolean",
+          "required": false,
+          "description": "Delete floating disconnected triangles, whose holes no fill can close (default true)"
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": false,
+          "description": "Asset to write (default '<assetPath>_Filled')"
+        },
+        {
+          "name": "inPlace",
+          "type": "boolean",
+          "required": false,
+          "description": "Overwrite assetPath instead of writing a separate asset (default false); not with outputPath, and the one form with no rollback"
+        },
+        {
+          "name": "backupPath",
+          "type": "string",
+          "required": false,
+          "description": "Copy the source here before an inPlace edit, the only way back to the original geometry"
+        },
+        {
+          "name": "lodType",
+          "type": "string",
+          "required": false,
+          "description": "MaxAvailable (default, ignores lodIndex) | HiResSourceModel | SourceModel | RenderData"
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "LOD to read when lodType names one (default 0)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the output asset exists: error (default) | replace"
+        },
+        {
+          "name": "copyMaterialsFromSource",
+          "type": "boolean",
+          "required": false,
+          "description": "Copy the source's material slots onto the written asset (default true)"
+        },
+        {
+          "name": "copyCollisionFromSource",
+          "type": "boolean",
+          "required": false,
+          "description": "Copy the source's simple collision and trace flag onto the written asset (default true)"
+        },
+        {
+          "name": "nanite",
+          "type": "string",
+          "required": false,
+          "description": "inherit (default, match the source) | enable | disable"
+        },
+        {
+          "name": "recomputeNormals",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompute normals on the written mesh (default false)"
+        },
+        {
+          "name": "recomputeTangents",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompute tangents on the written mesh (default false)"
+        },
+        {
+          "name": "removeDegenerates",
+          "type": "boolean",
+          "required": false,
+          "description": "Drop degenerate triangles when writing back into an existing mesh (default false)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the written asset (default true)"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Run the operation and report the result without writing (default false)"
+        }
+      ]
+    },
+    "apply_mesh_mirror": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh to read",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "axis",
+          "type": "string",
+          "required": false,
+          "description": "x (default) | y | z | custom: the mirror plane's normal, through planeOrigin"
+        },
+        {
+          "name": "planeOrigin",
+          "type": "vec3",
+          "required": false,
+          "description": "A point on the mirror plane (default the mesh origin)"
+        },
+        {
+          "name": "planeNormal",
+          "type": "vec3",
+          "required": false,
+          "description": "The mirror plane's normal when axis is custom; a zero vector is refused"
+        },
+        {
+          "name": "applyPlaneCut",
+          "type": "boolean",
+          "required": false,
+          "description": "Remove the geometry on the far side of the plane before reflecting (default true)"
+        },
+        {
+          "name": "flipCutSide",
+          "type": "boolean",
+          "required": false,
+          "description": "Keep the other side of the plane instead (default false)"
+        },
+        {
+          "name": "weldAlongPlane",
+          "type": "boolean",
+          "required": false,
+          "description": "Weld the two halves along the plane (default true)"
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": false,
+          "description": "Asset to write (default '<assetPath>_Mirrored')"
+        },
+        {
+          "name": "inPlace",
+          "type": "boolean",
+          "required": false,
+          "description": "Overwrite assetPath instead of writing a separate asset (default false); not with outputPath, and the one form with no rollback"
+        },
+        {
+          "name": "backupPath",
+          "type": "string",
+          "required": false,
+          "description": "Copy the source here before an inPlace edit, the only way back to the original geometry"
+        },
+        {
+          "name": "lodType",
+          "type": "string",
+          "required": false,
+          "description": "MaxAvailable (default, ignores lodIndex) | HiResSourceModel | SourceModel | RenderData"
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "LOD to read when lodType names one (default 0)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the output asset exists: error (default) | replace"
+        },
+        {
+          "name": "copyMaterialsFromSource",
+          "type": "boolean",
+          "required": false,
+          "description": "Copy the source's material slots onto the written asset (default true)"
+        },
+        {
+          "name": "copyCollisionFromSource",
+          "type": "boolean",
+          "required": false,
+          "description": "Copy the source's simple collision and trace flag onto the written asset (default true)"
+        },
+        {
+          "name": "nanite",
+          "type": "string",
+          "required": false,
+          "description": "inherit (default, match the source) | enable | disable"
+        },
+        {
+          "name": "recomputeNormals",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompute normals on the written mesh (default false)"
+        },
+        {
+          "name": "recomputeTangents",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompute tangents on the written mesh (default false)"
+        },
+        {
+          "name": "removeDegenerates",
+          "type": "boolean",
+          "required": false,
+          "description": "Drop degenerate triangles when writing back into an existing mesh (default false)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the written asset (default true)"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Run the operation and report the result without writing (default false)"
+        }
+      ]
+    },
+    "apply_mesh_remesh": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh to read",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "remeshMode",
+          "type": "string",
+          "required": false,
+          "description": "uniform (default, even edge lengths) | adaptive (denser where the surface curves)"
+        },
+        {
+          "name": "targetType",
+          "type": "string",
+          "required": false,
+          "description": "TriangleCount (default) | TargetEdgeLength"
+        },
+        {
+          "name": "targetTriangleCount",
+          "type": "integer",
+          "required": false,
+          "description": "Approximate triangle count to aim for (targetType TriangleCount, default 1000)"
+        },
+        {
+          "name": "targetEdgeLength",
+          "type": "number",
+          "required": false,
+          "description": "Edge length in centimetres to aim for (targetType TargetEdgeLength, default 1)"
+        },
+        {
+          "name": "smoothingType",
+          "type": "string",
+          "required": false,
+          "description": "Uniform | UVPreserving | Mixed (default)"
+        },
+        {
+          "name": "smoothingRate",
+          "type": "number",
+          "required": false,
+          "description": "0 to 1, how far vertices move toward their neighbours each pass (default 0.25)"
+        },
+        {
+          "name": "boundaryConstraint",
+          "type": "string",
+          "required": false,
+          "description": "Fixed | Refine | Free (default) | Ignore"
+        },
+        {
+          "name": "iterations",
+          "type": "integer",
+          "required": false,
+          "description": "Remeshing passes (default: the engine's)"
+        },
+        {
+          "name": "discardAttributes",
+          "type": "boolean",
+          "required": false,
+          "description": "Throw away UVs, normals and material IDs so the remesher moves freely (default false)"
+        },
+        {
+          "name": "reprojectToInputMesh",
+          "type": "boolean",
+          "required": false,
+          "description": "Pull new vertices back onto the original surface each pass (default true)"
+        },
+        {
+          "name": "relativeDensity",
+          "type": "number",
+          "required": false,
+          "description": "-2 to 2, bias toward more or fewer triangles in curved regions (remeshMode adaptive, default 0)"
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": false,
+          "description": "Asset to write (default '<assetPath>_Remeshed')"
+        },
+        {
+          "name": "inPlace",
+          "type": "boolean",
+          "required": false,
+          "description": "Overwrite assetPath instead of writing a separate asset (default false); not with outputPath, and the one form with no rollback"
+        },
+        {
+          "name": "backupPath",
+          "type": "string",
+          "required": false,
+          "description": "Copy the source here before an inPlace edit, the only way back to the original geometry"
+        },
+        {
+          "name": "lodType",
+          "type": "string",
+          "required": false,
+          "description": "MaxAvailable (default, ignores lodIndex) | HiResSourceModel | SourceModel | RenderData"
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "LOD to read when lodType names one (default 0)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the output asset exists: error (default) | replace"
+        },
+        {
+          "name": "copyMaterialsFromSource",
+          "type": "boolean",
+          "required": false,
+          "description": "Copy the source's material slots onto the written asset (default true)"
+        },
+        {
+          "name": "copyCollisionFromSource",
+          "type": "boolean",
+          "required": false,
+          "description": "Copy the source's simple collision and trace flag onto the written asset (default true)"
+        },
+        {
+          "name": "nanite",
+          "type": "string",
+          "required": false,
+          "description": "inherit (default, match the source) | enable | disable"
+        },
+        {
+          "name": "recomputeNormals",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompute normals on the written mesh (default false)"
+        },
+        {
+          "name": "recomputeTangents",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompute tangents on the written mesh (default false)"
+        },
+        {
+          "name": "removeDegenerates",
+          "type": "boolean",
+          "required": false,
+          "description": "Drop degenerate triangles when writing back into an existing mesh (default false)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the written asset (default true)"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Run the operation and report the result without writing (default false)"
+        }
+      ]
+    },
+    "apply_mesh_simplify": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh to read",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "simplifyMode",
+          "type": "string",
+          "required": false,
+          "description": "triangleCount (default) | vertexCount | tolerance | edgeLength | clusterEdgeLength | planar | polygroup | editorTriangleCount | editorVertexCount"
+        },
+        {
+          "name": "triangleCount",
+          "type": "integer",
+          "required": false,
+          "description": "Triangle count to reduce to (simplifyMode triangleCount or editorTriangleCount)"
+        },
+        {
+          "name": "vertexCount",
+          "type": "integer",
+          "required": false,
+          "description": "Vertex count to reduce to, at least 4 (simplifyMode vertexCount or editorVertexCount)"
+        },
+        {
+          "name": "tolerance",
+          "type": "number",
+          "required": false,
+          "description": "Furthest in centimetres the surface may drift (simplifyMode tolerance)"
+        },
+        {
+          "name": "edgeLength",
+          "type": "number",
+          "required": false,
+          "description": "Target edge length in centimetres (simplifyMode edgeLength or clusterEdgeLength)"
+        },
+        {
+          "name": "angleThreshold",
+          "type": "number",
+          "required": false,
+          "description": "How far from coplanar still counts as coplanar (simplifyMode planar or polygroup, default 0.001)"
+        },
+        {
+          "name": "method",
+          "type": "string",
+          "required": false,
+          "description": "StandardQEM | VolumePreserving | AttributeAware (default) | AttributeAwareV2"
+        },
+        {
+          "name": "allowSeamCollapse",
+          "type": "boolean",
+          "required": false,
+          "description": "Let the simplifier collapse UV, normal and material seams (default true)"
+        },
+        {
+          "name": "preserveVertexPositions",
+          "type": "boolean",
+          "required": false,
+          "description": "Keep surviving vertices where they are (default false)"
+        },
+        {
+          "name": "autoCompact",
+          "type": "boolean",
+          "required": false,
+          "description": "Close the gaps the collapse leaves in the index space (default true)"
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": false,
+          "description": "Asset to write (default '<assetPath>_Simplified')"
+        },
+        {
+          "name": "inPlace",
+          "type": "boolean",
+          "required": false,
+          "description": "Overwrite assetPath instead of writing a separate asset (default false); not with outputPath, and the one form with no rollback"
+        },
+        {
+          "name": "backupPath",
+          "type": "string",
+          "required": false,
+          "description": "Copy the source here before an inPlace edit, the only way back to the original geometry"
+        },
+        {
+          "name": "lodType",
+          "type": "string",
+          "required": false,
+          "description": "MaxAvailable (default, ignores lodIndex) | HiResSourceModel | SourceModel | RenderData"
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "LOD to read when lodType names one (default 0)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the output asset exists: error (default) | replace"
+        },
+        {
+          "name": "copyMaterialsFromSource",
+          "type": "boolean",
+          "required": false,
+          "description": "Copy the source's material slots onto the written asset (default true)"
+        },
+        {
+          "name": "copyCollisionFromSource",
+          "type": "boolean",
+          "required": false,
+          "description": "Copy the source's simple collision and trace flag onto the written asset (default true)"
+        },
+        {
+          "name": "nanite",
+          "type": "string",
+          "required": false,
+          "description": "inherit (default, match the source) | enable | disable"
+        },
+        {
+          "name": "recomputeNormals",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompute normals on the written mesh (default false)"
+        },
+        {
+          "name": "recomputeTangents",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompute tangents on the written mesh (default false)"
+        },
+        {
+          "name": "removeDegenerates",
+          "type": "boolean",
+          "required": false,
+          "description": "Drop degenerate triangles when writing back into an existing mesh (default false)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the written asset (default true)"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Run the operation and report the result without writing (default false)"
+        }
+      ]
+    },
     "asset_health_check": {
       "category": "asset",
       "params": [
@@ -3619,6 +4281,121 @@
           "type": "string",
           "required": false,
           "description": "Socket or bone on the resolved parent component"
+        }
+      ]
+    },
+    "audit_asset_hygiene": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "directory",
+          "type": "string",
+          "required": false,
+          "description": "Content path to sweep, added to directories (default /Game)"
+        },
+        {
+          "name": "directories",
+          "type": "array",
+          "required": false,
+          "description": "Content paths to sweep, mount-rooted such as /Game/Characters (default /Game)",
+          "items": "string"
+        },
+        {
+          "name": "recursive",
+          "type": "boolean",
+          "required": false,
+          "description": "Include subfolders (default true)"
+        },
+        {
+          "name": "maxAssets",
+          "type": "integer",
+          "required": false,
+          "description": "Assets the sweep walks before it reports scanTruncated (default 20000, max 200000)"
+        },
+        {
+          "name": "maxIssues",
+          "type": "integer",
+          "required": false,
+          "description": "Findings of each kind to list (default 200); the counts are always complete"
+        },
+        {
+          "name": "checks",
+          "type": "array",
+          "required": false,
+          "description": "unreferenced | brokenReferences | duplicates | naming | redirectors (default all five)",
+          "items": "string"
+        },
+        {
+          "name": "classNames",
+          "type": "array",
+          "required": false,
+          "description": "Only these asset class names",
+          "items": "string"
+        },
+        {
+          "name": "excludePaths",
+          "type": "array",
+          "required": false,
+          "description": "Skip packages whose name starts with one of these",
+          "items": "string"
+        },
+        {
+          "name": "keepPaths",
+          "type": "array",
+          "required": false,
+          "description": "Never report or touch packages whose name starts with one of these, such as a folder loaded by name from config",
+          "items": "string"
+        },
+        {
+          "name": "duplicateMethod",
+          "type": "string",
+          "required": false,
+          "description": "content (same class, size and saved hash) | name (same name and class in several folders) | both (default)"
+        },
+        {
+          "name": "namingRules",
+          "type": "array",
+          "required": false,
+          "description": "Naming convention entries",
+          "items": "object",
+          "fields": [
+            {
+              "name": "class",
+              "type": "string",
+              "required": true,
+              "description": "Asset class name the registry reports, such as StaticMesh or WidgetBlueprint, not a class path"
+            },
+            {
+              "name": "prefix",
+              "type": "string",
+              "required": false,
+              "description": "Name prefix the class requires"
+            },
+            {
+              "name": "suffix",
+              "type": "string",
+              "required": false,
+              "description": "Name suffix the class requires"
+            }
+          ]
+        },
+        {
+          "name": "namingRuleMode",
+          "type": "string",
+          "required": false,
+          "description": "merge (default, the caller's rules over the built-in table) | replace"
+        },
+        {
+          "name": "includeWorlds",
+          "type": "boolean",
+          "required": false,
+          "description": "Report maps as unreferenced too (default false)"
+        },
+        {
+          "name": "ignoreRedirectorReferencers",
+          "type": "boolean",
+          "required": false,
+          "description": "Do not count a redirector stub as a referencer (default true)"
         }
       ]
     },
@@ -4149,53 +4926,6 @@
         }
       ]
     },
-    "batch_translate": {
-      "category": "level",
-      "params": [
-        {
-          "name": "offset",
-          "type": "vec3",
-          "required": true,
-          "description": "World-space offset added to each actor's location"
-        },
-        {
-          "name": "actorLabels",
-          "type": "array",
-          "required": false,
-          "description": "Exact actor editor labels",
-          "items": "string"
-        },
-        {
-          "name": "actorPaths",
-          "type": "array",
-          "required": false,
-          "description": "Full actor object paths",
-          "items": "string"
-        },
-        {
-          "name": "tag",
-          "type": "string",
-          "required": false,
-          "description": "Actor must carry this tag"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "actorLabels"
-            ],
-            [
-              "actorPaths"
-            ],
-            [
-              "tag"
-            ]
-          ]
-        }
-      ]
-    },
     "begin_skeleton_edit": {
       "category": "animation",
       "params": [
@@ -4410,72 +5140,148 @@
         }
       ]
     },
-    "bulk_line_trace": {
-      "category": "level",
+    "bulk_read_asset_properties": {
+      "category": "asset",
       "params": [
         {
-          "name": "traces",
+          "name": "propertyNames",
           "type": "array",
           "required": true,
-          "description": "Line traces, 1 to 256, each read the way line_trace reads its parameters",
+          "description": "Property paths to read off every matched asset; dotted paths walk nested structs (max 32)",
+          "items": "string"
+        },
+        {
+          "name": "assetPaths",
+          "type": "array",
+          "required": false,
+          "description": "The exact assets to read",
+          "items": "string"
+        },
+        {
+          "name": "directory",
+          "type": "string",
+          "required": false,
+          "description": "Content folder to sweep, narrowed by classNames"
+        },
+        {
+          "name": "recursive",
+          "type": "boolean",
+          "required": false,
+          "description": "Include subfolders of directory (default true)"
+        },
+        {
+          "name": "classNames",
+          "type": "array",
+          "required": false,
+          "description": "Only assets of these classes",
+          "items": "string"
+        },
+        {
+          "name": "matchSubclasses",
+          "type": "boolean",
+          "required": false,
+          "description": "Also match subclasses of classNames (default true)"
+        },
+        {
+          "name": "where",
+          "type": "array",
+          "required": false,
+          "description": "Predicates evaluated in the editor (max 24)",
           "items": "object",
           "fields": [
             {
-              "name": "start",
-              "type": "vec3",
+              "name": "field",
+              "type": "string",
               "required": true,
-              "description": "Ray start"
+              "description": "Dot path into the row, e.g. props.CullDistance.Max, className or suspect"
             },
             {
-              "name": "end",
-              "type": "vec3",
-              "required": false,
-              "description": "Ray end; pass end or direction and distance"
-            },
-            {
-              "name": "direction",
-              "type": "vec3",
-              "required": false,
-              "description": "Ray direction, normalised internally"
-            },
-            {
-              "name": "distance",
-              "type": "number",
-              "required": false,
-              "description": "Ray length when direction is given (default 200000)"
-            },
-            {
-              "name": "traceComplex",
-              "type": "boolean",
-              "required": false,
-              "description": "Trace per-triangle collision (default false)"
-            },
-            {
-              "name": "channel",
+              "name": "op",
               "type": "string",
               "required": false,
-              "description": "Collision channel (default Visibility)"
+              "description": "eq (default), ne, lt, lte, gt, gte, contains, notContains, startsWith, endsWith, in, notIn, exists, notExists, isNull, isNotNull, isTrue, isFalse"
             },
             {
-              "name": "ignoreActors",
-              "type": "array",
+              "name": "value",
+              "type": "any",
               "required": false,
-              "description": "Actor labels to skip",
-              "items": "string"
+              "description": "Operand the op compares against"
             }
           ]
         },
         {
-          "name": "world",
+          "name": "whereMode",
           "type": "string",
           "required": false,
-          "description": "World scope: editor (default) | pie"
+          "description": "all (default) | any"
         },
         {
-          "name": "pieInstance",
+          "name": "suspectOnly",
+          "type": "boolean",
+          "required": false,
+          "description": "Only rows where a requested property is absent or null"
+        },
+        {
+          "name": "groupBy",
+          "type": "string",
+          "required": false,
+          "description": "Dot path to group matches by (max 200 groups)"
+        },
+        {
+          "name": "countBy",
+          "type": "array",
+          "required": false,
+          "description": "Dot paths to build value histograms for (max 8)",
+          "items": "string"
+        },
+        {
+          "name": "sampleLimit",
           "type": "integer",
           "required": false,
-          "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
+          "description": "Sample asset names per group (default 5, max 25)"
+        },
+        {
+          "name": "countOnly",
+          "type": "boolean",
+          "required": false,
+          "description": "Return the aggregates without rows"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Rows to return (default 200, max 2000)"
+        },
+        {
+          "name": "startIndex",
+          "type": "integer",
+          "required": false,
+          "description": "First row index, for paging"
+        },
+        {
+          "name": "maxAssets",
+          "type": "integer",
+          "required": false,
+          "description": "Refuse to load more candidates than this (default 2000, max 20000)"
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": false,
+          "description": "Write every matched row to this JSON file and return the path instead of the rows"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "assetPaths"
+            ],
+            [
+              "directory"
+            ]
+          ]
         }
       ]
     },
@@ -4491,115 +5297,33 @@
         }
       ]
     },
-    "bulk_set_component_property": {
-      "category": "level",
+    "bulk_set_asset_properties": {
+      "category": "asset",
       "params": [
         {
-          "name": "componentName",
-          "type": "string",
-          "required": true,
-          "description": "Component name looked up on every matched actor"
-        },
-        {
-          "name": "propertyName",
-          "type": "string",
-          "required": true,
-          "description": "Property name, dotted paths supported"
-        },
-        {
-          "name": "value",
-          "type": "any",
-          "required": true,
-          "description": "Value to write; null clears an object reference"
-        },
-        {
-          "name": "actorLabels",
+          "name": "items",
           "type": "array",
-          "required": false,
-          "description": "Exact actor editor labels",
-          "items": "string"
+          "required": true,
+          "description": "Asset updates: [{assetPath, properties}], max 500",
+          "items": "object"
         },
         {
-          "name": "labelPrefix",
-          "type": "string",
-          "required": false,
-          "description": "Case-sensitive prefix over the actor's editor label"
-        },
-        {
-          "name": "labelContains",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring over the actor's editor label"
-        },
-        {
-          "name": "tag",
-          "type": "string",
-          "required": false,
-          "description": "Actor must carry this tag"
-        },
-        {
-          "name": "classFilter",
-          "type": "string",
-          "required": false,
-          "description": "Actor class, resolved as a class or matched as a substring"
-        },
-        {
-          "name": "folderPath",
-          "type": "string",
-          "required": false,
-          "description": "World Outliner folder, matched exactly"
-        },
-        {
-          "name": "folderPathPrefix",
-          "type": "string",
-          "required": false,
-          "description": "World Outliner folder prefix"
-        },
-        {
-          "name": "matchSubclasses",
+          "name": "save",
           "type": "boolean",
           "required": false,
-          "description": "Match subclasses of the class filter (default true)"
+          "description": "Save the changed packages (default true)"
         },
         {
           "name": "dryRun",
           "type": "boolean",
           "required": false,
-          "description": "Report what would change without writing"
+          "description": "Preflight and report without writing (default false)"
         },
         {
-          "name": "transactionLabel",
-          "type": "string",
+          "name": "continueOnError",
+          "type": "boolean",
           "required": false,
-          "description": "Undo-stack entry name"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "actorLabels"
-            ],
-            [
-              "labelPrefix"
-            ],
-            [
-              "labelContains"
-            ],
-            [
-              "tag"
-            ],
-            [
-              "classFilter"
-            ],
-            [
-              "folderPath"
-            ],
-            [
-              "folderPathPrefix"
-            ]
-          ]
+          "description": "Apply the items that passed preflight instead of aborting the batch (default false)"
         }
       ]
     },
@@ -4621,6 +5345,36 @@
           "required": true,
           "description": "[{widgetName, propertyName, value}] (#563)",
           "items": "object"
+        }
+      ]
+    },
+    "bulk_upsert_data_assets": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "items",
+          "type": "array",
+          "required": true,
+          "description": "DataAsset descriptors: [{name, packagePath, className, properties?}], max 500",
+          "items": "object"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "update (default) | skip | error"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Run the full preflight and report the planned statuses without writing (default false)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the changed packages (default true)"
         }
       ]
     },
@@ -5075,24 +5829,6 @@
         }
       ]
     },
-    "clear_level_script": {
-      "category": "level",
-      "params": [
-        {
-          "name": "dryRun",
-          "type": "boolean",
-          "required": false,
-          "description": "Report what would be removed without removing it (default true)"
-        },
-        {
-          "name": "save",
-          "type": "boolean",
-          "required": false,
-          "description": "Save only the current level after a successful clear and compile (default false)"
-        }
-      ],
-      "contractExempt": "The contract's dryRun=false clears the loaded Level Blueprint; nothing it reads fails first"
-    },
     "clear_material_instance_parameters": {
       "category": "material",
       "params": [
@@ -5327,6 +6063,32 @@
           "type": "boolean",
           "required": false,
           "description": "Persist on success (default true)"
+        }
+      ]
+    },
+    "compile_customizable_object": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "CustomizableObject asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "optimizationLevel",
+          "type": "string",
+          "required": false,
+          "description": "Optimization level enum name, e.g. None or Maximum (default: the compile function's own)"
+        },
+        {
+          "name": "textureCompression",
+          "type": "string",
+          "required": false,
+          "description": "None | Fast | HighQuality"
         }
       ]
     },
@@ -5836,79 +6598,6 @@
         }
       ]
     },
-    "convert_brushes_to_static_mesh": {
-      "category": "level",
-      "params": [
-        {
-          "name": "actorLabels",
-          "type": "array",
-          "required": false,
-          "description": "Exact actor editor labels",
-          "items": "string"
-        },
-        {
-          "name": "folderPath",
-          "type": "string",
-          "required": false,
-          "description": "World Outliner folder whose brushes are converted"
-        },
-        {
-          "name": "recursiveFolder",
-          "type": "boolean",
-          "required": false,
-          "description": "Also take brushes in folders nested under folderPath (default true)"
-        },
-        {
-          "name": "classFilter",
-          "type": "string",
-          "required": false,
-          "description": "Brush class to convert"
-        },
-        {
-          "name": "exactClass",
-          "type": "boolean",
-          "required": false,
-          "description": "Require classFilter to be the exact class (default true)"
-        },
-        {
-          "name": "destinationPath",
-          "type": "string",
-          "required": false,
-          "description": "Content path the generated static meshes are written to (default /Game/Meshes/Converted)"
-        },
-        {
-          "name": "dryRun",
-          "type": "boolean",
-          "required": false,
-          "description": "Report the verdict per brush without converting (default TRUE)"
-        },
-        {
-          "name": "allowSubtractive",
-          "type": "boolean",
-          "required": false,
-          "description": "Also convert subtractive brushes, which have no surface of their own"
-        },
-        {
-          "name": "includeVolumes",
-          "type": "boolean",
-          "required": false,
-          "description": "Also convert volume brushes, which are collision rather than visible geometry"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "actorLabels"
-            ],
-            [
-              "folderPath"
-            ]
-          ]
-        }
-      ]
-    },
     "count_actors_by_class": {
       "category": "level",
       "params": [
@@ -6245,6 +6934,30 @@
         }
       ]
     },
+    "create_curvetable": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/CurveTables)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns an existing table; error refuses"
+        }
+      ],
+      "contractExempt": "Creates and saves a CurveTable from the contract name before anything fails"
+    },
     "create_customizable_object": {
       "category": "asset",
       "params": [
@@ -6340,6 +7053,38 @@
           "description": "skip (default) returns an existing asset; error refuses"
         }
       ]
+    },
+    "create_folder": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": false,
+          "description": "Content folder to create, e.g. /Game/Foo"
+        },
+        {
+          "name": "paths",
+          "type": "array",
+          "required": false,
+          "description": "Content folders to create; combined with path",
+          "items": "string"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "path"
+            ],
+            [
+              "paths"
+            ]
+          ]
+        }
+      ],
+      "contractExempt": "Creates the folder the contract path names"
     },
     "create_foliage_type": {
       "category": "foliage",
@@ -6471,6 +7216,61 @@
         }
       ]
     },
+    "create_interchange_pipeline": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "Object path of the new pipeline"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Pipeline asset name, placed in packagePath"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for name (default /Game/Import)"
+        },
+        {
+          "name": "meshType",
+          "type": "string",
+          "required": false,
+          "description": "skeletal (default) | static"
+        },
+        {
+          "name": "options",
+          "type": "object",
+          "required": false,
+          "description": "Dotted-path overrides on the new pipeline, e.g. {'MeshPipeline.bBuildNanite': true}"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns an existing pipeline; error refuses"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "assetPath"
+            ],
+            [
+              "name"
+            ]
+          ]
+        }
+      ],
+      "contractExempt": "Creates and saves a pipeline asset from the contract path before anything fails"
+    },
     "create_landscape": {
       "category": "landscape",
       "params": [
@@ -6523,48 +7323,6 @@
           "description": "Actor label; an existing landscape with this label is reported rather than duplicated"
         }
       ]
-    },
-    "create_landscape_layer_info": {
-      "category": "landscape",
-      "params": [
-        {
-          "name": "layerName",
-          "type": "string",
-          "required": true,
-          "description": "Paint layer name"
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": false,
-          "description": "LayerInfo asset name (default LI_<layerName>)"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder for the LayerInfo asset (default /Game/Landscape/LayerInfos)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "When the asset already exists: skip (default) | error"
-        },
-        {
-          "name": "physMaterial",
-          "type": "string",
-          "required": false,
-          "description": "PhysicalMaterial asset path"
-        },
-        {
-          "name": "hardness",
-          "type": "number",
-          "required": false,
-          "description": "Layer hardness"
-        }
-      ],
-      "contractExempt": "Contract values reach CreatePackage before anything is loaded"
     },
     "create_macro": {
       "category": "blueprint",
@@ -6913,6 +7671,36 @@
         }
       ]
     },
+    "create_stringtable": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/StringTables)"
+        },
+        {
+          "name": "namespace",
+          "type": "string",
+          "required": false,
+          "description": "StringTable namespace"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns an existing table; error refuses"
+        }
+      ],
+      "contractExempt": "Creates and saves a StringTable from the contract name before anything fails"
+    },
     "create_subobject": {
       "category": "asset",
       "params": [
@@ -6962,6 +7750,82 @@
           "description": "Save the owning package (default true)"
         }
       ]
+    },
+    "create_user_defined_enum": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game)"
+        },
+        {
+          "name": "values",
+          "type": "array",
+          "required": false,
+          "description": "Initial enumerator display names",
+          "items": "string"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns an existing enum; error refuses"
+        }
+      ],
+      "contractExempt": "Creates and saves an enum package from the contract name before anything fails"
+    },
+    "create_user_defined_struct": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game)"
+        },
+        {
+          "name": "structFields",
+          "type": "array",
+          "required": false,
+          "description": "Initial members; with none the struct keeps its one default member",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Member display name"
+            },
+            {
+              "name": "type",
+              "type": "string",
+              "required": false,
+              "description": "MakePinType string: bool (default), int, int64, float, string, name, text, byte, a struct such as Vector, an enum, or an object class such as Actor"
+            }
+          ]
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns an existing struct; error refuses"
+        }
+      ],
+      "contractExempt": "Creates and saves a struct package from the contract name before anything fails"
     },
     "create_widget_animation": {
       "category": "widget",
@@ -7015,88 +7879,6 @@
           "type": "string",
           "required": false,
           "description": "Full actor object path; the unambiguous selector, and it wins over actorLabel"
-        }
-      ]
-    },
-    "delete_actors": {
-      "category": "level",
-      "params": [
-        {
-          "name": "labelPrefix",
-          "type": "string",
-          "required": false,
-          "description": "Case-sensitive prefix over the actor's editor label"
-        },
-        {
-          "name": "labelContains",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring over the actor's editor label"
-        },
-        {
-          "name": "nameContains",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring over the actor's internal name"
-        },
-        {
-          "name": "className",
-          "type": "string",
-          "required": false,
-          "description": "Case-sensitive substring over the class name"
-        },
-        {
-          "name": "tag",
-          "type": "string",
-          "required": false,
-          "description": "Actor must carry this tag"
-        },
-        {
-          "name": "classPathContains",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring of the generated class path"
-        },
-        {
-          "name": "classPathContainsAny",
-          "type": "array",
-          "required": false,
-          "description": "Match when the class path contains any of these case-insensitive substrings",
-          "items": "string"
-        },
-        {
-          "name": "dryRun",
-          "type": "boolean",
-          "required": false,
-          "description": "Report the matches without deleting them (default false)"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "labelPrefix"
-            ],
-            [
-              "labelContains"
-            ],
-            [
-              "nameContains"
-            ],
-            [
-              "className"
-            ],
-            [
-              "tag"
-            ],
-            [
-              "classPathContains"
-            ],
-            [
-              "classPathContainsAny"
-            ]
-          ]
         }
       ]
     },
@@ -7158,57 +7940,6 @@
           "type": "string",
           "required": true,
           "description": "Row to remove"
-        }
-      ]
-    },
-    "delete_exact_labeled_actors_in_levels": {
-      "category": "level",
-      "params": [
-        {
-          "name": "levels",
-          "type": "array",
-          "required": true,
-          "description": "Per-map targets, at most 16",
-          "items": "object",
-          "fields": [
-            {
-              "name": "levelPath",
-              "type": "string",
-              "required": true,
-              "description": "Long package name of the .umap, such as /Game/Maps/Arena"
-            },
-            {
-              "name": "actorLabels",
-              "type": "array",
-              "required": true,
-              "description": "Exact editor labels to delete in that map, at most 256, no duplicates",
-              "items": "string"
-            },
-            {
-              "name": "expectedClassPath",
-              "type": "string",
-              "required": false,
-              "description": "Actor class every matched actor must be, such as /Script/Engine.StaticMeshActor"
-            }
-          ]
-        },
-        {
-          "name": "dryRun",
-          "type": "boolean",
-          "required": false,
-          "description": "Preview without deleting (default TRUE)"
-        },
-        {
-          "name": "onMissing",
-          "type": "string",
-          "required": false,
-          "description": "error (default) | ignore"
-        },
-        {
-          "name": "restoreOriginalLevel",
-          "type": "boolean",
-          "required": false,
-          "description": "Reopen the map that was open before the call (default true)"
         }
       ]
     },
@@ -7541,6 +8272,26 @@
           "type": "boolean",
           "required": false,
           "description": "Force a synchronous rescan first, which evicts pending-kill ghosts"
+        }
+      ]
+    },
+    "diff_asset": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Blueprint, Skeleton or SkeletalMesh to diff from",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "otherPath",
+          "type": "string",
+          "required": true,
+          "description": "Asset of the same class to compare against"
         }
       ]
     },
@@ -8000,6 +8751,50 @@
           "type": "number",
           "required": false,
           "description": "Enumerator index for rename_value and remove_value"
+        }
+      ]
+    },
+    "edit_user_defined_struct": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "UserDefinedStruct asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "op",
+          "type": "string",
+          "required": true,
+          "description": "add_field | rename_field | set_field_type | remove_field"
+        },
+        {
+          "name": "fieldName",
+          "type": "string",
+          "required": false,
+          "description": "Member by friendly or internal name; add_field names the new member with it"
+        },
+        {
+          "name": "fieldGuid",
+          "type": "string",
+          "required": false,
+          "description": "Member by GUID, stable across renames; wins over fieldName"
+        },
+        {
+          "name": "newDisplayName",
+          "type": "string",
+          "required": false,
+          "description": "New display name for rename_field; add_field falls back to it for the name"
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "required": false,
+          "description": "MakePinType string for add_field (default bool) and set_field_type"
         }
       ]
     },
@@ -8494,6 +9289,175 @@
         }
       ]
     },
+    "fix_asset_hygiene": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "fix",
+          "type": "string",
+          "required": true,
+          "description": "naming (rename to the convention) | unreferenced (quarantine or delete)"
+        },
+        {
+          "name": "assetPaths",
+          "type": "array",
+          "required": false,
+          "description": "The exact assets to act on, the safest way to drive it",
+          "items": "string"
+        },
+        {
+          "name": "directory",
+          "type": "string",
+          "required": false,
+          "description": "Content path to sweep, added to directories (default /Game)"
+        },
+        {
+          "name": "directories",
+          "type": "array",
+          "required": false,
+          "description": "Content paths to sweep, mount-rooted such as /Game/Characters (default /Game)",
+          "items": "string"
+        },
+        {
+          "name": "recursive",
+          "type": "boolean",
+          "required": false,
+          "description": "Include subfolders (default true)"
+        },
+        {
+          "name": "maxAssets",
+          "type": "integer",
+          "required": false,
+          "description": "Assets the sweep walks before it reports scanTruncated (default 20000, max 200000)"
+        },
+        {
+          "name": "classNames",
+          "type": "array",
+          "required": false,
+          "description": "Only these asset class names",
+          "items": "string"
+        },
+        {
+          "name": "excludePaths",
+          "type": "array",
+          "required": false,
+          "description": "Skip packages whose name starts with one of these",
+          "items": "string"
+        },
+        {
+          "name": "keepPaths",
+          "type": "array",
+          "required": false,
+          "description": "Never report or touch packages whose name starts with one of these, such as a folder loaded by name from config",
+          "items": "string"
+        },
+        {
+          "name": "namingRules",
+          "type": "array",
+          "required": false,
+          "description": "Naming convention entries",
+          "items": "object",
+          "fields": [
+            {
+              "name": "class",
+              "type": "string",
+              "required": true,
+              "description": "Asset class name the registry reports, such as StaticMesh or WidgetBlueprint, not a class path"
+            },
+            {
+              "name": "prefix",
+              "type": "string",
+              "required": false,
+              "description": "Name prefix the class requires"
+            },
+            {
+              "name": "suffix",
+              "type": "string",
+              "required": false,
+              "description": "Name suffix the class requires"
+            }
+          ]
+        },
+        {
+          "name": "namingRuleMode",
+          "type": "string",
+          "required": false,
+          "description": "merge (default, the caller's rules over the built-in table) | replace"
+        },
+        {
+          "name": "unreferencedAction",
+          "type": "string",
+          "required": false,
+          "description": "quarantine (default, undoable) | delete (permanent, no rollback)"
+        },
+        {
+          "name": "quarantineFolder",
+          "type": "string",
+          "required": false,
+          "description": "Where quarantined assets move, keeping their folder shape (default /Game/Quarantine)"
+        },
+        {
+          "name": "ignoreRedirectorReferencers",
+          "type": "boolean",
+          "required": false,
+          "description": "Do not count a redirector stub as a referencer (default true)"
+        },
+        {
+          "name": "maxFixes",
+          "type": "integer",
+          "required": false,
+          "description": "Refuse the call past this many assets (default 100)"
+        },
+        {
+          "name": "continueOnError",
+          "type": "boolean",
+          "required": false,
+          "description": "Apply the candidates that passed preflight instead of aborting (default false)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save what changed (default true)"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Name every asset and destination without changing anything (default TRUE)"
+        }
+      ]
+    },
+    "fixup_redirectors": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "paths",
+          "type": "array",
+          "required": true,
+          "description": "Redirector packages, or the folders holding them",
+          "items": "string"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Report the redirectors, referencers and packages it would load and save, and stop (default false)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Run the explicit save pass (default true); the editor's own fix-up writes what it can regardless"
+        },
+        {
+          "name": "allowProjectWide",
+          "type": "boolean",
+          "required": false,
+          "description": "Permit a path naming a whole content root (default false)"
+        }
+      ]
+    },
     "flush_blueprint_component_templates": {
       "category": "blueprint",
       "params": [
@@ -8636,6 +9600,134 @@
           "type": "number",
           "required": false,
           "description": "Raster resolution for the result's overlap estimate (default 512)"
+        }
+      ]
+    },
+    "generate_mesh_collision": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh whose collision to build or clear",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "op",
+          "type": "string",
+          "required": false,
+          "description": "generate (default) | clear"
+        },
+        {
+          "name": "method",
+          "type": "string",
+          "required": false,
+          "description": "AlignedBoxes | OrientedBoxes | MinimalSpheres | Capsules | ConvexHulls (default) | SweptHulls | MinVolumeShapes | LevelSets"
+        },
+        {
+          "name": "maxConvexHulls",
+          "type": "integer",
+          "required": false,
+          "description": "Convex hulls the decomposition may produce (default 1)"
+        },
+        {
+          "name": "hullTargetFaceCount",
+          "type": "integer",
+          "required": false,
+          "description": "Faces to simplify each hull down to (default 25)"
+        },
+        {
+          "name": "maxShapeCount",
+          "type": "integer",
+          "required": false,
+          "description": "Cap on the shapes produced (default 0, uncapped)"
+        },
+        {
+          "name": "minThickness",
+          "type": "number",
+          "required": false,
+          "description": "Thinnest a shape may be, in centimetres (default 1)"
+        },
+        {
+          "name": "autoDetectSpheres",
+          "type": "boolean",
+          "required": false,
+          "description": "Use a sphere where one fits (default true)"
+        },
+        {
+          "name": "autoDetectBoxes",
+          "type": "boolean",
+          "required": false,
+          "description": "Use a box where one fits (default true)"
+        },
+        {
+          "name": "autoDetectCapsules",
+          "type": "boolean",
+          "required": false,
+          "description": "Use a capsule where one fits (default true)"
+        },
+        {
+          "name": "simplifyHulls",
+          "type": "boolean",
+          "required": false,
+          "description": "Simplify each hull down to hullTargetFaceCount (default true)"
+        },
+        {
+          "name": "removeFullyContainedShapes",
+          "type": "boolean",
+          "required": false,
+          "description": "Drop shapes entirely inside another (default true)"
+        },
+        {
+          "name": "decompositionErrorTolerance",
+          "type": "number",
+          "required": false,
+          "description": "Volume error the decomposition may accept before splitting further (default 0)"
+        },
+        {
+          "name": "decompositionSearchFactor",
+          "type": "number",
+          "required": false,
+          "description": "0 to 1, how hard the decomposition searches for a better split (default 0.5)"
+        },
+        {
+          "name": "sweptHullAxis",
+          "type": "string",
+          "required": false,
+          "description": "X | Y | Z (default) | SmallestBoxDimension | SmallestVolume (method SweptHulls)"
+        },
+        {
+          "name": "markAsCustomized",
+          "type": "boolean",
+          "required": false,
+          "description": "Mark the collision customized so a reimport keeps it (default true)"
+        },
+        {
+          "name": "lodType",
+          "type": "string",
+          "required": false,
+          "description": "MaxAvailable (default, ignores lodIndex) | HiResSourceModel | SourceModel | RenderData"
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "LOD to read when lodType names one (default 0)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the written asset (default true)"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Run the operation and report the result without writing (default false)"
         }
       ]
     },
@@ -8907,6 +9999,56 @@
           "type": "boolean",
           "required": false,
           "description": "Include soft dependencies (default true)"
+        }
+      ]
+    },
+    "get_asset_properties": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Asset path; a Blueprint path reads its generated-class CDO",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "propertyName",
+          "type": "string",
+          "required": false,
+          "description": "One property to read; dotted and indexed paths walk structs, arrays and instanced subobjects"
+        },
+        {
+          "name": "includeValues",
+          "type": "boolean",
+          "required": false,
+          "description": "Include each property's value (default true)"
+        },
+        {
+          "name": "valueFormat",
+          "type": "string",
+          "required": false,
+          "description": "text (default, Unreal export text) | json (structured values)"
+        },
+        {
+          "name": "expandDepth",
+          "type": "integer",
+          "required": false,
+          "description": "Inline the properties of subobjects the asset owns to this depth, 0-5 (default 0)"
+        },
+        {
+          "name": "expandExternal",
+          "type": "boolean",
+          "required": false,
+          "description": "Also follow references to other assets when expanding (default false)"
+        },
+        {
+          "name": "maxExpandedObjects",
+          "type": "integer",
+          "required": false,
+          "description": "Cap on expanded objects (default 64)"
         }
       ]
     },
@@ -10690,7 +11832,7 @@
         },
         {
           "name": "maxResults",
-          "type": "number",
+          "type": "integer",
           "required": false,
           "description": "Most ids to return (default 1000)"
         }
@@ -10914,60 +12056,6 @@
           "description": "SkeletalMesh asset path",
           "aliases": [
             "path"
-          ]
-        }
-      ]
-    },
-    "get_spline_info": {
-      "category": "level",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Actor editor label; pass actorLabel or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; the unambiguous selector, and it wins over actorLabel"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "Spline component, when the actor has several"
-        },
-        {
-          "name": "projectPoint",
-          "type": "vec3",
-          "required": false,
-          "description": "World point to project onto the spline"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: editor (default) | pie"
-        },
-        {
-          "name": "pieInstance",
-          "type": "integer",
-          "required": false,
-          "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "actorLabel"
-            ],
-            [
-              "actorPath"
-            ]
           ]
         }
       ]
@@ -11979,6 +13067,37 @@
         }
       ]
     },
+    "import_texture_batch": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "items",
+          "type": "array",
+          "required": true,
+          "description": "Textures to import: [{filePath, packagePath?, name?, replaceExisting?}]",
+          "items": "object"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for items that name none (default /Game/Textures)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the imported textures (default true)"
+        },
+        {
+          "name": "automated",
+          "type": "boolean",
+          "required": false,
+          "description": "Suppress interactive dialogs (default true)"
+        }
+      ],
+      "contractExempt": "Runs an import batch under the contract values; an empty batch is not refused"
+    },
     "init_asc": {
       "category": "gas",
       "params": [
@@ -12434,6 +13553,53 @@
           "type": "string",
           "required": true,
           "description": "StaticMesh, SkeletalMesh or Skeleton asset path"
+        }
+      ]
+    },
+    "list_assets": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "directory",
+          "type": "string",
+          "required": false,
+          "description": "Content path to list (default /Game)"
+        },
+        {
+          "name": "classFilter",
+          "type": "string",
+          "required": false,
+          "description": "Asset class name, exact or substring",
+          "aliases": [
+            "typeFilter"
+          ]
+        },
+        {
+          "name": "recursive",
+          "type": "boolean",
+          "required": false,
+          "description": "Include subfolders (default true)"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1 to 5000 (default 500)",
+          "aliases": [
+            "maxResults"
+          ]
+        },
+        {
+          "name": "offset",
+          "type": "number",
+          "required": false,
+          "description": "Refused: the row offset was replaced by cursor paging, because a row number cannot report that the folder changed. Use cursor and limit"
         }
       ]
     },
@@ -13168,6 +14334,10 @@
         }
       ]
     },
+    "list_locks": {
+      "category": "asset",
+      "params": []
+    },
     "list_mass_types": {
       "category": "gameplay",
       "params": [
@@ -13883,6 +15053,32 @@
         }
       ]
     },
+    "list_textures": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "directory",
+          "type": "string",
+          "required": false,
+          "description": "Only textures whose object path starts with this (default /Game/)"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1 to 2000 (default 50)",
+          "aliases": [
+            "maxResults"
+          ]
+        }
+      ]
+    },
     "list_trace_channels": {
       "category": "editor",
       "params": [
@@ -14046,78 +15242,6 @@
       "category": "project",
       "params": []
     },
-    "load_actor_descs": {
-      "category": "level",
-      "params": [
-        {
-          "name": "mode",
-          "type": "string",
-          "required": false,
-          "description": "pin (make resident, default) | unpin (release)"
-        },
-        {
-          "name": "filter",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring over label, name, class and path"
-        },
-        {
-          "name": "className",
-          "type": "string",
-          "required": false,
-          "description": "Actor class filter"
-        },
-        {
-          "name": "guids",
-          "type": "array",
-          "required": false,
-          "description": "Exact actor GUIDs",
-          "items": "string"
-        },
-        {
-          "name": "bounds",
-          "type": "object",
-          "required": false,
-          "description": "{min:{x,y,z}, max:{x,y,z}} intersection test"
-        },
-        {
-          "name": "loadedOnly",
-          "type": "boolean",
-          "required": false,
-          "description": "Only actors currently streamed in"
-        },
-        {
-          "name": "unloadedOnly",
-          "type": "boolean",
-          "required": false,
-          "description": "Only actors on disk that are not streamed in"
-        },
-        {
-          "name": "maxActors",
-          "type": "integer",
-          "required": false,
-          "description": "Refuse to act on more than this many actors (default 256)"
-        },
-        {
-          "name": "dryRun",
-          "type": "boolean",
-          "required": false,
-          "description": "Report what would change without writing"
-        }
-      ]
-    },
-    "load_level": {
-      "category": "level",
-      "params": [
-        {
-          "name": "levelPath",
-          "type": "string",
-          "required": true,
-          "description": "Map package to open"
-        }
-      ],
-      "contractExempt": "Ends any play session, collects garbage and swaps the open map before the contract path can fail"
-    },
     "measure_mesh_geometry": {
       "category": "asset",
       "params": [
@@ -14164,6 +15288,183 @@
           "type": "boolean",
           "required": false,
           "description": "Run the merge now rather than on the next editor tick (default true)"
+        }
+      ]
+    },
+    "mesh_boolean": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": true,
+          "description": "union | subtract | intersect | trimInside | trimOutside | newPolyGroupInside | newPolyGroupOutside"
+        },
+        {
+          "name": "targetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh being cut; the result inherits its transform, materials, collision and Nanite setting"
+        },
+        {
+          "name": "toolPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh doing the cutting"
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": false,
+          "description": "Asset to write (default '<targetPath>_<Operation>')"
+        },
+        {
+          "name": "inPlace",
+          "type": "boolean",
+          "required": false,
+          "description": "Overwrite targetPath instead (default false); not with outputPath, and the only destructive form"
+        },
+        {
+          "name": "targetTransform",
+          "type": "object",
+          "required": false,
+          "description": "Where the target sits for the boolean (default identity)",
+          "fields": [
+            {
+              "name": "location",
+              "type": "vec3",
+              "required": false,
+              "description": "Translation"
+            },
+            {
+              "name": "rotation",
+              "type": "rotator",
+              "required": false,
+              "description": "Rotation"
+            },
+            {
+              "name": "scale",
+              "type": "vec3",
+              "required": false,
+              "description": "Scale (default 1)"
+            }
+          ]
+        },
+        {
+          "name": "toolTransform",
+          "type": "object",
+          "required": false,
+          "description": "Where the tool sits for the boolean (default identity)",
+          "fields": [
+            {
+              "name": "location",
+              "type": "vec3",
+              "required": false,
+              "description": "Translation"
+            },
+            {
+              "name": "rotation",
+              "type": "rotator",
+              "required": false,
+              "description": "Rotation"
+            },
+            {
+              "name": "scale",
+              "type": "vec3",
+              "required": false,
+              "description": "Scale (default 1)"
+            }
+          ]
+        },
+        {
+          "name": "lodType",
+          "type": "string",
+          "required": false,
+          "description": "MaxAvailable (default, ignores lodIndex) | HiResSourceModel | SourceModel | RenderData"
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "LOD of each input to read when lodType names one (default 0)"
+        },
+        {
+          "name": "fillHoles",
+          "type": "boolean",
+          "required": false,
+          "description": "Close the holes the cut opens (default true)"
+        },
+        {
+          "name": "simplifyOutput",
+          "type": "boolean",
+          "required": false,
+          "description": "Collapse coplanar triangles the boolean introduced (default true)"
+        },
+        {
+          "name": "simplifyPlanarTolerance",
+          "type": "number",
+          "required": false,
+          "description": "How far from coplanar still counts as coplanar when simplifying (default 0.01)"
+        },
+        {
+          "name": "allowEmptyResult",
+          "type": "boolean",
+          "required": false,
+          "description": "Accept a result with no triangles (default false)"
+        },
+        {
+          "name": "recomputeNormals",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompute normals on the written mesh (default false)"
+        },
+        {
+          "name": "recomputeTangents",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompute tangents on the written mesh (default false)"
+        },
+        {
+          "name": "removeDegenerates",
+          "type": "boolean",
+          "required": false,
+          "description": "Drop degenerate triangles when writing back into an existing mesh (default false)"
+        },
+        {
+          "name": "copyCollisionFromTarget",
+          "type": "boolean",
+          "required": false,
+          "description": "Copy the target's simple collision onto the result (default true)"
+        },
+        {
+          "name": "copyMaterialsFromTarget",
+          "type": "boolean",
+          "required": false,
+          "description": "Copy the target's material slots onto the result (default true)"
+        },
+        {
+          "name": "nanite",
+          "type": "string",
+          "required": false,
+          "description": "inherit (default, match the target) | enable | disable"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When outputPath exists: error (default) | replace"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Run the boolean and report the counts without writing (default false)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the written asset (default true)"
         }
       ]
     },
@@ -15071,144 +16372,6 @@
         }
       ]
     },
-    "nudge_component": {
-      "category": "level",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Actor editor label; pass actorLabel or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; the unambiguous selector, and it wins over actorLabel"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": true,
-          "description": "Exact SceneComponent instance name"
-        },
-        {
-          "name": "frame",
-          "type": "string",
-          "required": false,
-          "description": "Frame for translation and axis rotation: world | actor (default) | parent | component"
-        },
-        {
-          "name": "translationDelta",
-          "type": "object",
-          "required": false,
-          "description": "Frame-relative translation in centimetres",
-          "fields": [
-            {
-              "name": "forwardCm",
-              "type": "number",
-              "required": false,
-              "description": "Along the frame's forward axis"
-            },
-            {
-              "name": "rightCm",
-              "type": "number",
-              "required": false,
-              "description": "Along the frame's right axis"
-            },
-            {
-              "name": "upCm",
-              "type": "number",
-              "required": false,
-              "description": "Along the frame's up axis"
-            }
-          ]
-        },
-        {
-          "name": "axisRotation",
-          "type": "object",
-          "required": false,
-          "description": "Quaternion rotation about one frame axis; not with viewRotation",
-          "fields": [
-            {
-              "name": "axis",
-              "type": "string",
-              "required": true,
-              "description": "forward | right | up"
-            },
-            {
-              "name": "degrees",
-              "type": "number",
-              "required": true,
-              "description": "Signed rotation in degrees"
-            }
-          ]
-        },
-        {
-          "name": "viewRotation",
-          "type": "object",
-          "required": false,
-          "description": "Observer-relative rotation in the selected frame; not with axisRotation",
-          "fields": [
-            {
-              "name": "viewFrom",
-              "type": "string",
-              "required": true,
-              "description": "front | back | right | left | above | below"
-            },
-            {
-              "name": "direction",
-              "type": "string",
-              "required": true,
-              "description": "clockwise | counterclockwise"
-            },
-            {
-              "name": "degrees",
-              "type": "number",
-              "required": true,
-              "description": "Rotation in degrees, greater than zero"
-            }
-          ]
-        },
-        {
-          "name": "scaleMultiplier",
-          "type": "number",
-          "required": false,
-          "description": "Uniform relative-scale multiplier, greater than zero"
-        },
-        {
-          "name": "dryRun",
-          "type": "boolean",
-          "required": false,
-          "description": "Inspect and preview the requested transform without writing (default false)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: editor (default) | pie"
-        },
-        {
-          "name": "pieInstance",
-          "type": "integer",
-          "required": false,
-          "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "actorLabel"
-            ],
-            [
-              "actorPath"
-            ]
-          ]
-        }
-      ]
-    },
     "open_asset": {
       "category": "editor",
       "params": [
@@ -15394,155 +16557,6 @@
           "type": "integer",
           "required": false,
           "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
-        }
-      ]
-    },
-    "place_actors_batch": {
-      "category": "level",
-      "params": [
-        {
-          "name": "actors",
-          "type": "array",
-          "required": true,
-          "description": "StaticMeshActors to spawn; meshes load once per path",
-          "items": "object",
-          "fields": [
-            {
-              "name": "staticMesh",
-              "type": "string",
-              "required": true,
-              "description": "Static mesh asset path"
-            },
-            {
-              "name": "location",
-              "type": "vec3",
-              "required": false,
-              "description": "World location"
-            },
-            {
-              "name": "rotation",
-              "type": "rotator",
-              "required": false,
-              "description": "World rotation"
-            },
-            {
-              "name": "scale",
-              "type": "vec3",
-              "required": false,
-              "description": "World scale"
-            },
-            {
-              "name": "label",
-              "type": "string",
-              "required": false,
-              "description": "Actor label"
-            }
-          ]
-        }
-      ]
-    },
-    "place_skeletal_actor": {
-      "category": "level",
-      "params": [
-        {
-          "name": "skeletalMesh",
-          "type": "string",
-          "required": false,
-          "description": "SkeletalMesh asset path to spawn; null is refused here",
-          "nullable": true
-        },
-        {
-          "name": "meshPath",
-          "type": "string",
-          "required": false,
-          "description": "The older spelling of skeletalMesh"
-        },
-        {
-          "name": "label",
-          "type": "string",
-          "required": false,
-          "description": "Actor label; an existing actor with this label is reported rather than duplicated"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "When the label or name is taken: skip (default) | error"
-        },
-        {
-          "name": "transform",
-          "type": "object",
-          "required": false,
-          "description": "Spawn transform; location, rotation and scale given on their own win over its parts",
-          "fields": [
-            {
-              "name": "location",
-              "type": "vec3",
-              "required": false,
-              "description": "World location"
-            },
-            {
-              "name": "rotation",
-              "type": "rotator",
-              "required": false,
-              "description": "World rotation"
-            },
-            {
-              "name": "scale",
-              "type": "vec3",
-              "required": false,
-              "description": "Actor scale"
-            }
-          ]
-        },
-        {
-          "name": "location",
-          "type": "vec3",
-          "required": false,
-          "description": "World location"
-        },
-        {
-          "name": "rotation",
-          "type": "rotator",
-          "required": false,
-          "description": "World rotation"
-        },
-        {
-          "name": "scale",
-          "type": "vec3",
-          "required": false,
-          "description": "Actor scale"
-        },
-        {
-          "name": "materials",
-          "type": "array",
-          "required": false,
-          "description": "Per-slot component material override paths; index is the slot, and a null or empty entry leaves that slot alone"
-        },
-        {
-          "name": "animSequence",
-          "type": "string",
-          "required": false,
-          "description": "Single-node preview animation"
-        },
-        {
-          "name": "loop",
-          "type": "boolean",
-          "required": false,
-          "description": "Loop the preview animation (default true)"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "skeletalMesh"
-            ],
-            [
-              "meshPath"
-            ]
-          ]
         }
       ]
     },
@@ -15744,179 +16758,6 @@
           "type": "vec3",
           "required": true,
           "description": "World point to project onto the navmesh"
-        }
-      ]
-    },
-    "query_components": {
-      "category": "level",
-      "params": [
-        {
-          "name": "componentClass",
-          "type": "string",
-          "required": false,
-          "description": "Component class, resolved as a class or matched as a substring"
-        },
-        {
-          "name": "actorClass",
-          "type": "string",
-          "required": false,
-          "description": "Owning actor class, resolved as a class or matched as a substring"
-        },
-        {
-          "name": "matchSubclasses",
-          "type": "boolean",
-          "required": false,
-          "description": "Match subclasses of the class filter (default true)"
-        },
-        {
-          "name": "componentNameContains",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring over the component instance name"
-        },
-        {
-          "name": "actorLabelPrefix",
-          "type": "string",
-          "required": false,
-          "description": "Case-sensitive prefix over the actor's editor label"
-        },
-        {
-          "name": "actorLabelContains",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring over the actor's editor label"
-        },
-        {
-          "name": "actorTag",
-          "type": "string",
-          "required": false,
-          "description": "Actor must carry this tag"
-        },
-        {
-          "name": "folderPath",
-          "type": "string",
-          "required": false,
-          "description": "World Outliner folder, matched exactly"
-        },
-        {
-          "name": "folderPathPrefix",
-          "type": "string",
-          "required": false,
-          "description": "World Outliner folder prefix"
-        },
-        {
-          "name": "fields",
-          "type": "array",
-          "required": false,
-          "description": "Field groups: transform, bounds, localBounds, shadow, nanite, navigation, tick, materials, mesh, decal, health",
-          "items": "string"
-        },
-        {
-          "name": "propertyNames",
-          "type": "array",
-          "required": false,
-          "description": "Component UPROPERTY names projected under props.*, at most 32",
-          "items": "string"
-        },
-        {
-          "name": "where",
-          "type": "array",
-          "required": false,
-          "description": "Predicates evaluated in the editor, at most 24",
-          "items": "object",
-          "fields": [
-            {
-              "name": "field",
-              "type": "string",
-              "required": true,
-              "description": "Dot path into the row, such as shadow.effectiveCastShadow or props.CullDistance"
-            },
-            {
-              "name": "op",
-              "type": "string",
-              "required": false,
-              "description": "eq (default) | ne | lt | lte | gt | gte | contains | notContains | startsWith | endsWith | in | notIn | exists | notExists | isNull | isNotNull | isTrue | isFalse"
-            },
-            {
-              "name": "value",
-              "type": "any",
-              "required": false,
-              "description": "Value the operator compares against"
-            }
-          ]
-        },
-        {
-          "name": "whereMode",
-          "type": "string",
-          "required": false,
-          "description": "all (default) | any"
-        },
-        {
-          "name": "suspectOnly",
-          "type": "boolean",
-          "required": false,
-          "description": "Shorthand for where health.suspect isTrue"
-        },
-        {
-          "name": "groupBy",
-          "type": "string",
-          "required": false,
-          "description": "Dot path to group matches by; counts components, not instances"
-        },
-        {
-          "name": "countBy",
-          "type": "array",
-          "required": false,
-          "description": "Dot paths to build value histograms for, at most 8",
-          "items": "string"
-        },
-        {
-          "name": "sampleLimit",
-          "type": "integer",
-          "required": false,
-          "description": "Sample labels per group (default 5, max 25)"
-        },
-        {
-          "name": "countOnly",
-          "type": "boolean",
-          "required": false,
-          "description": "Return the aggregates without rows"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows returned (default 200, max 2000)"
-        },
-        {
-          "name": "startIndex",
-          "type": "integer",
-          "required": false,
-          "description": "First row index; rows are sorted so the index is stable across calls"
-        },
-        {
-          "name": "duplicateTransformTolerance",
-          "type": "number",
-          "required": false,
-          "description": "Centimetre bucket for duplicate-transform detection"
-        },
-        {
-          "name": "levelPath",
-          "type": "string",
-          "required": false,
-          "description": "Query another map: opened temporarily, refused while anything is dirty, and the open map restored"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: editor (default) | pie"
-        },
-        {
-          "name": "pieInstance",
-          "type": "integer",
-          "required": false,
-          "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
         }
       ]
     },
@@ -16177,6 +17018,56 @@
           "type": "number",
           "required": false,
           "description": "Nodes reported per graph (default 500, max 5000)"
+        }
+      ]
+    },
+    "read_asset_properties": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Asset path; a Blueprint path reads its generated-class CDO",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "propertyName",
+          "type": "string",
+          "required": false,
+          "description": "One property to read; dotted and indexed paths walk structs, arrays and instanced subobjects"
+        },
+        {
+          "name": "includeValues",
+          "type": "boolean",
+          "required": false,
+          "description": "Include each property's value (default false)"
+        },
+        {
+          "name": "valueFormat",
+          "type": "string",
+          "required": false,
+          "description": "text (default, Unreal export text) | json (structured values)"
+        },
+        {
+          "name": "expandDepth",
+          "type": "integer",
+          "required": false,
+          "description": "Inline the properties of subobjects the asset owns to this depth, 0-5 (default 0)"
+        },
+        {
+          "name": "expandExternal",
+          "type": "boolean",
+          "required": false,
+          "description": "Also follow references to other assets when expanding (default false)"
+        },
+        {
+          "name": "maxExpandedObjects",
+          "type": "integer",
+          "required": false,
+          "description": "Cap on expanded objects (default 64)"
         }
       ]
     },
@@ -16973,6 +17864,59 @@
         }
       ]
     },
+    "read_skeletal_mesh_build_settings": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh asset path"
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "LOD to target (default 0); not with allLods"
+        },
+        {
+          "name": "allLods",
+          "type": "boolean",
+          "required": false,
+          "description": "Target every LOD instead of one; not with lodIndex"
+        }
+      ]
+    },
+    "read_skeletal_mesh_skin_weights": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh asset path"
+        },
+        {
+          "name": "vertexIndices",
+          "type": "array",
+          "required": true,
+          "description": "Source MeshDescription vertex IDs to read (1-256)",
+          "items": "integer"
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Source LOD (default 0); generated LODs without source geometry are refused"
+        },
+        {
+          "name": "profileName",
+          "type": "string",
+          "required": false,
+          "description": "Existing skin-weight profile; omit or pass 'default' for the default profile"
+        }
+      ]
+    },
     "read_sound_routing": {
       "category": "audio",
       "params": [
@@ -17261,6 +18205,40 @@
         }
       ]
     },
+    "recenter_pivot": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "StaticMesh to recenter",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "assetPaths",
+          "type": "array",
+          "required": false,
+          "description": "StaticMeshes to recenter together; the first sets the reference pivot",
+          "items": "string"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "assetPath"
+            ],
+            [
+              "assetPaths"
+            ]
+          ]
+        }
+      ]
+    },
     "recompile_material": {
       "category": "material",
       "params": [
@@ -17279,97 +18257,6 @@
           "type": "boolean",
           "required": false,
           "description": "Cascade to every MaterialInstanceConstant whose parent chain reaches this material (#421)"
-        }
-      ]
-    },
-    "recreate_physics_state": {
-      "category": "level",
-      "params": [
-        {
-          "name": "actorLabels",
-          "type": "array",
-          "required": false,
-          "description": "Exact actor editor labels",
-          "items": "string"
-        },
-        {
-          "name": "labelPrefix",
-          "type": "string",
-          "required": false,
-          "description": "Case-sensitive prefix over the actor's editor label"
-        },
-        {
-          "name": "tag",
-          "type": "string",
-          "required": false,
-          "description": "Actor must carry this tag"
-        },
-        {
-          "name": "classFilter",
-          "type": "string",
-          "required": false,
-          "description": "Actor class the owners must be"
-        },
-        {
-          "name": "componentClass",
-          "type": "string",
-          "required": false,
-          "description": "Primitive component class to rebuild"
-        },
-        {
-          "name": "componentNameContains",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring over the component instance name"
-        },
-        {
-          "name": "dryRun",
-          "type": "boolean",
-          "required": false,
-          "description": "List what would be rebuilt without rebuilding it (default TRUE)"
-        },
-        {
-          "name": "maxComponents",
-          "type": "integer",
-          "required": false,
-          "description": "Refuse to rebuild more than this many components (default 2000, max 20000)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: editor (default) | pie"
-        },
-        {
-          "name": "pieInstance",
-          "type": "integer",
-          "required": false,
-          "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "actorLabels"
-            ],
-            [
-              "labelPrefix"
-            ],
-            [
-              "tag"
-            ],
-            [
-              "classFilter"
-            ],
-            [
-              "componentClass"
-            ],
-            [
-              "componentNameContains"
-            ]
-          ]
         }
       ]
     },
@@ -17491,58 +18378,6 @@
           "type": "string",
           "required": true,
           "description": "UScriptStruct to reflect, by name or path"
-        }
-      ]
-    },
-    "refresh_landscape_physical_material_collision": {
-      "category": "landscape",
-      "params": [
-        {
-          "name": "actorLabels",
-          "type": "array",
-          "required": false,
-          "description": "Exact editor labels of loaded LandscapeStreamingProxy actors, 1 to 256",
-          "items": "string"
-        },
-        {
-          "name": "guids",
-          "type": "array",
-          "required": false,
-          "description": "Actor GUIDs of loaded LandscapeStreamingProxy actors, 1 to 256",
-          "items": "string"
-        },
-        {
-          "name": "bounds",
-          "type": "object",
-          "required": false,
-          "description": "World-space box; proxies intersecting it are refreshed",
-          "fields": [
-            {
-              "name": "min",
-              "type": "vec3",
-              "required": true,
-              "description": "Box minimum"
-            },
-            {
-              "name": "max",
-              "type": "vec3",
-              "required": true,
-              "description": "Box maximum"
-            }
-          ]
-        },
-        {
-          "name": "maxActors",
-          "type": "integer",
-          "required": false,
-          "description": "Refuse more matches than this, 1 to 1024 (default 256)"
-        },
-        {
-          "name": "save",
-          "type": "boolean",
-          "required": false,
-          "description": "Saving is not supported; the refresh is in memory only. Omit it or pass false",
-          "literal": false
         }
       ]
     },
@@ -19428,6 +20263,51 @@
         }
       ]
     },
+    "rename_struct_field": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "UserDefinedStruct asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "fieldName",
+          "type": "string",
+          "required": false,
+          "description": "Member by friendly or internal name"
+        },
+        {
+          "name": "fieldGuid",
+          "type": "string",
+          "required": false,
+          "description": "Member by GUID, stable across renames"
+        },
+        {
+          "name": "newDisplayName",
+          "type": "string",
+          "required": true,
+          "description": "New display name; the member GUID is kept"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "fieldName"
+            ],
+            [
+              "fieldGuid"
+            ]
+          ]
+        }
+      ]
+    },
     "render_material_preview": {
       "category": "material",
       "params": [
@@ -19756,55 +20636,6 @@
         }
       ]
     },
-    "rerun_construction_scripts": {
-      "category": "level",
-      "params": [
-        {
-          "name": "actorLabels",
-          "type": "array",
-          "required": false,
-          "description": "Exact actor editor labels",
-          "items": "string"
-        },
-        {
-          "name": "className",
-          "type": "string",
-          "required": false,
-          "description": "Blueprint or native class, resolved as a class or matched as a substring"
-        },
-        {
-          "name": "matchSubclasses",
-          "type": "boolean",
-          "required": false,
-          "description": "Match subclasses of the class filter (default true)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: editor (default) | pie"
-        },
-        {
-          "name": "pieInstance",
-          "type": "integer",
-          "required": false,
-          "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "actorLabels"
-            ],
-            [
-              "className"
-            ]
-          ]
-        }
-      ]
-    },
     "reset_retarget_pose": {
       "category": "animation",
       "params": [
@@ -19853,86 +20684,6 @@
           "type": "string",
           "required": true,
           "description": "Graph name to resolve"
-        }
-      ]
-    },
-    "restore_component_relative_transform": {
-      "category": "level",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Actor editor label; pass actorLabel or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; the unambiguous selector, and it wins over actorLabel"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": true,
-          "description": "Exact SceneComponent instance name"
-        },
-        {
-          "name": "relativeTransform",
-          "type": "object",
-          "required": true,
-          "description": "The relative transform to put back, as nudge_component's rollback records it",
-          "fields": [
-            {
-              "name": "location",
-              "type": "vec3",
-              "required": true,
-              "description": "Relative location"
-            },
-            {
-              "name": "quaternion",
-              "type": "object",
-              "required": true,
-              "description": "Relative rotation {x, y, z, w}; this is what is applied"
-            },
-            {
-              "name": "scale",
-              "type": "vec3",
-              "required": true,
-              "description": "Relative scale"
-            },
-            {
-              "name": "rotation",
-              "type": "rotator",
-              "required": false,
-              "description": "The same rotation as a rotator, for reading only"
-            }
-          ]
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: editor (default) | pie"
-        },
-        {
-          "name": "pieInstance",
-          "type": "integer",
-          "required": false,
-          "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "actorLabel"
-            ],
-            [
-              "actorPath"
-            ]
-          ]
         }
       ]
     },
@@ -20320,30 +21071,6 @@
         }
       ]
     },
-    "save_level": {
-      "category": "level",
-      "params": [
-        {
-          "name": "force",
-          "type": "boolean",
-          "required": false,
-          "description": "Write a package even when it is already clean (default false)"
-        },
-        {
-          "name": "includeExternalActors",
-          "type": "boolean",
-          "required": false,
-          "description": "Also save the level's loaded external actor and folder packages (default true)"
-        },
-        {
-          "name": "commitDeletes",
-          "type": "boolean",
-          "required": false,
-          "description": "Save through the editor's dirty-package save, which deletes the packages of deleted World Partition actors (default false)"
-        }
-      ],
-      "contractExempt": "Saves the current level under the contract values; nothing it reads fails first"
-    },
     "scan_animation_tracks": {
       "category": "animation",
       "params": [
@@ -20633,6 +21360,38 @@
         }
       ]
     },
+    "search_assets_fts": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": true,
+          "description": "Words scored against each asset's name, class and path"
+        },
+        {
+          "name": "classFilter",
+          "type": "string",
+          "required": false,
+          "description": "Only assets whose class name contains this"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1 to 2000 (default 50)",
+          "aliases": [
+            "maxResults"
+          ]
+        }
+      ]
+    },
     "search_blueprint_call_sites": {
       "category": "blueprint",
       "params": [
@@ -20848,39 +21607,6 @@
         }
       ]
     },
-    "select_actors": {
-      "category": "level",
-      "params": [
-        {
-          "name": "actorLabels",
-          "type": "array",
-          "required": false,
-          "description": "Exact actor editor labels",
-          "items": "string"
-        },
-        {
-          "name": "actorPaths",
-          "type": "array",
-          "required": false,
-          "description": "Full actor object paths",
-          "items": "string"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "actorLabels"
-            ],
-            [
-              "actorPaths"
-            ]
-          ]
-        }
-      ],
-      "contractExempt": "Deselects everything before it selects, so the contract's empty lists would clear the editor selection"
-    },
     "send_ability_input": {
       "category": "gas",
       "params": [
@@ -21045,74 +21771,6 @@
           "description": "Empty both arrays; an omitted array then means empty rather than left alone"
         }
       ]
-    },
-    "set_actor_folder_path": {
-      "category": "level",
-      "params": [
-        {
-          "name": "folderPath",
-          "type": "string",
-          "required": true,
-          "description": "World Outliner folder; an empty string moves the actors to the root"
-        },
-        {
-          "name": "actorLabels",
-          "type": "array",
-          "required": false,
-          "description": "Exact actor editor labels",
-          "items": "string"
-        },
-        {
-          "name": "labelPrefix",
-          "type": "string",
-          "required": false,
-          "description": "Case-sensitive prefix over the actor's editor label"
-        },
-        {
-          "name": "className",
-          "type": "string",
-          "required": false,
-          "description": "Case-sensitive substring over the class name"
-        },
-        {
-          "name": "tag",
-          "type": "string",
-          "required": false,
-          "description": "Actor must carry this tag"
-        },
-        {
-          "name": "dryRun",
-          "type": "boolean",
-          "required": false,
-          "description": "Report the matches without moving them (default false)"
-        },
-        {
-          "name": "transactionLabel",
-          "type": "string",
-          "required": false,
-          "description": "Undo-stack entry name"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "actorLabels"
-            ],
-            [
-              "labelPrefix"
-            ],
-            [
-              "className"
-            ],
-            [
-              "tag"
-            ]
-          ]
-        }
-      ],
-      "contractExempt": "Opens an undo transaction and runs its write loop under the contract values, which match no actor; nothing it reads fails first"
     },
     "set_actor_hlod_layer": {
       "category": "level",
@@ -21858,138 +22516,6 @@
           "type": "string",
           "required": false,
           "description": "Only configs whose class or key contains this"
-        }
-      ]
-    },
-    "set_component_materials": {
-      "category": "level",
-      "params": [
-        {
-          "name": "actorLabels",
-          "type": "array",
-          "required": false,
-          "description": "Exact actor editor labels",
-          "items": "string"
-        },
-        {
-          "name": "labelPrefix",
-          "type": "string",
-          "required": false,
-          "description": "Case-sensitive prefix over the actor's editor label"
-        },
-        {
-          "name": "labelContains",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring over the actor's editor label"
-        },
-        {
-          "name": "tag",
-          "type": "string",
-          "required": false,
-          "description": "Actor must carry this tag"
-        },
-        {
-          "name": "classFilter",
-          "type": "string",
-          "required": false,
-          "description": "Actor class, resolved as a class or matched as a substring"
-        },
-        {
-          "name": "folderPath",
-          "type": "string",
-          "required": false,
-          "description": "World Outliner folder, matched exactly"
-        },
-        {
-          "name": "folderPathPrefix",
-          "type": "string",
-          "required": false,
-          "description": "World Outliner folder prefix"
-        },
-        {
-          "name": "matchSubclasses",
-          "type": "boolean",
-          "required": false,
-          "description": "Match subclasses of the class filter (default true)"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "Mesh component (default: the actor's first mesh component)"
-        },
-        {
-          "name": "materials",
-          "type": "array",
-          "required": false,
-          "description": "Per-slot material paths; index is the slot, and a null or empty entry clears that slot's override"
-        },
-        {
-          "name": "material",
-          "type": "string",
-          "required": false,
-          "description": "One material path applied to every slot"
-        },
-        {
-          "name": "clearOverrides",
-          "type": "boolean",
-          "required": false,
-          "description": "true drops every component override so the mesh asset's own slots show through"
-        },
-        {
-          "name": "dryRun",
-          "type": "boolean",
-          "required": false,
-          "description": "Report what would change without writing"
-        },
-        {
-          "name": "transactionLabel",
-          "type": "string",
-          "required": false,
-          "description": "Undo-stack entry name"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "actorLabels"
-            ],
-            [
-              "labelPrefix"
-            ],
-            [
-              "labelContains"
-            ],
-            [
-              "tag"
-            ],
-            [
-              "classFilter"
-            ],
-            [
-              "folderPath"
-            ],
-            [
-              "folderPathPrefix"
-            ]
-          ]
-        },
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "materials"
-            ],
-            [
-              "material"
-            ],
-            [
-              "clearOverrides"
-            ]
-          ]
         }
       ]
     },
@@ -23472,6 +23998,62 @@
         }
       ]
     },
+    "set_mesh_materials_batch": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assignments",
+          "type": "array",
+          "required": true,
+          "description": "Slot assignments, max 500",
+          "items": "object",
+          "fields": [
+            {
+              "name": "assetPath",
+              "type": "string",
+              "required": true,
+              "description": "StaticMesh or SkeletalMesh asset path"
+            },
+            {
+              "name": "materialPath",
+              "type": "string",
+              "required": true,
+              "description": "Material to assign"
+            },
+            {
+              "name": "slotName",
+              "type": "string",
+              "required": false,
+              "description": "Slot by name, which survives a reimport reordering slot indices"
+            },
+            {
+              "name": "slotIndex",
+              "type": "integer",
+              "required": false,
+              "description": "Slot by index (default 0); refused when it disagrees with slotName"
+            }
+          ]
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save each changed mesh (default true)"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Preflight and report without writing (default false)"
+        },
+        {
+          "name": "continueOnError",
+          "type": "boolean",
+          "required": false,
+          "description": "Apply the assignments that passed preflight instead of aborting the batch (default false)"
+        }
+      ]
+    },
     "set_mesh_nav": {
       "category": "asset",
       "params": [
@@ -24624,6 +25206,86 @@
         }
       ]
     },
+    "set_skeletal_mesh_optimize_for_instancing": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh asset path"
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "required": true,
+          "description": "Value to write to bOptimizeForInstancing"
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "LOD to target (default 0); not with allLods"
+        },
+        {
+          "name": "allLods",
+          "type": "boolean",
+          "required": false,
+          "description": "Target every LOD instead of one; not with lodIndex"
+        }
+      ]
+    },
+    "set_skeletal_mesh_skin_weights": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh asset path"
+        },
+        {
+          "name": "edits",
+          "type": "array",
+          "required": true,
+          "description": "Selected source vertices and their complete replacement influences (1-256)",
+          "items": "object",
+          "fields": [
+            {
+              "name": "vertexIndex",
+              "type": "integer",
+              "required": true,
+              "description": "Source MeshDescription vertex ID"
+            },
+            {
+              "name": "influences",
+              "type": "array",
+              "required": true,
+              "description": "1-64 entries of {boneName, weight? (0 to 1) | rawWeight? (1 to 65535)}",
+              "items": "object"
+            }
+          ]
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Source LOD (default 0); generated LODs without source geometry are refused"
+        },
+        {
+          "name": "profileName",
+          "type": "string",
+          "required": false,
+          "description": "Existing skin-weight profile; omit or pass 'default' for the default profile"
+        },
+        {
+          "name": "restoreRawWeights",
+          "type": "boolean",
+          "required": false,
+          "description": "Rollback payloads only: restore the exact uint16 rawWeight values"
+        }
+      ]
+    },
     "set_smart_object_slot": {
       "category": "gameplay",
       "params": [
@@ -24797,141 +25459,6 @@
           "type": "string",
           "required": false,
           "description": "Base submix to route to (empty detaches)"
-        }
-      ]
-    },
-    "set_spline_points": {
-      "category": "level",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Actor editor label; pass actorLabel or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; the unambiguous selector, and it wins over actorLabel"
-        },
-        {
-          "name": "points",
-          "type": "array",
-          "required": true,
-          "description": "Points in world space: a bare {x, y, z} or the typed form; validated as a batch before anything is cleared",
-          "items": "object",
-          "fields": [
-            {
-              "name": "x",
-              "type": "number",
-              "required": false,
-              "description": "World X, with y and z"
-            },
-            {
-              "name": "y",
-              "type": "number",
-              "required": false,
-              "description": "World Y"
-            },
-            {
-              "name": "z",
-              "type": "number",
-              "required": false,
-              "description": "World Z"
-            },
-            {
-              "name": "location",
-              "type": "vec3",
-              "required": false,
-              "description": "World position, instead of x, y, z"
-            },
-            {
-              "name": "position",
-              "type": "vec3",
-              "required": false,
-              "description": "World position, instead of x, y, z"
-            },
-            {
-              "name": "worldLocation",
-              "type": "vec3",
-              "required": false,
-              "description": "World position, instead of x, y, z"
-            },
-            {
-              "name": "pointType",
-              "type": "string",
-              "required": false,
-              "description": "Linear | Curve (default) | Constant | CurveClamped | CurveCustomTangent"
-            },
-            {
-              "name": "arriveTangent",
-              "type": "vec3",
-              "required": false,
-              "description": "World arrive tangent; pass both tangents or neither"
-            },
-            {
-              "name": "leaveTangent",
-              "type": "vec3",
-              "required": false,
-              "description": "World leave tangent; pass both tangents or neither"
-            },
-            {
-              "name": "rotation",
-              "type": "vec3",
-              "required": false,
-              "description": "World rotation as {x: pitch, y: yaw, z: roll} in degrees"
-            },
-            {
-              "name": "scale",
-              "type": "vec3",
-              "required": false,
-              "description": "Point scale"
-            },
-            {
-              "name": "inputKey",
-              "type": "number",
-              "required": false,
-              "description": "Input key; keys must strictly increase (default the point's index)"
-            }
-          ]
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "Spline component, when the actor has several; matched exactly"
-        },
-        {
-          "name": "closedLoop",
-          "type": "boolean",
-          "required": false,
-          "description": "Close the spline"
-        },
-        {
-          "name": "loopPosition",
-          "type": "number",
-          "required": false,
-          "description": "Input key a closed loop closes at, with loopPositionOverride"
-        },
-        {
-          "name": "loopPositionOverride",
-          "type": "boolean",
-          "required": false,
-          "description": "Close at loopPosition rather than after the last key"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "actorLabel"
-            ],
-            [
-              "actorPath"
-            ]
-          ]
         }
       ]
     },
@@ -25532,6 +26059,50 @@
         }
       ]
     },
+    "set_texture_settings": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Texture2D asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "settings",
+          "type": "object",
+          "required": false,
+          "description": "The four settings below as one object; a key also given at the top level wins over it"
+        },
+        {
+          "name": "compressionSettings",
+          "type": "string",
+          "required": false,
+          "description": "Default, Normalmap, Grayscale, Displacementmap, VectorDisplacementmap, HDR, EditorIcon, Alpha, DistanceFieldFont, HDR_Compressed or BC7"
+        },
+        {
+          "name": "lodGroup",
+          "type": "string",
+          "required": false,
+          "description": "Texture LOD group: World, WorldNormalMap, Character, UI, Lightmap, Effects and the rest"
+        },
+        {
+          "name": "sRGB",
+          "type": "boolean",
+          "required": false,
+          "description": "Treat the texture as sRGB"
+        },
+        {
+          "name": "neverStream",
+          "type": "boolean",
+          "required": false,
+          "description": "Keep every mip resident"
+        }
+      ]
+    },
     "set_texture_settings_by_type": {
       "category": "asset",
       "params": [
@@ -26042,86 +26613,6 @@
         }
       ]
     },
-    "set_world_partition_settings": {
-      "category": "level",
-      "params": [
-        {
-          "name": "cellSize",
-          "type": "number",
-          "required": false,
-          "description": "Streaming cell size in world centimetres"
-        },
-        {
-          "name": "loadingRange",
-          "type": "number",
-          "required": false,
-          "description": "Streaming loading range in world centimetres"
-        },
-        {
-          "name": "settings",
-          "type": "object",
-          "required": false,
-          "description": "Dotted path rooted at the world partition to value"
-        },
-        {
-          "name": "grid",
-          "type": "string",
-          "required": false,
-          "description": "Streaming grid for cellSize and loadingRange, by name; needed when the map has several"
-        },
-        {
-          "name": "gridPath",
-          "type": "string",
-          "required": false,
-          "description": "Streaming grid for cellSize and loadingRange, by the dotted path get_world_partition_settings reports"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "cellSize"
-            ],
-            [
-              "loadingRange"
-            ],
-            [
-              "settings"
-            ]
-          ]
-        }
-      ]
-    },
-    "set_world_settings": {
-      "category": "level",
-      "params": [
-        {
-          "name": "defaultGameMode",
-          "type": "string",
-          "required": false,
-          "description": "GameMode class path or short name; None clears it"
-        },
-        {
-          "name": "killZ",
-          "type": "number",
-          "required": false,
-          "description": "KillZ height"
-        },
-        {
-          "name": "globalGravityZ",
-          "type": "number",
-          "required": false,
-          "description": "Global gravity Z"
-        },
-        {
-          "name": "enableWorldBoundsChecks",
-          "type": "boolean",
-          "required": false,
-          "description": "Enable world bounds checks"
-        }
-      ]
-    },
     "simulate_procedural_foliage": {
       "category": "foliage",
       "params": [
@@ -26425,251 +26916,6 @@
         }
       ]
     },
-    "spawn_actors_batch": {
-      "category": "level",
-      "params": [
-        {
-          "name": "actorClass",
-          "type": "string",
-          "required": true,
-          "description": "Actor class: short name, /Script path or Blueprint class path"
-        },
-        {
-          "name": "instances",
-          "type": "array",
-          "required": false,
-          "description": "Explicit spawns",
-          "items": "object",
-          "fields": [
-            {
-              "name": "location",
-              "type": "vec3",
-              "required": false,
-              "description": "World location"
-            },
-            {
-              "name": "rotation",
-              "type": "rotator",
-              "required": false,
-              "description": "World rotation"
-            },
-            {
-              "name": "scale",
-              "type": "vec3",
-              "required": false,
-              "description": "Actor scale"
-            },
-            {
-              "name": "label",
-              "type": "string",
-              "required": false,
-              "description": "Actor label"
-            },
-            {
-              "name": "properties",
-              "type": "object",
-              "required": false,
-              "description": "Property name to value for this spawn; wins over the shared properties"
-            }
-          ]
-        },
-        {
-          "name": "fromComponents",
-          "type": "object",
-          "required": false,
-          "description": "One spawn per matched component, placed from its bounds",
-          "fields": [
-            {
-              "name": "componentClass",
-              "type": "string",
-              "required": false,
-              "description": "Component class the components must be"
-            },
-            {
-              "name": "componentNameContains",
-              "type": "string",
-              "required": false,
-              "description": "Case-insensitive substring over the component name"
-            },
-            {
-              "name": "actorLabels",
-              "type": "array",
-              "required": false,
-              "description": "Exact actor editor labels",
-              "items": "string"
-            },
-            {
-              "name": "labelPrefix",
-              "type": "string",
-              "required": false,
-              "description": "Case-sensitive prefix over the actor's editor label"
-            },
-            {
-              "name": "labelContains",
-              "type": "string",
-              "required": false,
-              "description": "Case-insensitive substring over the actor's editor label"
-            },
-            {
-              "name": "tag",
-              "type": "string",
-              "required": false,
-              "description": "Actor must carry this tag"
-            },
-            {
-              "name": "classFilter",
-              "type": "string",
-              "required": false,
-              "description": "Actor class, resolved as a class or matched as a substring"
-            },
-            {
-              "name": "folderPath",
-              "type": "string",
-              "required": false,
-              "description": "World Outliner folder, matched exactly"
-            },
-            {
-              "name": "folderPathPrefix",
-              "type": "string",
-              "required": false,
-              "description": "World Outliner folder prefix"
-            },
-            {
-              "name": "matchSubclasses",
-              "type": "boolean",
-              "required": false,
-              "description": "Match subclasses of classFilter (default true)"
-            },
-            {
-              "name": "space",
-              "type": "string",
-              "required": false,
-              "description": "local (default, the component's own orientation) | world (axis-aligned bounds)"
-            },
-            {
-              "name": "offset",
-              "type": "vec3",
-              "required": false,
-              "description": "Offset added to the computed point"
-            },
-            {
-              "name": "extentFraction",
-              "type": "vec3",
-              "required": false,
-              "description": "Fraction of the box extent added per axis, such as {z: 0.72}"
-            },
-            {
-              "name": "inheritRotation",
-              "type": "boolean",
-              "required": false,
-              "description": "Spawn with the component's rotation (default false)"
-            }
-          ]
-        },
-        {
-          "name": "alongSpline",
-          "type": "object",
-          "required": false,
-          "description": "Spawns scattered along a spline by distance",
-          "fields": [
-            {
-              "name": "actorLabel",
-              "type": "string",
-              "required": false,
-              "description": "Spline actor label; pass actorLabel or actorPath"
-            },
-            {
-              "name": "actorPath",
-              "type": "string",
-              "required": false,
-              "description": "Spline actor object path"
-            },
-            {
-              "name": "componentName",
-              "type": "string",
-              "required": false,
-              "description": "Spline component, when the actor has several"
-            },
-            {
-              "name": "spacing",
-              "type": "number",
-              "required": true,
-              "description": "Distance between spawns in cm, at least 1"
-            },
-            {
-              "name": "startDistance",
-              "type": "number",
-              "required": false,
-              "description": "Distance along the spline to start at (default 0)"
-            },
-            {
-              "name": "endDistance",
-              "type": "number",
-              "required": false,
-              "description": "Distance along the spline to stop at (default its length)"
-            },
-            {
-              "name": "offset",
-              "type": "vec3",
-              "required": false,
-              "description": "Offset, in the spline's frame when aligning to it"
-            },
-            {
-              "name": "alignToTangent",
-              "type": "boolean",
-              "required": false,
-              "description": "Rotate each spawn to the spline (default true)"
-            }
-          ]
-        },
-        {
-          "name": "properties",
-          "type": "object",
-          "required": false,
-          "description": "Property name to value applied to every spawn"
-        },
-        {
-          "name": "labelPrefix",
-          "type": "string",
-          "required": false,
-          "description": "Label prefix for the spawned actors"
-        },
-        {
-          "name": "dryRun",
-          "type": "boolean",
-          "required": false,
-          "description": "Return every computed transform without spawning"
-        },
-        {
-          "name": "maxSpawn",
-          "type": "integer",
-          "required": false,
-          "description": "Refuse a plan larger than this (default 500, max 5000)"
-        },
-        {
-          "name": "transactionLabel",
-          "type": "string",
-          "required": false,
-          "description": "Undo-stack entry name"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "instances"
-            ],
-            [
-              "fromComponents"
-            ],
-            [
-              "alongSpline"
-            ]
-          ]
-        }
-      ]
-    },
     "spawn_ambient_sound": {
       "category": "audio",
       "params": [
@@ -26909,111 +27155,6 @@
           "type": "boolean",
           "required": false,
           "description": "Destroy the component once the system finishes (default false)"
-        }
-      ]
-    },
-    "spawn_skeletal_mesh_actor": {
-      "category": "level",
-      "params": [
-        {
-          "name": "skeletalMesh",
-          "type": "string",
-          "required": false,
-          "description": "SkeletalMesh asset path to spawn; null is refused here",
-          "nullable": true
-        },
-        {
-          "name": "meshPath",
-          "type": "string",
-          "required": false,
-          "description": "The older spelling of skeletalMesh"
-        },
-        {
-          "name": "label",
-          "type": "string",
-          "required": false,
-          "description": "Actor label; an existing actor with this label is reported rather than duplicated"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "When the label or name is taken: skip (default) | error"
-        },
-        {
-          "name": "transform",
-          "type": "object",
-          "required": false,
-          "description": "Spawn transform; location, rotation and scale given on their own win over its parts",
-          "fields": [
-            {
-              "name": "location",
-              "type": "vec3",
-              "required": false,
-              "description": "World location"
-            },
-            {
-              "name": "rotation",
-              "type": "rotator",
-              "required": false,
-              "description": "World rotation"
-            },
-            {
-              "name": "scale",
-              "type": "vec3",
-              "required": false,
-              "description": "Actor scale"
-            }
-          ]
-        },
-        {
-          "name": "location",
-          "type": "vec3",
-          "required": false,
-          "description": "World location"
-        },
-        {
-          "name": "rotation",
-          "type": "rotator",
-          "required": false,
-          "description": "World rotation"
-        },
-        {
-          "name": "scale",
-          "type": "vec3",
-          "required": false,
-          "description": "Actor scale"
-        },
-        {
-          "name": "materials",
-          "type": "array",
-          "required": false,
-          "description": "Per-slot component material override paths; index is the slot, and a null or empty entry leaves that slot alone"
-        },
-        {
-          "name": "animSequence",
-          "type": "string",
-          "required": false,
-          "description": "Single-node preview animation"
-        },
-        {
-          "name": "loop",
-          "type": "boolean",
-          "required": false,
-          "description": "Loop the preview animation (default true)"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "skeletalMesh"
-            ],
-            [
-              "meshPath"
-            ]
-          ]
         }
       ]
     },

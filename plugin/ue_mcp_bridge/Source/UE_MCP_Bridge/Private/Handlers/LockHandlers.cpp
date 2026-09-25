@@ -27,7 +27,11 @@ void FLockHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("acquire_lock"), &FLockHandlers::AcquireLock);
 	Registry.RegisterHandler(TEXT("release_lock"), &FLockHandlers::ReleaseLock);
 	Registry.RegisterHandler(TEXT("release_session_locks"), &FLockHandlers::ReleaseSessionLocks);
-	Registry.RegisterHandler(TEXT("list_locks"), &FLockHandlers::ListLocks);
+	{
+		// Exposed as asset(list_locks), so its spec generates into the asset surface.
+		FMCPHandlerRegistry::FCategoryScope AssetScope(Registry, TEXT("asset"));
+		Registry.RegisterHandler(TEXT("list_locks"), &FLockHandlers::ListLocks, TArray<FMCPParamSpec>());
+	}
 }
 
 TSharedPtr<FJsonValue> FLockHandlers::AcquireLock(const TSharedPtr<FJsonObject>& Params)

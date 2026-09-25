@@ -694,16 +694,42 @@ namespace
 }
 void FSkeletalMeshHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
-	// Reports parameters its handlers never read (#1057).
-	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("skeletalmesh"));
-	Registry.RegisterHandler(TEXT("set_skeletal_mesh_optimize_for_instancing"), &SetOptimizeForInstancing);
-	Registry.RegisterHandler(TEXT("read_skeletal_mesh_build_settings"), &ReadBuildSettings);
-	Registry.RegisterHandler(TEXT("read_skeletal_mesh_skin_weights"), &ReadSkinWeights);
-	Registry.RegisterHandler(TEXT("set_skeletal_mesh_skin_weights"), &SetSkinWeights);
+	// Exposed by the asset tool, so the specs generate into its surface (#1057).
+	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("asset"));
+	using EType = EMCPParamType;
+	const FMCPParamSpec SpecAssetPath = MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("SkeletalMesh asset path"));
+	const FMCPParamSpec SpecBuildLodIndex = MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("LOD to target (default 0); not with allLods"));
+	const FMCPParamSpec SpecAllLods = MCPParam::Optional(TEXT("allLods"), EType::Boolean, TEXT("Target every LOD instead of one; not with lodIndex"));
+	const FMCPParamSpec SpecSkinLodIndex = MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("Source LOD (default 0); generated LODs without source geometry are refused"));
+	const FMCPParamSpec SpecProfileName = MCPParam::Optional(TEXT("profileName"), EType::String, TEXT("Existing skin-weight profile; omit or pass 'default' for the default profile"));
+	Registry.RegisterHandler(TEXT("set_skeletal_mesh_optimize_for_instancing"), &SetOptimizeForInstancing, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("enabled"), EType::Boolean, TEXT("Value to write to bOptimizeForInstancing")),
+		SpecBuildLodIndex, SpecAllLods,
+	});
+	Registry.RegisterHandler(TEXT("read_skeletal_mesh_build_settings"), &ReadBuildSettings, {
+		SpecAssetPath, SpecBuildLodIndex, SpecAllLods,
+	});
+	Registry.RegisterHandler(TEXT("read_skeletal_mesh_skin_weights"), &ReadSkinWeights, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("vertexIndices"), EType::Array, TEXT("Source MeshDescription vertex IDs to read (1-256)")).Items(EType::Integer),
+		SpecSkinLodIndex, SpecProfileName,
+	});
+	Registry.RegisterHandler(TEXT("set_skeletal_mesh_skin_weights"), &SetSkinWeights, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("edits"), EType::Array, TEXT("Selected source vertices and their complete replacement influences (1-256)")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("vertexIndex"), EType::Integer, TEXT("Source MeshDescription vertex ID")),
+			MCPParam::RequiredField(TEXT("influences"), EType::Array, TEXT("1-64 entries of {boneName, weight? (0 to 1) | rawWeight? (1 to 65535)}")).Items(EType::Object),
+		}),
+		SpecSkinLodIndex, SpecProfileName,
+		MCPParam::Optional(TEXT("restoreRawWeights"), EType::Boolean, TEXT("Rollback payloads only: restore the exact uint16 rawWeight values")),
+	});
 }
 
 TSharedPtr<FJsonValue> FSkeletalMeshHandlers::ReadSkinWeights(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the target resolves; also on engines that refuse the call (#1057).
+	MCPReadParamsAhead(Params, { TEXT("assetPath"), TEXT("vertexIndices"), TEXT("lodIndex"), TEXT("profileName") });
 #if !(WITH_EDITORONLY_DATA && UE_MCP_HAS_5_4_API)
 	return MCPError(TEXT("read_skeletal_mesh_skin_weights requires an Unreal Editor build on Unreal Engine 5.4 or newer"));
 #else
@@ -750,6 +776,8 @@ TSharedPtr<FJsonValue> FSkeletalMeshHandlers::ReadSkinWeights(const TSharedPtr<F
 
 TSharedPtr<FJsonValue> FSkeletalMeshHandlers::SetSkinWeights(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the target resolves; also on engines that refuse the call (#1057).
+	MCPReadParamsAhead(Params, { TEXT("assetPath"), TEXT("edits"), TEXT("lodIndex"), TEXT("profileName"), TEXT("restoreRawWeights") });
 #if !(WITH_EDITORONLY_DATA && UE_MCP_HAS_5_4_API)
 	return MCPError(TEXT("set_skeletal_mesh_skin_weights requires an Unreal Editor build on Unreal Engine 5.4 or newer"));
 #else
@@ -924,6 +952,8 @@ TSharedPtr<FJsonValue> FSkeletalMeshHandlers::SetSkinWeights(const TSharedPtr<FJ
 
 TSharedPtr<FJsonValue> FSkeletalMeshHandlers::ReadBuildSettings(const TSharedPtr<FJsonObject>& Params)
 {
+	// ResolveTargetLods reads these after the load (#1057).
+	MCPReadParamsAhead(Params, { TEXT("lodIndex"), TEXT("allLods") });
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	USkeletalMesh* Mesh = LoadAssetByPath<USkeletalMesh>(AssetPath);
@@ -946,6 +976,8 @@ TSharedPtr<FJsonValue> FSkeletalMeshHandlers::ReadBuildSettings(const TSharedPtr
 
 TSharedPtr<FJsonValue> FSkeletalMeshHandlers::SetOptimizeForInstancing(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the load; also on engines that refuse the call (#1057).
+	MCPReadParamsAhead(Params, { TEXT("assetPath"), TEXT("enabled"), TEXT("lodIndex"), TEXT("allLods") });
 #if !UE_MCP_HAS_5_8_API
 	// bOptimizeForInstancing is a 5.8 engine feature with no earlier equivalent,
 	// so there is nothing to write and nothing to stand in for it. The action

@@ -488,7 +488,39 @@ void FAssetMeshBooleanHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// A boolean over two dense meshes, plus the copy in and the rebuild out, is
 	// minutes rather than milliseconds on a repair-sized asset. The default
 	// handler timeout would report a hang while the editor was still working.
-	Registry.RegisterHandlerWithTimeout(TEXT("mesh_boolean"), &MeshBoolean, 300.0f);
+	using EType = EMCPParamType;
+	Registry.RegisterHandlerWithTimeout(TEXT("mesh_boolean"), &MeshBoolean, 300.0f, {
+		MCPParam::Required(TEXT("operation"), EType::String, TEXT("union | subtract | intersect | trimInside | trimOutside | newPolyGroupInside | newPolyGroupOutside")),
+		MCPParam::Required(TEXT("targetPath"), EType::String, TEXT("StaticMesh being cut; the result inherits its transform, materials, collision and Nanite setting")),
+		MCPParam::Required(TEXT("toolPath"), EType::String, TEXT("StaticMesh doing the cutting")),
+		MCPParam::Optional(TEXT("outputPath"), EType::String, TEXT("Asset to write (default '<targetPath>_<Operation>')")),
+		MCPParam::Optional(TEXT("inPlace"), EType::Boolean, TEXT("Overwrite targetPath instead (default false); not with outputPath, and the only destructive form")),
+		MCPParam::Optional(TEXT("targetTransform"), EType::Object, TEXT("Where the target sits for the boolean (default identity)")).WithFields({
+			MCPParam::OptionalField(TEXT("location"), EType::Vec3, TEXT("Translation")),
+			MCPParam::OptionalField(TEXT("rotation"), EType::Rotator, TEXT("Rotation")),
+			MCPParam::OptionalField(TEXT("scale"), EType::Vec3, TEXT("Scale (default 1)")),
+		}),
+		MCPParam::Optional(TEXT("toolTransform"), EType::Object, TEXT("Where the tool sits for the boolean (default identity)")).WithFields({
+			MCPParam::OptionalField(TEXT("location"), EType::Vec3, TEXT("Translation")),
+			MCPParam::OptionalField(TEXT("rotation"), EType::Rotator, TEXT("Rotation")),
+			MCPParam::OptionalField(TEXT("scale"), EType::Vec3, TEXT("Scale (default 1)")),
+		}),
+		MCPParam::Optional(TEXT("lodType"), EType::String, TEXT("MaxAvailable (default, ignores lodIndex) | HiResSourceModel | SourceModel | RenderData")),
+		MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("LOD of each input to read when lodType names one (default 0)")),
+		MCPParam::Optional(TEXT("fillHoles"), EType::Boolean, TEXT("Close the holes the cut opens (default true)")),
+		MCPParam::Optional(TEXT("simplifyOutput"), EType::Boolean, TEXT("Collapse coplanar triangles the boolean introduced (default true)")),
+		MCPParam::Optional(TEXT("simplifyPlanarTolerance"), EType::Number, TEXT("How far from coplanar still counts as coplanar when simplifying (default 0.01)")),
+		MCPParam::Optional(TEXT("allowEmptyResult"), EType::Boolean, TEXT("Accept a result with no triangles (default false)")),
+		MCPParam::Optional(TEXT("recomputeNormals"), EType::Boolean, TEXT("Recompute normals on the written mesh (default false)")),
+		MCPParam::Optional(TEXT("recomputeTangents"), EType::Boolean, TEXT("Recompute tangents on the written mesh (default false)")),
+		MCPParam::Optional(TEXT("removeDegenerates"), EType::Boolean, TEXT("Drop degenerate triangles when writing back into an existing mesh (default false)")),
+		MCPParam::Optional(TEXT("copyCollisionFromTarget"), EType::Boolean, TEXT("Copy the target's simple collision onto the result (default true)")),
+		MCPParam::Optional(TEXT("copyMaterialsFromTarget"), EType::Boolean, TEXT("Copy the target's material slots onto the result (default true)")),
+		MCPParam::Optional(TEXT("nanite"), EType::String, TEXT("inherit (default, match the target) | enable | disable")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When outputPath exists: error (default) | replace")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Run the boolean and report the counts without writing (default false)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the written asset (default true)")),
+	});
 }
 
 TSharedPtr<FJsonValue> FAssetMeshBooleanHandlers::MeshBoolean(const TSharedPtr<FJsonObject>& Params)
@@ -496,6 +528,13 @@ TSharedPtr<FJsonValue> FAssetMeshBooleanHandlers::MeshBoolean(const TSharedPtr<F
 	MCP_CHECK_GAME_THREAD();
 
 	// ── Parameters ──────────────────────────────────────────────────────────
+	// Every parameter is read before a check below can refuse (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("operation"), TEXT("targetPath"), TEXT("toolPath"), TEXT("outputPath"), TEXT("inPlace"),
+		TEXT("targetTransform"), TEXT("toolTransform"), TEXT("lodType"), TEXT("lodIndex"), TEXT("fillHoles"),
+		TEXT("simplifyOutput"), TEXT("simplifyPlanarTolerance"), TEXT("allowEmptyResult"), TEXT("recomputeNormals"),
+		TEXT("recomputeTangents"), TEXT("removeDegenerates"), TEXT("copyCollisionFromTarget"),
+		TEXT("copyMaterialsFromTarget"), TEXT("nanite"), TEXT("onConflict"), TEXT("dryRun"), TEXT("save") });
 	FString RequestedOperation;
 	if (auto Err = RequireString(Params, TEXT("operation"), RequestedOperation)) return Err;
 	const FString OperationName = ResolveBooleanOperation(RequestedOperation);

@@ -664,7 +664,7 @@ TSharedPtr<FJsonValue> MCPGeoParseRequest(
 	const TCHAR* OutputSuffix,
 	FMCPGeoRequest& Out)
 {
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), Out.AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), Out.AssetPath)) return Err;
 
 	Out.bInPlace = OptionalBool(Params, TEXT("inPlace"), false);
 	Out.OutputPath = OptionalString(Params, TEXT("outputPath"));
@@ -1247,6 +1247,13 @@ FVector MCPGeoAxisVector(const FString& Axis)
 TSharedPtr<FJsonValue> FAssetHandlers::SimplifyMesh(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	// Every parameter is read before a check below can refuse (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("assetPath"), TEXT("inPlace"), TEXT("outputPath"), TEXT("lodType"), TEXT("lodIndex"), TEXT("backupPath"),
+		TEXT("dryRun"), TEXT("save"), TEXT("recomputeNormals"), TEXT("recomputeTangents"), TEXT("removeDegenerates"),
+		TEXT("copyMaterialsFromSource"), TEXT("copyCollisionFromSource"), TEXT("nanite"), TEXT("onConflict"),
+		TEXT("simplifyMode"), TEXT("triangleCount"), TEXT("vertexCount"), TEXT("tolerance"), TEXT("edgeLength"),
+		TEXT("angleThreshold"), TEXT("method"), TEXT("allowSeamCollapse"), TEXT("preserveVertexPositions"), TEXT("autoCompact") });
 
 	FMCPGeoRequest Request;
 	if (auto Err = MCPGeoParseRequest(Params, TEXT("Simplified"), Request)) return Err;
@@ -1465,6 +1472,14 @@ TSharedPtr<FJsonValue> FAssetHandlers::SimplifyMesh(const TSharedPtr<FJsonObject
 TSharedPtr<FJsonValue> FAssetHandlers::RemeshMesh(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	// Every parameter is read before a check below can refuse (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("assetPath"), TEXT("inPlace"), TEXT("outputPath"), TEXT("lodType"), TEXT("lodIndex"), TEXT("backupPath"),
+		TEXT("dryRun"), TEXT("save"), TEXT("recomputeNormals"), TEXT("recomputeTangents"), TEXT("removeDegenerates"),
+		TEXT("copyMaterialsFromSource"), TEXT("copyCollisionFromSource"), TEXT("nanite"), TEXT("onConflict"),
+		TEXT("remeshMode"), TEXT("targetType"), TEXT("targetTriangleCount"), TEXT("targetEdgeLength"),
+		TEXT("smoothingType"), TEXT("smoothingRate"), TEXT("boundaryConstraint"), TEXT("iterations"),
+		TEXT("discardAttributes"), TEXT("reprojectToInputMesh"), TEXT("relativeDensity") });
 
 	FMCPGeoRequest Request;
 	if (auto Err = MCPGeoParseRequest(Params, TEXT("Remeshed"), Request)) return Err;
@@ -1622,6 +1637,13 @@ TSharedPtr<FJsonValue> FAssetHandlers::RemeshMesh(const TSharedPtr<FJsonObject>&
 TSharedPtr<FJsonValue> FAssetHandlers::MirrorMesh(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	// Every parameter is read before a check below can refuse (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("assetPath"), TEXT("inPlace"), TEXT("outputPath"), TEXT("lodType"), TEXT("lodIndex"), TEXT("backupPath"),
+		TEXT("dryRun"), TEXT("save"), TEXT("recomputeNormals"), TEXT("recomputeTangents"), TEXT("removeDegenerates"),
+		TEXT("copyMaterialsFromSource"), TEXT("copyCollisionFromSource"), TEXT("nanite"), TEXT("onConflict"),
+		TEXT("axis"), TEXT("planeOrigin"), TEXT("planeNormal"), TEXT("applyPlaneCut"), TEXT("flipCutSide"),
+		TEXT("weldAlongPlane") });
 
 	FMCPGeoRequest Request;
 	if (auto Err = MCPGeoParseRequest(Params, TEXT("Mirrored"), Request)) return Err;
@@ -1733,6 +1755,13 @@ TSharedPtr<FJsonValue> FAssetHandlers::MirrorMesh(const TSharedPtr<FJsonObject>&
 TSharedPtr<FJsonValue> FAssetHandlers::FillMeshHoles(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	// Every parameter is read before a check below can refuse (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("assetPath"), TEXT("inPlace"), TEXT("outputPath"), TEXT("lodType"), TEXT("lodIndex"), TEXT("backupPath"),
+		TEXT("dryRun"), TEXT("save"), TEXT("recomputeNormals"), TEXT("recomputeTangents"), TEXT("removeDegenerates"),
+		TEXT("copyMaterialsFromSource"), TEXT("copyCollisionFromSource"), TEXT("nanite"), TEXT("onConflict"),
+		TEXT("fillMethod"), TEXT("weldFirst"), TEXT("weldTolerance"), TEXT("removeDegenerateFirst"),
+		TEXT("deleteIsolatedTriangles") });
 
 	FMCPGeoRequest Request;
 	if (auto Err = MCPGeoParseRequest(Params, TEXT("Filled"), Request)) return Err;
@@ -1887,9 +1916,16 @@ TSharedPtr<FJsonValue> FAssetHandlers::FillMeshHoles(const TSharedPtr<FJsonObjec
 TSharedPtr<FJsonValue> FAssetHandlers::GenerateMeshCollision(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	// Every parameter is read before a check below can refuse (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("assetPath"), TEXT("op"), TEXT("method"), TEXT("maxConvexHulls"), TEXT("hullTargetFaceCount"),
+		TEXT("maxShapeCount"), TEXT("minThickness"), TEXT("autoDetectSpheres"), TEXT("autoDetectBoxes"),
+		TEXT("autoDetectCapsules"), TEXT("simplifyHulls"), TEXT("removeFullyContainedShapes"),
+		TEXT("decompositionErrorTolerance"), TEXT("decompositionSearchFactor"), TEXT("sweptHullAxis"),
+		TEXT("markAsCustomized"), TEXT("lodType"), TEXT("lodIndex"), TEXT("save"), TEXT("dryRun") });
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	if (MCPIsProtectedAssetPath(AssetPath)) return MCPProtectedPathError(AssetPath);
 
 	const FString Op = OptionalString(Params, TEXT("op"), TEXT("generate")).ToLower();
@@ -2215,9 +2251,15 @@ TSharedPtr<FJsonValue> FAssetHandlers::GenerateMeshCollision(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FAssetHandlers::FractureMesh(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	// Every parameter is read before a check below can refuse (#1057).
+	MCPReadParamsAhead(Params, {
+		TEXT("assetPath"), TEXT("pattern"), TEXT("axis"), TEXT("pieces"), TEXT("gridX"), TEXT("gridY"), TEXT("gridZ"),
+		TEXT("planeCount"), TEXT("seed"), TEXT("jitter"), TEXT("gapWidth"), TEXT("fillHoles"), TEXT("minPieceTriangles"),
+		TEXT("outputBasePath"), TEXT("onConflict"), TEXT("copyMaterialsFromSource"), TEXT("nanite"),
+		TEXT("recomputeNormals"), TEXT("recomputeTangents"), TEXT("lodType"), TEXT("lodIndex"), TEXT("save"), TEXT("dryRun") });
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	const FString Pattern = OptionalString(Params, TEXT("pattern"), TEXT("slice")).ToLower();
 	if (Pattern != TEXT("slice") && Pattern != TEXT("grid") && Pattern != TEXT("random"))
