@@ -62,6 +62,21 @@ namespace ImcEdit_Internal
 		return Packages;
 	}
 
+	// Spec'd handlers read every declared parameter before anything can fail
+	// (#1057). save is consumed later by RefuseUnwritable and FinishEdit.
+	static void ReadSaveFlag(const TSharedPtr<FJsonObject>& Params)
+	{
+		OptionalBool(Params, TEXT("save"), true);
+	}
+
+	// The mapping selector ResolveMappingIndex reads, read up front for the same reason.
+	static void ReadMappingSelector(const TSharedPtr<FJsonObject>& Params)
+	{
+		HasParam(Params, TEXT("mappingIndex"));
+		HasParam(Params, TEXT("inputActionPath"));
+		HasParam(Params, TEXT("key"));
+	}
+
 	// With save=true, refuse a package that cannot be written before anything
 	// changes, so a failed save never leaves a dirty edit behind (#932).
 	static TSharedPtr<FJsonValue> RefuseUnwritable(
@@ -310,6 +325,9 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddImcMapping(const TSharedPtr<FJsonOb
 	FString KeyName;
 	if (auto Err = RequireString(Params, TEXT("key"), KeyName)) return Err;
 
+	// FinishEdit and RefuseUnwritable read save again; this read comes before anything can fail (#1057).
+	ImcEdit_Internal::ReadSaveFlag(Params);
+
 	UInputMappingContext* IMC = LoadObject<UInputMappingContext>(nullptr, *ImcPath);
 	if (!IMC)
 	{
@@ -389,13 +407,20 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetMappingModifiers(const TSharedPtr<F
 	FString ImcPath;
 	if (auto Err = RequireString(Params, TEXT("imcPath"), ImcPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	int32 MappingIndex = OptionalInt(Params, TEXT("mappingIndex"), 0);
+	const TArray<TSharedPtr<FJsonValue>>* ModifiersArr = nullptr;
+	const bool bHasModifiersArr = TryGetArrayParam(Params, TEXT("modifiers"), ModifiersArr) && ModifiersArr;
+	const TArray<TSharedPtr<FJsonValue>>* TriggersArr = nullptr;
+	const bool bHasTriggersArr = TryGetArrayParam(Params, TEXT("triggers"), TriggersArr) && TriggersArr;
+	ImcEdit_Internal::ReadSaveFlag(Params);
+
 	UInputMappingContext* IMC = LoadObject<UInputMappingContext>(nullptr, *ImcPath);
 	if (!IMC)
 	{
 		return MCPError(FString::Printf(TEXT("InputMappingContext not found: %s"), *ImcPath));
 	}
 
-	int32 MappingIndex = OptionalInt(Params, TEXT("mappingIndex"), 0);
 	TArray<FEnhancedActionKeyMapping>& Mappings = const_cast<TArray<FEnhancedActionKeyMapping>&>(IMC->GetMappings());
 	if (!Mappings.IsValidIndex(MappingIndex))
 	{
@@ -479,8 +504,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetMappingModifiers(const TSharedPtr<F
 	TArray<TSharedPtr<FJsonValue>> IgnoredProperties;
 
 	// ── Modifiers ──
-	const TArray<TSharedPtr<FJsonValue>>* ModifiersArr = nullptr;
-	if (TryGetArrayParam(Params, TEXT("modifiers"), ModifiersArr) && ModifiersArr)
+	if (bHasModifiersArr)
 	{
 		Mapping.Modifiers.Empty();
 		for (const auto& ModVal : *ModifiersArr)
@@ -630,8 +654,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetMappingModifiers(const TSharedPtr<F
 	// (mirroring modifiers, #649), apply nested "properties", and never append
 	// a null; report any failed specs instead of silently corrupting the asset.
 	TArray<TSharedPtr<FJsonValue>> FailedTriggers;
-	const TArray<TSharedPtr<FJsonValue>>* TriggersArr = nullptr;
-	if (TryGetArrayParam(Params, TEXT("triggers"), TriggersArr) && TriggersArr)
+	if (bHasTriggersArr)
 	{
 		TArray<TObjectPtr<UInputTrigger>> NewTriggers;
 		for (const auto& TrigVal : *TriggersArr)
@@ -852,6 +875,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveImcMapping(const TSharedPtr<FJso
 	FString ImcPath;
 	if (auto Err = RequireString(Params, TEXT("imcPath"), ImcPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	ImcEdit_Internal::ReadMappingSelector(Params);
+	ImcEdit_Internal::ReadSaveFlag(Params);
+
 	UInputMappingContext* IMC = LoadObject<UInputMappingContext>(nullptr, *ImcPath);
 	if (!IMC)
 	{
@@ -951,6 +978,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetImcMappingKey(const TSharedPtr<FJso
 	FString NewKeyName;
 	if (auto Err = RequireString(Params, TEXT("newKey"), NewKeyName)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	ImcEdit_Internal::ReadMappingSelector(Params);
+	ImcEdit_Internal::ReadSaveFlag(Params);
+
 	UInputMappingContext* IMC = LoadObject<UInputMappingContext>(nullptr, *ImcPath);
 	if (!IMC)
 	{
@@ -1018,6 +1049,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetImcMappingAction(const TSharedPtr<F
 
 	FString NewActionPath;
 	if (auto Err = RequireString(Params, TEXT("newInputActionPath"), NewActionPath)) return Err;
+
+	// Every parameter is read before anything can fail (#1057).
+	ImcEdit_Internal::ReadMappingSelector(Params);
+	ImcEdit_Internal::ReadSaveFlag(Params);
 
 	UInputMappingContext* IMC = LoadObject<UInputMappingContext>(nullptr, *ImcPath);
 	if (!IMC)
@@ -1407,6 +1442,14 @@ namespace InputDepth_Internal
 			RequestedPlayer));
 	}
 
+	/** The player selector ResolveLocalPlayer reads, read before a spec'd
+	 *  handler can fail on anything else (#1057). */
+	static void ReadPlayerSelector(const TSharedPtr<FJsonObject>& Params)
+	{
+		HasParam(Params, TEXT("pieInstance"));
+		HasParam(Params, TEXT("playerIndex"));
+	}
+
 	/** Add the pieInstance/playerIndex a rollback has to target back onto its
 	 *  payload, so an undo lands on the same player the call did. */
 	static void AddPlayerTargetTo(TSharedPtr<FJsonObject> Payload, const FResolvedPlayer& Player)
@@ -1539,14 +1582,15 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetActionTriggers(const TSharedPtr<FJs
 	FString ActionPath;
 	if (auto Err = RequireString(Params, TEXT("inputActionPath"), ActionPath)) return Err;
 
-	UInputAction* Action = LoadAssetByPath<UInputAction>(ActionPath);
-	if (!Action) return MCPAssetLoadError(ActionPath, TEXT("InputAction"));
-
+	// Every parameter is read before anything can fail (#1057).
 	const TArray<TSharedPtr<FJsonValue>>* TriggerSpecs = nullptr;
 	const bool bHasTriggers = TryGetArrayParam(Params, TEXT("triggers"), TriggerSpecs) && TriggerSpecs != nullptr;
 	const TArray<TSharedPtr<FJsonValue>>* ModifierSpecs = nullptr;
 	const bool bHasModifiers = TryGetArrayParam(Params, TEXT("modifiers"), ModifierSpecs) && ModifierSpecs != nullptr;
 	const bool bClear = OptionalBool(Params, TEXT("clear"), false);
+
+	UInputAction* Action = LoadAssetByPath<UInputAction>(ActionPath);
+	if (!Action) return MCPAssetLoadError(ActionPath, TEXT("InputAction"));
 
 	if (!bHasTriggers && !bHasModifiers && !bClear)
 	{
@@ -1683,18 +1727,20 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetPlayerMappableSettings(const TShare
 	FString ActionPath;
 	if (auto Err = RequireString(Params, TEXT("inputActionPath"), ActionPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
 	FString MappingName;
 	const bool bHasMappingName = Params.IsValid() && TryGetStringParam(Params, TEXT("mappingName"), MappingName);
+	FString DisplayName;
+	const bool bHasDisplayName = Params.IsValid() && TryGetStringParam(Params, TEXT("displayName"), DisplayName);
+	FString DisplayCategory;
+	const bool bHasDisplayCategory = Params.IsValid() && TryGetStringParam(Params, TEXT("displayCategory"), DisplayCategory);
+	ImcEdit_Internal::ReadSaveFlag(Params);
+
 	MappingName.TrimStartAndEndInline();
 	if (!bHasMappingName || MappingName.IsEmpty())
 	{
 		return MCPError(TEXT("mappingName must be a non-empty string"));
 	}
-
-	FString DisplayName;
-	const bool bHasDisplayName = Params.IsValid() && TryGetStringParam(Params, TEXT("displayName"), DisplayName);
-	FString DisplayCategory;
-	const bool bHasDisplayCategory = Params.IsValid() && TryGetStringParam(Params, TEXT("displayCategory"), DisplayCategory);
 
 	UInputAction* Action = LoadAssetByPath<UInputAction>(ActionPath);
 	if (!Action) return MCPAssetLoadError(ActionPath, TEXT("InputAction"));
@@ -1813,10 +1859,12 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ApplyMappingContext(const TSharedPtr<F
 	FString ContextPath;
 	if (auto Err = RequireString(Params, TEXT("mappingContext"), ContextPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	const int32 Priority = OptionalInt(Params, TEXT("priority"), 0);
+	ReadPlayerSelector(Params);
+
 	UInputMappingContext* IMC = LoadAssetByPath<UInputMappingContext>(ContextPath);
 	if (!IMC) return MCPAssetLoadError(ContextPath, TEXT("InputMappingContext"));
-
-	const int32 Priority = OptionalInt(Params, TEXT("priority"), 0);
 
 	FResolvedPlayer Player;
 	if (auto Err = ResolveLocalPlayer(Params, Player)) return Err;
@@ -1882,6 +1930,9 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveMappingContext(const TSharedPtr<
 	FString ContextPath;
 	if (auto Err = RequireString(Params, TEXT("mappingContext"), ContextPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	ReadPlayerSelector(Params);
+
 	UInputMappingContext* IMC = LoadAssetByPath<UInputMappingContext>(ContextPath);
 	if (!IMC) return MCPAssetLoadError(ContextPath, TEXT("InputMappingContext"));
 
@@ -1933,14 +1984,15 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetActionValue(const TSharedPtr<FJsonO
 {
 	using namespace InputDepth_Internal;
 
+	// Read before anything can fail (#1057).
+	const FString ActionPath = OptionalString(Params, TEXT("inputActionPath"));
+
 	FResolvedPlayer Player;
 	if (auto Err = ResolveLocalPlayer(Params, Player)) return Err;
 	if (!Player.PlayerInput)
 	{
 		return MCPError(TEXT("The local player has no UEnhancedPlayerInput yet. It is created on the first input tick, so step PIE forward and retry."));
 	}
-
-	const FString ActionPath = OptionalString(Params, TEXT("inputActionPath"));
 
 	TArray<const UInputAction*> Wanted;
 	if (!ActionPath.IsEmpty())

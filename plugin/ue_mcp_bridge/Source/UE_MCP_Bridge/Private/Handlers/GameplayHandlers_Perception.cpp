@@ -514,8 +514,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReadPerception(const TSharedPtr<FJsonO
 {
 	const FString BlueprintPath = OptionalString(Params, TEXT("blueprintPath"));
 	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
-	const bool bHasActorSelector =
-		HasParam(Params, TEXT("actorLabel")) || HasParam(Params, TEXT("actorPath"));
+	// Both are asked, not short-circuited, so each reads as read (#1057).
+	const bool bHasActorLabel = HasParam(Params, TEXT("actorLabel"));
+	const bool bHasActorPath = HasParam(Params, TEXT("actorPath"));
+	const bool bHasActorSelector = bHasActorLabel || bHasActorPath;
 
 	if (BlueprintPath.IsEmpty() && !bHasActorSelector)
 	{
@@ -774,6 +776,15 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveSense(const TSharedPtr<FJsonObje
 	FString BlueprintPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BlueprintPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057). Two selectors:
+	// 'index' is exact, 'senseType' is what a caller has when it only knows it
+	// wants the Sight one gone.
+	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
+	const bool bHasIndex = HasParam(Params, TEXT("index"));
+	const int32 RequestedIndex = bHasIndex
+		? static_cast<int32>(OptionalNumber(Params, TEXT("index"), -1.0)) : INDEX_NONE;
+	const FString SenseType = OptionalString(Params, TEXT("senseType"));
+
 	if (MCPIsProtectedAssetPath(BlueprintPath))
 	{
 		return MCPProtectedPathError(BlueprintPath);
@@ -789,7 +800,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveSense(const TSharedPtr<FJsonObje
 		return MCPAssetNotFoundError(BlueprintPath, TEXT("Blueprint"));
 	}
 
-	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
 	USCS_Node* Node = nullptr;
 	TArray<FString> AvailableComponents;
 	UAIPerceptionComponent* Template =
@@ -818,13 +828,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveSense(const TSharedPtr<FJsonObje
 			"Nothing was changed."));
 	}
 	FScriptArrayHelper Helper(SensesProp, SensesProp->ContainerPtrToValuePtr<void>(Template));
-
-	// Two selectors: 'index' is exact, 'senseType' is what a caller has when it
-	// only knows it wants the Sight one gone.
-	const bool bHasIndex = HasParam(Params, TEXT("index"));
-	const int32 RequestedIndex = bHasIndex
-		? static_cast<int32>(OptionalNumber(Params, TEXT("index"), -1.0)) : INDEX_NONE;
-	const FString SenseType = OptionalString(Params, TEXT("senseType"));
 
 	if (!bHasIndex && SenseType.IsEmpty())
 	{
@@ -1007,6 +1010,8 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveSense(const TSharedPtr<FJsonObje
 
 TSharedPtr<FJsonValue> FGameplayHandlers::GetPerceivedActors(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before anything can fail (#1057); the class resolves further down.
+	const FString SenseSpec = OptionalString(Params, TEXT("senseType"));
 	UWorld* World = ResolveWorldFromParams(Params, TEXT("auto"));
 	if (!World)
 	{
@@ -1026,7 +1031,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetPerceivedActors(const TSharedPtr<FJ
 	UAIPerceptionComponent* Component = PerceptionLocalFindComponent(Actor, OwnerDescription);
 	if (!Component) return PerceptionLocalNoComponentError(Actor, TEXT("Actor"));
 
-	const FString SenseSpec = OptionalString(Params, TEXT("senseType"));
 	UClass* SenseClass = PerceptionLocalResolveSenseClass(SenseSpec, Error);
 	if (!SenseSpec.IsEmpty() && !SenseClass) return Error;
 	const TSubclassOf<UAISense> SenseFilter(SenseClass);
@@ -1115,6 +1119,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetPerceivedActors(const TSharedPtr<FJ
 
 TSharedPtr<FJsonValue> FGameplayHandlers::CheckPerception(const TSharedPtr<FJsonObject>& Params)
 {
+	// The target selector is resolved after the perceiver, so it is noted as
+	// read here, before a perceiver miss can return (#1057).
+	(void)HasParam(Params, TEXT("targetLabel"));
+	(void)HasParam(Params, TEXT("targetPath"));
 	UWorld* World = ResolveWorldFromParams(Params, TEXT("auto"));
 	if (!World)
 	{
@@ -1251,6 +1259,24 @@ TSharedPtr<FJsonValue> FGameplayHandlers::CheckPerception(const TSharedPtr<FJson
 TSharedPtr<FJsonValue> FGameplayHandlers::ReportNoiseEvent(const TSharedPtr<FJsonObject>& Params)
 {
 	UWorld* World = ResolveWorldFromParams(Params, TEXT("auto"));
+
+	// Every parameter is read before anything can fail (#1057). The actor
+	// selectors are resolved later; asking for each key here marks it read.
+	FString SenseType = OptionalString(Params, TEXT("senseType"), TEXT("hearing"));
+	const bool bHasInstigatorLabel = HasParam(Params, TEXT("instigatorLabel"));
+	const bool bHasInstigatorPath = HasParam(Params, TEXT("instigatorPath"));
+	const bool bHasTargetLabel = HasParam(Params, TEXT("targetLabel"));
+	const bool bHasTargetPath = HasParam(Params, TEXT("targetPath"));
+	const TSharedPtr<FJsonObject>* LocationObj = nullptr;
+	const bool bHasLocationObj = TryGetObjectParam(Params, TEXT("location"), LocationObj) && LocationObj;
+	const FString TagString = OptionalString(Params, TEXT("tag"));
+	const double Loudness = OptionalNumber(Params, TEXT("loudness"), 1.0);
+	const double MaxRange = OptionalNumber(Params, TEXT("maxRange"), 0.0);
+	const bool bHasAmount = HasParam(Params, TEXT("amount"));
+	const double Amount = OptionalNumber(Params, TEXT("amount"), 0.0);
+	const TSharedPtr<FJsonObject>* HitObj = nullptr;
+	const bool bHasHitObj = TryGetObjectParam(Params, TEXT("hitLocation"), HitObj) && HitObj;
+
 	if (!World)
 	{
 		return MCPError(TEXT(
@@ -1266,7 +1292,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReportNoiseEvent(const TSharedPtr<FJso
 			"runs in a world with an AI system; run this in PIE (world=\"pie\")."));
 	}
 
-	FString SenseType = OptionalString(Params, TEXT("senseType"), TEXT("hearing"));
 	SenseType.TrimStartAndEndInline();
 	const bool bHearing = SenseType.Equals(TEXT("hearing"), ESearchCase::IgnoreCase);
 	const bool bDamage = SenseType.Equals(TEXT("damage"), ESearchCase::IgnoreCase);
@@ -1284,7 +1309,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReportNoiseEvent(const TSharedPtr<FJso
 
 	// Optional instigator, resolved before anything is reported.
 	AActor* Instigator = nullptr;
-	if (HasParam(Params, TEXT("instigatorLabel")) || HasParam(Params, TEXT("instigatorPath")))
+	if (bHasInstigatorLabel || bHasInstigatorPath)
 	{
 		FMCPActorSelector InstigatorSelector;
 		InstigatorSelector.LabelKey = TEXT("instigatorLabel");
@@ -1299,8 +1324,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReportNoiseEvent(const TSharedPtr<FJso
 	// is what a caller reporting "this actor made a noise" means.
 	FVector Location = FVector::ZeroVector;
 	bool bHaveLocation = false;
-	const TSharedPtr<FJsonObject>* LocationObj = nullptr;
-	if (TryGetObjectParam(Params, TEXT("location"), LocationObj) && LocationObj)
+	if (bHasLocationObj)
 	{
 		bHaveLocation = ReadVec3Fields(*LocationObj, Location);
 	}
@@ -1310,7 +1334,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReportNoiseEvent(const TSharedPtr<FJso
 		bHaveLocation = true;
 	}
 
-	const FString TagString = OptionalString(Params, TEXT("tag"));
 	const FName Tag = TagString.IsEmpty() ? NAME_None : FName(*TagString);
 
 	auto Result = MCPSuccess();
@@ -1334,8 +1357,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReportNoiseEvent(const TSharedPtr<FJso
 				"heard by distance, so it has to happen somewhere: pass 'location', or pass "
 				"'instigatorLabel'/'instigatorPath' and the instigator's own location is used."));
 		}
-		const double Loudness = OptionalNumber(Params, TEXT("loudness"), 1.0);
-		const double MaxRange = OptionalNumber(Params, TEXT("maxRange"), 0.0);
 		if (Loudness <= 0.0)
 		{
 			return MCPError(FString::Printf(
@@ -1371,7 +1392,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReportNoiseEvent(const TSharedPtr<FJso
 		{
 			// The selector's own "missing parameter" message names the keys but
 			// not why damage needs them, so say that here.
-			if (!HasParam(Params, TEXT("targetLabel")) && !HasParam(Params, TEXT("targetPath")))
+			if (!bHasTargetLabel && !bHasTargetPath)
 			{
 				return MCPError(TEXT(
 					"senseType \"damage\" needs 'targetLabel' or 'targetPath': a damage event is "
@@ -1381,21 +1402,19 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReportNoiseEvent(const TSharedPtr<FJso
 			return Error;
 		}
 
-		if (!HasParam(Params, TEXT("amount")))
+		if (!bHasAmount)
 		{
 			return MCPError(TEXT(
 				"senseType \"damage\" needs 'amount': the damage taken. Zero-damage events are NOT "
 				"ignored by the engine, so pass 0 deliberately if that is what you mean."));
 		}
-		const double Amount = OptionalNumber(Params, TEXT("amount"), 0.0);
 
 		// The engine's own fallback chain: event location, then hit location,
 		// then the damaged actor's location.
 		if (!bHaveLocation) Location = DamagedActor->GetActorLocation();
 
 		FVector HitLocation = FAISystem::InvalidLocation;
-		const TSharedPtr<FJsonObject>* HitObj = nullptr;
-		if (TryGetObjectParam(Params, TEXT("hitLocation"), HitObj) && HitObj)
+		if (bHasHitObj)
 		{
 			FVector Parsed = FVector::ZeroVector;
 			if (ReadVec3Fields(*HitObj, Parsed)) HitLocation = Parsed;

@@ -221,6 +221,9 @@ namespace MCPPagination
 		Out.CollectionKey = CollectionKey;
 		Out.Limit = DefaultLimit;
 
+		// Read before the limit check can refuse, so a spec'd handler reads both (#1057).
+		const FString Cursor = Params.IsValid() ? OptionalString(Params, TEXT("cursor")) : FString();
+
 		// 'maxResults' is the older spelling of 'limit'. The tool layer already
 		// translates one into the other, but the bridge is also called directly,
 		// and there a page cap that is read by nobody is a silent wrong answer:
@@ -243,7 +246,6 @@ namespace MCPPagination
 			Out.Limit = static_cast<int32>(Raw);
 		}
 
-		const FString Cursor = Params.IsValid() ? OptionalString(Params, TEXT("cursor")) : FString();
 		if (Cursor.IsEmpty())
 		{
 			return nullptr;

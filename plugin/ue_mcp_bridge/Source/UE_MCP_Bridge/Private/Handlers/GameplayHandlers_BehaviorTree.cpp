@@ -293,6 +293,9 @@ namespace
 		}
 	};
 
+	// Reads the selector parameters only. The class is resolved separately, by
+	// MCPBTResolveSelector, so a handler can read every parameter before its
+	// asset load can fail without loading a class it may never need (#1057).
 	FMCPBTSelector MCPBTReadSelector(const TSharedPtr<FJsonObject>& Params)
 	{
 		FMCPBTSelector Selector;
@@ -300,11 +303,15 @@ namespace
 		Selector.NodeNameSpec = OptionalString(Params, TEXT("nodeName")).TrimStartAndEnd();
 		Selector.NodePathSpec = OptionalString(Params, TEXT("nodePath")).TrimStartAndEnd();
 		Selector.KindSpec = OptionalString(Params, TEXT("kind")).TrimStartAndEnd();
+		return Selector;
+	}
+
+	void MCPBTResolveSelector(FMCPBTSelector& Selector)
+	{
 		if (!Selector.NodeClassSpec.IsEmpty())
 		{
 			Selector.NodeClass = MCPResolveClass(Selector.NodeClassSpec, /*bAllowLoad*/ true);
 		}
-		return Selector;
 	}
 
 	bool MCPBTSelectorMatches(const FMCPBTSelector& Selector, const FMCPBTNodeRef& Ref)
@@ -651,7 +658,7 @@ bool FGameplayHandlers::WriteBTNodeProperty(UBTNode* Node, const FString& Proper
 TSharedPtr<FJsonValue> FGameplayHandlers::GetBehaviorTreeInfo(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UObject* Asset = UEditorAssetLibrary::LoadAsset(AssetPath);
 	if (!Asset)
@@ -723,14 +730,15 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetBehaviorTreeInfo(const TSharedPtr<F
 TSharedPtr<FJsonValue> FGameplayHandlers::ReadBehaviorTreeGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
-	UBehaviorTree* BT = MCPBTLoad(AssetPath);
-	if (!BT) return MCPError(FString::Printf(TEXT("BehaviorTree not found: %s"), *AssetPath));
-
+	// Every parameter is read before the load can fail (#1057).
 	const bool bIncludeProperties = OptionalBool(Params, TEXT("includeProperties"), false);
 	const bool bIncludeInherited = OptionalBool(Params, TEXT("includeInherited"), false);
 	const TSet<FString> Filter = MCPBTPropertyFilter(Params);
+
+	UBehaviorTree* BT = MCPBTLoad(AssetPath);
+	if (!BT) return MCPError(FString::Printf(TEXT("BehaviorTree not found: %s"), *AssetPath));
 
 	int32 DecoratorCount = 0;
 	int32 ServiceCount = 0;
@@ -855,17 +863,19 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReadBehaviorTreeGraph(const TSharedPtr
 TSharedPtr<FJsonValue> FGameplayHandlers::ReadBTNodeProperties(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+
+	// Every parameter is read before the load can fail (#1057).
+	FMCPBTSelector Selector = MCPBTReadSelector(Params);
+	const bool bIncludeInherited = OptionalBool(Params, TEXT("includeInherited"), false);
+	const TSet<FString> Filter = MCPBTPropertyFilter(Params);
 
 	UBehaviorTree* BT = MCPBTLoad(AssetPath);
 	if (!BT) return MCPError(FString::Printf(TEXT("BehaviorTree not found: %s"), *AssetPath));
 
 	TArray<FMCPBTNodeRef> Nodes;
 	MCPBTCollectTree(BT, Nodes);
-
-	const FMCPBTSelector Selector = MCPBTReadSelector(Params);
-	const bool bIncludeInherited = OptionalBool(Params, TEXT("includeInherited"), false);
-	const TSet<FString> Filter = MCPBTPropertyFilter(Params);
+	MCPBTResolveSelector(Selector);
 
 	TArray<TSharedPtr<FJsonValue>> Out;
 	for (const FMCPBTNodeRef& Ref : Nodes)
@@ -898,6 +908,9 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListBTTasks(const TSharedPtr<FJsonObje
 	const bool bRecursive = OptionalBool(Params, TEXT("recursive"), true);
 	const bool bFilterClassOnly = OptionalBool(Params, TEXT("filterClassOnly"), false);
 	const int32 Limit = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 200), 1, 5000);
+	// Read before the tree load can fail (#1057); the classes resolve below.
+	FMCPBTSelector Selector = MCPBTReadSelector(Params);
+	const FString TaskClassSpec = OptionalString(Params, TEXT("taskClass")).TrimStartAndEnd();
 
 	TArray<UBehaviorTree*> Trees;
 	TArray<TSharedPtr<FJsonValue>> Unloadable;
@@ -938,8 +951,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListBTTasks(const TSharedPtr<FJsonObje
 		}
 	}
 
-	const FMCPBTSelector Selector = MCPBTReadSelector(Params);
-	const FString TaskClassSpec = OptionalString(Params, TEXT("taskClass")).TrimStartAndEnd();
+	MCPBTResolveSelector(Selector);
 	UClass* TaskClass = TaskClassSpec.IsEmpty() ? nullptr : MCPResolveClass(TaskClassSpec, /*bAllowLoad*/ true);
 
 	TArray<TSharedPtr<FJsonValue>> Out;
@@ -1022,7 +1034,14 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListBTTasks(const TSharedPtr<FJsonObje
 TSharedPtr<FJsonValue> FGameplayHandlers::SetBTNodeProperty(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+
+	// Every parameter is read before the load can fail (#1057).
+	FMCPBTSelector Selector = MCPBTReadSelector(Params);
+	const TSharedPtr<FJsonObject>* PropertiesObj = nullptr;
+	const bool bHasProperties = TryGetObjectParam(Params, TEXT("properties"), PropertiesObj) && PropertiesObj && (*PropertiesObj).IsValid();
+	const FString SingleProperty = OptionalString(Params, TEXT("property")).TrimStartAndEnd();
+	const TSharedPtr<FJsonValue> SingleValue = TryGetParam(Params, TEXT("value"));
 
 	UBehaviorTree* BT = MCPBTLoad(AssetPath);
 	if (!BT) return MCPError(FString::Printf(TEXT("BehaviorTree not found: %s"), *AssetPath));
@@ -1034,7 +1053,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetBTNodeProperty(const TSharedPtr<FJs
 		return MCPError(FString::Printf(TEXT("%s has no nodes to write to."), *AssetPath));
 	}
 
-	const FMCPBTSelector Selector = MCPBTReadSelector(Params);
+	MCPBTResolveSelector(Selector);
 	if (Selector.IsEmpty())
 	{
 		return MCPError(FString::Printf(
@@ -1064,18 +1083,15 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetBTNodeProperty(const TSharedPtr<FJs
 	// Gather the writes: a properties map of path to value, a single
 	// property + value pair, or both.
 	TArray<TPair<FString, TSharedPtr<FJsonValue>>> Writes;
-	const TSharedPtr<FJsonObject>* PropertiesObj = nullptr;
-	if (TryGetObjectParam(Params, TEXT("properties"), PropertiesObj) && PropertiesObj && (*PropertiesObj).IsValid())
+	if (bHasProperties)
 	{
 		for (const auto& Pair : (*PropertiesObj)->Values)
 		{
 			Writes.Emplace(Pair.Key, Pair.Value);
 		}
 	}
-	const FString SingleProperty = OptionalString(Params, TEXT("property")).TrimStartAndEnd();
 	if (!SingleProperty.IsEmpty())
 	{
-		TSharedPtr<FJsonValue> SingleValue = TryGetParam(Params, TEXT("value"));
 		if (!SingleValue.IsValid())
 		{
 			return MCPError(TEXT("'property' needs a 'value' alongside it (pass null to clear an object reference)."));

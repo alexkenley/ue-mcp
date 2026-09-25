@@ -18,6 +18,7 @@
 #include "Handlers/NetworkingHandlers.h"
 #include "Handlers/ProjectHandlers.h"
 #include "Handlers/StateTreeHandlers.h"
+#include "Handlers/GameplayHandlers.h"
 #include "Handlers/GasHandlers.h"
 #include "Misc/AutomationTest.h"
 
@@ -91,6 +92,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FFabHandlers::RegisterHandlers(Registry);
 	FProjectHandlers::RegisterHandlers(Registry);
 	FStateTreeHandlers::RegisterHandlers(Registry);
+	FGameplayHandlers::RegisterHandlers(Registry);
 	FGasHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();

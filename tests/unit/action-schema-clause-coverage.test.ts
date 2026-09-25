@@ -79,8 +79,6 @@ const ENGLISH_NOT_A_PARAMETER: Record<string, string[]> = {
   "asset.bulk_rename": ["where"],
   // "parameters?: [{name, type}] where type is bool/int/float/..."
   "blueprint.add_event_dispatcher": ["type"],
-  // "... OR pathfindingContextPath? (object path) - uses its agent + filter"
-  "gameplay.find_nav_path": ["filter"],
   // "... onConflict? (skip | overwrite), override? ..." reads as prose here:
   // the word is English in this clause and became a collision only once the
   // wrapped engine tools declared `override` as a real material parameter.

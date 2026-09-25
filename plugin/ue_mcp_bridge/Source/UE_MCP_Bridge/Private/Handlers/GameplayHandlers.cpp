@@ -107,20 +107,145 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("gameplay"));
+
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else; the TS surface for it is generated from a recording of these.
+	// Unspecced: the create_* handlers that would reach AssetTools.CreateAsset
+	// with the spec contract test's values, spawn_nav_modifier_volume (spawns an
+	// actor) and rebuild_navigation (rebuilds the navmesh with no parameters).
+	using EType = EMCPParamType;
+	auto Cursor = []()
+	{
+		return MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("nextCursor from the previous page, passed back unmodified. Omit for the first page"));
+	};
+	auto PageLimit = []()
+	{
+		return MCPParam::Optional(TEXT("limit"), EType::Number, TEXT("Rows on this page (default 200, max 2000)"));
+	};
+	auto ImcPath = []()
+	{
+		return MCPParam::Required(TEXT("imcPath"), EType::String, TEXT("InputMappingContext asset path"));
+	};
+	auto SaveFlag = []()
+	{
+		return MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Persist the asset (default true); false defers the write"));
+	};
+	auto PieInstance = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("pieInstance"), EType::Number, Description);
+	};
+	auto QueryPath = []()
+	{
+		return MCPParam::Required(TEXT("queryPath"), EType::String, TEXT("EnvQuery asset path"));
+	};
+	auto SlotAsset = []()
+	{
+		return MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("SmartObjectDefinition asset path"));
+	};
+	auto InstanceProperties = []()
+	{
+		return MCPParam::Optional(TEXT("instanceProperties"), EType::Object, TEXT("Property writes applied to a freshly-spawned behavior instance"));
+	};
+	auto FrameworkPackage = []()
+	{
+		return MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Content folder (default /Game/Blueprints/GameFramework)"));
+	};
+	auto BTAssetPath = [](const TCHAR* Description)
+	{
+		return MCPParam::Required(TEXT("assetPath"), EType::String, Description).Alias(TEXT("path"));
+	};
+	auto BTNodePath = []()
+	{
+		return MCPParam::Optional(TEXT("nodePath"), EType::String, TEXT("BT node address from read_behavior_tree_graph, e.g. 'Root.Children[0].Decorators[1]'"));
+	};
+	auto BTNodeName = []()
+	{
+		return MCPParam::Optional(TEXT("nodeName"), EType::String, TEXT("BT node selector: the node's object name or its NodeName display text"));
+	};
+	auto BTNodeClass = []()
+	{
+		return MCPParam::Optional(TEXT("nodeClass"), EType::String, TEXT("BT node selector: class name, /Script path or partial name; a resolved class matches its whole subtree"));
+	};
+	auto BTKind = []()
+	{
+		return MCPParam::Optional(TEXT("kind"), EType::String, TEXT("BT node kind: composite | task | decorator | service"));
+	};
+	auto BTParent = []()
+	{
+		return MCPParam::Optional(TEXT("parent"), EType::String, TEXT("Node to attach under: a guid from list_bt_graph_nodes, a runtime address from read_behavior_tree_graph, a unique node name, or 'root' (default)"));
+	};
+	auto BTIndex = []()
+	{
+		return MCPParam::Optional(TEXT("index"), EType::Number, TEXT("Position among the parent's children, which is the execution order. For a decorator or service, its position in the parent's subnode list; on a SimpleParallel, the output pin (0 = main task, 1 = background)"));
+	};
+	auto BTPropertyNames = []()
+	{
+		return MCPParam::Optional(TEXT("propertyNames"), EType::Array, TEXT("Only report these UPROPERTY names")).Items(EType::String);
+	};
+	auto BTIncludeInherited = []()
+	{
+		return MCPParam::Optional(TEXT("includeInherited"), EType::Boolean, TEXT("Keep the properties UBTNode itself declares (TreeAsset, ParentNode, NodeName), omitted by default"));
+	};
+	auto BTProperty = []()
+	{
+		return MCPParam::Optional(TEXT("property"), EType::String, TEXT("Dotted, indexed property path on the node, e.g. 'FilterClass' or 'Lines[1].Text'"));
+	};
+	auto BTValue = []()
+	{
+		return MCPParam::Optional(TEXT("value"), EType::Any, TEXT("Value for property: scalar, object, array, class path, or null to clear a reference"));
+	};
+	auto BTProperties = []()
+	{
+		return MCPParam::Optional(TEXT("properties"), EType::Object, TEXT("Several writes at once, as a map of property path to value. Applied as one batch: a rejected write puts the others back"));
+	};
+	auto LiveActorLabel = []()
+	{
+		return MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Live actor label or name (the pawn or its AIController)"));
+	};
+	auto LiveActorPath = []()
+	{
+		return MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path; wins over actorLabel"));
+	};
+	auto LiveWorld = []()
+	{
+		return MCPParam::Optional(TEXT("world"), EType::String, TEXT("World scope: auto (default) | pie | editor"));
+	};
+	auto LivePie = []()
+	{
+		return MCPParam::Optional(TEXT("pieInstance"), EType::Number, TEXT("PIE world instance (0 = server/primary); omit for the primary world"));
+	};
+	auto PerceptionComponent = []()
+	{
+		return MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Target AIPerceptionComponent name (default: first found)"));
+	};
+
 	Registry.RegisterHandler(TEXT("create_smart_object_definition"), &CreateSmartObjectDefinition);
-	Registry.RegisterHandler(TEXT("get_navmesh_info"), &GetNavmeshInfo);
-	Registry.RegisterHandler(TEXT("get_game_framework_info"), &GetGameFrameworkInfo);
-	Registry.RegisterHandler(TEXT("list_input_assets"), &ListInputAssets);
-	Registry.RegisterHandler(TEXT("list_behavior_trees"), &ListBehaviorTrees);
-	Registry.RegisterHandler(TEXT("list_eqs_queries"), &ListEqsQueries);
-	Registry.RegisterHandler(TEXT("list_state_trees"), &ListStateTrees);
-	Registry.RegisterHandler(TEXT("project_point_to_navigation"), &ProjectPointToNavigation);
+	Registry.RegisterHandler(TEXT("get_navmesh_info"), &GetNavmeshInfo, {});
+	Registry.RegisterHandler(TEXT("get_game_framework_info"), &GetGameFrameworkInfo, {});
+	Registry.RegisterHandler(TEXT("list_input_assets"), &ListInputAssets, {
+		Cursor(),
+		PageLimit(),
+	});
+	Registry.RegisterHandler(TEXT("list_behavior_trees"), &ListBehaviorTrees, {
+		Cursor(),
+		PageLimit(),
+	});
+	Registry.RegisterHandler(TEXT("list_eqs_queries"), &ListEqsQueries, {});
+	Registry.RegisterHandler(TEXT("list_state_trees"), &ListStateTrees, {
+		Cursor(),
+		PageLimit(),
+	});
+	Registry.RegisterHandler(TEXT("project_point_to_navigation"), &ProjectPointToNavigation, {
+		MCPParam::Required(TEXT("location"), EType::Vec3, TEXT("World point to project onto the navmesh")),
+	});
 	// Enhanced Input asset authoring stays here. pie-studio owns PIE-time
 	// inject/record/replay; authoring InputAction / InputMappingContext
 	// assets and editing IMC mappings is core ue-mcp.
 	Registry.RegisterHandler(TEXT("create_input_action"), &CreateInputAction);
 	Registry.RegisterHandler(TEXT("create_input_mapping_context"), &CreateInputMappingContext);
-	Registry.RegisterHandler(TEXT("read_imc"), &ReadImc);
+	Registry.RegisterHandler(TEXT("read_imc"), &ReadImc, {
+		ImcPath(),
+	});
 	// #778: superseded by GetInputMappingContexts, which covers every PIE world
 	// rather than only the primary one. The old name stays registered so it does
 	// not become "Unknown method", but the RESPONSE SHAPE changed: results are
@@ -128,105 +253,483 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// mappingContexts (was appliedContexts, with imc -> path). A caller reading
 	// the old shape must be updated - this is name compatibility, not contract
 	// compatibility.
-	Registry.RegisterHandler(TEXT("get_applied_imcs"), &GetInputMappingContexts);
-	Registry.RegisterHandler(TEXT("list_imc_mappings"), &ReadImc);
-	Registry.RegisterHandler(TEXT("add_imc_mapping"), &AddImcMapping);
-	Registry.RegisterHandler(TEXT("set_mapping_modifiers"), &SetMappingModifiers);
-	Registry.RegisterHandler(TEXT("remove_imc_mapping"), &RemoveImcMapping);
-	Registry.RegisterHandler(TEXT("set_imc_mapping_key"), &SetImcMappingKey);
-	Registry.RegisterHandler(TEXT("set_imc_mapping_action"), &SetImcMappingAction);
+	Registry.RegisterHandler(TEXT("get_applied_imcs"), &GetInputMappingContexts, {
+		PieInstance(TEXT("PIE world instance (0 = server/primary); omit for every running PIE world")),
+		MCPParam::Optional(TEXT("playerIndex"), EType::Number, TEXT("Player index; omit for every player")),
+		MCPParam::Optional(TEXT("mappingContext"), EType::String, TEXT("Name or path of one context to answer yes/no about")),
+		MCPParam::Optional(TEXT("includeActions"), EType::Boolean, TEXT("Include each context's action/key mappings")),
+	});
+	Registry.RegisterHandler(TEXT("list_imc_mappings"), &ReadImc, {
+		ImcPath(),
+	});
+	Registry.RegisterHandler(TEXT("add_imc_mapping"), &AddImcMapping, {
+		ImcPath(),
+		MCPParam::Required(TEXT("inputActionPath"), EType::String, TEXT("InputAction asset path to map")),
+		MCPParam::Required(TEXT("key"), EType::String, TEXT("FKey name to bind")),
+		SaveFlag(),
+	});
+	Registry.RegisterHandler(TEXT("set_mapping_modifiers"), &SetMappingModifiers, {
+		ImcPath(),
+		MCPParam::Optional(TEXT("mappingIndex"), EType::Number, TEXT("Index of the mapping in the IMC (default 0)")),
+		MCPParam::Optional(TEXT("modifiers"), EType::Array, TEXT("Modifier objects: {type, ...props} or {class, properties}. Replaces the mapping's list")).Items(EType::Object),
+		MCPParam::Optional(TEXT("triggers"), EType::Array, TEXT("Trigger objects: {type, ...props} or {class, properties}. Replaces the mapping's list")).Items(EType::Object),
+		SaveFlag(),
+	});
+	Registry.RegisterHandler(TEXT("remove_imc_mapping"), &RemoveImcMapping, {
+		ImcPath(),
+		MCPParam::Optional(TEXT("mappingIndex"), EType::Number, TEXT("Index of the mapping to remove")),
+		MCPParam::Optional(TEXT("inputActionPath"), EType::String, TEXT("Select the mapping by InputAction (with key)")),
+		MCPParam::Optional(TEXT("key"), EType::String, TEXT("Select the mapping by key (with inputActionPath)")),
+		SaveFlag(),
+	});
+	Registry.RegisterHandler(TEXT("set_imc_mapping_key"), &SetImcMappingKey, {
+		ImcPath(),
+		MCPParam::Required(TEXT("newKey"), EType::String, TEXT("New FKey name")),
+		MCPParam::Optional(TEXT("mappingIndex"), EType::Number, TEXT("Index of the mapping to rebind")),
+		MCPParam::Optional(TEXT("key"), EType::String, TEXT("Select the mapping by its current key")),
+		MCPParam::Optional(TEXT("inputActionPath"), EType::String, TEXT("Select the mapping by its InputAction")),
+		SaveFlag(),
+	});
+	Registry.RegisterHandler(TEXT("set_imc_mapping_action"), &SetImcMappingAction, {
+		ImcPath(),
+		MCPParam::Required(TEXT("newInputActionPath"), EType::String, TEXT("InputAction the mapping should use")),
+		MCPParam::Optional(TEXT("mappingIndex"), EType::Number, TEXT("Index of the mapping to retarget")),
+		MCPParam::Optional(TEXT("key"), EType::String, TEXT("Select the mapping by its key")),
+		MCPParam::Optional(TEXT("inputActionPath"), EType::String, TEXT("Select the mapping by its current InputAction")),
+		SaveFlag(),
+	});
 	// V11 Enhanced Input depth: the read half authoring never had, the
 	// action's own instanced trigger/modifier arrays, live apply/remove of a
 	// mapping context, the live action value, and the audit.
-	Registry.RegisterHandler(TEXT("read_input_action"), &ReadInputAction);
-	Registry.RegisterHandler(TEXT("set_action_triggers"), &SetActionTriggers);
-	Registry.RegisterHandler(TEXT("set_player_mappable_settings"), &SetPlayerMappableSettings);
-	Registry.RegisterHandler(TEXT("apply_mapping_context"), &ApplyMappingContext);
-	Registry.RegisterHandler(TEXT("remove_mapping_context"), &RemoveMappingContext);
-	Registry.RegisterHandler(TEXT("get_action_value"), &GetActionValue);
-	Registry.RegisterHandler(TEXT("validate_input"), &ValidateInput);
+	Registry.RegisterHandler(TEXT("read_input_action"), &ReadInputAction, {
+		MCPParam::Required(TEXT("inputActionPath"), EType::String, TEXT("InputAction asset path")),
+	});
+	Registry.RegisterHandler(TEXT("set_action_triggers"), &SetActionTriggers, {
+		MCPParam::Required(TEXT("inputActionPath"), EType::String, TEXT("InputAction asset path")),
+		MCPParam::Optional(TEXT("triggers"), EType::Array, TEXT("Trigger specs that replace the action's own Triggers array")).Items(EType::Object),
+		MCPParam::Optional(TEXT("modifiers"), EType::Array, TEXT("Modifier specs that replace the action's own Modifiers array")).Items(EType::Object),
+		MCPParam::Optional(TEXT("clear"), EType::Boolean, TEXT("Empty both arrays; an omitted array then means empty rather than left alone")),
+	});
+	Registry.RegisterHandler(TEXT("set_player_mappable_settings"), &SetPlayerMappableSettings, {
+		MCPParam::Required(TEXT("inputActionPath"), EType::String, TEXT("InputAction asset path")),
+		MCPParam::Required(TEXT("mappingName"), EType::String, TEXT("Stable FName saved with the player mapping; must be non-empty")),
+		MCPParam::Optional(TEXT("displayName"), EType::String, TEXT("Display name written onto UPlayerMappableKeySettings")),
+		MCPParam::Optional(TEXT("displayCategory"), EType::String, TEXT("Display category (Movement, Combat, ...) written onto UPlayerMappableKeySettings")),
+		SaveFlag(),
+	});
+	Registry.RegisterHandler(TEXT("apply_mapping_context"), &ApplyMappingContext, {
+		MCPParam::Required(TEXT("mappingContext"), EType::String, TEXT("InputMappingContext asset path to apply to the live player")),
+		MCPParam::Optional(TEXT("priority"), EType::Number, TEXT("Enhanced Input context priority; higher wins for the same key (default 0)")),
+		PieInstance(TEXT("PIE world instance (0 = server/primary); omit for the first running one")),
+		MCPParam::Optional(TEXT("playerIndex"), EType::Number, TEXT("Local player to act on (default 0)")),
+	});
+	Registry.RegisterHandler(TEXT("remove_mapping_context"), &RemoveMappingContext, {
+		MCPParam::Required(TEXT("mappingContext"), EType::String, TEXT("InputMappingContext asset path to remove from the live player")),
+		PieInstance(TEXT("PIE world instance (0 = server/primary); omit for the first running one")),
+		MCPParam::Optional(TEXT("playerIndex"), EType::Number, TEXT("Local player to act on (default 0)")),
+	});
+	Registry.RegisterHandler(TEXT("get_action_value"), &GetActionValue, {
+		MCPParam::Optional(TEXT("inputActionPath"), EType::String, TEXT("InputAction to read; omit for every action the player has bound")),
+		PieInstance(TEXT("PIE world instance (0 = server/primary); omit for the first running one")),
+		MCPParam::Optional(TEXT("playerIndex"), EType::Number, TEXT("Local player to read (default 0)")),
+	});
+	Registry.RegisterHandler(TEXT("validate_input"), &ValidateInput, {
+		MCPParam::Optional(TEXT("imcPath"), EType::String, TEXT("Audit this one InputMappingContext instead of sweeping directory")),
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content root the InputMappingContext sweep covers (default /Game)")),
+		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include subfolders of directory (default true)")),
+		MCPParam::Optional(TEXT("limit"), EType::Number, TEXT("How many InputMappingContexts a sweep loads (default 200)")),
+	});
 	// T18 Mass Entity and Zone Graph. ensure_mass_entity_config and
 	// read_mass_entity_config already ship from MassHandlers.cpp.
-	Registry.RegisterHandler(TEXT("list_mass_types"), &ListMassTypes);
-	Registry.RegisterHandler(TEXT("remove_mass_trait"), &RemoveMassTrait);
-	Registry.RegisterHandler(TEXT("reorder_mass_traits"), &ReorderMassTraits);
-	Registry.RegisterHandler(TEXT("validate_mass_entity_config"), &ValidateMassEntityConfig);
-	Registry.RegisterHandler(TEXT("query_zone_graph"), &QueryZoneGraph);
+	Registry.RegisterHandler(TEXT("list_mass_types"), &ListMassTypes, {
+		MCPParam::Optional(TEXT("kind"), EType::String, TEXT("all | traits | processors (default all)")),
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring over the class names")),
+		MCPParam::Optional(TEXT("limit"), EType::Number, TEXT("How many classes per kind (default 200)")),
+	});
+	Registry.RegisterHandler(TEXT("remove_mass_trait"), &RemoveMassTrait, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MassEntityConfigAsset path")),
+		MCPParam::Optional(TEXT("traitClass"), EType::String, TEXT("Concrete UMassEntityTraitBase subclass to remove, short name or /Script path. Idempotent selector")),
+		MCPParam::Optional(TEXT("index"), EType::Number, TEXT("Positional index into Config.Traits, as read_mass_entity_config reports it")),
+	});
+	Registry.RegisterHandler(TEXT("reorder_mass_traits"), &ReorderMassTraits, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MassEntityConfigAsset path")),
+		MCPParam::Required(TEXT("order"), EType::Array, TEXT("Current trait indices in the order wanted; must be a full permutation")).Items(EType::Number),
+	});
+	Registry.RegisterHandler(TEXT("validate_mass_entity_config"), &ValidateMassEntityConfig, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MassEntityConfigAsset path")),
+	});
+	Registry.RegisterHandler(TEXT("query_zone_graph"), &QueryZoneGraph, {
+		MCPParam::Optional(TEXT("queryMode"), EType::String, TEXT("summary | lanes | lane | nearest (default summary)")),
+		MCPParam::Optional(TEXT("laneIndex"), EType::Number, TEXT("Lane queryMode=lane reports, as queryMode=lanes numbers them")),
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("Query point for queryMode=nearest")),
+		MCPParam::Optional(TEXT("radius"), EType::Number, TEXT("How far from location a nearest-lane hit is accepted, in world units (default 100000)")),
+		MCPParam::Optional(TEXT("tags"), EType::Array, TEXT("Zone Graph tag names to keep, as the project settings name them")),
+		MCPParam::Optional(TEXT("limit"), EType::Number, TEXT("How many lanes to report (default 50)")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("editor | pie | auto (default editor)")),
+		PieInstance(TEXT("PIE world instance when world is pie or auto")),
+		MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Only this ZoneGraphData actor, by label or name")),
+		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Only this ZoneGraphData actor, by full object path")),
+	});
 	Registry.RegisterHandler(TEXT("create_blackboard"), &CreateBlackboard);
-	Registry.RegisterHandler(TEXT("create_behavior_tree"), &CreateBehaviorTree);
+	Registry.RegisterHandler(TEXT("create_behavior_tree"), &CreateBehaviorTree, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Content folder (default /Game/AI)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default, returns the existing asset) or error when the asset already exists")),
+		MCPParam::Optional(TEXT("blackboardPath"), EType::String, TEXT("BlackboardData assigned before the first save; an unknown path creates nothing")),
+	});
 	Registry.RegisterHandler(TEXT("create_eqs_query"), &CreateEqsQuery);
-	Registry.RegisterHandler(TEXT("list_eqs_types"), &ListEqsTypes);
-	Registry.RegisterHandler(TEXT("read_eqs_query"), &ReadEqsQuery);
-	Registry.RegisterHandler(TEXT("add_eqs_generator"), &AddEqsGenerator);
-	Registry.RegisterHandler(TEXT("add_eqs_test"), &AddEqsTest);
-	Registry.RegisterHandler(TEXT("remove_eqs_test"), &RemoveEqsTest);
-	Registry.RegisterHandler(TEXT("remove_eqs_option"), &RemoveEqsOption);
-	Registry.RegisterHandler(TEXT("get_bt_runtime"), &GetBtRuntime);
-	Registry.RegisterHandler(TEXT("get_live_blackboard"), &GetLiveBlackboard);
-	Registry.RegisterHandler(TEXT("set_live_blackboard"), &SetLiveBlackboard);
-	Registry.RegisterHandler(TEXT("run_behavior_tree"), &RunBehaviorTree);
-	Registry.RegisterHandler(TEXT("stop_behavior_tree"), &StopBehaviorTree);
-	Registry.RegisterHandler(TEXT("list_ai_agents"), &ListAiAgents);
-	Registry.RegisterHandler(TEXT("read_perception"), &ReadPerception);
-	Registry.RegisterHandler(TEXT("remove_sense"), &RemoveSense);
-	Registry.RegisterHandler(TEXT("get_perceived_actors"), &GetPerceivedActors);
-	Registry.RegisterHandler(TEXT("check_perception"), &CheckPerception);
-	Registry.RegisterHandler(TEXT("report_noise_event"), &ReportNoiseEvent);
-	Registry.RegisterHandler(TEXT("reorder_eqs_tests"), &ReorderEqsTests);
-	Registry.RegisterHandler(TEXT("run_eqs_query"), &RunEqsQuery);
+	Registry.RegisterHandler(TEXT("list_eqs_types"), &ListEqsTypes, {
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring over the class names")),
+		Cursor(),
+		PageLimit(),
+	});
+	Registry.RegisterHandler(TEXT("read_eqs_query"), &ReadEqsQuery, {
+		QueryPath(),
+	});
+	Registry.RegisterHandler(TEXT("add_eqs_generator"), &AddEqsGenerator, {
+		QueryPath(),
+		MCPParam::Required(TEXT("generatorClass"), EType::String, TEXT("Generator class, short name (OnCircle) or full path")),
+	});
+	Registry.RegisterHandler(TEXT("add_eqs_test"), &AddEqsTest, {
+		QueryPath(),
+		MCPParam::Required(TEXT("testClass"), EType::String, TEXT("Test class, short name (Distance) or full path")),
+		MCPParam::Optional(TEXT("optionIndex"), EType::Number, TEXT("Option to add the test to (default 0)")),
+		MCPParam::Optional(TEXT("purpose"), EType::String, TEXT("filter | score | both")),
+	});
+	Registry.RegisterHandler(TEXT("remove_eqs_test"), &RemoveEqsTest, {
+		QueryPath(),
+		MCPParam::Required(TEXT("testIndex"), EType::Number, TEXT("Test to remove, as read_eqs_query reports it")),
+		MCPParam::Optional(TEXT("optionIndex"), EType::Number, TEXT("Option the test belongs to (default 0)")),
+	});
+	Registry.RegisterHandler(TEXT("remove_eqs_option"), &RemoveEqsOption, {
+		QueryPath(),
+		MCPParam::Required(TEXT("optionIndex"), EType::Number, TEXT("Option to remove, as read_eqs_query reports it")),
+	});
+	Registry.RegisterHandler(TEXT("get_bt_runtime"), &GetBtRuntime, {
+		LiveActorLabel(),
+		LiveActorPath(),
+		LiveWorld(),
+		LivePie(),
+		MCPParam::Optional(TEXT("includeAuxNodes"), EType::Boolean, TEXT("Include the decorators and services currently active (default true)")),
+		MCPParam::Optional(TEXT("includeDebugStrings"), EType::Boolean, TEXT("Include the engine's DescribeActiveTasks / DescribeActiveTrees dumps (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("get_live_blackboard"), &GetLiveBlackboard, {
+		LiveActorLabel(),
+		LiveActorPath(),
+		LiveWorld(),
+		LivePie(),
+		MCPParam::Optional(TEXT("key"), EType::String, TEXT("Report this one blackboard key; a miss lists every real key name")),
+		MCPParam::Optional(TEXT("verbosity"), EType::String, TEXT("onlyValue | keyWithValue | detailed (default) | full")),
+	});
+	Registry.RegisterHandler(TEXT("set_live_blackboard"), &SetLiveBlackboard, {
+		LiveActorLabel(),
+		LiveActorPath(),
+		LiveWorld(),
+		LivePie(),
+		MCPParam::Required(TEXT("key"), EType::String, TEXT("Blackboard key to write")),
+		MCPParam::Optional(TEXT("value"), EType::Any, TEXT("Value to write, typed to the key; required unless clear is true")),
+		MCPParam::Optional(TEXT("clear"), EType::Boolean, TEXT("Clear the key instead of writing a value")),
+	});
+	Registry.RegisterHandler(TEXT("run_behavior_tree"), &RunBehaviorTree, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("BehaviorTree asset to run")).Alias(TEXT("behaviorTreePath")),
+		LiveActorLabel(),
+		LiveActorPath(),
+		LiveWorld(),
+		LivePie(),
+		MCPParam::Optional(TEXT("executionMode"), EType::String, TEXT("looped (default) | singleRun")),
+		MCPParam::Optional(TEXT("restartIfRunning"), EType::Boolean, TEXT("Restart the tree even if this one is already running")),
+	});
+	Registry.RegisterHandler(TEXT("stop_behavior_tree"), &StopBehaviorTree, {
+		LiveActorLabel(),
+		LiveActorPath(),
+		LiveWorld(),
+		LivePie(),
+		MCPParam::Optional(TEXT("mode"), EType::String, TEXT("stop (default) | forced | restart | pause | resume")),
+		MCPParam::Optional(TEXT("reason"), EType::String, TEXT("Recorded with the stop, for the log")),
+		MCPParam::Optional(TEXT("completeRestart"), EType::Boolean, TEXT("With mode=restart, restart from the root rather than resuming")),
+	});
+	Registry.RegisterHandler(TEXT("list_ai_agents"), &ListAiAgents, {
+		LiveWorld(),
+		LivePie(),
+		MCPParam::Optional(TEXT("runningOnly"), EType::Boolean, TEXT("Only agents whose brain is currently running")),
+		MCPParam::Optional(TEXT("behaviorTreeOnly"), EType::Boolean, TEXT("Only agents running a BehaviorTree")),
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Case-insensitive substring over the agent's class name")),
+		MCPParam::Optional(TEXT("limit"), EType::Number, TEXT("Maximum agents to return")),
+	});
+	Registry.RegisterHandler(TEXT("read_perception"), &ReadPerception, {
+		MCPParam::Optional(TEXT("blueprintPath"), EType::String, TEXT("Blueprint whose AIPerceptionComponent template to read; or pass actorLabel/actorPath")),
+		LiveActorLabel(),
+		LiveActorPath(),
+		LiveWorld(),
+		LivePie(),
+		PerceptionComponent(),
+	});
+	Registry.RegisterHandler(TEXT("remove_sense"), &RemoveSense, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Blueprint carrying the AIPerceptionComponent template")),
+		MCPParam::Optional(TEXT("index"), EType::Number, TEXT("Index of the sense config to remove, as read_perception reports it")),
+		MCPParam::Optional(TEXT("senseType"), EType::String, TEXT("Sense to remove when index is omitted: Sight | Hearing | Damage | Touch | Team | Prediction | Blueprint")),
+		PerceptionComponent(),
+	});
+	Registry.RegisterHandler(TEXT("get_perceived_actors"), &GetPerceivedActors, {
+		LiveActorLabel(),
+		LiveActorPath(),
+		LiveWorld(),
+		LivePie(),
+		MCPParam::Optional(TEXT("senseType"), EType::String, TEXT("Only report this sense: Sight | Hearing | Damage | Touch | Team | Prediction")),
+	});
+	Registry.RegisterHandler(TEXT("check_perception"), &CheckPerception, {
+		MCPParam::Optional(TEXT("perceiverLabel"), EType::String, TEXT("The actor doing the perceiving")),
+		MCPParam::Optional(TEXT("perceiverPath"), EType::String, TEXT("Full object path of the perceiver")),
+		MCPParam::Optional(TEXT("targetLabel"), EType::String, TEXT("The actor being perceived")),
+		MCPParam::Optional(TEXT("targetPath"), EType::String, TEXT("Full object path of the target")),
+		LiveWorld(),
+		LivePie(),
+	});
+	Registry.RegisterHandler(TEXT("report_noise_event"), &ReportNoiseEvent, {
+		MCPParam::Optional(TEXT("senseType"), EType::String, TEXT("hearing (default) | damage")),
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("Event location; defaults to the instigator's (hearing) or the damaged actor's (damage)")),
+		MCPParam::Optional(TEXT("loudness"), EType::Number, TEXT("Noise loudness (default 1)")),
+		MCPParam::Optional(TEXT("maxRange"), EType::Number, TEXT("Maximum range the noise carries (0 = unlimited)")),
+		MCPParam::Optional(TEXT("instigatorLabel"), EType::String, TEXT("The actor that caused the event")),
+		MCPParam::Optional(TEXT("instigatorPath"), EType::String, TEXT("Full object path of the instigator")),
+		MCPParam::Optional(TEXT("tag"), EType::String, TEXT("Tag recorded on the stimulus")),
+		MCPParam::Optional(TEXT("targetLabel"), EType::String, TEXT("Damaged actor (damage only)")),
+		MCPParam::Optional(TEXT("targetPath"), EType::String, TEXT("Full object path of the damaged actor (damage only)")),
+		MCPParam::Optional(TEXT("amount"), EType::Number, TEXT("Damage amount (damage only, required there)")),
+		MCPParam::Optional(TEXT("hitLocation"), EType::Object, TEXT("Impact point {x,y,z} (damage only)")),
+		LiveWorld(),
+		LivePie(),
+	});
+	Registry.RegisterHandler(TEXT("reorder_eqs_tests"), &ReorderEqsTests, {
+		QueryPath(),
+		MCPParam::Required(TEXT("order"), EType::Array, TEXT("Current test indices in the order wanted; must be a full permutation")).Items(EType::Number),
+		MCPParam::Optional(TEXT("optionIndex"), EType::Number, TEXT("Option whose tests to reorder (default 0)")),
+	});
+	Registry.RegisterHandler(TEXT("run_eqs_query"), &RunEqsQuery, {
+		QueryPath(),
+		MCPParam::Optional(TEXT("querierLabel"), EType::String, TEXT("Actor the query runs from, which querier-relative contexts resolve against")),
+		MCPParam::Optional(TEXT("querierPath"), EType::String, TEXT("Full object path of the querier; unambiguous where a label is not")),
+		MCPParam::Optional(TEXT("runMode"), EType::String, TEXT("all | best | random (default all)")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("auto | pie | editor (default auto)")),
+		PieInstance(TEXT("PIE world instance when world is pie or auto")),
+		MCPParam::Optional(TEXT("limit"), EType::Number, TEXT("How many scored items to return (default 50)")),
+	});
 	Registry.RegisterHandler(TEXT("create_state_tree"), &CreateStateTree);
-	Registry.RegisterHandler(TEXT("get_input_mapping_contexts"), &GetInputMappingContexts);
-	Registry.RegisterHandler(TEXT("get_state_tree_runtime"), &GetStateTreeRuntime);
-	Registry.RegisterHandler(TEXT("create_game_mode"), &CreateGameMode);
-	Registry.RegisterHandler(TEXT("create_game_state"), &CreateGameState);
-	Registry.RegisterHandler(TEXT("create_player_controller"), &CreatePlayerController);
-	Registry.RegisterHandler(TEXT("create_player_state"), &CreatePlayerState);
-	Registry.RegisterHandler(TEXT("create_hud"), &CreateHud);
+	Registry.RegisterHandler(TEXT("get_input_mapping_contexts"), &GetInputMappingContexts, {
+		PieInstance(TEXT("PIE world instance (0 = server/primary); omit for every running PIE world")),
+		MCPParam::Optional(TEXT("playerIndex"), EType::Number, TEXT("Player index; omit for every player")),
+		MCPParam::Optional(TEXT("mappingContext"), EType::String, TEXT("Name or path of one context to answer yes/no about")),
+		MCPParam::Optional(TEXT("includeActions"), EType::Boolean, TEXT("Include each context's action/key mappings")),
+	});
+	Registry.RegisterHandler(TEXT("get_state_tree_runtime"), &GetStateTreeRuntime, {
+		MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Actor label, name or path. Pass actorLabel or actorPath")),
+		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path; the unambiguous selector")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("pie (default) | editor | auto")),
+		PieInstance(TEXT("PIE world instance (0 = server/primary)")),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("StateTree component to read (default: first found)")),
+	});
+	Registry.RegisterHandler(TEXT("create_game_mode"), &CreateGameMode, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Blueprint name")),
+		FrameworkPackage(),
+		MCPParam::Optional(TEXT("parentClass"), EType::String, TEXT("Parent deriving from GameModeBase: short name, /Script path or Blueprint asset path")),
+	});
+	Registry.RegisterHandler(TEXT("create_game_state"), &CreateGameState, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Blueprint name")),
+		FrameworkPackage(),
+		MCPParam::Optional(TEXT("parentClass"), EType::String, TEXT("Parent deriving from GameStateBase: short name, /Script path or Blueprint asset path")),
+	});
+	Registry.RegisterHandler(TEXT("create_player_controller"), &CreatePlayerController, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Blueprint name")),
+		FrameworkPackage(),
+		MCPParam::Optional(TEXT("parentClass"), EType::String, TEXT("Parent deriving from PlayerController: short name, /Script path or Blueprint asset path")),
+	});
+	Registry.RegisterHandler(TEXT("create_player_state"), &CreatePlayerState, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Blueprint name")),
+		FrameworkPackage(),
+		MCPParam::Optional(TEXT("parentClass"), EType::String, TEXT("Parent deriving from PlayerState: short name, /Script path or Blueprint asset path")),
+	});
+	Registry.RegisterHandler(TEXT("create_hud"), &CreateHud, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Blueprint name")),
+		FrameworkPackage(),
+		MCPParam::Optional(TEXT("parentClass"), EType::String, TEXT("Parent deriving from HUD: short name, /Script path or Blueprint asset path")),
+	});
 	Registry.RegisterHandler(TEXT("spawn_nav_modifier_volume"), &SpawnNavModifierVolume);
-	Registry.RegisterHandler(TEXT("set_world_game_mode"), &SetWorldGameMode);
-	Registry.RegisterHandler(TEXT("add_blackboard_key"), &AddBlackboardKey);
+	Registry.RegisterHandler(TEXT("set_world_game_mode"), &SetWorldGameMode, {
+		MCPParam::Required(TEXT("gameModeClass"), EType::String, TEXT("GameMode class or Blueprint path")).Alias(TEXT("gameModePath")),
+	});
+	Registry.RegisterHandler(TEXT("add_blackboard_key"), &AddBlackboardKey, {
+		MCPParam::Required(TEXT("blackboardPath"), EType::String, TEXT("BlackboardData asset path")),
+		MCPParam::Required(TEXT("keyName"), EType::String, TEXT("Key name to add")),
+		MCPParam::Optional(TEXT("keyType"), EType::String, TEXT("Bool (default) | Int | Float | String | Name | Vector | Rotator | Object | Class | Enum")),
+		MCPParam::Optional(TEXT("baseClass"), EType::String, TEXT("Base class for an Object/Class key (e.g. /Script/Engine.Actor); for an Enum key, the enum when enumType is absent")),
+		MCPParam::Optional(TEXT("enumType"), EType::String, TEXT("Enum name or path for keyType=Enum")),
+	});
 	// #469: set parent on BlackboardData so a child Blackboard can extend the
 	// parent's keys (canonical UE pattern for extending third-party AI assets).
-	Registry.RegisterHandler(TEXT("set_blackboard_parent"), &SetBlackboardParent);
-	Registry.RegisterHandler(TEXT("remove_blackboard_key"), &RemoveBlackboardKey);
-	Registry.RegisterHandler(TEXT("read_blackboard"), &ReadBlackboard);
+	Registry.RegisterHandler(TEXT("set_blackboard_parent"), &SetBlackboardParent, {
+		MCPParam::Required(TEXT("blackboardPath"), EType::String, TEXT("Child BlackboardData asset path")),
+		MCPParam::Optional(TEXT("parentPath"), EType::String, TEXT("Parent BlackboardData asset path; None or omitted clears it")),
+		MCPParam::Optional(TEXT("autoPruneDuplicateKeys"), EType::Boolean, TEXT("Remove own keys the parent chain already defines (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("remove_blackboard_key"), &RemoveBlackboardKey, {
+		MCPParam::Required(TEXT("blackboardPath"), EType::String, TEXT("BlackboardData asset path")),
+		MCPParam::Required(TEXT("keyName"), EType::String, TEXT("Key name to remove")),
+	});
+	Registry.RegisterHandler(TEXT("read_blackboard"), &ReadBlackboard, {
+		MCPParam::Required(TEXT("blackboardPath"), EType::String, TEXT("BlackboardData asset path")).Alias(TEXT("assetPath")),
+	});
 	// #494: discover available BT node classes (composites, tasks, decorators, services).
-	Registry.RegisterHandler(TEXT("list_bt_node_classes"), &ListBTNodeClasses);
-	Registry.RegisterHandler(TEXT("set_behavior_tree_blackboard"), &SetBehaviorTreeBlackboard);
+	Registry.RegisterHandler(TEXT("list_bt_node_classes"), &ListBTNodeClasses, {
+		MCPParam::Optional(TEXT("kind"), EType::String, TEXT("composite | task | decorator | service. Omit for every kind; anything else is refused")),
+		Cursor(),
+		PageLimit(),
+	});
+	Registry.RegisterHandler(TEXT("set_behavior_tree_blackboard"), &SetBehaviorTreeBlackboard, {
+		MCPParam::Required(TEXT("behaviorTreePath"), EType::String, TEXT("BehaviorTree asset path")),
+		MCPParam::Required(TEXT("blackboardPath"), EType::String, TEXT("BlackboardData asset to bind")),
+	});
 	Registry.RegisterHandler(TEXT("rebuild_navigation"), &RebuildNavmesh);
-	Registry.RegisterHandler(TEXT("find_nav_path"), &FindNavPath);
-	Registry.RegisterHandler(TEXT("list_nav_invokers"), &ListNavInvokers);
-	// New handlers
-	Registry.RegisterHandler(TEXT("get_behavior_tree_info"), &GetBehaviorTreeInfo);
-	Registry.RegisterHandler(TEXT("read_behavior_tree_graph"), &ReadBehaviorTreeGraph);
+	Registry.RegisterHandler(TEXT("find_nav_path"), &FindNavPath, {
+		MCPParam::Required(TEXT("start"), EType::Vec3, TEXT("Query start (world point)")),
+		MCPParam::Required(TEXT("end"), EType::Vec3, TEXT("Query end (world point)")),
+		MCPParam::Optional(TEXT("pathfindingContext"), EType::String, TEXT("Actor label whose navigation agent and filter the query uses")),
+		MCPParam::Optional(TEXT("pathfindingContextPath"), EType::String, TEXT("Full object path of the pathfinding context actor; alternative to pathfindingContext")),
+	});
+	Registry.RegisterHandler(TEXT("list_nav_invokers"), &ListNavInvokers, {});
+	Registry.RegisterHandler(TEXT("get_behavior_tree_info"), &GetBehaviorTreeInfo, {
+		BTAssetPath(TEXT("BehaviorTree asset path")),
+	});
+	Registry.RegisterHandler(TEXT("read_behavior_tree_graph"), &ReadBehaviorTreeGraph, {
+		BTAssetPath(TEXT("BehaviorTree asset path")),
+		MCPParam::Optional(TEXT("includeProperties"), EType::Boolean, TEXT("Include each node's own UPROPERTY values")),
+		BTIncludeInherited(),
+		BTPropertyNames(),
+	});
 	// #919: pick BT nodes and read only their own UPROPERTY values.
-	Registry.RegisterHandler(TEXT("read_bt_node_properties"), &ReadBTNodeProperties);
+	Registry.RegisterHandler(TEXT("read_bt_node_properties"), &ReadBTNodeProperties, {
+		BTAssetPath(TEXT("BehaviorTree asset path")),
+		BTNodeClass(),
+		BTNodeName(),
+		BTNodePath(),
+		BTKind(),
+		BTPropertyNames(),
+		BTIncludeInherited(),
+	});
 	// #940: inventory BTTask nodes, FilterClass included.
-	Registry.RegisterHandler(TEXT("list_bt_tasks"), &ListBTTasks);
+	Registry.RegisterHandler(TEXT("list_bt_tasks"), &ListBTTasks, {
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("BehaviorTree asset path; omit to sweep directory")),
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content folder to sweep when assetPath is omitted (default: every BehaviorTree)")),
+		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include subfolders of directory (default true)")),
+		MCPParam::Optional(TEXT("taskClass"), EType::String, TEXT("Keep only tasks of this class or its subclasses, e.g. BTTask_MoveTo")),
+		MCPParam::Optional(TEXT("filterClassOnly"), EType::Boolean, TEXT("Keep only tasks that declare a FilterClass")),
+		MCPParam::Optional(TEXT("limit"), EType::Number, TEXT("How many BehaviorTree assets a directory sweep loads (default 200)")),
+		BTNodeClass(),
+		BTNodeName(),
+		BTNodePath(),
+		BTKind(),
+	});
 	// #919/#940: one scoped write onto an owned BT node subobject. Registered
 	// under both names because a caller reaching for the task-specific one
 	// should not have to know it is the general node setter.
-	Registry.RegisterHandler(TEXT("set_bt_node_property"), &SetBTNodeProperty);
-	Registry.RegisterHandler(TEXT("set_bt_task_property"), &SetBTNodeProperty);
+	Registry.RegisterHandler(TEXT("set_bt_node_property"), &SetBTNodeProperty, {
+		BTAssetPath(TEXT("BehaviorTree asset path")),
+		BTNodePath(),
+		BTNodeName(),
+		BTNodeClass(),
+		BTKind(),
+		BTProperty(),
+		BTValue(),
+		BTProperties(),
+	});
+	Registry.RegisterHandler(TEXT("set_bt_task_property"), &SetBTNodeProperty, {
+		BTAssetPath(TEXT("BehaviorTree asset path")),
+		BTNodePath(),
+		BTNodeName(),
+		BTNodeClass(),
+		BTKind(),
+		BTProperty(),
+		BTValue(),
+		BTProperties(),
+	});
 	// #889/#947: author the BT editor graph and recompile it into the runnable
 	// tree. Reading and writing node properties only reaches nodes that already
 	// exist; these are what put nodes there, reconnect them and reorder them.
-	Registry.RegisterHandler(TEXT("list_bt_graph_nodes"), &ListBTGraphNodes);
-	Registry.RegisterHandler(TEXT("add_bt_node"), &AddBTNode);
-	Registry.RegisterHandler(TEXT("move_bt_node"), &MoveBTNode);
-	Registry.RegisterHandler(TEXT("remove_bt_node"), &RemoveBTNode);
-	Registry.RegisterHandler(TEXT("add_perception_component"), &AddPerceptionComponent);
-	Registry.RegisterHandler(TEXT("configure_ai_perception_sense"), &ConfigureAiPerceptionSense);
-	Registry.RegisterHandler(TEXT("add_state_tree_component"), &AddStateTreeComponent);
-	Registry.RegisterHandler(TEXT("add_smart_object_component"), &AddSmartObjectComponent);
-	Registry.RegisterHandler(TEXT("add_smart_object_slot"), &AddSmartObjectSlot);
-	Registry.RegisterHandler(TEXT("set_smart_object_slot"), &SetSmartObjectSlot);
-	Registry.RegisterHandler(TEXT("remove_smart_object_slot"), &RemoveSmartObjectSlot);
-	Registry.RegisterHandler(TEXT("list_smart_object_slots"), &ListSmartObjectSlots);
-	Registry.RegisterHandler(TEXT("add_smart_object_slot_behavior"), &AddSmartObjectSlotBehavior);
-	Registry.RegisterHandler(TEXT("add_smart_object_default_behavior"), &AddSmartObjectDefaultBehavior);
+	Registry.RegisterHandler(TEXT("list_bt_graph_nodes"), &ListBTGraphNodes, {
+		BTAssetPath(TEXT("BehaviorTree asset path")),
+	});
+	Registry.RegisterHandler(TEXT("add_bt_node"), &AddBTNode, {
+		BTAssetPath(TEXT("BehaviorTree asset path")),
+		MCPParam::Required(TEXT("nodeClass"), EType::String, TEXT("Concrete BT node class to place, e.g. BTComposite_Selector or BTTask_MoveTo; list_bt_node_classes enumerates them")),
+		MCPParam::Optional(TEXT("nodeCategory"), EType::String, TEXT("composite | task | decorator | service. Inferred from nodeClass when omitted; supplying it fails loudly on a mismatch")),
+		BTParent(),
+		BTIndex(),
+		MCPParam::Optional(TEXT("nodeName"), EType::String, TEXT("Display name for the new node")),
+		MCPParam::Optional(TEXT("properties"), EType::Object, TEXT("UPROPERTY writes on the new node, as a map of property path to value")),
+		MCPParam::Optional(TEXT("blackboardKeys"), EType::Object, TEXT("Map of FBlackboardKeySelector property to blackboard key name, e.g. {BlackboardKey: 'TargetActor'}; resolved against the tree's blackboard")),
+	});
+	Registry.RegisterHandler(TEXT("move_bt_node"), &MoveBTNode, {
+		BTAssetPath(TEXT("BehaviorTree asset path")),
+		MCPParam::Required(TEXT("node"), EType::String, TEXT("Node to move: a guid, a runtime address, or a unique node name")).Alias(TEXT("nodePath")),
+		BTParent(),
+		BTIndex(),
+	});
+	Registry.RegisterHandler(TEXT("remove_bt_node"), &RemoveBTNode, {
+		BTAssetPath(TEXT("BehaviorTree asset path")),
+		MCPParam::Required(TEXT("node"), EType::String, TEXT("Node to remove: a guid, a runtime address, or a unique node name")).Alias(TEXT("nodePath")),
+	});
+	Registry.RegisterHandler(TEXT("add_perception_component"), &AddPerceptionComponent, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Blueprint asset path")),
+		MCPParam::Optional(TEXT("senses"), EType::Array, TEXT("Sense names (Sight, Hearing, Damage, Touch, Team, Prediction), AISenseConfig_* names or class paths")).Items(EType::String),
+	});
+	Registry.RegisterHandler(TEXT("configure_ai_perception_sense"), &ConfigureAiPerceptionSense, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Blueprint asset path")),
+		MCPParam::Optional(TEXT("senseType"), EType::String, TEXT("Sight (default) | Hearing | Damage | Touch | Team | Prediction | Blueprint")),
+		MCPParam::Optional(TEXT("settings"), EType::Object, TEXT("Per-sense property writes, e.g. {SightRadius: 1500}")),
+		PerceptionComponent(),
+	});
+	Registry.RegisterHandler(TEXT("add_state_tree_component"), &AddStateTreeComponent, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Blueprint asset path")),
+	});
+	Registry.RegisterHandler(TEXT("add_smart_object_component"), &AddSmartObjectComponent, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Blueprint asset path")),
+	});
+	Registry.RegisterHandler(TEXT("add_smart_object_slot"), &AddSmartObjectSlot, {
+		SlotAsset(),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Slot name")),
+		MCPParam::Optional(TEXT("offset"), EType::Vec3, TEXT("Slot offset {x,y,z}")),
+		MCPParam::Optional(TEXT("rotation"), EType::Rotator, TEXT("Slot rotation {pitch,yaw,roll}")),
+		MCPParam::Optional(TEXT("tags"), EType::Array, TEXT("Slot runtime tags (gameplay tag strings or struct shapes)")),
+		MCPParam::Optional(TEXT("behaviorClass"), EType::String, TEXT("Behavior definition class or asset path to give the slot")),
+		InstanceProperties(),
+	});
+	Registry.RegisterHandler(TEXT("set_smart_object_slot"), &SetSmartObjectSlot, {
+		SlotAsset(),
+		MCPParam::Required(TEXT("slotIndex"), EType::Number, TEXT("Slot index")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Slot name")),
+		MCPParam::Optional(TEXT("offset"), EType::Vec3, TEXT("Slot offset {x,y,z}")),
+		MCPParam::Optional(TEXT("rotation"), EType::Rotator, TEXT("Slot rotation {pitch,yaw,roll}")),
+		MCPParam::Optional(TEXT("tags"), EType::Array, TEXT("Slot runtime tags (gameplay tag strings or struct shapes)")),
+	});
+	Registry.RegisterHandler(TEXT("remove_smart_object_slot"), &RemoveSmartObjectSlot, {
+		SlotAsset(),
+		MCPParam::Required(TEXT("slotIndex"), EType::Number, TEXT("Slot index to remove")),
+	});
+	Registry.RegisterHandler(TEXT("list_smart_object_slots"), &ListSmartObjectSlots, {
+		SlotAsset(),
+	});
+	Registry.RegisterHandler(TEXT("add_smart_object_slot_behavior"), &AddSmartObjectSlotBehavior, {
+		SlotAsset(),
+		MCPParam::Required(TEXT("slotIndex"), EType::Number, TEXT("Slot index")),
+		MCPParam::Required(TEXT("behaviorClass"), EType::String, TEXT("Behavior definition asset path or class path")),
+		InstanceProperties(),
+	});
+	Registry.RegisterHandler(TEXT("add_smart_object_default_behavior"), &AddSmartObjectDefaultBehavior, {
+		SlotAsset(),
+		MCPParam::Required(TEXT("behaviorClass"), EType::String, TEXT("Behavior definition asset path or class path")),
+		InstanceProperties(),
+	});
 	// read_imc through get_pie_subsystem_state moved to pie-studio
-	Registry.RegisterHandler(TEXT("get_navmesh_details"), &GetNavmeshDetails);
+	Registry.RegisterHandler(TEXT("get_navmesh_details"), &GetNavmeshDetails, {});
 	// apply_damage_in_pie moved to pie-studio
 }
 
@@ -529,13 +1032,16 @@ TSharedPtr<FJsonValue> FGameplayHandlers::CreateSmartObjectDefinition(const TSha
 // slots could not be made valid without editing it by hand.
 TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectDefaultBehavior(const TSharedPtr<FJsonObject>& Params)
 {
-	FSlotsAccess SA;
-	if (auto Err = ResolveSlots(Params, SA)) return Err;
+	// Every parameter is read before anything can fail (#1057); assetPath is
+	// read by ResolveSlots, and the behaviorClass error keeps its old order.
 	FString BehaviorSpec;
-	if (auto Err = RequireString(Params, TEXT("behaviorClass"), BehaviorSpec)) return Err;
-
+	const TSharedPtr<FJsonValue> BehaviorParamErr = RequireString(Params, TEXT("behaviorClass"), BehaviorSpec);
 	const TSharedPtr<FJsonObject>* InstanceProps = nullptr;
 	TryGetObjectParam(Params, TEXT("instanceProperties"), InstanceProps);
+
+	FSlotsAccess SA;
+	if (auto Err = ResolveSlots(Params, SA)) return Err;
+	if (BehaviorParamErr) return BehaviorParamErr;
 
 	SA.Asset->Modify();
 	UObject* Instance = nullptr;
@@ -565,6 +1071,21 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectDefaultBehavior(const TS
 
 TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectSlot(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057). The slot fields
+	// are read again, and written, by ApplySlotFieldsFromJson below.
+	{
+		const TSharedPtr<FJsonObject>* ObjProbe = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* ArrProbe = nullptr;
+		FString StrProbe;
+		TryGetObjectParam(Params, TEXT("offset"), ObjProbe);
+		TryGetObjectParam(Params, TEXT("rotation"), ObjProbe);
+		TryGetArrayParam(Params, TEXT("tags"), ArrProbe);
+		TryGetStringParam(Params, TEXT("name"), StrProbe);
+	}
+	const FString BehaviorSpec = OptionalString(Params, TEXT("behaviorClass"));
+	const TSharedPtr<FJsonObject>* InstanceProps = nullptr;
+	TryGetObjectParam(Params, TEXT("instanceProperties"), InstanceProps);
+
 	FSlotsAccess SA;
 	if (auto Err = ResolveSlots(Params, SA)) return Err;
 	SA.Asset->Modify();
@@ -581,12 +1102,9 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectSlot(const TSharedPtr<FJ
 	// #833: a slot with no behavior definition is what the editor's asset check
 	// rejects, so the slot can be born with one instead of being added and then
 	// repaired by a second call.
-	const FString BehaviorSpec = OptionalString(Params, TEXT("behaviorClass"));
 	FString AddedBehavior;
 	if (!BehaviorSpec.IsEmpty())
 	{
-		const TSharedPtr<FJsonObject>* InstanceProps = nullptr;
-		TryGetObjectParam(Params, TEXT("instanceProperties"), InstanceProps);
 		UObject* Instance = nullptr;
 		int32 BehaviorIndex = INDEX_NONE;
 		const FString BehaviorErr = AppendBehaviorDefinition(
@@ -621,10 +1139,23 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectSlot(const TSharedPtr<FJ
 
 TSharedPtr<FJsonValue> FGameplayHandlers::SetSmartObjectSlot(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057). The slot fields
+	// are read again, and written, by ApplySlotFieldsFromJson below.
+	int32 SlotIdx = -1;
+	const bool bHasSlotIdx = TryGetNumberParam(Params, TEXT("slotIndex"), SlotIdx);
+	{
+		const TSharedPtr<FJsonObject>* ObjProbe = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* ArrProbe = nullptr;
+		FString StrProbe;
+		TryGetObjectParam(Params, TEXT("offset"), ObjProbe);
+		TryGetObjectParam(Params, TEXT("rotation"), ObjProbe);
+		TryGetArrayParam(Params, TEXT("tags"), ArrProbe);
+		TryGetStringParam(Params, TEXT("name"), StrProbe);
+	}
+
 	FSlotsAccess SA;
 	if (auto Err = ResolveSlots(Params, SA)) return Err;
-	int32 SlotIdx = -1;
-	if (!TryGetNumberParam(Params, TEXT("slotIndex"), SlotIdx) || SlotIdx < 0)
+	if (!bHasSlotIdx || SlotIdx < 0)
 	{
 		return MCPError(TEXT("Missing 'slotIndex' (non-negative integer)"));
 	}
@@ -709,10 +1240,13 @@ TSharedPtr<FJsonValue> FGameplayHandlers::SetSmartObjectSlot(const TSharedPtr<FJ
 
 TSharedPtr<FJsonValue> FGameplayHandlers::RemoveSmartObjectSlot(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
+	int32 SlotIdx = -1;
+	const bool bHasSlotIdx = TryGetNumberParam(Params, TEXT("slotIndex"), SlotIdx);
+
 	FSlotsAccess SA;
 	if (auto Err = ResolveSlots(Params, SA)) return Err;
-	int32 SlotIdx = -1;
-	if (!TryGetNumberParam(Params, TEXT("slotIndex"), SlotIdx) || SlotIdx < 0)
+	if (!bHasSlotIdx || SlotIdx < 0)
 	{
 		return MCPError(TEXT("Missing 'slotIndex' (non-negative integer)"));
 	}
@@ -863,15 +1397,22 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListSmartObjectSlots(const TSharedPtr<
 
 TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectSlotBehavior(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057); the errors keep
+	// their old order.
+	int32 SlotIdx = -1;
+	const bool bHasSlotIdx = TryGetNumberParam(Params, TEXT("slotIndex"), SlotIdx);
+	FString BehaviorClassPath;
+	const TSharedPtr<FJsonValue> BehaviorParamErr = RequireString(Params, TEXT("behaviorClass"), BehaviorClassPath);
+	const TSharedPtr<FJsonObject>* InstObj = nullptr;
+	TryGetObjectParam(Params, TEXT("instanceProperties"), InstObj);
+
 	FSlotsAccess SA;
 	if (auto Err = ResolveSlots(Params, SA)) return Err;
-	int32 SlotIdx = -1;
-	if (!TryGetNumberParam(Params, TEXT("slotIndex"), SlotIdx) || SlotIdx < 0)
+	if (!bHasSlotIdx || SlotIdx < 0)
 	{
 		return MCPError(TEXT("Missing 'slotIndex' (non-negative integer)"));
 	}
-	FString BehaviorClassPath;
-	if (auto Err2 = RequireString(Params, TEXT("behaviorClass"), BehaviorClassPath)) return Err2;
+	if (BehaviorParamErr) return BehaviorParamErr;
 
 	FScriptArrayHelper Helper(SA.SlotsProp, SA.ArrayAddr);
 	if (SlotIdx >= Helper.Num()) return MCPError(FString::Printf(TEXT("slotIndex %d out of range"), SlotIdx));
@@ -880,9 +1421,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddSmartObjectSlotBehavior(const TShar
 	// Resolution, instancing and the instanceProperties write are shared with
 	// add_smart_object_slot and add_smart_object_default_behavior: one route to
 	// a behavior definition, so a name that works on one works on all three.
-	const TSharedPtr<FJsonObject>* InstObj = nullptr;
-	TryGetObjectParam(Params, TEXT("instanceProperties"), InstObj);
-
 	SA.Asset->Modify();
 	UObject* BehaviorAsset = nullptr;
 	int32 NewBDIdx = INDEX_NONE;
@@ -1211,6 +1749,8 @@ TSharedPtr<FJsonValue> FGameplayHandlers::CreateBehaviorTree(const TSharedPtr<FJ
 
 	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/AI"));
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	// Read before anything can fail (#1057).
+	const FString BlackboardPath = OptionalString(Params, TEXT("blackboardPath"));
 
 	UClass* BTClass = FindObject<UClass>(nullptr, TEXT("/Script/AIModule.BehaviorTree"));
 	if (!BTClass)
@@ -1219,7 +1759,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::CreateBehaviorTree(const TSharedPtr<FJ
 	}
 
 	// Resolved before the asset exists, so a bad path creates nothing.
-	const FString BlackboardPath = OptionalString(Params, TEXT("blackboardPath"));
 	UBlackboardData* BB = nullptr;
 	if (!BlackboardPath.IsEmpty())
 	{
@@ -1369,6 +1908,8 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetStateTreeRuntime(const TSharedPtr<F
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("pie"));
+	// Read before the world or actor lookup can fail (#1057).
+	const FString CompName = OptionalString(Params, TEXT("componentName"));
 	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
 	if (!World) return MCPError(FString::Printf(TEXT("World not available for scope '%s'"), *WorldScope));
 
@@ -1385,7 +1926,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetStateTreeRuntime(const TSharedPtr<F
 	UActorComponent* STComp = nullptr;
 	FStructProperty* InstanceProp = nullptr;
 	FStructProperty* RefProp = nullptr;
-	const FString CompName = OptionalString(Params, TEXT("componentName"));
 	for (UActorComponent* Comp : Actor->GetComponents())
 	{
 		if (!Comp) continue;
@@ -1726,10 +2266,13 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RebuildNavmesh(const TSharedPtr<FJsonO
 // move?" diagnostic.
 TSharedPtr<FJsonValue> FGameplayHandlers::FindNavPath(const TSharedPtr<FJsonObject>& Params)
 {
-	REQUIRE_EDITOR_WORLD(World);
-
+	// Every parameter is read before anything can fail (#1057).
 	const FVector Start = OptionalVec3(Params, TEXT("start"));
 	const FVector End = OptionalVec3(Params, TEXT("end"));
+	const FString ContextLabel = OptionalString(Params, TEXT("pathfindingContext"));
+	const bool bHasContextPath = HasParam(Params, TEXT("pathfindingContextPath"));
+
+	REQUIRE_EDITOR_WORLD(World);
 
 	UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
 	if (!NavSys) return MCPError(TEXT("Navigation system unavailable"));
@@ -1737,8 +2280,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::FindNavPath(const TSharedPtr<FJsonObje
 	// Optional pathfindingContext (actor label) so the path query uses the
 	// matching navigation filter / agent.
 	AActor* Context = nullptr;
-	FString ContextLabel = OptionalString(Params, TEXT("pathfindingContext"));
-	if (!ContextLabel.IsEmpty() || HasParam(Params, TEXT("pathfindingContextPath")))
+	if (!ContextLabel.IsEmpty() || bHasContextPath)
 	{
 		// #983: the context actor decides which navigation filter and agent
 		// answer the query, so picking the wrong namesake changes the path.
@@ -1923,6 +2465,12 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddBlackboardKey(const TSharedPtr<FJso
 
 	FString KeyType = OptionalString(Params, TEXT("keyType"), TEXT("Bool"));
 
+	// Read before anything can fail (#1057). baseClass is read again by
+	// ResolveBlackboardBaseClass; an Enum key takes enumType, then baseClass.
+	const FString BaseClassParam = OptionalString(Params, TEXT("baseClass"));
+	FString EnumTypeParam;
+	const bool bHasEnumType = TryGetStringParam(Params, TEXT("enumType"), EnumTypeParam);
+
 	UBlackboardData* BlackboardAsset = LoadObject<UBlackboardData>(nullptr, *BlackboardPath);
 	if (!BlackboardAsset)
 	{
@@ -1992,7 +2540,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddBlackboardKey(const TSharedPtr<FJso
 	else if (KeyType == TEXT("Enum"))
 	{
 		UBlackboardKeyType_Enum* EnumKey = NewObject<UBlackboardKeyType_Enum>(BlackboardAsset);
-		const FString EnumName = OptionalString(Params, TEXT("enumType"), OptionalString(Params, TEXT("baseClass")));
+		const FString EnumName = bHasEnumType ? EnumTypeParam : BaseClassParam;
 		if (!EnumName.IsEmpty())
 		{
 			UEnum* Enum = LoadObject<UEnum>(nullptr, *EnumName);
@@ -2307,7 +2855,8 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveBlackboardKey(const TSharedPtr<F
 TSharedPtr<FJsonValue> FGameplayHandlers::ReadBlackboard(const TSharedPtr<FJsonObject>& Params)
 {
 	FString BlackboardPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("blackboardPath"), TEXT("assetPath"), BlackboardPath)) return Err;
+	// `assetPath` is an alias the registry resolves to blackboardPath (#1057).
+	if (auto Err = RequireString(Params, TEXT("blackboardPath"), BlackboardPath)) return Err;
 
 	UBlackboardData* BB = LoadObject<UBlackboardData>(nullptr, *BlackboardPath);
 	if (!BB) return MCPError(FString::Printf(TEXT("BlackboardData not found: %s"), *BlackboardPath));
@@ -2358,6 +2907,18 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListBTNodeClasses(const TSharedPtr<FJs
 {
 	const FString KindFilter = OptionalString(Params, TEXT("kind"), TEXT("")).ToLower();
 	const bool bAll = KindFilter.IsEmpty();
+
+	// T3: paged. Four class groups come back here, so ONE cursor pages ONE
+	// collection: every row, each tagged with its `kind`, under `classes`. The
+	// four familiar arrays are still emitted and hold this page's rows of that
+	// kind, while the counts stay counts of the WHOLE listing. Read before the
+	// kind check below can refuse, so every parameter is read (#1057).
+	MCPPagination::FPageRequest Page;
+	const TSharedPtr<FJsonValue> PageErr = MCPPagination::ReadPageRequest(
+		Params,
+		FString::Printf(TEXT("list_bt_node_classes|kind=%s"), *KindFilter),
+		/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page);
+
 	if (!bAll
 		&& KindFilter != TEXT("composite") && KindFilter != TEXT("task")
 		&& KindFilter != TEXT("decorator") && KindFilter != TEXT("service"))
@@ -2368,19 +2929,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListBTNodeClasses(const TSharedPtr<FJs
 			TEXT("'kind' must be one of composite, task, decorator, service, got '%s'. Omit it for every kind."),
 			*KindFilter));
 	}
-
-	// T3: paged. Four class groups come back here, so ONE cursor pages ONE
-	// collection: every row, each tagged with its `kind`, under `classes`. The
-	// four familiar arrays are still emitted and hold this page's rows of that
-	// kind, while the counts stay counts of the WHOLE listing.
-	MCPPagination::FPageRequest Page;
-	if (auto Err = MCPPagination::ReadPageRequest(
-			Params,
-			FString::Printf(TEXT("list_bt_node_classes|kind=%s"), *KindFilter),
-			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
-	{
-		return Err;
-	}
+	if (PageErr) return PageErr;
 
 	auto PushClass = [](TArray<MCPPagination::FPageRow>& Out, UClass* C, const TCHAR* Kind)
 	{
@@ -2502,6 +3051,9 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddPerceptionComponent(const TSharedPt
 {
 	FString BPPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BPPath)) return Err;
+	// Read before anything can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* SenseArray = nullptr;
+	const bool bHasSenses = TryGetArrayParam(Params, TEXT("senses"), SenseArray) && SenseArray;
 
 	UBlueprint* BP = Cast<UBlueprint>(UEditorAssetLibrary::LoadAsset(BPPath));
 	if (!BP)
@@ -2521,8 +3073,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddPerceptionComponent(const TSharedPt
 	// below then made every retry return existed: true, so the action could
 	// never configure it. Nothing is mutated until this pass succeeds.
 	TArray<UClass*> SenseClasses;
-	const TArray<TSharedPtr<FJsonValue>>* SenseArray = nullptr;
-	if (TryGetArrayParam(Params, TEXT("senses"), SenseArray) && SenseArray)
+	if (bHasSenses)
 	{
 		for (const TSharedPtr<FJsonValue>& Entry : *SenseArray)
 		{
@@ -2645,6 +3196,11 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ConfigureAiPerceptionSense(const TShar
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BPPath)) return Err;
 
 	FString SenseType = OptionalString(Params, TEXT("senseType"), TEXT("Sight"));
+	// Read before anything can fail (#1057).
+	const FString CompName = OptionalString(Params, TEXT("componentName"));
+	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
+	const bool bHasSettings =
+		TryGetObjectParam(Params, TEXT("settings"), PropsObj) && PropsObj && (*PropsObj).IsValid();
 
 	TMap<FString, FString> SenseMap;
 	SenseMap.Add(TEXT("Sight"), TEXT("AISenseConfig_Sight"));
@@ -2672,7 +3228,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ConfigureAiPerceptionSense(const TShar
 
 	// Locate the AIPerceptionComponent template on the construction script.
 	UClass* PercClass = FindObject<UClass>(nullptr, TEXT("/Script/AIModule.AIPerceptionComponent"));
-	const FString CompName = OptionalString(Params, TEXT("componentName"));
 	UObject* PercTemplate = nullptr;
 	FString ResolvedComp;
 	if (BP->SimpleConstructionScript)
@@ -2740,10 +3295,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ConfigureAiPerceptionSense(const TShar
 	// uncompiled, which AddPerceptionComponent already avoids for its own
 	// `senses` array for exactly this reason. The update path below needs the
 	// same guarantee, and gets it from the same check plus a per-key snapshot.
-	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
-	const bool bHasSettings =
-		TryGetObjectParam(Params, TEXT("settings"), PropsObj) && PropsObj && (*PropsObj).IsValid();
-
 	if (bHasSettings)
 	{
 		TArray<FString> UnknownKeys;

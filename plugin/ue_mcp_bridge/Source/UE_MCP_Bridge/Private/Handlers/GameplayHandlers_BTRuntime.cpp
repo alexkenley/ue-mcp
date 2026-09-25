@@ -613,6 +613,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetBtRuntime(const TSharedPtr<FJsonObj
 {
 	MCP_CHECK_GAME_THREAD();
 
+	// Read before the target lookup can fail (#1057).
+	const bool bIncludeAuxNodes = OptionalBool(Params, TEXT("includeAuxNodes"), true);
+	const bool bIncludeDebugStrings = OptionalBool(Params, TEXT("includeDebugStrings"), true);
+
 	FMCPBTLiveTarget Target;
 	TSharedPtr<FJsonValue> Err;
 	if (!MCPBTLiveResolveTarget(Params, /*bRequireBehaviorTree*/ true, Target, Err)) return Err;
@@ -682,7 +686,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetBtRuntime(const TSharedPtr<FJsonObj
 
 	// Active decorators and services. IsAuxNodeActive is the public question;
 	// the tree asset supplies the candidates, since InstanceStack is protected.
-	if (OptionalBool(Params, TEXT("includeAuxNodes"), true) && CurrentTree)
+	if (bIncludeAuxNodes && CurrentTree)
 	{
 		TArray<TSharedPtr<FJsonValue>> ActiveAux;
 		int32 Considered = 0;
@@ -705,7 +709,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetBtRuntime(const TSharedPtr<FJsonObj
 	// The engine's own dumps. They carry the per-instance detail the protected
 	// instance stack would otherwise be the only source of, and they are the
 	// same text the BT debugger shows.
-	if (OptionalBool(Params, TEXT("includeDebugStrings"), true))
+	if (bIncludeDebugStrings)
 	{
 		Result->SetStringField(TEXT("activeTasks"), Comp->DescribeActiveTasks());
 		Result->SetStringField(TEXT("activeTrees"), Comp->DescribeActiveTrees());
@@ -726,6 +730,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetLiveBlackboard(const TSharedPtr<FJs
 {
 	MCP_CHECK_GAME_THREAD();
 
+	// Read before the target lookup can fail (#1057).
+	const FString VerbosityWord = OptionalString(Params, TEXT("verbosity"), TEXT("detailed")).ToLower();
+	const FString SingleKey = OptionalString(Params, TEXT("key"));
+
 	FMCPBTLiveTarget Target;
 	TSharedPtr<FJsonValue> Err;
 	if (!MCPBTLiveResolveTarget(Params, /*bRequireBehaviorTree*/ false, Target, Err)) return Err;
@@ -733,7 +741,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetLiveBlackboard(const TSharedPtr<FJs
 	UBlackboardComponent* BB = MCPBTLiveRequireBlackboard(Target, Err);
 	if (!BB) return Err;
 
-	const FString VerbosityWord = OptionalString(Params, TEXT("verbosity"), TEXT("detailed")).ToLower();
 	EBlackboardDescription::Type Verbosity = EBlackboardDescription::DetailedKeyWithValue;
 	if (!MCPBTLiveParseVerbosity(VerbosityWord, Verbosity))
 	{
@@ -749,7 +756,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::GetLiveBlackboard(const TSharedPtr<FJs
 	const int32 NumKeys = BB->GetNumKeys();
 
 	// One named key, when the caller already knows which one it wants.
-	const FString SingleKey = OptionalString(Params, TEXT("key"));
 	if (!SingleKey.IsEmpty())
 	{
 		const FBlackboard::FKey KeyID = BB->GetKeyID(FName(*SingleKey));
@@ -1151,7 +1157,11 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RunBehaviorTree(const TSharedPtr<FJson
 	MCP_CHECK_GAME_THREAD();
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("behaviorTreePath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+
+	// Read before the target lookup can fail (#1057).
+	const FString ModeWord = OptionalString(Params, TEXT("executionMode"), TEXT("looped")).ToLower();
+	const bool bRestartIfRunning = OptionalBool(Params, TEXT("restartIfRunning"), false);
 
 	FMCPBTLiveTarget Target;
 	TSharedPtr<FJsonValue> Err;
@@ -1190,7 +1200,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RunBehaviorTree(const TSharedPtr<FJson
 	UBehaviorTree* Tree = Cast<UBehaviorTree>(AssetObject);
 	if (!Tree) return MCPAssetWrongTypeError(AssetPath, AssetObject, TEXT("BehaviorTree"));
 
-	const FString ModeWord = OptionalString(Params, TEXT("executionMode"), TEXT("looped")).ToLower();
 	EBTExecutionMode::Type ExecutionMode = EBTExecutionMode::Looped;
 	if (ModeWord == TEXT("singlerun")) ExecutionMode = EBTExecutionMode::SingleRun;
 	else if (ModeWord != TEXT("looped"))
@@ -1199,8 +1208,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RunBehaviorTree(const TSharedPtr<FJson
 			TEXT("Unknown executionMode '%s'. Use \"looped\" (restart from the root when the tree finishes) or \"singleRun\" (stop after one pass)."),
 			*ModeWord));
 	}
-
-	const bool bRestartIfRunning = OptionalBool(Params, TEXT("restartIfRunning"), false);
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("assetPath"), Tree->GetPathName());
@@ -1329,7 +1336,15 @@ TSharedPtr<FJsonValue> FGameplayHandlers::StopBehaviorTree(const TSharedPtr<FJso
 {
 	MCP_CHECK_GAME_THREAD();
 
+	// Every parameter is read before anything can fail (#1057).
 	const FString Mode = OptionalString(Params, TEXT("mode"), TEXT("stop")).ToLower();
+	const FString Reason = OptionalString(Params, TEXT("reason"), TEXT("ue-mcp stop_behavior_tree"));
+	const bool bComplete = OptionalBool(Params, TEXT("completeRestart"), false);
+	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("auto"));
+	(void)HasParam(Params, TEXT("pieInstance"));
+	(void)HasParam(Params, TEXT("actorLabel"));
+	(void)HasParam(Params, TEXT("actorPath"));
+
 	if (Mode != TEXT("stop") && Mode != TEXT("forced") && Mode != TEXT("restart")
 		&& Mode != TEXT("pause") && Mode != TEXT("resume"))
 	{
@@ -1343,7 +1358,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::StopBehaviorTree(const TSharedPtr<FJso
 	if (!MCPBTLiveResolveTarget(Params, /*bRequireBehaviorTree*/ true, Target, Err)) return Err;
 
 	UBehaviorTreeComponent* Comp = Target.BTComp;
-	const FString Reason = OptionalString(Params, TEXT("reason"), TEXT("ue-mcp stop_behavior_tree"));
 
 	const bool bWasRunning = Comp->IsRunning();
 	const bool bWasPaused = Comp->IsPaused();
@@ -1359,7 +1373,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::StopBehaviorTree(const TSharedPtr<FJso
 
 	TSharedPtr<FJsonObject> RollbackPayload = MakeShared<FJsonObject>();
 	RollbackPayload->SetStringField(TEXT("actorPath"), Target.Actor->GetPathName());
-	RollbackPayload->SetStringField(TEXT("world"), OptionalString(Params, TEXT("world"), TEXT("auto")));
+	RollbackPayload->SetStringField(TEXT("world"), WorldScope);
 
 	if (Mode == TEXT("stop") || Mode == TEXT("forced"))
 	{
@@ -1407,7 +1421,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::StopBehaviorTree(const TSharedPtr<FJso
 				*Target.BrainOwner->GetActorLabel()));
 			return MCPResult(Result);
 		}
-		const bool bComplete = OptionalBool(Params, TEXT("completeRestart"), false);
 		Comp->RestartTree(bComplete ? EBTRestartMode::CompleteRestart : EBTRestartMode::ForceReevaluateRootNode);
 		Result->SetBoolField(TEXT("restarted"), true);
 		Result->SetBoolField(TEXT("completeRestart"), bComplete);
@@ -1478,18 +1491,20 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListAiAgents(const TSharedPtr<FJsonObj
 
 	const FString Scope = OptionalString(Params, TEXT("world"), TEXT("auto"));
 	UWorld* World = ResolveWorldFromParams(Params, *Scope);
+
+	// Read before the world check can fail (#1057).
+	const bool bRunningOnly = OptionalBool(Params, TEXT("runningOnly"), false);
+	const bool bBehaviorTreeOnly = OptionalBool(Params, TEXT("behaviorTreeOnly"), false);
+	const FString ClassFilter = OptionalString(Params, TEXT("classFilter"));
+	int32 Limit = OptionalInt(Params, TEXT("limit"), MCPBTLiveDefaultAgentLimit);
+	if (Limit <= 0) Limit = MCPBTLiveDefaultAgentLimit;
+
 	if (!World)
 	{
 		return MCPError(FString::Printf(
 			TEXT("No world available for scope '%s'. AI only runs in a game world, so start Play-In-Editor first, or pass world=\"editor\" to enumerate placed actors. editor(list_pie_instances) lists the running PIE worlds."),
 			*Scope));
 	}
-
-	const bool bRunningOnly = OptionalBool(Params, TEXT("runningOnly"), false);
-	const bool bBehaviorTreeOnly = OptionalBool(Params, TEXT("behaviorTreeOnly"), false);
-	const FString ClassFilter = OptionalString(Params, TEXT("classFilter"));
-	int32 Limit = OptionalInt(Params, TEXT("limit"), MCPBTLiveDefaultAgentLimit);
-	if (Limit <= 0) Limit = MCPBTLiveDefaultAgentLimit;
 
 	// Keyed on the brain component so a pawn and its controller do not produce
 	// two rows for one agent.
