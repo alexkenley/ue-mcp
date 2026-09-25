@@ -9,12 +9,20 @@
  *   node scripts/check-release-gates.mjs version-delta   patch-only bumps
  *   node scripts/check-release-gates.mjs count-markers   stamped counts are current
  *   node scripts/check-release-gates.mjs docs-freshness  handlers moved, docs did not
+ *   node scripts/check-release-gates.mjs context-tax     every seed within its budget
  *   node scripts/check-release-gates.mjs all             every gate above
  */
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import {
+  BUDGETS,
+  TAX_MARKER_FILES,
+  budgetProblems,
+  measureContextTax,
+  staleStamps,
+} from "./context-tax.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -263,13 +271,53 @@ function checkDocsFreshness() {
   return 0;
 }
 
+/**
+ * The context a client pays before its first call (#1172). The docs quoted
+ * 45k/23k/1k for a surface that had grown to 270k/105k/2k, because nothing
+ * measured it. This measures every seed and the two discovery answers micro
+ * relies on, fails when one is over its budget, and fails when a number
+ * stamped in the docs has drifted more than the tolerance from the
+ * measurement.
+ */
+async function checkContextTax() {
+  let rows;
+  try {
+    rows = await measureContextTax();
+  } catch (e) {
+    console.error(`context-tax     - could not measure: ${e.message}`);
+    return 1;
+  }
+  const over = budgetProblems(rows);
+  const stale = TAX_MARKER_FILES.flatMap((rel) => {
+    const file = path.join(REPO, rel);
+    return fs.existsSync(file) ? staleStamps(fs.readFileSync(file, "utf8"), rows, rel) : [];
+  });
+  if (over.length > 0) {
+    console.error(
+      "context-tax     - over budget:\n" + over.map((l) => `      ${l}`).join("\n")
+        + "\n    The seed is what every client pays before its first call. Shrink it, or raise the budget in scripts/context-tax.mjs with the owner's sign-off.",
+    );
+  }
+  if (stale.length > 0) {
+    console.error(
+      "context-tax     - stamped numbers are stale:\n" + stale.map((l) => `      ${l}`).join("\n")
+        + "\n    Run `node scripts/context-tax.mjs --stamp` and commit what it changes.",
+    );
+  }
+  if (over.length > 0 || stale.length > 0) return 1;
+  const summary = Object.keys(BUDGETS).map((k) => `${k} ${rows[k].tokens}/${BUDGETS[k]}`).join(", ");
+  console.log(`context-tax     - within budget (${summary})`);
+  return 0;
+}
+
 const GATES = {
   "version-delta": checkVersionDelta,
   "count-markers": checkCountMarkers,
   "docs-freshness": checkDocsFreshness,
+  "context-tax": checkContextTax,
 };
 
-function main(argv) {
+async function main(argv) {
   const which = argv[0] ?? "all";
   const names = which === "all" ? Object.keys(GATES) : [which];
   let bad = 0;
@@ -279,11 +327,11 @@ function main(argv) {
       console.error(`No such gate: ${name}. Known: ${Object.keys(GATES).join(", ")}, all`);
       return 2;
     }
-    bad += gate();
+    bad += await gate();
   }
   return bad > 0 ? 1 : 0;
 }
 
 if (process.argv[1]?.endsWith("check-release-gates.mjs")) {
-  process.exit(main(process.argv.slice(2)));
+  process.exit(await main(process.argv.slice(2)));
 }
