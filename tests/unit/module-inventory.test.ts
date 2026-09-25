@@ -134,7 +134,6 @@ const SESSION_INDEPENDENT: Record<string, string> = {
   "client-quirks.ts": "About the connected MCP client, not about any editor.",
   "config-parser.ts": "Pure ini utility over whatever directory it is handed.",
   "cpp-parser.ts": "Pure header inspection over whatever file it is handed.",
-  "function-args.ts": "Pure argument coercion.",
   "errors.ts": "Shared error codes and the McpError shape.",
   "schemas.ts": "Shared schema declarations.",
   "types.ts": "Shared declarations. The session-aware helpers here take the session and hold nothing.",

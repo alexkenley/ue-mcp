@@ -42,7 +42,7 @@ const KEY_ARGS = new Map([
     "MCPNoteParamRead", "RequireString", "OptionalString", "OptionalInt", "OptionalNumber", "OptionalBool",
     "HasParam", "TryGetParam", "TryGetStringParam", "TryGetNumberParam", "TryGetBoolParam", "TryGetArrayParam",
     "TryGetObjectParam", "OptionalVec3", "RequireVec3", "OptionalRotator", "RequireRotator", "OptionalLinearColor",
-    "OptionalTransform",
+    "OptionalTransform", "MCPReadFunctionArgs", "MCPReadPythonArgs",
   ].map((name) => [name, [1]]),
   ["RequireStringAlt", [1, 2]],
 ]);

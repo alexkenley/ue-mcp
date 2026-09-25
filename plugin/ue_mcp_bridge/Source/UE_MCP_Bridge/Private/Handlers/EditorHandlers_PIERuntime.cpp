@@ -224,11 +224,16 @@ namespace
 		return false;
 	}
 
-	/** Marshal JSON args into a UFunction frame, call it, and read outputs back. */
+	/**
+	 * Marshal JSON args into a UFunction frame, call it, and read outputs back.
+	 * Args is the name -> value map MCPNormalizeFunctionArgs produced, or
+	 * invalid for none; Params is the call's own bag, read for deferToNextTick.
+	 */
 	TSharedPtr<FJsonValue> CallFunctionWithJsonArgs(
 		UObject* CallTarget,
 		const FString& FunctionName,
 		const TSharedPtr<FJsonObject>& Params,
+		const TSharedPtr<FJsonObject>& Args,
 		const TSharedPtr<FJsonObject>& Result)
 	{
 		UFunction* Func = CallTarget->FindFunction(FName(*FunctionName));
@@ -277,16 +282,14 @@ namespace
 			}
 		};
 
-		const TSharedPtr<FJsonObject>* ArgObj = nullptr;
-		TryGetObjectParam(Params, TEXT("args"), ArgObj);
-		if (ArgObj && (*ArgObj).IsValid())
+		if (Args.IsValid())
 		{
 			for (TFieldIterator<FProperty> It(Func); It && (It->PropertyFlags & CPF_Parm); ++It)
 			{
 				FProperty* P = *It;
 				if (P->PropertyFlags & CPF_ReturnParm) continue;
 				if ((P->PropertyFlags & CPF_OutParm) && !(P->PropertyFlags & CPF_ReferenceParm)) continue;
-				TSharedPtr<FJsonValue> Val = (*ArgObj)->TryGetField(P->GetName());
+				TSharedPtr<FJsonValue> Val = Args->TryGetField(P->GetName());
 				if (!Val.IsValid()) continue;
 				FString E;
 				if (!MCPJsonProperty::SetJsonOnProperty(P, P->ContainerPtrToValuePtr<void>(ParamBuf.GetData()), Val, E))
@@ -414,6 +417,10 @@ TSharedPtr<FJsonValue> FEditorHandlers::InvokeObjectFunction(const TSharedPtr<FJ
 {
 	FString FunctionName;
 	if (auto Err = RequireString(Params, TEXT("functionName"), FunctionName)) return Err;
+	// A map, an entry list or a JSON string of either, refused before the
+	// target is resolved (#811).
+	TSharedPtr<FJsonObject> ArgsMap;
+	if (auto Err = MCPReadFunctionArgs(Params, TEXT("args"), ArgsMap)) return Err;
 
 	UWorld* World = ResolveWorldFromParams(Params, TEXT("auto"));
 
@@ -447,7 +454,7 @@ TSharedPtr<FJsonValue> FEditorHandlers::InvokeObjectFunction(const TSharedPtr<FJ
 		? TEXT("A pure or const function writes nothing, so there is nothing to undo.")
 		: TEXT("A UFUNCTION call has no known inverse. Wrap the sequence in editor(begin_editor_transaction) and roll back with editor(cancel_editor_transaction) when the effects are transactional, or undo the effect with whatever call your project treats as its opposite."));
 
-	return CallFunctionWithJsonArgs(Target, FunctionName, Params, Result);
+	return CallFunctionWithJsonArgs(Target, FunctionName, Params, ArgsMap, Result);
 }
 
 // Run an ordered UObject call sequence in one handler dispatch. ProcessEvent is
@@ -468,6 +475,8 @@ TSharedPtr<FJsonValue> FEditorHandlers::InvokeObjectFunctions(const TSharedPtr<F
 
 	// Reject malformed entries before running any user code. Runtime failures
 	// still stop the sequence without rolling back earlier successful calls.
+	TArray<TSharedPtr<FJsonObject>> CallArgs;
+	CallArgs.SetNum(Calls->Num());
 	for (int32 Index = 0; Index < Calls->Num(); ++Index)
 	{
 		const TSharedPtr<FJsonObject>* CallParams = nullptr;
@@ -495,6 +504,12 @@ TSharedPtr<FJsonValue> FEditorHandlers::InvokeObjectFunctions(const TSharedPtr<F
 		if (ObjectPath.IsEmpty() && Target == TEXT("subsystem") && OptionalString(*CallParams, TEXT("subsystemClass")).IsEmpty())
 		{
 			return MCPError(FString::Printf(TEXT("calls[%d] target=subsystem requires 'subsystemClass'"), Index));
+		}
+		// Each call's args take the same forms as invoke_object_function's (#811).
+		if (auto Err = MCPNormalizeFunctionArgs(
+			TryGetParam(*CallParams, TEXT("args")), FString::Printf(TEXT("calls[%d].args"), Index), CallArgs[Index]))
+		{
+			return Err;
 		}
 	}
 
@@ -542,7 +557,7 @@ TSharedPtr<FJsonValue> FEditorHandlers::InvokeObjectFunctions(const TSharedPtr<F
 			CallResultObject->SetStringField(TEXT("world"), World->GetPathName());
 			CallResultObject->SetStringField(TEXT("netMode"), DescribePIENetMode(World));
 		}
-		TSharedPtr<FJsonValue> CallResult = CallFunctionWithJsonArgs(Target, FunctionName, *CallParams, CallResultObject);
+		TSharedPtr<FJsonValue> CallResult = CallFunctionWithJsonArgs(Target, FunctionName, *CallParams, CallArgs[Index], CallResultObject);
 		Results.Add(CallResult);
 
 		const TSharedPtr<FJsonObject>* CallResultPtr = nullptr;

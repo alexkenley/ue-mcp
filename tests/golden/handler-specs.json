@@ -1,5 +1,5 @@
 {
-  "handlerCount": 1074,
+  "handlerCount": 1079,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -18077,6 +18077,220 @@
         }
       ]
     },
+    "invoke_function": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "functionName",
+          "type": "string",
+          "required": true,
+          "description": "BlueprintCallable or Exec UFUNCTION on the actor, or on component"
+        },
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor label. Editor labels are not unique, so a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path, the unambiguous selector. Wins over actorLabel"
+        },
+        {
+          "name": "component",
+          "type": "string",
+          "required": false,
+          "description": "Component subobject name to call the function on instead of the actor"
+        },
+        {
+          "name": "args",
+          "type": "any",
+          "required": false,
+          "description": "Function arguments: an object mapping parameter name to value (a struct value takes a JSON object such as {X,Y,Z} or export text), an entry list [{name, value}], or a JSON string of either",
+          "forms": [
+            "argMap",
+            "stringList",
+            "argEntryList",
+            "string"
+          ]
+        },
+        {
+          "name": "actorArgs",
+          "type": "object",
+          "required": false,
+          "description": "UObject* parameter name -> actor label, resolved against live actors in the selected world"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "editor (default) | pie | auto"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+        },
+        {
+          "name": "deferToNextTick",
+          "type": "boolean",
+          "required": false,
+          "description": "Queue the call for the next engine tick, outside the editor script-execution guard, so a replicated UFUNCTION routes normally; return and out values are not reported"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ],
+      "contractExempt": "calls a UFUNCTION"
+    },
+    "invoke_object_function": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "functionName",
+          "type": "string",
+          "required": true,
+          "description": "UFUNCTION to call; an unknown name lists the available ones"
+        },
+        {
+          "name": "objectPath",
+          "type": "string",
+          "required": false,
+          "description": "Object path of the live instance. Wins over target"
+        },
+        {
+          "name": "target",
+          "type": "string",
+          "required": false,
+          "description": "gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem"
+        },
+        {
+          "name": "subsystemClass",
+          "type": "string",
+          "required": false,
+          "description": "Subsystem class name or /Script path, with target=subsystem"
+        },
+        {
+          "name": "playerIndex",
+          "type": "number",
+          "required": false,
+          "description": "Player index for target=playercontroller or playerpawn (default 0)"
+        },
+        {
+          "name": "args",
+          "type": "any",
+          "required": false,
+          "description": "Function arguments: an object mapping parameter name to value (a struct value takes a JSON object such as {X,Y,Z} or export text), an entry list [{name, value}], or a JSON string of either",
+          "forms": [
+            "argMap",
+            "stringList",
+            "argEntryList",
+            "string"
+          ]
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: editor | pie | auto. Each action names its own default"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+        },
+        {
+          "name": "deferToNextTick",
+          "type": "boolean",
+          "required": false,
+          "description": "Queue the call for the next engine tick, outside the editor script-execution guard, so a replicated UFUNCTION routes normally; return and out values are not reported"
+        }
+      ],
+      "contractExempt": "calls a UFUNCTION"
+    },
+    "invoke_object_functions": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "calls",
+          "type": "array",
+          "required": true,
+          "description": "1 to 64 calls, run in order in one game-thread dispatch; the first failure stops the sequence",
+          "items": "object",
+          "fields": [
+            {
+              "name": "functionName",
+              "type": "string",
+              "required": true,
+              "description": "UFUNCTION to call"
+            },
+            {
+              "name": "objectPath",
+              "type": "string",
+              "required": false,
+              "description": "Object path of the live instance. Wins over target"
+            },
+            {
+              "name": "target",
+              "type": "string",
+              "required": false,
+              "description": "gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem"
+            },
+            {
+              "name": "subsystemClass",
+              "type": "string",
+              "required": false,
+              "description": "Subsystem class name or /Script path, with target=subsystem"
+            },
+            {
+              "name": "playerIndex",
+              "type": "integer",
+              "required": false,
+              "description": "Player index for target=playercontroller or playerpawn (default 0)"
+            },
+            {
+              "name": "args",
+              "type": "any",
+              "required": false,
+              "description": "This call's arguments, in any form invoke_object_function takes",
+              "forms": [
+                "argMap",
+                "stringList",
+                "argEntryList",
+                "string"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: editor | pie | auto. Each action names its own default"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+        }
+      ],
+      "contractExempt": "calls UFUNCTIONs"
+    },
     "invoke_runtime_function": {
       "category": "widget",
       "params": [
@@ -18130,6 +18344,60 @@
           ]
         }
       ]
+    },
+    "invoke_static_function": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "className",
+          "type": "string",
+          "required": true,
+          "description": "UBlueprintFunctionLibrary class: a short name or a /Script/Module.Class path"
+        },
+        {
+          "name": "functionName",
+          "type": "string",
+          "required": true,
+          "description": "Static UFUNCTION on the library"
+        },
+        {
+          "name": "args",
+          "type": "any",
+          "required": false,
+          "description": "Function arguments: an object mapping parameter name to value (a struct value takes a JSON object such as {X,Y,Z} or export text), an entry list [{name, value}], or a JSON string of either",
+          "forms": [
+            "argMap",
+            "stringList",
+            "argEntryList",
+            "string"
+          ]
+        },
+        {
+          "name": "actorArgs",
+          "type": "object",
+          "required": false,
+          "description": "UObject* parameter name -> actor label, resolved against live actors in the selected world"
+        },
+        {
+          "name": "worldContextParam",
+          "type": "string",
+          "required": false,
+          "description": "UObject* parameter to fill with the selected world; detected from WorldContext metadata and for WorldContextObject when omitted"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "editor (default) | pie | game | auto"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+        }
+      ],
+      "contractExempt": "calls a static UFUNCTION"
     },
     "is_class_loaded": {
       "category": "reflection",
@@ -27924,6 +28192,63 @@
           "description": "How many scored items to return (default 50)"
         }
       ]
+    },
+    "run_python_file": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "filePath",
+          "type": "string",
+          "required": true,
+          "description": "Absolute path to the .py file",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "entryPoint",
+          "type": "string",
+          "required": false,
+          "description": "Function in the file to call after loading it under a run name other than __main__, so its main guard does not fire; its return value comes back as result"
+        },
+        {
+          "name": "args",
+          "type": "any",
+          "required": false,
+          "description": "Positional arguments, as sys.argv[1:] or, with entryPoint, the call's arguments: a list of strings, a JSON array string, or one string. A parameter map is refused",
+          "forms": [
+            "argMap",
+            "stringList",
+            "argEntryList",
+            "string"
+          ]
+        },
+        {
+          "name": "kwargs",
+          "type": "object",
+          "required": false,
+          "description": "Keyword arguments for the entryPoint call"
+        },
+        {
+          "name": "resultVariable",
+          "type": "string",
+          "required": false,
+          "description": "Top-level Python variable to return as result, separate from the log (default result with entryPoint)"
+        },
+        {
+          "name": "captureLog",
+          "type": "boolean",
+          "required": false,
+          "description": "false drops everything the script logged except its errors (default true)"
+        },
+        {
+          "name": "maxLogChars",
+          "type": "number",
+          "required": false,
+          "description": "Keep only the last N characters of logged output"
+        }
+      ],
+      "contractExempt": "runs a Python file"
     },
     "run_stat_command": {
       "category": "editor",

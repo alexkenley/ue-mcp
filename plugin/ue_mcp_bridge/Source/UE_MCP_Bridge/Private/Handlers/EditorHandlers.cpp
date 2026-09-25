@@ -239,8 +239,7 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// save under the contract test's values is ContractExempt, and its source is
 	// held to its spec instead. execute_python, request_editor_shutdown,
 	// save_current_level, build_project and pie_start_ignoring_blueprint_errors
-	// have no bridge action of their own, so they carry no spec; nor do the
-	// handlers taking a UFUNCTION args bag, for the reason at run_python_file.
+	// have no bridge action of their own, so they carry no spec.
 	using EType = EMCPParamType;
 	const TArray<FMCPParamSpec> NoParams;
 	auto ChannelListParam = [](const TCHAR* Name, const TCHAR* Description)
@@ -297,12 +296,28 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("command"), EType::String, TEXT("Console command to run in the editor world")),
 	}, MCPSpec::ContractExempt(TEXT("runs a console command")));
 	Registry.RegisterHandler(TEXT("execute_python"), &ExecutePython);
-	// run_python_file and the invoke_* handlers carry no spec: their args take a
-	// name -> value map, an entry list, positional strings or a JSON string, and
-	// a spec can only declare that as array | object | string with untyped
-	// members, whose empty member schema is what #811 removed from the surface.
-	// The handlers accept every one of those shapes themselves.
-	Registry.RegisterHandler(TEXT("run_python_file"), &RunPythonFile);
+	// `args` on run_python_file and the invoke_* handlers takes one of four
+	// forms. One category key has one type, so all five declare the same forms;
+	// MCPReadPythonArgs and MCPReadFunctionArgs accept the ones each handler
+	// can use and refuse the rest (#811).
+	const TArray<EMCPValueForm> ArgForms = {
+		EMCPValueForm::ArgMap, EMCPValueForm::StringList, EMCPValueForm::ArgEntryList, EMCPValueForm::String,
+	};
+	auto FunctionArgsParam = [&ArgForms]()
+	{
+		return MCPParam::Optional(TEXT("args"), EType::Any,
+			TEXT("Function arguments: an object mapping parameter name to value (a struct value takes a JSON object such as {X,Y,Z} or export text), an entry list [{name, value}], or a JSON string of either")).OneOfForms(ArgForms);
+	};
+	Registry.RegisterHandler(TEXT("run_python_file"), &RunPythonFile, {
+		MCPParam::Required(TEXT("filePath"), EType::String, TEXT("Absolute path to the .py file")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("entryPoint"), EType::String, TEXT("Function in the file to call after loading it under a run name other than __main__, so its main guard does not fire; its return value comes back as result")),
+		MCPParam::Optional(TEXT("args"), EType::Any,
+			TEXT("Positional arguments, as sys.argv[1:] or, with entryPoint, the call's arguments: a list of strings, a JSON array string, or one string. A parameter map is refused")).OneOfForms(ArgForms),
+		MCPParam::Optional(TEXT("kwargs"), EType::Object, TEXT("Keyword arguments for the entryPoint call")),
+		MCPParam::Optional(TEXT("resultVariable"), EType::String, TEXT("Top-level Python variable to return as result, separate from the log (default result with entryPoint)")),
+		MCPParam::Optional(TEXT("captureLog"), EType::Boolean, TEXT("false drops everything the script logged except its errors (default true)")),
+		MCPParam::Optional(TEXT("maxLogChars"), EType::Number, TEXT("Keep only the last N characters of logged output")),
+	}, MCPSpec::ContractExempt(TEXT("runs a Python file")));
 	Registry.RegisterHandler(TEXT("set_property"), &SetProperty, {
 		ObjectPathParam(TEXT("Object, asset, class or Blueprint path. A class or Blueprint resolves to its default object")),
 		PropertyNameParam(),
@@ -503,9 +518,32 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("get_world_state"), &GetWorldState, NoParams);
 	Registry.RegisterHandler(TEXT("request_editor_shutdown"), &RequestEditorShutdown);
 	Registry.RegisterHandler(TEXT("list_pie_instances"), &ListPIEInstances, NoParams);
-	// No spec, for the args reason given at run_python_file.
-	Registry.RegisterHandler(TEXT("invoke_object_function"), &InvokeObjectFunction);
-	Registry.RegisterHandlerWithTimeout(TEXT("invoke_object_functions"), &InvokeObjectFunctions, 300.0f);
+	{
+		TArray<FMCPParamSpec> Spec = {
+			MCPParam::Required(TEXT("functionName"), EType::String, TEXT("UFUNCTION to call; an unknown name lists the available ones")),
+		};
+		Spec.Append(RuntimeTargetParams());
+		Spec.Append({
+			FunctionArgsParam(),
+			WorldParam(),
+			PieInstanceParam(),
+			MCPParam::Optional(TEXT("deferToNextTick"), EType::Boolean, TEXT("Queue the call for the next engine tick, outside the editor script-execution guard, so a replicated UFUNCTION routes normally; return and out values are not reported")),
+		});
+		Registry.RegisterHandler(TEXT("invoke_object_function"), &InvokeObjectFunction, Spec,
+			MCPSpec::ContractExempt(TEXT("calls a UFUNCTION")));
+	}
+	Registry.RegisterHandlerWithTimeout(TEXT("invoke_object_functions"), &InvokeObjectFunctions, 300.0f, {
+		MCPParam::Required(TEXT("calls"), EType::Array, TEXT("1 to 64 calls, run in order in one game-thread dispatch; the first failure stops the sequence")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("functionName"), EType::String, TEXT("UFUNCTION to call")),
+			MCPParam::OptionalField(TEXT("objectPath"), EType::String, TEXT("Object path of the live instance. Wins over target")),
+			MCPParam::OptionalField(TEXT("target"), EType::String, TEXT("gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem")),
+			MCPParam::OptionalField(TEXT("subsystemClass"), EType::String, TEXT("Subsystem class name or /Script path, with target=subsystem")),
+			MCPParam::OptionalField(TEXT("playerIndex"), EType::Integer, TEXT("Player index for target=playercontroller or playerpawn (default 0)")),
+			MCPParam::OptionalField(TEXT("args"), EType::Any, TEXT("This call's arguments, in any form invoke_object_function takes")).OneOfForms(ArgForms),
+		}),
+		WorldParam(),
+		PieInstanceParam(),
+	}, MCPSpec::ContractExempt(TEXT("calls UFUNCTIONs")));
 	{
 		TArray<FMCPParamSpec> Spec = RuntimeTargetParams();
 		Spec.Append({
@@ -707,9 +745,26 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("get_pie_pawn"), &GetPiePawn, {
 		MCPParam::Optional(TEXT("playerIndex"), EType::Number, TEXT("0-based player index (default 0)")),
 	});
-	// No spec, for the args reason given at run_python_file.
-	Registry.RegisterHandler(TEXT("invoke_function"), &InvokeFunction);
-	Registry.RegisterHandler(TEXT("invoke_static_function"), &InvokeStaticFunction);
+	Registry.RegisterHandler(TEXT("invoke_function"), &InvokeFunction, {
+		MCPParam::Required(TEXT("functionName"), EType::String, TEXT("BlueprintCallable or Exec UFUNCTION on the actor, or on component")),
+		ActorLabelParam(),
+		ActorPathParam(),
+		MCPParam::Optional(TEXT("component"), EType::String, TEXT("Component subobject name to call the function on instead of the actor")),
+		FunctionArgsParam(),
+		MCPParam::Optional(TEXT("actorArgs"), EType::Object, TEXT("UObject* parameter name -> actor label, resolved against live actors in the selected world")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("editor (default) | pie | auto")),
+		PieInstanceParam(),
+		MCPParam::Optional(TEXT("deferToNextTick"), EType::Boolean, TEXT("Queue the call for the next engine tick, outside the editor script-execution guard, so a replicated UFUNCTION routes normally; return and out values are not reported")),
+	}, MCPSpec::AtLeastOne({ { TEXT("actorLabel") }, { TEXT("actorPath") } }).ContractExempt(TEXT("calls a UFUNCTION")));
+	Registry.RegisterHandler(TEXT("invoke_static_function"), &InvokeStaticFunction, {
+		MCPParam::Required(TEXT("className"), EType::String, TEXT("UBlueprintFunctionLibrary class: a short name or a /Script/Module.Class path")),
+		MCPParam::Required(TEXT("functionName"), EType::String, TEXT("Static UFUNCTION on the library")),
+		FunctionArgsParam(),
+		MCPParam::Optional(TEXT("actorArgs"), EType::Object, TEXT("UObject* parameter name -> actor label, resolved against live actors in the selected world")),
+		MCPParam::Optional(TEXT("worldContextParam"), EType::String, TEXT("UObject* parameter to fill with the selected world; detected from WorldContext metadata and for WorldContextObject when omitted")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("editor (default) | pie | game | auto")),
+		PieInstanceParam(),
+	}, MCPSpec::ContractExempt(TEXT("calls a static UFUNCTION")));
 	Registry.RegisterHandler(TEXT("configure_pie"), &ConfigurePie, {
 		MCPParam::Optional(TEXT("numClients"), EType::Number, TEXT("Number of PIE clients")),
 		MCPParam::Optional(TEXT("netMode"), EType::String, TEXT("standalone | listen | client")),
@@ -1023,7 +1078,12 @@ TSharedPtr<FJsonValue> FEditorHandlers::ExecutePython(const TSharedPtr<FJsonObje
 TSharedPtr<FJsonValue> FEditorHandlers::RunPythonFile(const TSharedPtr<FJsonObject>& Params)
 {
 	FString FilePath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("filePath"), FilePath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("filePath"), FilePath)) return Err;
+
+	// Positional args: sys.argv[1:], or with an entryPoint that call's
+	// arguments. A list, a JSON array string or one string (#811).
+	TArray<FString> ExtraArgs;
+	if (auto Err = MCPReadPythonArgs(Params, TEXT("args"), ExtraArgs)) return Err;
 
 	// Accept forward-slashes on Windows; FPlatformFileManager normalises them.
 	if (!FPaths::FileExists(FilePath))
@@ -1035,18 +1095,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::RunPythonFile(const TSharedPtr<FJsonObje
 	if (!PythonPlugin || !PythonPlugin->IsPythonAvailable())
 	{
 		return MCPError(TEXT("Python scripting is not available"));
-	}
-
-	// Optional positional args to expose as sys.argv[1:].
-	TArray<FString> ExtraArgs;
-	const TArray<TSharedPtr<FJsonValue>>* ArgsArr = nullptr;
-	if (TryGetArrayParam(Params, TEXT("args"), ArgsArr) && ArgsArr)
-	{
-		for (const TSharedPtr<FJsonValue>& V : *ArgsArr)
-		{
-			FString S;
-			if (V.IsValid() && V->TryGetString(S)) ExtraArgs.Add(S);
-		}
 	}
 
 	// #995: a project script under Tools/ usually holds several independent
