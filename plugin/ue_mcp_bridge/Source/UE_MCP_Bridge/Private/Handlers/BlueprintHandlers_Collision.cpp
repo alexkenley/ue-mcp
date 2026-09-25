@@ -258,14 +258,24 @@ void FCollisionQueryHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("blueprint"));
-	Registry.RegisterHandler(TEXT("get_component_collision"), &GetComponentCollision);
+
+	// #1057: get_component_collision declares its parameters here, and the TS
+	// surface for it is generated from a recording of them.
+	// resolve_collision_profile is a project action and is declared there.
+	using EType = EMCPParamType;
+	Registry.RegisterHandler(TEXT("get_component_collision"), &GetComponentCollision, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Blueprint path, or a native class (/Script/MyGame.MyCharacter or MyCharacter)")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("componentName"), EType::String, TEXT("Component whose effective collision to read")),
+		MCPParam::Optional(TEXT("channel"), EType::String, TEXT("Narrow the answer to one collision channel: its configured name, the C++ enumerator, or the container index")),
+		MCPParam::Optional(TEXT("includeAllChannels"), EType::Boolean, TEXT("Include the unused GameTraceChannel slots (default false)")),
+	});
 	Registry.RegisterHandler(TEXT("resolve_collision_profile"), &ResolveCollisionProfile);
 }
 
 TSharedPtr<FJsonValue> FCollisionQueryHandlers::GetComponentCollision(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString ComponentName;
 	if (auto Err = RequireString(Params, TEXT("componentName"), ComponentName)) return Err;

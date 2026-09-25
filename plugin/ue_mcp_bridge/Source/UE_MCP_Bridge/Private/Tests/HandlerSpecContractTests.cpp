@@ -19,6 +19,12 @@
 // to load before it creates is left unspecced rather than given a spec this
 // test would run. That is also why each spec'd handler reads all of its
 // parameters before loading anything.
+// The values point at an asset that does not exist, so every handler that
+// writes fails at its first load, or on a refused value such as limit 0 or
+// step 0, before anything is written; a read-only handler may run to the end.
+// That is also why each spec'd handler reads all of its parameters before
+// loading or validating anything. A handler whose contract values could reach
+// a write (an asset create, an ini write, a demo scene step) carries no spec.
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -41,6 +47,8 @@
 #include "Handlers/WidgetHandlers.h"
 #include "Handlers/AssetHandlers.h"
 #include "Handlers/AssetHandlers_Geometry.h"
+#include "Handlers/BlueprintHandlers.h"
+#include "Handlers/BlueprintHandlers_Collision.h"
 #include "Handlers/ChooserHandlers.h"
 #include "Handlers/DemoHandlers.h"
 #include "Handlers/ReflectionHandlers.h"
@@ -110,7 +118,6 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	// and a direct LoadObject names the missing path in its warning.
 	AddExpectedError(TEXT("LoadAsset failed"), EAutomationExpectedErrorFlags::Contains, 0);
 	AddExpectedError(TEXT("HandlerSpecContract/NoSuchAsset"), EAutomationExpectedErrorFlags::Contains, 0);
-
 	FMCPHandlerRegistry Registry;
 	FAnimationHandlers::RegisterHandlers(Registry);
 	FAudioHandlers::RegisterHandlers(Registry);
@@ -132,6 +139,11 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	// invalid package name) runs before anything is created.
 	FAssetHandlers::RegisterHandlers(Registry);
 	FAssetGeometryHandlers::RegisterHandlers(Registry);
+	// duplicate_blueprint hands a source that does not exist to the editor asset
+	// library, which refuses it before anything is written and logs why.
+	AddExpectedError(TEXT("DuplicateAsset"), EAutomationExpectedErrorFlags::Contains, 0);
+	FBlueprintHandlers::RegisterHandlers(Registry);
+	FCollisionQueryHandlers::RegisterHandlers(Registry);
 	FChooserHandlers::RegisterHandlers(Registry);
 	FDemoHandlers::RegisterHandlers(Registry);
 	FReflectionHandlers::RegisterHandlers(Registry);

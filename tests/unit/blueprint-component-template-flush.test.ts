@@ -14,7 +14,7 @@ describe("blueprint.flush_component_templates", () => {
 
     expect(call).toHaveBeenCalledWith(
       "flush_blueprint_component_templates",
-      { path: "/Game/Blueprints/BP_Actor" },
+      { assetPath: "/Game/Blueprints/BP_Actor" },
       120_000,
     );
   });

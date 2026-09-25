@@ -86,95 +86,462 @@ void FBlueprintHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// come close to covering.
 	constexpr float SearchCallSitesTimeoutSeconds = 600.0f;
 
+	// #1057: a spec'd handler declares its parameters here and nowhere else; the
+	// TS surface is generated from a recording of them. A handler registered with
+	// a timeout is registered with its spec first; the timed registration keeps
+	// the spec. create_blueprint and create_blueprint_interface have no spec: the
+	// contract test would create the asset it is handed.
+	using EType = EMCPParamType;
+	const FMCPParamSpec SpecAssetPath = MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint")).Alias(TEXT("path"));
+	const FMCPParamSpec SpecAssetPathOrBlueprintPath = MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint")).Alias(TEXT("blueprintPath"));
+	const FMCPParamSpec SpecEnumPath = MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("UserDefinedEnum asset path")).Alias(TEXT("path"));
+	const FMCPParamSpec SpecStructPath = MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("UserDefinedStruct asset path")).Alias(TEXT("path"));
+	const FMCPParamSpec SpecGraphName = MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph name or the selector list_graphs reports (default EventGraph)"));
+	const FMCPParamSpec SpecGraphSelector = MCPParam::Optional(TEXT("graphSelector"), EType::String, TEXT("The exact selector list_graphs reports, which separates two graphs sharing a name. Wins over graphName"));
+	const FMCPParamSpec SpecNodeId = MCPParam::Required(TEXT("nodeId"), EType::String, TEXT("Node GUID, as get_connections and find_nodes report it, or the node name")).Alias(TEXT("nodeName"));
+	const FMCPParamSpec SpecVarName = MCPParam::Required(TEXT("name"), EType::String, TEXT("Variable name"));
+	const FMCPParamSpec SpecFunctionName = MCPParam::Required(TEXT("functionName"), EType::String, TEXT("Function name"));
+	const FMCPParamSpec SpecComponentName = MCPParam::Required(TEXT("componentName"), EType::String, TEXT("SCS or inherited component name"));
+	const FMCPParamSpec SpecPropertyName = MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Property name"));
+	const FMCPParamSpec SpecValue = MCPParam::Required(TEXT("value"), EType::Any, TEXT("Value to write: a JSON value, or Unreal export text. null clears an object, class or interface reference"));
+	const FMCPParamSpec SpecOnConflict = MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) reports the existing entry; error refuses"));
+	const FMCPParamSpec SpecVarType = MCPParam::Optional(TEXT("varType"), EType::String, TEXT("Variable type: bool, int, float, string, name, text, byte, vector, rotator, transform, object:/Script/Module.Class, struct:/Game/Path, enum:/Game/Path.Enum, or a container over any of those (Type[], set<Type>, map<Key,Value>)")).Alias(TEXT("type"));
+	const FMCPParamSpec SpecTitleFilter = MCPParam::Optional(TEXT("titleFilter"), EType::String, TEXT("Case-insensitive substring match on node title"));
+	const FMCPParamSpec SpecClassFilter = MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Case-insensitive substring match on node class name"));
+	const FMCPParamSpec SpecPosX = MCPParam::Optional(TEXT("posX"), EType::Number, TEXT("Node X position in the graph"));
+	const FMCPParamSpec SpecPosY = MCPParam::Optional(TEXT("posY"), EType::Number, TEXT("Node Y position in the graph"));
+	const FMCPParamSpec SpecDefaultValue = MCPParam::Optional(TEXT("defaultValue"), EType::Any, TEXT("Default value as Unreal export text; an empty string clears it"));
+	const FMCPParamSpec SpecOrder = MCPParam::Optional(TEXT("order"), EType::Array, TEXT("The COMPLETE desired order, never a partial list"));
+	const FMCPParamSpec SpecDumpToFile = MCPParam::Optional(TEXT("dumpToFile"), EType::Boolean, TEXT("Write the whole result to a JSON file instead of returning it inline"));
+	const FMCPParamSpec SpecOutputPath = MCPParam::Optional(TEXT("outputPath"), EType::String, TEXT("Absolute or Saved-relative JSON path for the dump"));
+	const FMCPParamSpec SpecIncludeNestedGraphs = MCPParam::Optional(TEXT("includeNestedGraphs"), EType::Boolean, TEXT("Also walk collapsed and nested graphs (default true)"));
+	const FMCPParamSpec SpecIncludeLevelScripts = MCPParam::Optional(TEXT("includeLevelScripts"), EType::Boolean, TEXT("Also sweep the level script Blueprint of every map under the directory, at a full map load each (default false)"));
+	const FMCPParamSpec SpecDirectory = MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content path to search under (default /Game)"));
+	const FMCPParamSpec SpecRecursive = MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include subfolders of directory (default true)"));
+	const FMCPParamSpec SpecAssetPaths = MCPParam::Optional(TEXT("assetPaths"), EType::Array, TEXT("Blueprint asset paths; a World path resolves to its level script")).Items(EType::String);
+	const FMCPParamSpec SpecMaxBlueprints = MCPParam::Optional(TEXT("maxBlueprints"), EType::Integer, TEXT("Cap on Blueprints loaded (default 2000)"));
+	const FMCPParamSpec SpecCursor = MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the nextCursor from the previous page, unmodified"));
+	const FMCPParamSpec SpecParameters = MCPParam::Optional(TEXT("parameters"), EType::Array, TEXT("Typed signature parameters [{name, type}]; type takes the add_variable vocabulary, containers included")).Items(EType::Object);
+
 	Registry.RegisterHandler(TEXT("create_blueprint"), &CreateBlueprint);
-	Registry.RegisterHandler(TEXT("read_blueprint"), &ReadBlueprint);
-	Registry.RegisterHandler(TEXT("add_variable"), &AddVariable);
-	Registry.RegisterHandler(TEXT("add_component"), &AddComponent);
-	Registry.RegisterHandler(TEXT("add_blueprint_interface"), &AddBlueprintInterface);
-	Registry.RegisterHandler(TEXT("compile_blueprint"), &CompileBlueprint);
-	Registry.RegisterHandler(TEXT("search_node_types"), &SearchNodeTypes);
-	Registry.RegisterHandler(TEXT("list_node_types"), &ListNodeTypes);
-	Registry.RegisterHandler(TEXT("list_blueprint_variables"), &ListBlueprintVariables);
-	Registry.RegisterHandler(TEXT("set_variable_properties"), &SetVariableProperties);
-	Registry.RegisterHandler(TEXT("create_function"), &CreateFunction);
-	Registry.RegisterHandler(TEXT("list_blueprint_functions"), &ListBlueprintFunctions);
-	Registry.RegisterHandler(TEXT("add_node"), &AddNode);
+	Registry.RegisterHandler(TEXT("read_blueprint"), &ReadBlueprint, {
+		SpecAssetPath,
+		MCPParam::Optional(TEXT("includeComponentProperties"), EType::Boolean, TEXT("Dump UPROPERTY name, type and value per component template (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("add_variable"), &AddVariable, {
+		SpecAssetPath,
+		SpecVarName,
+		SpecVarType,
+		SpecOnConflict,
+	});
+	Registry.RegisterHandler(TEXT("add_component"), &AddComponent, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("componentClass"), EType::String, TEXT("Component class: a short name such as ChildActorComponent, or a full path")),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Name of the new component (default: componentClass)")),
+		SpecOnConflict,
+		MCPParam::Optional(TEXT("parentComponent"), EType::String, TEXT("SCS parent component for the hierarchy")),
+		MCPParam::Optional(TEXT("childActorClass"), EType::String, TEXT("ChildActorClass for an added ChildActorComponent: a Blueprint path with or without _C, or a C++ class")),
+	});
+	Registry.RegisterHandler(TEXT("add_blueprint_interface"), &AddBlueprintInterface, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Blueprint asset path")),
+		MCPParam::Required(TEXT("interfacePath"), EType::String, TEXT("Interface class path")),
+	});
+	Registry.RegisterHandler(TEXT("compile_blueprint"), &CompileBlueprint, {
+		SpecAssetPath,
+	});
+	Registry.RegisterHandler(TEXT("search_node_types"), &SearchNodeTypes, {
+		MCPParam::Required(TEXT("query"), EType::String, TEXT("Words to match against the C++ name, the palette label and Keywords metadata")),
+		MCPParam::Optional(TEXT("className"), EType::String, TEXT("Narrow to one owning class, by short name or object path")).Alias(TEXT("classFilter")),
+		MCPParam::Optional(TEXT("includeGraphNodes"), EType::Boolean, TEXT("Include UEdGraphNode classes alongside function-library entries (default true)")),
+		SpecCursor,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 50, max 500)")),
+	});
+	Registry.RegisterHandler(TEXT("list_node_types"), &ListNodeTypes, {
+		MCPParam::Optional(TEXT("category"), EType::String, TEXT("Node category: utilities (default), math, string, gameplay, actor and so on")),
+		SpecCursor,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 100, max 1000)")),
+	});
+	Registry.RegisterHandler(TEXT("list_blueprint_variables"), &ListBlueprintVariables, {
+		SpecAssetPath,
+		MCPParam::Optional(TEXT("includeValues"), EType::Boolean, TEXT("Also resolve each variable's default off the generated-class CDO, and report whether the package holds unsaved changes (default false)")),
+		SpecCursor,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 200, max 2000)")),
+	});
+	Registry.RegisterHandler(TEXT("set_variable_properties"), &SetVariableProperties, {
+		SpecAssetPath,
+		SpecVarName,
+		MCPParam::Optional(TEXT("editFlag"), EType::String, TEXT("EditAnywhere, EditDefaultsOnly, EditInstanceOnly or none: the value list_variables reports")),
+		MCPParam::Optional(TEXT("instanceEditable"), EType::Boolean, TEXT("Two-state shorthand for editFlag; mutually exclusive with it")),
+		MCPParam::Optional(TEXT("private"), EType::Boolean, TEXT("The Blueprint editor's Private checkbox, independent of editFlag")),
+		MCPParam::Optional(TEXT("category"), EType::String, TEXT("Category")),
+		MCPParam::Optional(TEXT("tooltip"), EType::String, TEXT("Tooltip")),
+		MCPParam::Optional(TEXT("exposeOnSpawn"), EType::Boolean, TEXT("ExposeOnSpawn flag")),
+	});
+	Registry.RegisterHandler(TEXT("create_function"), &CreateFunction, {
+		SpecAssetPath,
+		SpecFunctionName,
+		SpecOnConflict,
+	});
+	Registry.RegisterHandler(TEXT("list_blueprint_functions"), &ListBlueprintFunctions, {
+		SpecAssetPath,
+		MCPParam::Optional(TEXT("includeInherited"), EType::Boolean, TEXT("Append overridable parent and interface functions this Blueprint has not implemented (default false)")),
+		SpecCursor,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 200, max 2000)")),
+	});
+	Registry.RegisterHandler(TEXT("add_node"), &AddNode, {
+		SpecAssetPath,
+		SpecGraphName,
+		MCPParam::Required(TEXT("nodeClass"), EType::String, TEXT("Node class or short alias such as CallFunction, CallParent or CustomEvent")),
+		MCPParam::Optional(TEXT("nodeParams"), EType::Object, TEXT("Node-specific settings, such as functionName and className for a CallFunction node")),
+	});
+	Registry.RegisterHandler(TEXT("read_blueprint_graph"), &ReadBlueprintGraph, {
+		SpecAssetPath,
+		SpecGraphName,
+		MCPParam::Optional(TEXT("offset"), EType::Integer, TEXT("Row offset into the (filtered) node list")),
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Nodes to return; omit for a safe default page, or dump the whole graph with dumpToFile")),
+		MCPParam::Optional(TEXT("includePins"), EType::Boolean, TEXT("Include pins (default true)")),
+		MCPParam::Optional(TEXT("includeDefaults"), EType::Boolean, TEXT("Include pin default values (default true)")),
+		MCPParam::Optional(TEXT("includeComments"), EType::Boolean, TEXT("Include node comments (default true)")),
+		SpecDumpToFile,
+		SpecOutputPath,
+		SpecTitleFilter,
+		SpecClassFilter,
+	});
 	Registry.RegisterHandlerWithTimeout(TEXT("read_blueprint_graph"), &ReadBlueprintGraph, ReadBlueprintGraphTimeoutSeconds);
-	Registry.RegisterHandler(TEXT("add_event_dispatcher"), &AddEventDispatcher);
-	Registry.RegisterHandler(TEXT("rename_function"), &RenameFunction);
-	Registry.RegisterHandler(TEXT("delete_function"), &DeleteFunction);
+	Registry.RegisterHandler(TEXT("add_event_dispatcher"), &AddEventDispatcher, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Blueprint asset path")),
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Dispatcher name")),
+		SpecParameters,
+	});
+	Registry.RegisterHandler(TEXT("rename_function"), &RenameFunction, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("oldName"), EType::String, TEXT("Current name")),
+		MCPParam::Required(TEXT("newName"), EType::String, TEXT("New name")),
+	});
+	Registry.RegisterHandler(TEXT("delete_function"), &DeleteFunction, {
+		SpecAssetPath,
+		SpecFunctionName,
+	});
 	Registry.RegisterHandler(TEXT("create_blueprint_interface"), &CreateBlueprintInterface);
-	Registry.RegisterHandler(TEXT("override_function"), &OverrideFunction);
-	Registry.RegisterHandler(TEXT("list_overridable_functions"), &ListOverridableFunctions);
-	Registry.RegisterHandler(TEXT("connect_pins"), &ConnectPins);
-	Registry.RegisterHandler(TEXT("delete_node"), &DeleteNode);
-	Registry.RegisterHandler(TEXT("refresh_node"), &RefreshNode);
-	Registry.RegisterHandler(TEXT("disconnect_pins"), &DisconnectPins);
-	Registry.RegisterHandler(TEXT("set_node_property"), &SetNodeProperty);
-	Registry.RegisterHandler(TEXT("list_blueprint_graphs"), &ListGraphs);
-	Registry.RegisterHandler(TEXT("resolve_blueprint_graph"), &ResolveGraph);
-	Registry.RegisterHandler(TEXT("set_blueprint_component_property"), &SetComponentProperty);
+	Registry.RegisterHandler(TEXT("override_function"), &OverrideFunction, {
+		SpecAssetPath,
+		SpecFunctionName,
+		MCPParam::Optional(TEXT("source"), EType::String, TEXT("Advisory hint for where the function comes from: auto (default), interface or parent. Echoed back")),
+		MCPParam::Optional(TEXT("preferFunction"), EType::Boolean, TEXT("Force the function-graph form even when the function could be placed as an override event")),
+		MCPParam::Optional(TEXT("interfacePath"), EType::String, TEXT("Implement this interface first when it is not present")),
+	});
+	Registry.RegisterHandler(TEXT("list_overridable_functions"), &ListOverridableFunctions, {
+		SpecAssetPath,
+	});
+	Registry.RegisterHandler(TEXT("connect_pins"), &ConnectPins, {
+		SpecAssetPath,
+		SpecGraphName,
+		SpecGraphSelector,
+		MCPParam::Required(TEXT("sourceNodeId"), EType::String, TEXT("Source node GUID, as get_connections and find_nodes report it, or its title")).Alias(TEXT("sourceNode")),
+		MCPParam::Required(TEXT("sourcePin"), EType::String, TEXT("Source pin name")).Alias(TEXT("sourcePinName")),
+		MCPParam::Required(TEXT("targetNodeId"), EType::String, TEXT("Target node GUID, as get_connections and find_nodes report it, or its title")).Alias(TEXT("targetNode")),
+		MCPParam::Required(TEXT("targetPin"), EType::String, TEXT("Target pin name")).Alias(TEXT("targetPinName")),
+		MCPParam::Optional(TEXT("breakExistingSource"), EType::Boolean, TEXT("Break every existing link on the source pin first")),
+		MCPParam::Optional(TEXT("breakExistingTarget"), EType::Boolean, TEXT("Break every existing link on the target pin first")),
+	});
+	Registry.RegisterHandler(TEXT("delete_node"), &DeleteNode, {
+		SpecAssetPath,
+		SpecGraphName,
+		SpecGraphSelector,
+		SpecNodeId,
+	});
+	Registry.RegisterHandler(TEXT("refresh_node"), &RefreshNode, {
+		SpecAssetPath,
+		SpecGraphName,
+		SpecGraphSelector,
+		SpecNodeId,
+		MCPParam::Optional(TEXT("breakOrphanedPins"), EType::Boolean, TEXT("Also break the links holding orphaned pins alive, which removes those pins")),
+	});
+	Registry.RegisterHandler(TEXT("disconnect_pins"), &DisconnectPins, {
+		SpecAssetPath,
+		SpecGraphName,
+		SpecGraphSelector,
+		SpecNodeId,
+		MCPParam::Required(TEXT("pinName"), EType::String, TEXT("The pin whose links are broken")),
+		MCPParam::Optional(TEXT("linkedNodeId"), EType::String, TEXT("Break only links to this node (GUID or name). Omit to break every link on the pin")),
+		MCPParam::Optional(TEXT("linkedPinName"), EType::String, TEXT("With linkedNodeId, break only the link to this pin")),
+	});
+	Registry.RegisterHandler(TEXT("set_node_property"), &SetNodeProperty, {
+		SpecAssetPath,
+		SpecGraphName,
+		SpecNodeId,
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Pin or struct property name")).Alias(TEXT("pinName")),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("New pin default or property value, as a string")).Alias(TEXT("defaultValue")),
+	});
+	Registry.RegisterHandler(TEXT("list_blueprint_graphs"), &ListGraphs, {
+		SpecAssetPath,
+	});
+	Registry.RegisterHandler(TEXT("resolve_blueprint_graph"), &ResolveGraph, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("graphName"), EType::String, TEXT("Graph name to resolve")),
+	});
+	Registry.RegisterHandler(TEXT("set_blueprint_component_property"), &SetComponentProperty, {
+		SpecAssetPath,
+		SpecComponentName,
+		SpecPropertyName,
+		SpecValue,
+	});
 	// #442: dedicated OverrideMaterials writer that takes a materialPaths array
 	// directly, avoiding any value coercion concerns on the generic path.
-	Registry.RegisterHandler(TEXT("set_component_override_materials"), &SetComponentOverrideMaterials);
+	Registry.RegisterHandler(TEXT("set_component_override_materials"), &SetComponentOverrideMaterials, {
+		SpecAssetPath,
+		SpecComponentName,
+		MCPParam::Required(TEXT("materialPaths"), EType::Array, TEXT("Material asset paths; an empty array clears")).Items(EType::String),
+	});
 	// #457: timeline track authoring (float/vector/color/event) on a Blueprint.
-	Registry.RegisterHandler(TEXT("add_timeline_track"), &AddTimelineTrack);
-	Registry.RegisterHandler(TEXT("set_capsule_size"), &SetCapsuleSize);
-	Registry.RegisterHandler(TEXT("set_class_default"), &SetClassDefault);
-	Registry.RegisterHandler(TEXT("remove_component"), &RemoveComponent);
-	Registry.RegisterHandler(TEXT("delete_variable"), &DeleteVariable);
-	Registry.RegisterHandler(TEXT("add_function_parameter"), &AddFunctionParameter);
-	Registry.RegisterHandler(TEXT("set_variable_default"), &SetVariableDefault);
-	Registry.RegisterHandler(TEXT("get_blueprint_variable_default"), &GetVariableDefault);
+	Registry.RegisterHandler(TEXT("add_timeline_track"), &AddTimelineTrack, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("timelineName"), EType::String, TEXT("Timeline name")),
+		MCPParam::Required(TEXT("trackName"), EType::String, TEXT("Track name within the timeline")),
+		MCPParam::Optional(TEXT("trackType"), EType::String, TEXT("float (default), vector, color or event")),
+		MCPParam::Optional(TEXT("keyframes"), EType::Array, TEXT("[{time, value}]: value is a number for float and event, {x,y,z} for vector, {r,g,b,a} for color")).Items(EType::Object),
+	});
+	Registry.RegisterHandler(TEXT("set_capsule_size"), &SetCapsuleSize, {
+		SpecAssetPath,
+		SpecComponentName,
+		MCPParam::Optional(TEXT("halfHeight"), EType::Number, TEXT("Capsule half height (unscaled)")),
+		MCPParam::Optional(TEXT("radius"), EType::Number, TEXT("Capsule radius (unscaled)")),
+	});
+	Registry.RegisterHandler(TEXT("set_class_default"), &SetClassDefault, {
+		SpecAssetPath,
+		SpecPropertyName,
+		SpecValue,
+	});
+	Registry.RegisterHandler(TEXT("remove_component"), &RemoveComponent, {
+		SpecAssetPath,
+		SpecComponentName,
+	});
+	Registry.RegisterHandler(TEXT("delete_variable"), &DeleteVariable, {
+		SpecAssetPath,
+		SpecVarName,
+	});
+	Registry.RegisterHandler(TEXT("add_function_parameter"), &AddFunctionParameter, {
+		SpecAssetPath,
+		SpecFunctionName,
+		MCPParam::Required(TEXT("parameterName"), EType::String, TEXT("Parameter name")),
+		MCPParam::Optional(TEXT("parameterType"), EType::String, TEXT("Parameter type in the add_variable vocabulary, containers included (default float)")),
+		MCPParam::Optional(TEXT("isOutput"), EType::Boolean, TEXT("An output parameter rather than an input (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("set_variable_default"), &SetVariableDefault, {
+		SpecAssetPath,
+		SpecVarName,
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("New default value, as a string")),
+	});
+	Registry.RegisterHandler(TEXT("get_blueprint_variable_default"), &GetVariableDefault, {
+		SpecAssetPath,
+		SpecVarName,
+	});
 
 	// v0.7.8 stubs
-	Registry.RegisterHandler(TEXT("read_blueprint_graph_summary"), &ReadBlueprintGraphSummary);
-	Registry.RegisterHandler(TEXT("get_blueprint_execution_flow"), &GetBlueprintExecutionFlow);
-	Registry.RegisterHandler(TEXT("get_blueprint_dependencies"), &GetBlueprintDependencies);
+	Registry.RegisterHandler(TEXT("read_blueprint_graph_summary"), &ReadBlueprintGraphSummary, {
+		SpecAssetPath,
+		SpecGraphName,
+		SpecTitleFilter,
+		SpecClassFilter,
+	});
+	Registry.RegisterHandler(TEXT("get_blueprint_execution_flow"), &GetBlueprintExecutionFlow, {
+		SpecAssetPath,
+		SpecGraphName,
+		MCPParam::Optional(TEXT("entryPoint"), EType::String, TEXT("Event or function name to start the exec-flow trace from")),
+	});
+	Registry.RegisterHandler(TEXT("get_blueprint_dependencies"), &GetBlueprintDependencies, {
+		SpecAssetPath,
+		MCPParam::Optional(TEXT("reverse"), EType::Boolean, TEXT("true reports the referencers of this asset instead")),
+	});
 
 	// v0.7.11 - BP authoring depth
-	Registry.RegisterHandler(TEXT("duplicate_blueprint"), &DuplicateBlueprint);
-	Registry.RegisterHandler(TEXT("add_local_variable"), &AddLocalVariable);
-	Registry.RegisterHandler(TEXT("list_local_variables"), &ListLocalVariables);
-	Registry.RegisterHandler(TEXT("validate_blueprint"), &ValidateBlueprint);
+	Registry.RegisterHandler(TEXT("duplicate_blueprint"), &DuplicateBlueprint, {
+		MCPParam::Required(TEXT("sourcePath"), EType::String, TEXT("Blueprint asset to duplicate")),
+		MCPParam::Required(TEXT("destinationPath"), EType::String, TEXT("Full destination asset path")),
+	});
+	Registry.RegisterHandler(TEXT("add_local_variable"), &AddLocalVariable, {
+		SpecAssetPath,
+		SpecFunctionName,
+		SpecVarName,
+		SpecVarType,
+	});
+	Registry.RegisterHandler(TEXT("list_local_variables"), &ListLocalVariables, {
+		SpecAssetPath,
+		SpecFunctionName,
+	});
+	Registry.RegisterHandler(TEXT("validate_blueprint"), &ValidateBlueprint, {
+		SpecAssetPath,
+	});
 
 	// v0.7.11 - issue fixes
-	Registry.RegisterHandler(TEXT("read_component_properties"), &ReadComponentProperties);
-	Registry.RegisterHandler(TEXT("read_node_property"), &ReadNodeProperty);
-	Registry.RegisterHandler(TEXT("reparent_component"), &ReparentComponent);
-	Registry.RegisterHandler(TEXT("reparent_blueprint"), &ReparentBlueprint);
-	Registry.RegisterHandler(TEXT("flush_inheritable_component_handler"), &FlushInheritableComponentHandler);
-	Registry.RegisterHandler(TEXT("flush_blueprint_component_templates"), &FlushComponentTemplates);
-	Registry.RegisterHandler(TEXT("set_actor_tick_settings"), &SetActorTickSettings);
+	Registry.RegisterHandler(TEXT("read_component_properties"), &ReadComponentProperties, {
+		SpecAssetPath,
+		SpecComponentName,
+	});
+	Registry.RegisterHandler(TEXT("read_node_property"), &ReadNodeProperty, {
+		SpecAssetPath,
+		SpecGraphName,
+		SpecNodeId,
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Pin or reflected node property name")).Alias(TEXT("pinName")),
+	});
+	Registry.RegisterHandler(TEXT("reparent_component"), &ReparentComponent, {
+		SpecAssetPath,
+		SpecComponentName,
+		MCPParam::Required(TEXT("newParent"), EType::String, TEXT("New parent component name")),
+	});
+	Registry.RegisterHandler(TEXT("reparent_blueprint"), &ReparentBlueprint, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("parentClass"), EType::String, TEXT("New parent class: short name or full path")),
+	});
+	Registry.RegisterHandler(TEXT("flush_inheritable_component_handler"), &FlushInheritableComponentHandler, {
+		SpecAssetPath,
+	});
+	Registry.RegisterHandler(TEXT("flush_blueprint_component_templates"), &FlushComponentTemplates, {
+		SpecAssetPath,
+	});
+	Registry.RegisterHandler(TEXT("set_actor_tick_settings"), &SetActorTickSettings, {
+		SpecAssetPath,
+		MCPParam::Optional(TEXT("bCanEverTick"), EType::Boolean, TEXT("PrimaryActorTick.bCanEverTick")),
+		MCPParam::Optional(TEXT("bStartWithTickEnabled"), EType::Boolean, TEXT("PrimaryActorTick.bStartWithTickEnabled")),
+		MCPParam::Optional(TEXT("TickInterval"), EType::Number, TEXT("PrimaryActorTick.TickInterval in seconds")),
+	});
 
 	// v0.7.12 - issue #128 - single-property read (inherited-aware)
-	Registry.RegisterHandler(TEXT("get_blueprint_component_property"), &GetComponentProperty);
+	Registry.RegisterHandler(TEXT("get_blueprint_component_property"), &GetComponentProperty, {
+		SpecAssetPath,
+		SpecComponentName,
+		SpecPropertyName,
+	});
 
 	// v0.7.17 issue #130: bulk graph node import via T3D copy/paste
-	Registry.RegisterHandler(TEXT("export_nodes_t3d"), &ExportNodesT3D);
-	Registry.RegisterHandler(TEXT("import_nodes_t3d"), &ImportNodesT3D);
+	Registry.RegisterHandler(TEXT("export_nodes_t3d"), &ExportNodesT3D, {
+		SpecAssetPath,
+		SpecGraphName,
+		MCPParam::Optional(TEXT("nodeIds"), EType::Array, TEXT("Node GUIDs or names to export (omit for the whole graph)")).Items(EType::String),
+	});
+	Registry.RegisterHandler(TEXT("import_nodes_t3d"), &ImportNodesT3D, {
+		SpecAssetPath,
+		SpecGraphName,
+		MCPParam::Required(TEXT("t3d"), EType::String, TEXT("T3D blob from export_nodes_t3d, or copied from the Blueprint graph editor")).Alias(TEXT("text")),
+		MCPParam::Optional(TEXT("posX"), EType::Number, TEXT("Re-center pasted nodes around this X (with posY)")),
+		MCPParam::Optional(TEXT("posY"), EType::Number, TEXT("Re-center pasted nodes around this Y (with posX)")),
+	});
 
 	// issues #182/#183: C++ class CDO property access
-	Registry.RegisterHandler(TEXT("set_cdo_property"), &SetCdoProperty);
-	Registry.RegisterHandler(TEXT("get_cdo_properties"), &GetCdoProperties);
+	Registry.RegisterHandler(TEXT("set_cdo_property"), &SetCdoProperty, {
+		MCPParam::Required(TEXT("className"), EType::String, TEXT("C++ class name or path")),
+		SpecPropertyName,
+		SpecValue,
+	});
+	Registry.RegisterHandler(TEXT("get_cdo_properties"), &GetCdoProperties, {
+		MCPParam::Required(TEXT("className"), EType::String, TEXT("C++ class name or path")),
+		MCPParam::Optional(TEXT("propertyNames"), EType::Array, TEXT("Property names to read (omit for all)")).Items(EType::String),
+	});
 
 	// issue #195: run construction script and inspect resulting components
-	Registry.RegisterHandler(TEXT("run_construction_script"), &RunConstructionScript);
+	Registry.RegisterHandler(TEXT("run_construction_script"), &RunConstructionScript, {
+		SpecAssetPath,
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("Spawn location for the temporary actor")),
+	});
 
 	// v1.0.0-rc.15 - agent-friendly BP authoring
-	Registry.RegisterHandler(TEXT("compile_blueprints"), &CompileBlueprints);
-	Registry.RegisterHandler(TEXT("cleanup_graph"), &CleanupGraph);
-	Registry.RegisterHandler(TEXT("connect_pins_batch"), &ConnectPinsBatch);
-	Registry.RegisterHandler(TEXT("set_node_position"), &SetNodePosition);
-	Registry.RegisterHandler(TEXT("auto_layout_graph"), &AutoLayoutGraph);
+	Registry.RegisterHandler(TEXT("compile_blueprints"), &CompileBlueprints, {
+		MCPParam::Required(TEXT("assetPaths"), EType::Array, TEXT("Blueprint asset paths to compile")).Items(EType::String),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Persist on success (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("cleanup_graph"), &CleanupGraph, {
+		SpecAssetPath,
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph to clean (default: every graph)")),
+	});
+	Registry.RegisterHandler(TEXT("connect_pins_batch"), &ConnectPinsBatch, {
+		SpecAssetPath,
+		SpecGraphName,
+		MCPParam::Required(TEXT("connections"), EType::Array, TEXT("[{sourceNode, sourcePin, targetNode, targetPin}]")).Items(EType::Object),
+	});
+	Registry.RegisterHandler(TEXT("set_node_position"), &SetNodePosition, {
+		SpecAssetPath,
+		SpecGraphName,
+		SpecNodeId,
+		SpecPosX,
+		SpecPosY,
+	});
+	Registry.RegisterHandler(TEXT("auto_layout_graph"), &AutoLayoutGraph, {
+		SpecAssetPath,
+		SpecGraphName,
+		MCPParam::Optional(TEXT("columnGap"), EType::Integer, TEXT("Horizontal spacing between columns (default 360)")),
+		MCPParam::Optional(TEXT("rowGap"), EType::Integer, TEXT("Vertical spacing between rows (default 200)")),
+		MCPParam::Optional(TEXT("previousPositionsLimit"), EType::Integer, TEXT("Capture each node's pre-layout coordinates only when the graph has at most this many nodes (default 200)")),
+		MCPParam::Optional(TEXT("capturePreviousPositions"), EType::Boolean, TEXT("Capture previousPositions regardless of previousPositionsLimit (default false)")),
+	});
 
 	// #945: project-wide call-site audit (BlueprintHandlers_Search.cpp).
+	Registry.RegisterHandler(TEXT("search_blueprint_call_sites"), &SearchCallSites, {
+		MCPParam::Required(TEXT("functionNames"), EType::Array, TEXT("Function names to find call sites for, max 50 per request")).Items(EType::String),
+		MCPParam::Optional(TEXT("className"), EType::String, TEXT("Declaring class to narrow the functions to")),
+		SpecDirectory,
+		SpecIncludeNestedGraphs,
+		SpecIncludeLevelScripts,
+		MCPParam::Optional(TEXT("includeNeighbours"), EType::Boolean, TEXT("Include each hit's immediate execution and data neighbours")),
+		MCPParam::Optional(TEXT("narrowByRegistry"), EType::Boolean, TEXT("Use Asset Registry dependencies to rule out Blueprints before loading them (default true)")),
+		MCPParam::Optional(TEXT("offset"), EType::Integer, TEXT("Row offset, the older non-resumable form of paging")),
+		SpecCursor,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 200, max 1000)")),
+		SpecMaxBlueprints,
+		SpecDumpToFile,
+		SpecOutputPath,
+	});
 	Registry.RegisterHandlerWithTimeout(TEXT("search_blueprint_call_sites"), &SearchCallSites, SearchCallSitesTimeoutSeconds);
+	Registry.RegisterHandler(TEXT("search_blueprint_nodes"), &SearchNodes, {
+		SpecAssetPathOrBlueprintPath,
+		MCPParam::Optional(TEXT("titles"), EType::Array, TEXT("Case-insensitive substrings matched against each node title")).Items(EType::String),
+		MCPParam::Optional(TEXT("nodeClasses"), EType::Array, TEXT("Exact node class names, such as K2Node_VariableGet")).Items(EType::String),
+		MCPParam::Optional(TEXT("variableName"), EType::String, TEXT("The member a node reads or writes")),
+		MCPParam::Optional(TEXT("variableAccess"), EType::String, TEXT("Narrow variableName to get, set or any (default any)")),
+		SpecIncludeNestedGraphs,
+		MCPParam::Optional(TEXT("authoredOnly"), EType::Boolean, TEXT("Leave out transient and generated compiler graphs (default true)")),
+		SpecCursor,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 200, max 1000)")),
+	});
 	Registry.RegisterHandlerWithTimeout(TEXT("search_blueprint_nodes"), &SearchNodes, SearchCallSitesTimeoutSeconds);
+	Registry.RegisterHandler(TEXT("get_blueprint_connections"), &GetConnections, {
+		SpecAssetPath,
+		SpecGraphName,
+		SpecGraphSelector,
+		MCPParam::Optional(TEXT("nodeId"), EType::String, TEXT("Report only the edges into and out of this node (GUID or name)")),
+		MCPParam::Optional(TEXT("kind"), EType::String, TEXT("exec, data or all (default all)")),
+		SpecIncludeNestedGraphs,
+		SpecCursor,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 200, max 1000)")),
+	});
 	Registry.RegisterHandlerWithTimeout(TEXT("get_blueprint_connections"), &GetConnections, SearchCallSitesTimeoutSeconds);
 
 	// #1166: batch export to disk and the dead-code audit (BlueprintHandlers_Audit.cpp).
+	// export_blueprint_batch writes files, and its contract values are safe
+	// because the parentClass they carry resolves to no class, which is refused
+	// before anything is enumerated or written.
+	Registry.RegisterHandler(TEXT("export_blueprint_batch"), &ExportBlueprintBatch, {
+		SpecAssetPaths,
+		SpecDirectory,
+		SpecRecursive,
+		MCPParam::Optional(TEXT("parentClass"), EType::String, TEXT("Only Blueprints deriving from this class")),
+		SpecIncludeLevelScripts,
+		MCPParam::Optional(TEXT("outputDir"), EType::String, TEXT("Absolute directory, or one relative to Saved/ (default Saved/UE_MCP/BlueprintExport)")),
+		MCPParam::Optional(TEXT("maxAssets"), EType::Integer, TEXT("Cap on Blueprints exported (default 200, max 5000)")),
+		MCPParam::Optional(TEXT("includeT3D"), EType::Boolean, TEXT("Also write one T3D file per graph (default false)")),
+	});
 	Registry.RegisterHandlerWithTimeout(TEXT("export_blueprint_batch"), &ExportBlueprintBatch, SearchCallSitesTimeoutSeconds);
+	Registry.RegisterHandler(TEXT("audit_blueprint_dead_code"), &AuditDeadCode, {
+		SpecDirectory,
+		SpecAssetPaths,
+		SpecRecursive,
+		SpecIncludeLevelScripts,
+		MCPParam::Optional(TEXT("scanReferencers"), EType::Boolean, TEXT("Also scan every Blueprint package that depends on an audited one for references (default true)")),
+		SpecMaxBlueprints,
+		MCPParam::Optional(TEXT("maxSamples"), EType::Integer, TEXT("Samples listed per finding kind per Blueprint (default 20, max 500); counts stay complete")),
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return (default 200, max 5000)")),
+		SpecDumpToFile,
+		SpecOutputPath,
+	});
 	Registry.RegisterHandlerWithTimeout(TEXT("audit_blueprint_dead_code"), &AuditDeadCode, SearchCallSitesTimeoutSeconds);
 
 	// V9 Blueprint depth (BlueprintHandlers_Depth.cpp). Interface removal and
@@ -182,32 +549,142 @@ void FBlueprintHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// macros, dispatcher signatures and custom events, member and local
 	// variable rename plus metadata, dispatcher removal, custom events with a
 	// typed signature, and macro authoring.
-	Registry.RegisterHandler(TEXT("list_blueprint_interfaces"), &ListBlueprintInterfaces);
-	Registry.RegisterHandler(TEXT("remove_blueprint_interface"), &RemoveBlueprintInterface);
-	Registry.RegisterHandler(TEXT("set_function_properties"), &SetFunctionProperties);
-	Registry.RegisterHandler(TEXT("list_graph_parameters"), &ListGraphParameters);
-	Registry.RegisterHandler(TEXT("edit_graph_parameters"), &EditGraphParameters);
-	Registry.RegisterHandler(TEXT("rename_blueprint_variable"), &RenameBlueprintVariable);
-	Registry.RegisterHandler(TEXT("get_blueprint_variable_metadata"), &GetBlueprintVariableMetadata);
-	Registry.RegisterHandler(TEXT("set_blueprint_variable_metadata"), &SetBlueprintVariableMetadata);
-	Registry.RegisterHandler(TEXT("edit_local_variable"), &EditLocalVariable);
-	Registry.RegisterHandler(TEXT("list_event_dispatchers"), &ListEventDispatchers);
-	Registry.RegisterHandler(TEXT("remove_event_dispatcher"), &RemoveEventDispatcher);
-	Registry.RegisterHandler(TEXT("add_custom_event"), &AddCustomEvent);
-	Registry.RegisterHandler(TEXT("create_macro"), &CreateMacro);
-	Registry.RegisterHandler(TEXT("delete_macro"), &DeleteMacro);
-	Registry.RegisterHandler(TEXT("delete_graph"), &DeleteGraph);
+	Registry.RegisterHandler(TEXT("list_blueprint_interfaces"), &ListBlueprintInterfaces, {
+		SpecAssetPathOrBlueprintPath,
+	});
+	Registry.RegisterHandler(TEXT("remove_blueprint_interface"), &RemoveBlueprintInterface, {
+		SpecAssetPathOrBlueprintPath,
+		MCPParam::Required(TEXT("interfacePath"), EType::String, TEXT("Interface class path, as list_interfaces reports it")),
+		MCPParam::Optional(TEXT("preserveFunctions"), EType::Boolean, TEXT("Keep the implementations as ordinary Blueprint functions (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("set_function_properties"), &SetFunctionProperties, {
+		SpecAssetPath,
+		SpecFunctionName,
+		MCPParam::Optional(TEXT("pure"), EType::Boolean, TEXT("BlueprintPure: no side effects, and the node loses its exec pins")),
+		MCPParam::Optional(TEXT("isConst"), EType::Boolean, TEXT("const: the function only reads state")),
+		MCPParam::Optional(TEXT("accessSpecifier"), EType::String, TEXT("public, protected or private")),
+		MCPParam::Optional(TEXT("category"), EType::String, TEXT("Category")),
+		MCPParam::Optional(TEXT("tooltip"), EType::String, TEXT("Tooltip")),
+		MCPParam::Optional(TEXT("keywords"), EType::String, TEXT("Extra palette search keywords")),
+		MCPParam::Optional(TEXT("compactNodeTitle"), EType::String, TEXT("Render the node in compact form under this title")),
+		MCPParam::Optional(TEXT("callInEditor"), EType::Boolean, TEXT("Expose a details-panel button that runs it on a selected instance")),
+		MCPParam::Optional(TEXT("threadSafe"), EType::Boolean, TEXT("Safe to call off the game thread")),
+		MCPParam::Optional(TEXT("deprecated"), EType::Boolean, TEXT("Mark the function deprecated so its call sites warn")),
+		MCPParam::Optional(TEXT("deprecationMessage"), EType::String, TEXT("Text shown at a deprecated function's call sites")),
+	});
+	Registry.RegisterHandler(TEXT("list_graph_parameters"), &ListGraphParameters, {
+		SpecAssetPath,
+		MCPParam::Optional(TEXT("functionName"), EType::String, TEXT("Function, macro or dispatcher signature to read; name exactly one of functionName and eventName")),
+		MCPParam::Optional(TEXT("eventName"), EType::String, TEXT("Custom event to read")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Narrows an eventName search to one graph")),
+	});
+	Registry.RegisterHandler(TEXT("edit_graph_parameters"), &EditGraphParameters, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("op"), EType::String, TEXT("add, remove, rename, set_type, set_default or reorder")),
+		MCPParam::Optional(TEXT("functionName"), EType::String, TEXT("Function, macro or dispatcher signature to edit; name exactly one of functionName and eventName")),
+		MCPParam::Optional(TEXT("eventName"), EType::String, TEXT("Custom event to edit")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Narrows an eventName search to one graph")),
+		MCPParam::Optional(TEXT("isOutput"), EType::Boolean, TEXT("Edit the return side (default false)")),
+		MCPParam::Optional(TEXT("parameterName"), EType::String, TEXT("Parameter to act on")),
+		MCPParam::Optional(TEXT("parameterType"), EType::String, TEXT("Type in the add_variable vocabulary, for add and set_type")),
+		MCPParam::Optional(TEXT("newName"), EType::String, TEXT("New name, for rename")),
+		SpecDefaultValue,
+		SpecOrder,
+	});
+	Registry.RegisterHandler(TEXT("rename_blueprint_variable"), &RenameBlueprintVariable, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("oldName"), EType::String, TEXT("Current name")),
+		MCPParam::Required(TEXT("newName"), EType::String, TEXT("New name")),
+	});
+	Registry.RegisterHandler(TEXT("get_blueprint_variable_metadata"), &GetBlueprintVariableMetadata, {
+		SpecAssetPath,
+		SpecVarName,
+		MCPParam::Optional(TEXT("functionName"), EType::String, TEXT("The function owning a local variable; omit for a member variable")),
+	});
+	Registry.RegisterHandler(TEXT("set_blueprint_variable_metadata"), &SetBlueprintVariableMetadata, {
+		SpecAssetPath,
+		SpecVarName,
+		MCPParam::Required(TEXT("metadata"), EType::Object, TEXT("{key: 'value'} pairs; a null value removes that key. Unreal stores every metadata value as text")),
+		MCPParam::Optional(TEXT("functionName"), EType::String, TEXT("The function owning a local variable; omit for a member variable")),
+	});
+	Registry.RegisterHandler(TEXT("edit_local_variable"), &EditLocalVariable, {
+		SpecAssetPath,
+		SpecFunctionName,
+		SpecVarName,
+		MCPParam::Required(TEXT("op"), EType::String, TEXT("rename, remove, set_type or set_default")),
+		MCPParam::Optional(TEXT("newName"), EType::String, TEXT("New name, for rename")),
+		SpecVarType,
+		SpecDefaultValue,
+	});
+	Registry.RegisterHandler(TEXT("list_event_dispatchers"), &ListEventDispatchers, {
+		SpecAssetPathOrBlueprintPath,
+	});
+	Registry.RegisterHandler(TEXT("remove_event_dispatcher"), &RemoveEventDispatcher, {
+		SpecAssetPathOrBlueprintPath,
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Dispatcher name")),
+	});
+	Registry.RegisterHandler(TEXT("add_custom_event"), &AddCustomEvent, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("eventName"), EType::String, TEXT("Custom event name")),
+		SpecGraphName,
+		SpecParameters,
+		MCPParam::Optional(TEXT("netMode"), EType::String, TEXT("none (default), multicast, server or client")),
+		MCPParam::Optional(TEXT("reliable"), EType::Boolean, TEXT("Send the replicated event reliably (default true; ignored when netMode is none)")),
+		MCPParam::Optional(TEXT("callInEditor"), EType::Boolean, TEXT("Expose a details-panel button that runs it on a selected instance")),
+		SpecPosX,
+		SpecPosY,
+	});
+	Registry.RegisterHandler(TEXT("create_macro"), &CreateMacro, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("macroName"), EType::String, TEXT("Macro graph name")),
+		MCPParam::Optional(TEXT("inputs"), EType::Array, TEXT("Input parameters [{name, type}]")).Items(EType::Object),
+		MCPParam::Optional(TEXT("outputs"), EType::Array, TEXT("Output parameters [{name, type}]")).Items(EType::Object),
+		SpecOnConflict,
+	});
+	Registry.RegisterHandler(TEXT("delete_macro"), &DeleteMacro, {
+		SpecAssetPath,
+		MCPParam::Required(TEXT("macroName"), EType::String, TEXT("Macro graph name")),
+	});
+	Registry.RegisterHandler(TEXT("delete_graph"), &DeleteGraph, {
+		SpecAssetPath,
+		SpecGraphName,
+		SpecGraphSelector,
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Remove a graph still owned by a live node, or an event graph; both are refused without it")),
+	});
 
 	// V14 user-type authoring (BlueprintHandlers_UserTypes.cpp). Creation and
 	// the coarse entry CRUD stay on the asset category; these cover ordering,
 	// entry and field metadata, field defaults, and the whole-definition read.
-	Registry.RegisterHandler(TEXT("read_user_defined_enum"), &ReadUserDefinedEnum);
-	Registry.RegisterHandler(TEXT("reorder_enum_values"), &ReorderEnumValues);
-	Registry.RegisterHandler(TEXT("set_enum_metadata"), &SetEnumMetadata);
-	Registry.RegisterHandler(TEXT("read_user_defined_struct"), &ReadUserDefinedStruct);
-	Registry.RegisterHandler(TEXT("set_struct_field_default"), &SetStructFieldDefault);
-	Registry.RegisterHandler(TEXT("reorder_struct_fields"), &ReorderStructFields);
-	Registry.RegisterHandler(TEXT("edit_struct_metadata"), &EditStructMetadata);
+	Registry.RegisterHandler(TEXT("read_user_defined_enum"), &ReadUserDefinedEnum, {
+		SpecEnumPath,
+	});
+	Registry.RegisterHandler(TEXT("reorder_enum_values"), &ReorderEnumValues, {
+		SpecEnumPath,
+		MCPParam::Required(TEXT("order"), EType::Array, TEXT("The COMPLETE desired order, never a partial list")),
+	});
+	Registry.RegisterHandler(TEXT("set_enum_metadata"), &SetEnumMetadata, {
+		SpecEnumPath,
+		MCPParam::Optional(TEXT("bitflags"), EType::Boolean, TEXT("Mark the enum as a bitflags type")),
+		MCPParam::Optional(TEXT("entries"), EType::Array, TEXT("[{name or index, tooltip}] per-enumerator tooltips")).Items(EType::Object),
+	});
+	Registry.RegisterHandler(TEXT("read_user_defined_struct"), &ReadUserDefinedStruct, {
+		SpecStructPath,
+	});
+	Registry.RegisterHandler(TEXT("set_struct_field_default"), &SetStructFieldDefault, {
+		SpecStructPath,
+		MCPParam::Required(TEXT("defaultValue"), EType::Any, TEXT("Default value as Unreal export text; an empty string clears it")),
+		MCPParam::Optional(TEXT("fieldName"), EType::String, TEXT("Resolve the member by its display or internal name")),
+		MCPParam::Optional(TEXT("fieldGuid"), EType::String, TEXT("Resolve the member by its GUID, which is stable across renames")),
+	});
+	Registry.RegisterHandler(TEXT("reorder_struct_fields"), &ReorderStructFields, {
+		SpecStructPath,
+		MCPParam::Required(TEXT("order"), EType::Array, TEXT("The COMPLETE desired order, never a partial list")),
+	});
+	Registry.RegisterHandler(TEXT("edit_struct_metadata"), &EditStructMetadata, {
+		SpecStructPath,
+		MCPParam::Optional(TEXT("tooltip"), EType::String, TEXT("Tooltip")),
+		MCPParam::Optional(TEXT("fields"), EType::Array, TEXT("[{fieldName or fieldGuid, tooltip?, editableOnInstance?, saveGame?, multiLineText?, widget3D?, metadata?}]")).Items(EType::Object),
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -218,7 +695,7 @@ void FBlueprintHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 TSharedPtr<FJsonValue> FBlueprintHandlers::ReadBlueprintGraphSummary(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
 	// #560 optional node filters (case-insensitive substring); edges are left
 	// complete so a caller can still see what connects to a matched node.
@@ -311,7 +788,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReadBlueprintGraphSummary(const TShar
 TSharedPtr<FJsonValue> FBlueprintHandlers::GetBlueprintExecutionFlow(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
 	FString EntryPoint = OptionalString(Params, TEXT("entryPoint"), TEXT(""));
 
@@ -410,7 +887,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::GetBlueprintExecutionFlow(const TShar
 TSharedPtr<FJsonValue> FBlueprintHandlers::GetBlueprintDependencies(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	const bool bReverse = OptionalBool(Params, TEXT("reverse"), false);
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
@@ -576,7 +1053,7 @@ namespace
 TSharedPtr<FJsonValue> FBlueprintHandlers::ListGraphs(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -615,7 +1092,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListGraphs(const TSharedPtr<FJsonObje
 TSharedPtr<FJsonValue> FBlueprintHandlers::ResolveGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString RequestedName;
 	if (auto Err = RequireString(Params, TEXT("graphName"), RequestedName)) return Err;
@@ -1214,7 +1691,13 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CreateBlueprint(const TSharedPtr<FJso
 TSharedPtr<FJsonValue> FBlueprintHandlers::ReadBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// #353/#370: per-component property dump on demand. Off by default so the
+	// common read stays small; flip on when the caller wants the full UPROPERTY
+	// values from each component template (e.g. AIPerceptionStimuliSourceComponent's
+	// bAutoRegisterAsSource for a read-then-modify flow). Read before the load
+	// can fail (#1057).
+	const bool bIncludeComponentProperties = OptionalBool(Params, TEXT("includeComponentProperties"));
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -1222,11 +1705,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReadBlueprint(const TSharedPtr<FJsonO
 		return BlueprintNotFoundError(AssetPath);
 	}
 
-	// #353/#370: per-component property dump on demand. Off by default so the
-	// common read stays small; flip on when the caller wants the full UPROPERTY
-	// values from each component template (e.g. AIPerceptionStimuliSourceComponent's
-	// bAutoRegisterAsSource for a read-then-modify flow).
-	const bool bIncludeComponentProperties = OptionalBool(Params, TEXT("includeComponentProperties"));
 	auto AppendComponentProperties = [&bIncludeComponentProperties](TSharedPtr<FJsonObject> CompObj, UActorComponent* Template)
 	{
 		if (!bIncludeComponentProperties || !Template) return;
@@ -1418,12 +1896,12 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReadBlueprint(const TSharedPtr<FJsonO
 TSharedPtr<FJsonValue> FBlueprintHandlers::AddVariable(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString VarName;
 	if (auto Err = RequireString(Params, TEXT("name"), VarName)) return Err;
 
-	FString VarType = OptionalString(Params, TEXT("type"), TEXT("Float"));
+	FString VarType = OptionalString(Params, TEXT("varType"), TEXT("Float"));
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
@@ -1495,13 +1973,18 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddVariable(const TSharedPtr<FJsonObj
 TSharedPtr<FJsonValue> FBlueprintHandlers::AddComponent(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString ComponentClass;
 	if (auto Err = RequireString(Params, TEXT("componentClass"), ComponentClass)) return Err;
 
 	FString ComponentName = OptionalString(Params, TEXT("componentName"), ComponentClass);
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	// #115: optional parentComponent - makes this component a child in the SCS
+	// hierarchy. #526: childActorClass sets a ChildActorComponent's class in the
+	// same call. Both are read before the load can fail (#1057).
+	const FString ParentComponent = OptionalString(Params, TEXT("parentComponent"));
+	const FString ChildActorClassPath = OptionalString(Params, TEXT("childActorClass"));
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -1553,9 +2036,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddComponent(const TSharedPtr<FJsonOb
 		return MCPError(FString::Printf(TEXT("Component class not found: %s. Try the short name (e.g. 'StaticMeshComponent') or the full path ('/Script/Engine.StaticMeshComponent')."), *ComponentClass));
 	}
 
-	// #115: optional parentComponent - makes this component a child in the SCS hierarchy
-	const FString ParentComponent = OptionalString(Params, TEXT("parentComponent"));
-
 	// Try using SubobjectDataSubsystem (UE5 method)
 	bool bSuccess = false;
 	if (USubobjectDataSubsystem* Subsystem = GEngine->GetEngineSubsystem<USubobjectDataSubsystem>())
@@ -1604,8 +2084,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddComponent(const TSharedPtr<FJsonOb
 				// #526: when adding a ChildActorComponent, let callers set its
 				// ChildActorClass in the same call. Accepts a Blueprint asset path
 				// (with or without the _C generated-class suffix) or a C++ class.
-				FString ChildActorClassPath;
-				if (TryGetStringParam(Params, TEXT("childActorClass"), ChildActorClassPath) && !ChildActorClassPath.IsEmpty())
+				if (!ChildActorClassPath.IsEmpty())
 				{
 					if (const FSubobjectData* NewData = NewHandle.GetData())
 					{
@@ -1664,7 +2143,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddComponent(const TSharedPtr<FJsonOb
 TSharedPtr<FJsonValue> FBlueprintHandlers::CompileBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -1834,6 +2313,23 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SearchNodeTypes(const TSharedPtr<FJso
 
 	FString Query;
 	if (auto Err = RequireString(Params, TEXT("query"), Query)) return Err;
+	// Every parameter, paging included, is read before anything can fail (#1057).
+	const bool bIncludeGraphNodes = OptionalBool(Params, TEXT("includeGraphNodes"), true);
+	// Optional narrowing to one owning class, by short name or object path.
+	const FString ClassFilter = OptionalString(Params, TEXT("className"));
+
+	// T3: paged. This used to score every match, return the top `limit` and set
+	// `truncated`, which told a caller there was more without giving it any way
+	// to read the rest. The whole ranked list is enumerated and paged instead.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("search_node_types|query=%s|className=%s|includeGraphNodes=%d"),
+				*Query, *ClassFilter, bIncludeGraphNodes ? 1 : 0),
+			/*DefaultLimit*/ 50, /*MaxLimit*/ 500, Page))
+	{
+		return Err;
+	}
 
 	const FString NormQuery = Normalize(Query);
 	if (NormQuery.IsEmpty())
@@ -1850,11 +2346,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SearchNodeTypes(const TSharedPtr<FJso
 		if (!NormToken.IsEmpty()) NormTokens.Add(NormToken);
 	}
 
-	const bool bIncludeGraphNodes = OptionalBool(Params, TEXT("includeGraphNodes"), true);
-
-	// Optional narrowing to one owning class, by short name or object path.
-	FString ClassFilter = OptionalString(Params, TEXT("className"));
-	if (ClassFilter.IsEmpty()) ClassFilter = OptionalString(Params, TEXT("classFilter"));
 	UClass* FilterClass = nullptr;
 	if (!ClassFilter.IsEmpty())
 	{
@@ -1867,19 +2358,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SearchNodeTypes(const TSharedPtr<FJso
 		{
 			return MCPError(FString::Printf(TEXT("Class not found: %s"), *ClassFilter));
 		}
-	}
-
-	// T3: paged. This used to score every match, return the top `limit` and set
-	// `truncated`, which told a caller there was more without giving it any way
-	// to read the rest. The whole ranked list is enumerated and paged instead.
-	MCPPagination::FPageRequest Page;
-	if (auto Err = MCPPagination::ReadPageRequest(
-			Params,
-			FString::Printf(TEXT("search_node_types|query=%s|className=%s|includeGraphNodes=%d"),
-				*Query, *ClassFilter, bIncludeGraphNodes ? 1 : 0),
-			/*DefaultLimit*/ 50, /*MaxLimit*/ 500, Page))
-	{
-		return Err;
 	}
 
 	static const FName NAME_KeywordsMeta(TEXT("Keywords"));
@@ -2275,7 +2753,7 @@ namespace
 TSharedPtr<FJsonValue> FBlueprintHandlers::GetVariableDefault(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString VarName;
 	if (auto Err = RequireString(Params, TEXT("name"), VarName)) return Err;
@@ -2335,7 +2813,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::GetVariableDefault(const TSharedPtr<F
 TSharedPtr<FJsonValue> FBlueprintHandlers::ListBlueprintVariables(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	// #902: resolved values are opt-in. They cost a CDO property read and a
 	// JSON serialization per variable, and every existing caller of this action
@@ -2463,7 +2941,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListBlueprintVariables(const TSharedP
 TSharedPtr<FJsonValue> FBlueprintHandlers::RemoveComponent(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString ComponentName;
 	if (auto Err = RequireString(Params, TEXT("componentName"), ComponentName)) return Err;
@@ -2677,7 +3155,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RemoveComponent(const TSharedPtr<FJso
 TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteVariable(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString VarName;
 	if (auto Err = RequireString(Params, TEXT("name"), VarName)) return Err;
@@ -2805,7 +3283,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DuplicateBlueprint(const TSharedPtr<F
 TSharedPtr<FJsonValue> FBlueprintHandlers::AddLocalVariable(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString FunctionName;
 	if (auto Err = RequireString(Params, TEXT("functionName"), FunctionName)) return Err;
 	FString VarName;
@@ -2883,7 +3361,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddLocalVariable(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FBlueprintHandlers::ListLocalVariables(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString FunctionName;
 	if (auto Err = RequireString(Params, TEXT("functionName"), FunctionName)) return Err;
 
@@ -2926,7 +3404,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListLocalVariables(const TSharedPtr<F
 TSharedPtr<FJsonValue> FBlueprintHandlers::ValidateBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
@@ -2957,7 +3435,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ValidateBlueprint(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FBlueprintHandlers::ReparentComponent(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString ComponentName;
 	if (auto Err = RequireString(Params, TEXT("componentName"), ComponentName)) return Err;
 	FString NewParent;
@@ -3040,7 +3518,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReparentComponent(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FBlueprintHandlers::ReparentBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString ParentClassName;
 	if (auto Err = RequireString(Params, TEXT("parentClass"), ParentClassName)) return Err;
 
@@ -3157,7 +3635,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReparentBlueprint(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FBlueprintHandlers::FlushInheritableComponentHandler(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
@@ -3260,7 +3738,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::FlushInheritableComponentHandler(cons
 TSharedPtr<FJsonValue> FBlueprintHandlers::FlushComponentTemplates(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -3437,7 +3915,10 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::FlushComponentTemplates(const TShared
 TSharedPtr<FJsonValue> FBlueprintHandlers::RunConstructionScript(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Optional spawn location; a missing axis is 0. Read before the load can
+	// fail (#1057).
+	const FVector SpawnLocation = OptionalVec3(Params, TEXT("location"), FVector::ZeroVector);
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -3452,18 +3933,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RunConstructionScript(const TSharedPt
 	}
 
 	REQUIRE_EDITOR_WORLD(World);
-
-	// Parse optional spawn location
-	FVector SpawnLocation = FVector::ZeroVector;
-	const TSharedPtr<FJsonObject>* LocationObj = nullptr;
-	if (TryGetObjectParam(Params, TEXT("location"), LocationObj) && LocationObj)
-	{
-		double X = 0.0, Y = 0.0, Z = 0.0;
-		(*LocationObj)->TryGetNumberField(TEXT("x"), X);
-		(*LocationObj)->TryGetNumberField(TEXT("y"), Y);
-		(*LocationObj)->TryGetNumberField(TEXT("z"), Z);
-		SpawnLocation = FVector(X, Y, Z);
-	}
 
 	// Spawn a temporary actor
 	FActorSpawnParameters SpawnParams;

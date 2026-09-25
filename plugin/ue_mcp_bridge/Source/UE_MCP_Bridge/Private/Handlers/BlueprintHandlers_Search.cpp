@@ -254,18 +254,34 @@ namespace
 TSharedPtr<FJsonValue> FBlueprintHandlers::GetConnections(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
-	UBlueprint* const Blueprint = LoadBlueprint(AssetPath);
-	if (!Blueprint) return MCPError(FString::Printf(TEXT("Blueprint not found: %s"), *AssetPath));
-
+	// Every parameter, paging included, is read before anything can fail (#1057).
 	// One graph when named, every graph otherwise: an audit of "what is wired
 	// to what" across a Blueprint is as reasonable a question as one graph.
-	FString Requested = OptionalString(Params, TEXT("graphSelector"), TEXT(""));
-	if (Requested.IsEmpty()) Requested = OptionalString(Params, TEXT("graphName"), TEXT(""));
+	const FString Requested = ReadGraphNameOrSelector(Params, FString());
 
 	FString Kind = OptionalString(Params, TEXT("kind"), TEXT("all")).ToLower();
 	if (Kind.IsEmpty()) Kind = TEXT("all");
+
+	const bool bIncludeNestedGraphs = OptionalBool(Params, TEXT("includeNestedGraphs"), true);
+
+	// Optional node filter (GUID or name): only edges into or out of that node.
+	const FString NodeFilter = OptionalString(Params, TEXT("nodeId"), TEXT(""));
+	int32 NodeFilterHits = 0;
+
+	// The cursor is keyed by the path the caller gave, which the paging contract
+	// already requires to stay the same between pages.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(TEXT("get_blueprint_connections|asset=%s|graph=%s|kind=%s|nested=%d|node=%s"),
+				*AssetPath, *Requested, *Kind, bIncludeNestedGraphs ? 1 : 0, *NodeFilter),
+			DefaultCallSiteLimit, MaxCallSiteLimit, Page))
+	{
+		return Err;
+	}
+
 	if (Kind != TEXT("all") && Kind != TEXT("exec") && Kind != TEXT("data"))
 	{
 		return MCPError(FString::Printf(
@@ -274,21 +290,8 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::GetConnections(const TSharedPtr<FJson
 	const bool bWantExec = Kind != TEXT("data");
 	const bool bWantData = Kind != TEXT("exec");
 
-	const bool bIncludeNestedGraphs = OptionalBool(Params, TEXT("includeNestedGraphs"), true);
-
-	// Optional node filter (GUID or name): only edges into or out of that node.
-	const FString NodeFilter = OptionalString(Params, TEXT("nodeId"), TEXT(""));
-	int32 NodeFilterHits = 0;
-
-	MCPPagination::FPageRequest Page;
-	if (auto Err = MCPPagination::ReadPageRequest(
-			Params,
-			FString::Printf(TEXT("get_blueprint_connections|asset=%s|graph=%s|kind=%s|nested=%d|node=%s"),
-				*Blueprint->GetPathName(), *Requested, *Kind, bIncludeNestedGraphs ? 1 : 0, *NodeFilter),
-			DefaultCallSiteLimit, MaxCallSiteLimit, Page))
-	{
-		return Err;
-	}
+	UBlueprint* const Blueprint = LoadBlueprint(AssetPath);
+	if (!Blueprint) return MCPError(FString::Printf(TEXT("Blueprint not found: %s"), *AssetPath));
 
 	TArray<UEdGraph*> AllGraphs;
 	Blueprint->GetAllGraphs(AllGraphs);
@@ -435,17 +438,24 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::GetConnections(const TSharedPtr<FJson
 TSharedPtr<FJsonValue> FBlueprintHandlers::SearchNodes(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("blueprintPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
-	// LoadBlueprint resolves a World path to its level script too, which is the
-	// same alias read/list_graphs/read_graph already accept.
-	UBlueprint* const Blueprint = LoadBlueprint(AssetPath);
-	if (!Blueprint) return MCPError(FString::Printf(TEXT("Blueprint not found: %s"), *AssetPath));
+	// Every parameter, paging included, is read before anything can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* TitlesArr = nullptr;
+	TryGetArrayParam(Params, TEXT("titles"), TitlesArr);
+	const TArray<TSharedPtr<FJsonValue>>* NodeClassesArr = nullptr;
+	TryGetArrayParam(Params, TEXT("nodeClasses"), NodeClassesArr);
+	const FString VariableName = OptionalString(Params, TEXT("variableName"), TEXT(""));
+	FString VariableAccess = OptionalString(Params, TEXT("variableAccess"), TEXT("any")).ToLower();
+	const bool bIncludeNestedGraphs = OptionalBool(Params, TEXT("includeNestedGraphs"), true);
+	// Transient and generated graphs are compiler artifacts. They are off by
+	// default because a caller auditing what a person authored does not want
+	// them, and the Python this replaces filtered them out by hand every time.
+	const bool bAuthoredOnly = OptionalBool(Params, TEXT("authoredOnly"), true);
 
-	auto ReadLowerStrings = [&](const TCHAR* Field, TArray<FString>& OutRaw, TSet<FString>& OutLower)
+	auto ReadLowerStrings = [](const TArray<TSharedPtr<FJsonValue>>* Arr, TArray<FString>& OutRaw, TSet<FString>& OutLower)
 	{
-		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-		if (!TryGetArrayParam(Params, Field, Arr) || !Arr) return;
+		if (!Arr) return;
 		for (const TSharedPtr<FJsonValue>& Value : *Arr)
 		{
 			FString S;
@@ -459,12 +469,30 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SearchNodes(const TSharedPtr<FJsonObj
 
 	TArray<FString> Titles;      TSet<FString> TitlesLower;
 	TArray<FString> NodeClasses; TSet<FString> NodeClassesLower;
-	ReadLowerStrings(TEXT("titles"), Titles, TitlesLower);
-	ReadLowerStrings(TEXT("nodeClasses"), NodeClasses, NodeClassesLower);
+	ReadLowerStrings(TitlesArr, Titles, TitlesLower);
+	ReadLowerStrings(NodeClassesArr, NodeClasses, NodeClassesLower);
 
-	const FString VariableName = OptionalString(Params, TEXT("variableName"), TEXT(""));
-	FString VariableAccess = OptionalString(Params, TEXT("variableAccess"), TEXT("any")).ToLower();
 	if (VariableAccess.IsEmpty()) VariableAccess = TEXT("any");
+
+	// The cursor is keyed by the path the caller gave, which the paging contract
+	// already requires to stay the same between pages.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(
+				TEXT("search_blueprint_nodes|asset=%s|titles=%s|classes=%s|var=%s|access=%s|nested=%d|authored=%d"),
+				*AssetPath,
+				*FString::Join(Titles, TEXT(",")),
+				*FString::Join(NodeClasses, TEXT(",")),
+				*VariableName,
+				*VariableAccess,
+				bIncludeNestedGraphs ? 1 : 0,
+				bAuthoredOnly ? 1 : 0),
+			DefaultCallSiteLimit, MaxCallSiteLimit, Page))
+	{
+		return Err;
+	}
+
 	if (VariableAccess != TEXT("any") && VariableAccess != TEXT("get") && VariableAccess != TEXT("set"))
 	{
 		return MCPError(FString::Printf(
@@ -483,28 +511,10 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SearchNodes(const TSharedPtr<FJsonObj
 			"'variableName' (a member the node reads or writes)."));
 	}
 
-	const bool bIncludeNestedGraphs = OptionalBool(Params, TEXT("includeNestedGraphs"), true);
-	// Transient and generated graphs are compiler artifacts. They are off by
-	// default because a caller auditing what a person authored does not want
-	// them, and the Python this replaces filtered them out by hand every time.
-	const bool bAuthoredOnly = OptionalBool(Params, TEXT("authoredOnly"), true);
-
-	MCPPagination::FPageRequest Page;
-	if (auto Err = MCPPagination::ReadPageRequest(
-			Params,
-			FString::Printf(
-				TEXT("search_blueprint_nodes|asset=%s|titles=%s|classes=%s|var=%s|access=%s|nested=%d|authored=%d"),
-				*Blueprint->GetPathName(),
-				*FString::Join(Titles, TEXT(",")),
-				*FString::Join(NodeClasses, TEXT(",")),
-				*VariableName,
-				*VariableAccess,
-				bIncludeNestedGraphs ? 1 : 0,
-				bAuthoredOnly ? 1 : 0),
-			DefaultCallSiteLimit, MaxCallSiteLimit, Page))
-	{
-		return Err;
-	}
+	// LoadBlueprint resolves a World path to its level script too, which is the
+	// same alias read/list_graphs/read_graph already accept.
+	UBlueprint* const Blueprint = LoadBlueprint(AssetPath);
+	if (!Blueprint) return MCPError(FString::Printf(TEXT("Blueprint not found: %s"), *AssetPath));
 
 	TArray<UEdGraph*> AllGraphs;
 	Blueprint->GetAllGraphs(AllGraphs);
@@ -678,23 +688,71 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SearchNodes(const TSharedPtr<FJsonObj
 TSharedPtr<FJsonValue> FBlueprintHandlers::SearchCallSites(const TSharedPtr<FJsonObject>& Params)
 {
 	// ── Arguments ───────────────────────────────────────────────────────────
+	// Every parameter, paging included, is read before anything can fail (#1057).
 	const TArray<TSharedPtr<FJsonValue>>* NamesArray = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("functionNames"), NamesArray) || !NamesArray)
-	{
-		return MCPError(TEXT("Missing 'functionNames' (string array of function names to find call sites for)"));
-	}
+	const bool bHasNames = TryGetArrayParam(Params, TEXT("functionNames"), NamesArray) && NamesArray;
+	const FString ClassName = OptionalString(Params, TEXT("className"), TEXT(""));
+	FString Directory = OptionalString(Params, TEXT("directory"), TEXT("/Game"));
+	const bool bIncludeNestedGraphs = OptionalBool(Params, TEXT("includeNestedGraphs"), true);
+	// Off by default: it loads map packages, which is far more expensive than
+	// loading Blueprints and cannot be narrowed by the registry the same way.
+	const bool bIncludeLevelScripts = OptionalBool(Params, TEXT("includeLevelScripts"), false);
+	const bool bIncludeNeighbours = OptionalBool(Params, TEXT("includeNeighbours"), false);
+	const bool bNarrowByRegistry = OptionalBool(Params, TEXT("narrowByRegistry"), true);
+	const bool bDumpToFile = OptionalBool(Params, TEXT("dumpToFile"), false);
+	const FString OutputPath = OptionalString(Params, TEXT("outputPath"), TEXT(""));
+	const int32 Offset = FMath::Max(0, OptionalInt(Params, TEXT("offset"), 0));
+	const int32 MaxBlueprints = FMath::Clamp(
+		OptionalInt(Params, TEXT("maxBlueprints"), DefaultMaxBlueprints), 1, MaxMaxBlueprints);
 
 	TArray<FString> FunctionNames;
 	TSet<FString> WantedLower;
-	for (const TSharedPtr<FJsonValue>& Value : *NamesArray)
+	if (bHasNames)
 	{
-		FString Name;
-		if (!Value.IsValid() || !Value->TryGetString(Name)) continue;
-		Name.TrimStartAndEndInline();
-		if (Name.IsEmpty()) continue;
-		if (WantedLower.Contains(Name.ToLower())) continue;
-		FunctionNames.Add(Name);
-		WantedLower.Add(Name.ToLower());
+		for (const TSharedPtr<FJsonValue>& Value : *NamesArray)
+		{
+			FString Name;
+			if (!Value.IsValid() || !Value->TryGetString(Name)) continue;
+			Name.TrimStartAndEndInline();
+			if (Name.IsEmpty()) continue;
+			if (WantedLower.Contains(Name.ToLower())) continue;
+			FunctionNames.Add(Name);
+			WantedLower.Add(Name.ToLower());
+		}
+	}
+
+	Directory.TrimStartAndEndInline();
+	if (Directory.IsEmpty()) Directory = TEXT("/Game");
+	while (Directory.Len() > 1 && Directory.EndsWith(TEXT("/")))
+	{
+		Directory.LeftChopInline(1);
+	}
+
+	// T3: paged. `offset` keeps working and still means the same row index; the
+	// cursor is the resumable form of it, anchored on the identity of the last
+	// row rather than on a count into a result set that a recompile moves. The
+	// class is keyed as the caller spelled it, which the paging contract already
+	// requires to stay the same between pages.
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(
+			Params,
+			FString::Printf(
+				TEXT("search_blueprint_call_sites|names=%s|class=%s|dir=%s|nested=%d|levelScripts=%d|neighbours=%d|narrow=%d"),
+				*FString::Join(FunctionNames, TEXT(",")),
+				*ClassName,
+				*Directory,
+				bIncludeNestedGraphs ? 1 : 0,
+				bIncludeLevelScripts ? 1 : 0,
+				bIncludeNeighbours ? 1 : 0,
+				bNarrowByRegistry ? 1 : 0),
+			DefaultCallSiteLimit, MaxCallSiteLimit, Page))
+	{
+		return Err;
+	}
+
+	if (!bHasNames)
+	{
+		return MCPError(TEXT("Missing 'functionNames' (string array of function names to find call sites for)"));
 	}
 	if (FunctionNames.Num() == 0)
 	{
@@ -707,7 +765,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SearchCallSites(const TSharedPtr<FJso
 			FunctionNames.Num(), MaxRequestedFunctionNames));
 	}
 
-	const FString ClassName = OptionalString(Params, TEXT("className"), TEXT(""));
 	UClass* FilterClass = nullptr;
 	if (!ClassName.IsEmpty())
 	{
@@ -720,50 +777,11 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SearchCallSites(const TSharedPtr<FJso
 		}
 	}
 
-	FString Directory = OptionalString(Params, TEXT("directory"), TEXT("/Game"));
-	Directory.TrimStartAndEndInline();
-	if (Directory.IsEmpty()) Directory = TEXT("/Game");
-	while (Directory.Len() > 1 && Directory.EndsWith(TEXT("/")))
-	{
-		Directory.LeftChopInline(1);
-	}
 	if (!Directory.StartsWith(TEXT("/")))
 	{
 		return MCPError(FString::Printf(
 			TEXT("'directory' must be a mount-rooted content path such as /Game or /Game/AI, got '%s'"), *Directory));
 	}
-
-	const bool bIncludeNestedGraphs = OptionalBool(Params, TEXT("includeNestedGraphs"), true);
-	// Off by default: it loads map packages, which is far more expensive than
-	// loading Blueprints and cannot be narrowed by the registry the same way.
-	const bool bIncludeLevelScripts = OptionalBool(Params, TEXT("includeLevelScripts"), false);
-	const bool bIncludeNeighbours = OptionalBool(Params, TEXT("includeNeighbours"), false);
-	const bool bNarrowByRegistry = OptionalBool(Params, TEXT("narrowByRegistry"), true);
-	const bool bDumpToFile = OptionalBool(Params, TEXT("dumpToFile"), false);
-	const FString OutputPath = OptionalString(Params, TEXT("outputPath"), TEXT(""));
-
-	const int32 Offset = FMath::Max(0, OptionalInt(Params, TEXT("offset"), 0));
-	// T3: paged. `offset` keeps working and still means the same row index; the
-	// cursor is the resumable form of it, anchored on the identity of the last
-	// row rather than on a count into a result set that a recompile moves.
-	MCPPagination::FPageRequest Page;
-	if (auto Err = MCPPagination::ReadPageRequest(
-			Params,
-			FString::Printf(
-				TEXT("search_blueprint_call_sites|names=%s|class=%s|dir=%s|nested=%d|levelScripts=%d|neighbours=%d|narrow=%d"),
-				*FString::Join(FunctionNames, TEXT(",")),
-				FilterClass ? *FilterClass->GetPathName() : TEXT(""),
-				*Directory,
-				bIncludeNestedGraphs ? 1 : 0,
-				bIncludeLevelScripts ? 1 : 0,
-				bIncludeNeighbours ? 1 : 0,
-				bNarrowByRegistry ? 1 : 0),
-			DefaultCallSiteLimit, MaxCallSiteLimit, Page))
-	{
-		return Err;
-	}
-	const int32 MaxBlueprints = FMath::Clamp(
-		OptionalInt(Params, TEXT("maxBlueprints"), DefaultMaxBlueprints), 1, MaxMaxBlueprints);
 
 	// ── Registry pass: candidates, then narrowing ───────────────────────────
 	FAssetRegistryModule& AssetRegistryModule =

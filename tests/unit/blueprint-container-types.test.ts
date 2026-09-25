@@ -17,10 +17,10 @@ async function route(input: Record<string, unknown>) {
 }
 
 describe("blueprint container type specs", () => {
-  it("add_variable forwards a map spec as type", async () => {
+  it("add_variable forwards a map spec as varType", async () => {
     const [method, params] = await route({ action: "add_variable", assetPath: BP, name: "TeamScores", varType: MAP });
     expect(method).toBe("add_variable");
-    expect(params).toMatchObject({ path: BP, name: "TeamScores", type: MAP });
+    expect(params).toMatchObject({ assetPath: BP, name: "TeamScores", varType: MAP });
   });
 
   it("add_local_variable forwards an array spec as varType", async () => {
@@ -32,7 +32,7 @@ describe("blueprint container type specs", () => {
   it("add_function_parameter forwards a set spec as parameterType", async () => {
     const [method, params] = await route({ action: "add_function_parameter", assetPath: BP, functionName: "F", parameterName: "P", parameterType: "set<Name>" });
     expect(method).toBe("add_function_parameter");
-    expect(params).toMatchObject({ path: BP, functionName: "F", parameterName: "P", parameterType: "set<Name>" });
+    expect(params).toMatchObject({ assetPath: BP, functionName: "F", parameterName: "P", parameterType: "set<Name>" });
   });
 
   it("add_event_dispatcher forwards typed parameters untouched", async () => {
