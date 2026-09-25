@@ -1488,6 +1488,8 @@ TSharedPtr<FJsonObject> FMCPBridgeServer::BuildCapabilitiesPayload()
 		TEXT("instance-records"),
 		TEXT("requested-port-file"),
 		TEXT("param-echo"),
+		// #1057: handlerSpecs below.
+		TEXT("handler-specs"),
 	};
 	TArray<TSharedPtr<FJsonValue>> FeatureValues;
 	for (const TCHAR* Feature : Features)
@@ -1514,6 +1516,11 @@ TSharedPtr<FJsonObject> FMCPBridgeServer::BuildCapabilitiesPayload()
 	}
 	Payload->SetNumberField(TEXT("actionCount"), Names.Num());
 	Payload->SetArrayField(TEXT("actions"), ActionValues);
+
+	// #1057: the declared parameter contract of every handler registered with
+	// one. The server's surface for those actions is generated from a recording
+	// of this, so a live answer that differs from the recording is drift.
+	Payload->SetObjectField(TEXT("handlerSpecs"), HandlerRegistry.BuildHandlerSpecsJson());
 
 	return Payload;
 }

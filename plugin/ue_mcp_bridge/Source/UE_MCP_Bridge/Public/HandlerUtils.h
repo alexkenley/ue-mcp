@@ -201,6 +201,12 @@ public:
 		}
 	}
 
+	/** Every top-level key read so far, whether or not it arrived. */
+	const TSet<FString>& ReadKeys() const
+	{
+		return Read;
+	}
+
 	/** Keys that arrived, were not read and are not routing names, sorted. */
 	TArray<FString> Unread() const
 	{
