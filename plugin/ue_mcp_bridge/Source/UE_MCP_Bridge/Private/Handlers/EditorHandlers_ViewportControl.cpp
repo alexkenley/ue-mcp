@@ -554,14 +554,15 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetViewMode(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FEditorHandlers::SetViewportExposure(const TSharedPtr<FJsonObject>& Params)
 {
-	TSharedPtr<FJsonValue> Error;
-	const FMCPViewportCtlTarget Target = MCPViewportCtlResolveTarget(Params, Error);
-	if (!Target.Client) return Error;
-
+	// Which parameters were sent is read before anything can fail (#1057).
 	const bool bHasFixed = Params.IsValid() && HasParam(Params, TEXT("fixed"));
 	const bool bHasEv100 = Params.IsValid() && HasParam(Params, TEXT("ev100"));
 	FString Mode = OptionalString(Params, TEXT("mode"));
 	Mode.TrimStartAndEndInline();
+
+	TSharedPtr<FJsonValue> Error;
+	const FMCPViewportCtlTarget Target = MCPViewportCtlResolveTarget(Params, Error);
+	if (!Target.Client) return Error;
 
 	if (!bHasFixed && !bHasEv100 && Mode.IsEmpty())
 	{
@@ -637,15 +638,17 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetViewportExposure(const TSharedPtr<FJs
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FEditorHandlers::SetViewportView(const TSharedPtr<FJsonObject>& Params)
 {
-	TSharedPtr<FJsonValue> Error;
-	const FMCPViewportCtlTarget Target = MCPViewportCtlResolveTarget(Params, Error);
-	if (!Target.Client) return Error;
-
+	// Which parameters were sent is read before anything can fail (#1057); the
+	// values are read and validated below, before each write.
 	const bool bHasFov = Params.IsValid() && HasParam(Params, TEXT("fov"));
 	const bool bHasNear = Params.IsValid() && HasParam(Params, TEXT("nearClip"));
 	const bool bHasFar = Params.IsValid() && HasParam(Params, TEXT("farClip"));
 	const bool bHasType = Params.IsValid() && HasParam(Params, TEXT("viewportType"));
 	const bool bHasSpeed = Params.IsValid() && HasParam(Params, TEXT("cameraSpeed"));
+
+	TSharedPtr<FJsonValue> Error;
+	const FMCPViewportCtlTarget Target = MCPViewportCtlResolveTarget(Params, Error);
+	if (!Target.Client) return Error;
 
 	if (!bHasFov && !bHasNear && !bHasFar && !bHasType && !bHasSpeed)
 	{
@@ -855,12 +858,13 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetGameView(const TSharedPtr<FJsonObject
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FEditorHandlers::RedrawViewport(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the target is resolved, so every parameter counts (#1057).
+	const bool bAll = OptionalBool(Params, TEXT("allViewports"), false);
+	const bool bInvalidateHitProxies = OptionalBool(Params, TEXT("invalidateHitProxies"), true);
+
 	TSharedPtr<FJsonValue> Error;
 	const FMCPViewportCtlTarget Target = MCPViewportCtlResolveTarget(Params, Error);
 	if (!Target.Client) return Error;
-
-	const bool bAll = OptionalBool(Params, TEXT("allViewports"), false);
-	const bool bInvalidateHitProxies = OptionalBool(Params, TEXT("invalidateHitProxies"), true);
 
 	int32 Redrawn = 1;
 	if (bAll)
@@ -1081,11 +1085,14 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetUndoState(const TSharedPtr<FJsonObjec
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FEditorHandlers::UndoRedoSteps(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
+	FString Direction = OptionalString(Params, TEXT("direction"), TEXT("undo"));
+	const int32 RequestedSteps = OptionalInt(Params, TEXT("steps"), 1);
+
 	TSharedPtr<FJsonValue> Error;
 	UTransactor* Trans = MCPViewportCtlRequireTransactor(Error);
 	if (!Trans) return Error;
 
-	FString Direction = OptionalString(Params, TEXT("direction"), TEXT("undo"));
 	Direction.TrimStartAndEndInline();
 	const bool bUndo = Direction.Equals(TEXT("undo"), ESearchCase::IgnoreCase);
 	const bool bRedo = Direction.Equals(TEXT("redo"), ESearchCase::IgnoreCase);
@@ -1096,7 +1103,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::UndoRedoSteps(const TSharedPtr<FJsonObje
 			*Direction));
 	}
 
-	const int32 RequestedSteps = OptionalInt(Params, TEXT("steps"), 1);
 	if (RequestedSteps < 1)
 	{
 		return MCPError(FString::Printf(
@@ -1178,6 +1184,9 @@ TSharedPtr<FJsonValue> FEditorHandlers::UndoRedoSteps(const TSharedPtr<FJsonObje
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FEditorHandlers::GetTransactionHistory(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the undo buffer is looked up (#1057).
+	int32 MaxEntries = OptionalInt(Params, TEXT("maxEntries"), 50);
+
 	TSharedPtr<FJsonValue> Error;
 	UTransactor* Trans = MCPViewportCtlRequireTransactor(Error);
 	if (!Trans) return Error;
@@ -1186,7 +1195,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetTransactionHistory(const TSharedPtr<F
 	const int32 UndoCount = Trans->GetUndoCount();
 	const int32 CurrentIndex = QueueLength - UndoCount;
 
-	int32 MaxEntries = OptionalInt(Params, TEXT("maxEntries"), 50);
 	if (MaxEntries < 1) MaxEntries = 1;
 	if (MaxEntries > QueueLength) MaxEntries = QueueLength;
 

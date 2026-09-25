@@ -42,35 +42,94 @@
 
 void FSequencerHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
-	// Reports parameters its handlers never read (#1057).
-	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("sequencer"));
+	// Reports parameters its handlers never read (#1057). Tagged with the editor
+	// category because the editor tool is the surface these methods are exposed
+	// through, so their parameter specs generate into its module.
+	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("editor"));
+
+	// #1057: a spec'd handler declares its parameters here and nowhere else;
+	// the registry renames each alias to its parameter before the handler runs.
+	using EType = EMCPParamType;
+	auto SequencePathParam = [](const TCHAR* Description, bool bRequired)
+	{
+		FMCPParamSpec Spec = MCPParam::Required(TEXT("sequencePath"), EType::String, Description).Alias(TEXT("assetPath")).Alias(TEXT("path"));
+		Spec.bRequired = bRequired;
+		return Spec;
+	};
+	auto TrackTypeParam = []()
+	{
+		return MCPParam::Required(TEXT("trackType"), EType::String, TEXT("Transform | Float | SkeletalAnimation | CameraCut | Audio | Event | Fade"));
+	};
+	auto ActorLabelParam = []()
+	{
+		return MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Actor label. Editor labels are not unique, so a label naming several actors is refused"));
+	};
+	auto ActorPathParam = []()
+	{
+		return MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path, the unambiguous selector. Wins over actorLabel"));
+	};
+
 	Registry.RegisterHandler(TEXT("create_level_sequence"), &CreateLevelSequence);
-	Registry.RegisterHandler(TEXT("get_sequence_info"), &ReadSequenceInfo);
-	Registry.RegisterHandler(TEXT("add_sequence_track"), &AddTrack);
+	Registry.RegisterHandler(TEXT("get_sequence_info"), &ReadSequenceInfo, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Level Sequence asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("includeSectionDetails"), EType::Boolean, TEXT("Include attach sockets and first-key transform values per track")),
+	});
+	Registry.RegisterHandler(TEXT("add_sequence_track"), &AddTrack, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Level Sequence asset path")).Alias(TEXT("path")),
+		TrackTypeParam(),
+		ActorLabelParam(),
+		ActorPathParam(),
+	});
 	Registry.RegisterHandler(TEXT("play_sequence"), &SequenceControl);
-	Registry.RegisterHandler(TEXT("scrub_sequence"), &ScrubSequence);
+	Registry.RegisterHandler(TEXT("scrub_sequence"), &ScrubSequence, {
+		SequencePathParam(TEXT("Level Sequence to open and scrub; omit to scrub the one already open"), false),
+		MCPParam::Optional(TEXT("seconds"), EType::Number, TEXT("Playhead position in seconds. Pass exactly one of seconds and frame")),
+		MCPParam::Optional(TEXT("frame"), EType::Number, TEXT("Playhead position as a frame number, read in timeUnit")),
+		MCPParam::Optional(TEXT("timeUnit"), EType::String, TEXT("How to read frame: display (default, the frame numbers Sequencer shows) | tick (the units get_sequence_info's playbackRange reports)")),
+	});
 	// #1098: a whole frame range in one call, so it gets the long timeout.
 	Registry.RegisterHandlerWithTimeout(TEXT("render_sequence_frames"), &RenderSequenceFrames, 600.0f);
-	Registry.RegisterHandler(TEXT("set_sequence_playback_range"), &SetPlaybackRange);
-	Registry.RegisterHandler(TEXT("add_sequence_section"), &AddSection);
-	Registry.RegisterHandler(TEXT("set_sequence_keyframes"), &SetKeyframes);
+	Registry.RegisterHandler(TEXT("set_sequence_playback_range"), &SetPlaybackRange, {
+		SequencePathParam(TEXT("Level Sequence asset path"), true),
+		MCPParam::Required(TEXT("startSeconds"), EType::Number, TEXT("Range start in seconds")),
+		MCPParam::Required(TEXT("endSeconds"), EType::Number, TEXT("Range end in seconds")),
+	});
+	Registry.RegisterHandler(TEXT("add_sequence_section"), &AddSection, {
+		SequencePathParam(TEXT("Level Sequence asset path"), true),
+		TrackTypeParam(),
+		ActorLabelParam(),
+		ActorPathParam(),
+		MCPParam::Optional(TEXT("startSeconds"), EType::Number, TEXT("Section start in seconds")),
+		MCPParam::Optional(TEXT("endSeconds"), EType::Number, TEXT("Section end in seconds (default one second after the start)")),
+		MCPParam::Optional(TEXT("cameraActorLabel"), EType::String, TEXT("Camera actor to bind a CameraCut section to")),
+		MCPParam::Optional(TEXT("cameraActorPath"), EType::String, TEXT("Full object path of the camera actor. Wins over cameraActorLabel")),
+	});
+	Registry.RegisterHandler(TEXT("set_sequence_keyframes"), &SetKeyframes, {
+		SequencePathParam(TEXT("Level Sequence asset path"), true),
+		TrackTypeParam(),
+		ActorLabelParam(),
+		ActorPathParam(),
+		MCPParam::Optional(TEXT("sectionIndex"), EType::Integer, TEXT("Target section index (default 0)")),
+		MCPParam::Required(TEXT("channel"), EType::String, TEXT("Location.X/Y/Z or Rotation.X/Y/Z (also x/y/z, yaw/pitch/roll) on a Transform track; the float channel on Fade or Float")),
+		MCPParam::Required(TEXT("keyframes"), EType::Array, TEXT("Keys to add, as [{seconds, value}]")).Items(EType::Object),
+		MCPParam::Optional(TEXT("interpolation"), EType::String, TEXT("cubic (default) | linear")),
+	});
 }
 
 // ─── #548 sequencer authoring helpers ────────────────────────────────
 namespace
 {
-	ULevelSequence* LoadSequence(const TSharedPtr<FJsonObject>& Params, FString& OutPath, FString& OutError)
+	// `assetPath` and `path` reach the spec'd handlers as `sequencePath`, renamed
+	// by the registry (#1057), so the path is read by the caller.
+	ULevelSequence* LoadSequence(const FString& Path, bool bHasPath, FString& OutError)
 	{
-		if (!TryGetStringParam(Params, TEXT("sequencePath"), OutPath))
+		if (!bHasPath)
 		{
-			if (!TryGetStringParam(Params, TEXT("assetPath"), OutPath) && !TryGetStringParam(Params, TEXT("path"), OutPath))
-			{
-				OutError = TEXT("Missing 'sequencePath' parameter");
-				return nullptr;
-			}
+			OutError = TEXT("Missing 'sequencePath' parameter");
+			return nullptr;
 		}
-		ULevelSequence* Seq = Cast<ULevelSequence>(UEditorAssetLibrary::LoadAsset(OutPath));
-		if (!Seq) { OutError = FString::Printf(TEXT("LevelSequence not found: %s"), *OutPath); return nullptr; }
+		ULevelSequence* Seq = Cast<ULevelSequence>(UEditorAssetLibrary::LoadAsset(Path));
+		if (!Seq) { OutError = FString::Printf(TEXT("LevelSequence not found: %s"), *Path); return nullptr; }
 		return Seq;
 	}
 
@@ -149,10 +208,14 @@ TSharedPtr<FJsonValue> FSequencerHandlers::CreateLevelSequence(const TSharedPtr<
 
 TSharedPtr<FJsonValue> FSequencerHandlers::ReadSequenceInfo(const TSharedPtr<FJsonObject>& Params)
 {
-	if (auto Err = MCPRefuseDuringPlayInEditor(TEXT("get_sequence_info"))) return Err;
-
+	// Every parameter is read before anything can fail (#1057); `path` arrives
+	// as `assetPath`, renamed by the registry.
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	TSharedPtr<FJsonValue> PathErr = RequireString(Params, TEXT("assetPath"), AssetPath);
+	const bool bIncludeDetails = OptionalBool(Params, TEXT("includeSectionDetails"));
+
+	if (auto Err = MCPRefuseDuringPlayInEditor(TEXT("get_sequence_info"))) return Err;
+	if (PathErr) return PathErr;
 
 	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
 	ULevelSequence* Sequence = Cast<ULevelSequence>(LoadedAsset);
@@ -207,7 +270,6 @@ TSharedPtr<FJsonValue> FSequencerHandlers::ReadSequenceInfo(const TSharedPtr<FJs
 	UEMCP::SequencerInfo::SetTimingRangeFields(*RangeObj, PlaybackRange, TickResolution, DisplayRate);
 	Result->SetObjectField(TEXT("playbackRange"), RangeObj);
 
-	const bool bIncludeDetails = OptionalBool(Params, TEXT("includeSectionDetails"));
 	UEMCP::SequencerInfo::FDetailBudget DetailBudget;
 
 	if (bIncludeDetails)
@@ -488,11 +550,20 @@ TSharedPtr<FJsonValue> FSequencerHandlers::ReadSequenceInfo(const TSharedPtr<FJs
 
 TSharedPtr<FJsonValue> FSequencerHandlers::AddTrack(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057); `path` arrives
+	// as `assetPath`, renamed by the registry.
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	TSharedPtr<FJsonValue> PathErr = RequireString(Params, TEXT("assetPath"), AssetPath);
 
 	FString TrackType;
-	if (auto Err = RequireString(Params, TEXT("trackType"), TrackType)) return Err;
+	TSharedPtr<FJsonValue> TrackTypeErr = RequireString(Params, TEXT("trackType"), TrackType);
+
+	// Check if we should add to an actor binding or as a master track
+	FString ActorLabel = OptionalString(Params, TEXT("actorLabel"));
+	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
+
+	if (PathErr) return PathErr;
+	if (TrackTypeErr) return TrackTypeErr;
 
 	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
 	ULevelSequence* Sequence = Cast<ULevelSequence>(LoadedAsset);
@@ -542,9 +613,6 @@ TSharedPtr<FJsonValue> FSequencerHandlers::AddTrack(const TSharedPtr<FJsonObject
 		return MCPError(FString::Printf(TEXT("Unknown track type: '%s'. Use Transform, Float, SkeletalAnimation, CameraCut, Audio, Event, or Fade."), *TrackType));
 	}
 
-	// Check if we should add to an actor binding or as a master track
-	FString ActorLabel = OptionalString(Params, TEXT("actorLabel"));
-	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
 	auto Result = MCPSuccess();
 
 	// Stamped here rather than at each return, because every path out of this
@@ -770,10 +838,21 @@ TSharedPtr<FJsonValue> FSequencerHandlers::SequenceControl(const TSharedPtr<FJso
 // no use for.
 TSharedPtr<FJsonValue> FSequencerHandlers::ScrubSequence(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057). `assetPath`
+	// and `path` arrive as `sequencePath`, renamed by the registry.
+	const FString RequestedPath = OptionalString(Params, TEXT("sequencePath"));
+	// Two units are in play and confusing them is an 800x error, so the unit is
+	// named rather than guessed: 'display' is the frame number Sequencer shows,
+	// 'tick' is what get_sequence_info's playbackRange reports.
+	const FString TimeUnit = OptionalString(Params, TEXT("timeUnit"), TEXT("display")).ToLower();
+	double RequestedSeconds = 0.0;
+	double RequestedFrame = 0.0;
+	const bool bHasSeconds = TryGetNumberParam(Params, TEXT("seconds"), RequestedSeconds);
+	const bool bHasFrame = TryGetNumberParam(Params, TEXT("frame"), RequestedFrame);
+
 	// The Sequencer scripting surface acts on whatever is currently open, so a
 	// named sequence has to be opened first or the scrub would move a different
 	// one. Same rule as play_sequence.
-	const FString RequestedPath = OptionalString(Params, TEXT("sequencePath"), OptionalString(Params, TEXT("assetPath")));
 	if (!RequestedPath.IsEmpty())
 	{
 		ULevelSequence* Sequence = LoadAssetByPath<ULevelSequence>(RequestedPath);
@@ -801,10 +880,6 @@ TSharedPtr<FJsonValue> FSequencerHandlers::ScrubSequence(const TSharedPtr<FJsonO
 	const FFrameRate DisplayRate = MovieScene->GetDisplayRate();
 	const FFrameRate TickResolution = MovieScene->GetTickResolution();
 
-	// Two units are in play and confusing them is an 800x error, so the unit is
-	// named rather than guessed: 'display' is the frame number Sequencer shows,
-	// 'tick' is what get_sequence_info's playbackRange reports.
-	const FString TimeUnit = OptionalString(Params, TEXT("timeUnit"), TEXT("display")).ToLower();
 	if (TimeUnit != TEXT("display") && TimeUnit != TEXT("tick"))
 	{
 		return MCPError(FString::Printf(
@@ -812,10 +887,6 @@ TSharedPtr<FJsonValue> FSequencerHandlers::ScrubSequence(const TSharedPtr<FJsonO
 			*TimeUnit));
 	}
 
-	double RequestedSeconds = 0.0;
-	double RequestedFrame = 0.0;
-	const bool bHasSeconds = TryGetNumberParam(Params, TEXT("seconds"), RequestedSeconds);
-	const bool bHasFrame = TryGetNumberParam(Params, TEXT("frame"), RequestedFrame);
 	if (bHasSeconds == bHasFrame)
 	{
 		return MCPError(TEXT("Provide exactly one of 'seconds' or 'frame'"));
@@ -942,15 +1013,19 @@ TSharedPtr<FJsonValue> FSequencerHandlers::ScrubSequence(const TSharedPtr<FJsonO
 // seconds. (#548) Params: sequencePath, startSeconds, endSeconds.
 TSharedPtr<FJsonValue> FSequencerHandlers::SetPlaybackRange(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
 	FString Path, Err;
-	ULevelSequence* Sequence = LoadSequence(Params, Path, Err);
+	const bool bHasPath = TryGetStringParam(Params, TEXT("sequencePath"), Path);
+	double StartSeconds = 0.0, EndSeconds = 0.0;
+	const bool bHasStart = TryGetNumberParam(Params, TEXT("startSeconds"), StartSeconds);
+	const bool bHasEnd = TryGetNumberParam(Params, TEXT("endSeconds"), EndSeconds);
+
+	ULevelSequence* Sequence = LoadSequence(Path, bHasPath, Err);
 	if (!Sequence) return MCPError(Err);
 	UMovieScene* MovieScene = Sequence->GetMovieScene();
 	if (!MovieScene) return MCPError(TEXT("Sequence has no MovieScene"));
 
-	double StartSeconds = 0.0, EndSeconds = 0.0;
-	if (!TryGetNumberParam(Params, TEXT("startSeconds"), StartSeconds) ||
-		!TryGetNumberParam(Params, TEXT("endSeconds"), EndSeconds))
+	if (!bHasStart || !bHasEnd)
 	{
 		return MCPError(TEXT("Missing 'startSeconds' and/or 'endSeconds'"));
 	}
@@ -1042,19 +1117,29 @@ TSharedPtr<FJsonValue> FSequencerHandlers::SetPlaybackRange(const TSharedPtr<FJs
 // endSeconds?, cameraActorLabel? (CameraCut).
 TSharedPtr<FJsonValue> FSequencerHandlers::AddSection(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
 	FString Path, Err;
-	ULevelSequence* Sequence = LoadSequence(Params, Path, Err);
+	const bool bHasPath = TryGetStringParam(Params, TEXT("sequencePath"), Path);
+	FString TrackType;
+	TSharedPtr<FJsonValue> TrackTypeErr = RequireString(Params, TEXT("trackType"), TrackType);
+	const FString ActorLabel = OptionalString(Params, TEXT("actorLabel"));
+	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
+	// Read here so a bad cameraActorLabel fails before we create an orphan
+	// section; the binding is resolved below.
+	const FString CameraActorLabel = OptionalString(Params, TEXT("cameraActorLabel"));
+	const FString CameraActorPath = OptionalString(Params, TEXT("cameraActorPath"));
+	double StartSeconds = 0.0, EndSeconds = 0.0;
+	const bool bHasStart = TryGetNumberParam(Params, TEXT("startSeconds"), StartSeconds);
+	const bool bHasEnd = TryGetNumberParam(Params, TEXT("endSeconds"), EndSeconds);
+
+	ULevelSequence* Sequence = LoadSequence(Path, bHasPath, Err);
 	if (!Sequence) return MCPError(Err);
 	UMovieScene* MovieScene = Sequence->GetMovieScene();
 	if (!MovieScene) return MCPError(TEXT("Sequence has no MovieScene"));
 
-	FString TrackType;
-	if (auto E = RequireString(Params, TEXT("trackType"), TrackType)) return E;
+	if (TrackTypeErr) return TrackTypeErr;
 	UClass* TrackClass = ResolveTrackClass(TrackType);
 	if (!TrackClass) return MCPError(FString::Printf(TEXT("Unknown track type: '%s'"), *TrackType));
-
-	const FString ActorLabel = OptionalString(Params, TEXT("actorLabel"));
-	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
 
 	UMovieSceneTrack* Track = nullptr;
 	FGuid BindingGuid;
@@ -1080,8 +1165,6 @@ TSharedPtr<FJsonValue> FSequencerHandlers::AddSection(const TSharedPtr<FJsonObje
 
 	// Resolve the camera binding up front so a bad cameraActorLabel fails before
 	// we create an orphan section.
-	const FString CameraActorLabel = OptionalString(Params, TEXT("cameraActorLabel"));
-	const FString CameraActorPath = OptionalString(Params, TEXT("cameraActorPath"));
 	FGuid CamGuid;
 	if (!CameraActorLabel.IsEmpty() || !CameraActorPath.IsEmpty())
 	{
@@ -1100,9 +1183,6 @@ TSharedPtr<FJsonValue> FSequencerHandlers::AddSection(const TSharedPtr<FJsonObje
 	Track->AddSection(*Section);
 
 	const FFrameRate Tick = MovieScene->GetTickResolution();
-	double StartSeconds = 0.0, EndSeconds = 0.0;
-	const bool bHasStart = TryGetNumberParam(Params, TEXT("startSeconds"), StartSeconds);
-	const bool bHasEnd = TryGetNumberParam(Params, TEXT("endSeconds"), EndSeconds);
 	if (bHasStart || bHasEnd)
 	{
 		const FFrameNumber Start = Tick.AsFrameNumber(StartSeconds);
@@ -1160,30 +1240,39 @@ TSharedPtr<FJsonValue> FSequencerHandlers::AddSection(const TSharedPtr<FJsonObje
 // (default 0), channel, keyframes ([{seconds, value}]), interpolation? (cubic|linear).
 TSharedPtr<FJsonValue> FSequencerHandlers::SetKeyframes(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
+	FString Path, Err;
+	const bool bHasPath = TryGetStringParam(Params, TEXT("sequencePath"), Path);
+	FString TrackType;
+	TSharedPtr<FJsonValue> TrackTypeErr = RequireString(Params, TEXT("trackType"), TrackType);
+	FString ChannelName;
+	TSharedPtr<FJsonValue> ChannelErr = RequireString(Params, TEXT("channel"), ChannelName);
+	const TArray<TSharedPtr<FJsonValue>>* Keyframes = nullptr;
+	const bool bHasKeyframes = TryGetArrayParam(Params, TEXT("keyframes"), Keyframes) && Keyframes;
+	const FString ActorLabel = OptionalString(Params, TEXT("actorLabel"));
+	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
+	int32 SectionIndex = 0;
+	TryGetNumberParam(Params, TEXT("sectionIndex"), SectionIndex);
+	const bool bLinear = OptionalString(Params, TEXT("interpolation"), TEXT("cubic")).Equals(TEXT("linear"), ESearchCase::IgnoreCase);
+
 	if (auto PieErr = MCPRefuseDuringPlayInEditor(TEXT("set_sequence_keyframes"))) return PieErr;
 
-	FString Path, Err;
-	ULevelSequence* Sequence = LoadSequence(Params, Path, Err);
+	ULevelSequence* Sequence = LoadSequence(Path, bHasPath, Err);
 	if (!Sequence) return MCPError(Err);
 	UMovieScene* MovieScene = Sequence->GetMovieScene();
 	if (!MovieScene) return MCPError(TEXT("Sequence has no MovieScene"));
 
-	FString TrackType;
-	if (auto E = RequireString(Params, TEXT("trackType"), TrackType)) return E;
+	if (TrackTypeErr) return TrackTypeErr;
 	UClass* TrackClass = ResolveTrackClass(TrackType);
 	if (!TrackClass) return MCPError(FString::Printf(TEXT("Unknown track type: '%s'"), *TrackType));
 
-	FString ChannelName;
-	if (auto E = RequireString(Params, TEXT("channel"), ChannelName)) return E;
+	if (ChannelErr) return ChannelErr;
 
-	const TArray<TSharedPtr<FJsonValue>>* Keyframes = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("keyframes"), Keyframes) || !Keyframes)
+	if (!bHasKeyframes)
 	{
 		return MCPError(TEXT("Missing 'keyframes' array ([{seconds, value}, ...])"));
 	}
 
-	const FString ActorLabel = OptionalString(Params, TEXT("actorLabel"));
-	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
 	UMovieSceneTrack* Track = nullptr;
 	if (!ActorLabel.IsEmpty() || !ActorPath.IsEmpty())
 	{
@@ -1206,8 +1295,6 @@ TSharedPtr<FJsonValue> FSequencerHandlers::SetKeyframes(const TSharedPtr<FJsonOb
 
 	const TArray<UMovieSceneSection*>& Sections = Track->GetAllSections();
 	if (Sections.Num() == 0) return MCPError(TEXT("Track has no sections (call add_sequence_section first)"));
-	int32 SectionIndex = 0;
-	TryGetNumberParam(Params, TEXT("sectionIndex"), SectionIndex);
 	if (SectionIndex < 0 || SectionIndex >= Sections.Num())
 	{
 		return MCPError(FString::Printf(TEXT("sectionIndex %d out of range (sections=%d)"), SectionIndex, Sections.Num()));
@@ -1215,7 +1302,6 @@ TSharedPtr<FJsonValue> FSequencerHandlers::SetKeyframes(const TSharedPtr<FJsonOb
 	UMovieSceneSection* Section = Sections[SectionIndex];
 
 	const FString Canonical = CanonicalTransformChannel(ChannelName);
-	const bool bLinear = OptionalString(Params, TEXT("interpolation"), TEXT("cubic")).Equals(TEXT("linear"), ESearchCase::IgnoreCase);
 	const FFrameRate Tick = MovieScene->GetTickResolution();
 	Section->Modify();
 

@@ -85,7 +85,14 @@ namespace
 		FString& OutDescription,
 		FString& OutError)
 	{
+		// Every selector is read before any of them is used, the way
+		// MCPResolveActor reads both of its keys (#1057).
 		const FString ObjectPath = OptionalString(Params, TEXT("objectPath"));
+		const FString Target = OptionalString(Params, TEXT("target")).ToLower();
+		const int32 PlayerIndex = OptionalInt(Params, TEXT("playerIndex"), 0);
+		FString SubsystemName;
+		const bool bHasSubsystemName = TryGetStringParam(Params, TEXT("subsystemClass"), SubsystemName);
+
 		if (!ObjectPath.IsEmpty())
 		{
 			// FindObject first: in PIE the live instance already exists and
@@ -103,7 +110,6 @@ namespace
 			return Found;
 		}
 
-		const FString Target = OptionalString(Params, TEXT("target")).ToLower();
 		if (Target.IsEmpty())
 		{
 			OutError = TEXT("Provide 'objectPath', or 'target' (gameinstance|gamemode|gamestate|playercontroller|playerpawn|subsystem)");
@@ -114,8 +120,6 @@ namespace
 			OutError = TEXT("No world available to resolve a runtime target against");
 			return nullptr;
 		}
-
-		const int32 PlayerIndex = OptionalInt(Params, TEXT("playerIndex"), 0);
 
 		if (Target == TEXT("gameinstance"))
 		{
@@ -154,8 +158,7 @@ namespace
 		}
 		if (Target == TEXT("subsystem"))
 		{
-			FString SubsystemName;
-			if (!TryGetStringParam(Params, TEXT("subsystemClass"), SubsystemName) || SubsystemName.IsEmpty())
+			if (!bHasSubsystemName || SubsystemName.IsEmpty())
 			{
 				OutError = TEXT("target=subsystem requires 'subsystemClass'");
 				return nullptr;
@@ -596,12 +599,7 @@ TSharedPtr<FJsonValue> FEditorHandlers::InvokeObjectFunctions(const TSharedPtr<F
 // same "no actor label" problem as calling a function on it.
 TSharedPtr<FJsonValue> FEditorHandlers::GetObjectProperties(const TSharedPtr<FJsonObject>& Params)
 {
-	UWorld* World = ResolveWorldFromParams(Params, TEXT("auto"));
-
-	FString Description, Error;
-	UObject* Target = ResolveRuntimeObject(Params, World, Description, Error);
-	if (!Target) return MCPError(Error);
-
+	// Every parameter is read before the target is resolved (#1057).
 	TArray<FString> Wanted;
 	const TArray<TSharedPtr<FJsonValue>>* NameValues = nullptr;
 	if (TryGetArrayParam(Params, TEXT("propertyNames"), NameValues) && NameValues)
@@ -612,6 +610,17 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetObjectProperties(const TSharedPtr<FJs
 			if (V.IsValid() && V->TryGetString(N) && !N.IsEmpty()) Wanted.Add(N);
 		}
 	}
+	// Bound the response. Exporting every reflected property of something like
+	// a GameState with replicated arrays builds a payload big enough to drop
+	// the bridge - the same failure asset(list) was just paginated for.
+	const int32 MaxProperties = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 200), 1, 5000);
+	const int32 MaxValueChars = FMath::Clamp(OptionalInt(Params, TEXT("maxValueLength"), 2000), 64, 100000);
+
+	UWorld* World = ResolveWorldFromParams(Params, TEXT("auto"));
+
+	FString Description, Error;
+	UObject* Target = ResolveRuntimeObject(Params, World, Description, Error);
+	if (!Target) return MCPError(Error);
 
 	TSharedPtr<FJsonObject> Props = MakeShared<FJsonObject>();
 	// #820: export text cannot carry a struct-keyed TMap back into a setter, so
@@ -629,11 +638,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetObjectProperties(const TSharedPtr<FJs
 	TArray<bool> WantedMatched;
 	WantedMatched.Init(false, Wanted.Num());
 	int32 Count = 0;
-	// Bound the response. Exporting every reflected property of something like
-	// a GameState with replicated arrays builds a payload big enough to drop
-	// the bridge - the same failure asset(list) was just paginated for.
-	const int32 MaxProperties = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 200), 1, 5000);
-	const int32 MaxValueChars = FMath::Clamp(OptionalInt(Params, TEXT("maxValueLength"), 2000), 64, 100000);
 	int32 Skipped = 0;
 	int32 TruncatedValues = 0;
 	for (TFieldIterator<FProperty> It(Target->GetClass(), EFieldIteratorFlags::IncludeSuper); It; ++It)
@@ -725,21 +729,39 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetObjectProperties(const TSharedPtr<FJs
 // built on.
 TSharedPtr<FJsonValue> FEditorHandlers::ReadBoneTransforms(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
 	UWorld* World = ResolveWorldFromParams(Params, TEXT("auto"));
+	HasParam(Params, TEXT("actorLabel"));
+	HasParam(Params, TEXT("actorPath"));
+	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
+	// "world" (default) or "component" space. Component space is what an
+	// animation assertion usually wants, since it is independent of where the
+	// actor happens to be standing.
+	const bool bComponentSpace = OptionalString(Params, TEXT("space"), TEXT("world")).ToLower() == TEXT("component");
+	const FString RelativeTo = OptionalString(Params, TEXT("relativeTo"));
+	TArray<FString> RequestedBones;
+	const TArray<TSharedPtr<FJsonValue>>* BoneValues = nullptr;
+	if (TryGetArrayParam(Params, TEXT("bones"), BoneValues) && BoneValues)
+	{
+		for (const TSharedPtr<FJsonValue>& V : *BoneValues)
+		{
+			FString N;
+			if (V.IsValid() && V->TryGetString(N) && !N.IsEmpty()) RequestedBones.Add(N);
+		}
+	}
+	const int32 Limit = FMath::Max(1, OptionalInt(Params, TEXT("limit"), 200));
+
 	if (!World) return MCPError(TEXT("No world available"));
 
-	FString ActorLabel;
-	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
-
+	// Reads actorPath and actorLabel, and refuses when neither was sent.
 	FMCPActorSelector ActorSel;
 	ActorSel.Match = EMCPActorMatch::LabelNameOrPath;
 	ActorSel.WorldLabel = World->IsGameWorld() ? TEXT("PIE") : TEXT("editor");
 	TSharedPtr<FJsonValue> ActorErr;
 	AActor* Actor = MCPResolveActor(World, Params, ActorErr, ActorSel);
 	if (!Actor) return ActorErr;
-	ActorLabel = Actor->GetActorLabel();
+	const FString ActorLabel = Actor->GetActorLabel();
 
-	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
 	USkeletalMeshComponent* Mesh = nullptr;
 	TArray<FString> SkeletalComponents;
 	for (UActorComponent* Comp : Actor->GetComponents())
@@ -819,10 +841,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::ReadBoneTransforms(const TSharedPtr<FJso
 		}
 	}
 
-	// "world" (default) or "component" space. Component space is what an
-	// animation assertion usually wants, since it is independent of where the
-	// actor happens to be standing.
-	const bool bComponentSpace = OptionalString(Params, TEXT("space"), TEXT("world")).ToLower() == TEXT("component");
 	// GetSocketTransform(RTS_Component) composes socket-local onto the bone's
 	// WORLD transform and only then divides the component transform back out.
 	// Rotation and componentwise scaling do not commute, so a non-uniform
@@ -850,7 +868,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::ReadBoneTransforms(const TSharedPtr<FJso
 		return true;
 	};
 
-	const FString RelativeTo = OptionalString(Params, TEXT("relativeTo"));
 	const bool bRelative = !RelativeTo.IsEmpty();
 	FTransform RelativeToComponent = FTransform::Identity;
 	if (bRelative)
@@ -862,17 +879,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::ReadBoneTransforms(const TSharedPtr<FJso
 			return MCPError(FString::Printf(
 				TEXT("Relative bone or socket not found on SkeletalMeshComponent '%s': %s"),
 				*Mesh->GetName(), *RelativeTo));
-		}
-	}
-
-	TArray<FString> RequestedBones;
-	const TArray<TSharedPtr<FJsonValue>>* BoneValues = nullptr;
-	if (TryGetArrayParam(Params, TEXT("bones"), BoneValues) && BoneValues)
-	{
-		for (const TSharedPtr<FJsonValue>& V : *BoneValues)
-		{
-			FString N;
-			if (V.IsValid() && V->TryGetString(N) && !N.IsEmpty()) RequestedBones.Add(N);
 		}
 	}
 
@@ -927,9 +933,8 @@ TSharedPtr<FJsonValue> FEditorHandlers::ReadBoneTransforms(const TSharedPtr<FJso
 	}
 	else
 	{
-		// No explicit list: report every bone, capped so a full skeleton on a
-		// dense rig cannot blow up the response.
-		const int32 Limit = FMath::Max(1, OptionalInt(Params, TEXT("limit"), 200));
+		// No explicit list: report every bone, capped by limit so a full
+		// skeleton on a dense rig cannot blow up the response.
 		const int32 NumBones = Mesh->GetNumBones();
 		const bool bNeedComponentTransform = bRelative || bComponentSpace;
 		for (int32 i = 0; i < NumBones && Samples.Num() < Limit; ++i)
@@ -967,34 +972,38 @@ TSharedPtr<FJsonValue> FEditorHandlers::ReadBoneTransforms(const TSharedPtr<FJso
 // hand in Python.
 TSharedPtr<FJsonValue> FEditorHandlers::TeleportRuntimeActor(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
 	UWorld* World = ResolveWorldFromParams(Params, TEXT("pie"));
+	HasParam(Params, TEXT("actorLabel"));
+	HasParam(Params, TEXT("actorPath"));
+	const bool bHasLocation = HasParam(Params, TEXT("location"));
+	const FVector RequestedLocation = bHasLocation ? OptionalVec3(Params, TEXT("location")) : FVector::ZeroVector;
+	const bool bHasRotation = HasParam(Params, TEXT("rotation"));
+	const FRotator RequestedRotation = bHasRotation ? OptionalRotator(Params, TEXT("rotation")) : FRotator::ZeroRotator;
+	const bool bStopMovement = OptionalBool(Params, TEXT("stopMovement"), true);
+	const bool bSweep = OptionalBool(Params, TEXT("sweep"), false);
+
 	if (!World) return MCPError(TEXT("PIE is not running - teleport_runtime_actor targets a live world"));
 
-	FString ActorLabel;
-	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
-
+	// Reads actorPath and actorLabel, and refuses when neither was sent.
 	FMCPActorSelector ActorSel;
 	ActorSel.Match = EMCPActorMatch::LabelNameOrPath;
 	ActorSel.WorldLabel = World->IsGameWorld() ? TEXT("PIE") : TEXT("editor");
 	TSharedPtr<FJsonValue> ActorErr;
 	AActor* Actor = MCPResolveActor(World, Params, ActorErr, ActorSel);
 	if (!Actor) return ActorErr;
-	ActorLabel = Actor->GetActorLabel();
+	const FString ActorLabel = Actor->GetActorLabel();
 
 	const FVector StartLocation = Actor->GetActorLocation();
 	// Captured alongside the location because the read below is consumed as the
 	// requested rotation when the caller omits one, and an inverse call needs
 	// the value the actor actually had before the move.
 	const FRotator StartRotation = Actor->GetActorRotation();
-	const FVector Location = HasParam(Params, TEXT("location"))
-		? OptionalVec3(Params, TEXT("location"))
-		: StartLocation;
-	const bool bHasRotation = HasParam(Params, TEXT("rotation"));
-	const FRotator Rotation = bHasRotation ? OptionalRotator(Params, TEXT("rotation")) : Actor->GetActorRotation();
+	const FVector Location = bHasLocation ? RequestedLocation : StartLocation;
+	const FRotator Rotation = bHasRotation ? RequestedRotation : Actor->GetActorRotation();
 
 	// Stop the movement component first, otherwise the pending velocity is
 	// re-applied on the next tick and the actor slides straight back.
-	const bool bStopMovement = OptionalBool(Params, TEXT("stopMovement"), true);
 	UPawnMovementComponent* Movement = nullptr;
 	if (APawn* Pawn = Cast<APawn>(Actor))
 	{
@@ -1005,7 +1014,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::TeleportRuntimeActor(const TSharedPtr<FJ
 		Movement->StopMovementImmediately();
 	}
 
-	const bool bSweep = OptionalBool(Params, TEXT("sweep"), false);
 	bool bMoved = Actor->TeleportTo(Location, Rotation, /*bIsATest=*/false, /*bNoCheck=*/!bSweep);
 	if (!bMoved)
 	{
@@ -1091,19 +1099,26 @@ TSharedPtr<FJsonValue> FEditorHandlers::TeleportRuntimeActor(const TSharedPtr<FJ
 //   velocity? {x,y,z}, world? (default pie), pieInstance?
 TSharedPtr<FJsonValue> FEditorHandlers::SetMovementMode(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
 	UWorld* World = ResolveWorldFromParams(Params, TEXT("pie"));
+	HasParam(Params, TEXT("actorLabel"));
+	HasParam(Params, TEXT("actorPath"));
+	const FString ModeStr = OptionalString(Params, TEXT("mode"));
+	const bool bHasCustomMode = HasParam(Params, TEXT("customMode"));
+	const int32 CustomMode = OptionalInt(Params, TEXT("customMode"), 0);
+	const bool bHasVelocity = HasParam(Params, TEXT("velocity"));
+	const FVector RequestedVelocity = bHasVelocity ? OptionalVec3(Params, TEXT("velocity")) : FVector::ZeroVector;
+
 	if (!World) return MCPError(TEXT("PIE is not running - set_movement_mode targets a live world"));
 
-	FString ActorLabel;
-	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
-
+	// Reads actorPath and actorLabel, and refuses when neither was sent.
 	FMCPActorSelector ActorSel;
 	ActorSel.Match = EMCPActorMatch::LabelNameOrPath;
 	ActorSel.WorldLabel = World->IsGameWorld() ? TEXT("PIE") : TEXT("editor");
 	TSharedPtr<FJsonValue> ActorErr;
 	AActor* Actor = MCPResolveActor(World, Params, ActorErr, ActorSel);
 	if (!Actor) return ActorErr;
-	ActorLabel = Actor->GetActorLabel();
+	const FString ActorLabel = Actor->GetActorLabel();
 
 	UCharacterMovementComponent* Movement = Actor->FindComponentByClass<UCharacterMovementComponent>();
 	if (!Movement)
@@ -1120,7 +1135,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetMovementMode(const TSharedPtr<FJsonOb
 
 	bool bModeChanged = false;
 	EMovementMode RequestedMode = MOVE_None;
-	const FString ModeStr = OptionalString(Params, TEXT("mode"));
 	if (!ModeStr.IsEmpty())
 	{
 		// Named modes only. Accepting a raw number here would let a caller set a
@@ -1141,8 +1155,7 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetMovementMode(const TSharedPtr<FJsonOb
 				*ModeStr));
 		}
 
-		int32 CustomMode = OptionalInt(Params, TEXT("customMode"), 0);
-		if (Mode != MOVE_Custom && HasParam(Params, TEXT("customMode")))
+		if (Mode != MOVE_Custom && bHasCustomMode)
 		{
 			return MCPError(TEXT("customMode only applies with mode='custom'; passing it with another mode would be silently ignored."));
 		}
@@ -1158,11 +1171,11 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetMovementMode(const TSharedPtr<FJsonOb
 
 	bool bVelocityChanged = false;
 	FString Result_VelocityNote;
-	if (HasParam(Params, TEXT("velocity")))
+	if (bHasVelocity)
 	{
 		// Write through the component, not the actor: the actor has no velocity
 		// of its own and CharacterMovement is what integrates this next tick.
-		Movement->Velocity = OptionalVec3(Params, TEXT("velocity"));
+		Movement->Velocity = RequestedVelocity;
 		bVelocityChanged = true;
 		if (Actor->GetLocalRole() != ROLE_Authority)
 		{
@@ -1529,10 +1542,13 @@ namespace
 // unblock a bug went through Python.
 TSharedPtr<FJsonValue> FEditorHandlers::SetObjectProperty(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
 	FString PropertyName;
-	if (auto Err = RequireString(Params, TEXT("propertyName"), PropertyName)) return Err;
-
+	TSharedPtr<FJsonValue> PropertyErr = RequireString(Params, TEXT("propertyName"), PropertyName);
 	TSharedPtr<FJsonValue> NewValue = TryGetParam(Params, TEXT("value"));
+	const bool bPostEditChange = OptionalBool(Params, TEXT("postEditChange"), false);
+
+	if (PropertyErr) return PropertyErr;
 	if (!NewValue.IsValid()) return MCPError(TEXT("Missing 'value' parameter"));
 
 	UWorld* World = ResolveWorldFromParams(Params, TEXT("auto"));
@@ -1640,7 +1656,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetObjectProperty(const TSharedPtr<FJson
 	// asset, and dirtying a PIE package or a spawned widget's outer would ask
 	// the editor to save something that does not exist on disk. Asset writes
 	// belong in editor(set_property).
-	const bool bPostEditChange = OptionalBool(Params, TEXT("postEditChange"), false);
 	if (bPostEditChange)
 	{
 		FPropertyChangedEvent ChangeEvent(Prop);

@@ -6,7 +6,10 @@
 //
 // The values point at an asset that does not exist, so every handler fails at
 // its first load and nothing is written. That is also why each spec'd handler
-// reads all of its parameters before loading anything.
+// reads all of its parameters before loading anything. A spec'd handler with
+// nothing to load either only reads, or refuses these values (an unknown mode,
+// a zero factor, an empty path list) before it acts; one that would act on
+// them is left unspecified.
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -20,6 +23,9 @@
 #include "Handlers/StateTreeHandlers.h"
 #include "Handlers/GameplayHandlers.h"
 #include "Handlers/GasHandlers.h"
+#include "Handlers/DialogHandlers.h"
+#include "Handlers/EditorHandlers.h"
+#include "Handlers/SequencerHandlers.h"
 #include "Misc/AutomationTest.h"
 
 namespace MCPHandlerSpecTests
@@ -94,6 +100,9 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FStateTreeHandlers::RegisterHandlers(Registry);
 	FGameplayHandlers::RegisterHandlers(Registry);
 	FGasHandlers::RegisterHandlers(Registry);
+	FEditorHandlers::RegisterHandlers(Registry);
+	FSequencerHandlers::RegisterHandlers(Registry);
+	FDialogHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
 	TestTrue(TEXT("handlers register with a parameter spec"), Specs.Num() > 0);

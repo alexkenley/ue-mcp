@@ -640,9 +640,17 @@ TSharedPtr<FJsonValue> FEditorHandlers::RestoreRuntimeVisibility(const TSharedPt
 	MCP_CHECK_GAME_THREAD();
 	if (!Params.IsValid()) return MCPError(TEXT("Missing params"));
 
+	// Every parameter is read before anything can fail (#1057).
 	FString RollbackToken;
-	if (!TryGetStringParam(Params, TEXT("rollbackToken"), RollbackToken) ||
-		RollbackToken.TrimStartAndEnd().IsEmpty())
+	const bool bHasToken = TryGetStringParam(Params, TEXT("rollbackToken"), RollbackToken);
+	const bool bHasWorld = HasParam(Params, TEXT("world"));
+	FString WorldScope;
+	const bool bWorldIsString = bHasWorld && TryGetStringParam(Params, TEXT("world"), WorldScope);
+	const bool bHasPIEInstance = HasParam(Params, TEXT("pieInstance"));
+	double RawPIEInstance = 0.0;
+	const bool bPIEInstanceIsNumber = bHasPIEInstance && TryGetNumberParam(Params, TEXT("pieInstance"), RawPIEInstance);
+
+	if (!bHasToken || RollbackToken.TrimStartAndEnd().IsEmpty())
 	{
 		return MCPError(TEXT("Restore requires non-empty 'rollbackToken' from the set response"));
 	}
@@ -675,19 +683,16 @@ TSharedPtr<FJsonValue> FEditorHandlers::RestoreRuntimeVisibility(const TSharedPt
 		return MCPError(TEXT("Rollback token belongs to an expired PIE session"));
 	}
 
-	if (HasParam(Params, TEXT("world")))
+	if (bHasWorld)
 	{
-		FString WorldScope;
-		if (!TryGetStringParam(Params, TEXT("world"), WorldScope) ||
-			!WorldScope.Equals(TEXT("pie"), ESearchCase::IgnoreCase))
+		if (!bWorldIsString || !WorldScope.Equals(TEXT("pie"), ESearchCase::IgnoreCase))
 		{
 			return MCPError(TEXT("Runtime visibility restore is PIE-only; 'world' must be 'pie'"));
 		}
 	}
-	if (HasParam(Params, TEXT("pieInstance")))
+	if (bHasPIEInstance)
 	{
-		double RawPIEInstance = 0.0;
-		if (!TryGetNumberParam(Params, TEXT("pieInstance"), RawPIEInstance) ||
+		if (!bPIEInstanceIsNumber ||
 			!FMath::IsNearlyEqual(RawPIEInstance, FMath::RoundToInt(RawPIEInstance)))
 		{
 			return MCPError(TEXT("'pieInstance' must be an integer"));

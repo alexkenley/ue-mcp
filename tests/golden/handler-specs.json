@@ -1,131 +1,6 @@
 {
-  "handlerCount": 134,
+  "handlerCount": 75,
   "handlers": {
-    "add_ability_system_component": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "blueprintPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "Name of the AbilitySystemComponent (default AbilitySystemComp)"
-        }
-      ]
-    },
-    "add_attribute": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "attributeSetPath",
-          "type": "string",
-          "required": true,
-          "description": "AttributeSet Blueprint asset path"
-        },
-        {
-          "name": "attributeName",
-          "type": "string",
-          "required": true,
-          "description": "FGameplayAttributeData variable to add"
-        }
-      ]
-    },
-    "add_blackboard_key": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "blackboardPath",
-          "type": "string",
-          "required": true,
-          "description": "BlackboardData asset path"
-        },
-        {
-          "name": "keyName",
-          "type": "string",
-          "required": true,
-          "description": "Key name to add"
-        },
-        {
-          "name": "keyType",
-          "type": "string",
-          "required": false,
-          "description": "Bool (default) | Int | Float | String | Name | Vector | Rotator | Object | Class | Enum"
-        },
-        {
-          "name": "baseClass",
-          "type": "string",
-          "required": false,
-          "description": "Base class for an Object/Class key (e.g. /Script/Engine.Actor); for an Enum key, the enum when enumType is absent"
-        },
-        {
-          "name": "enumType",
-          "type": "string",
-          "required": false,
-          "description": "Enum name or path for keyType=Enum"
-        }
-      ]
-    },
-    "add_bt_node": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "BehaviorTree asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "nodeClass",
-          "type": "string",
-          "required": true,
-          "description": "Concrete BT node class to place, e.g. BTComposite_Selector or BTTask_MoveTo; list_bt_node_classes enumerates them"
-        },
-        {
-          "name": "nodeCategory",
-          "type": "string",
-          "required": false,
-          "description": "composite | task | decorator | service. Inferred from nodeClass when omitted; supplying it fails loudly on a mismatch"
-        },
-        {
-          "name": "parent",
-          "type": "string",
-          "required": false,
-          "description": "Node to attach under: a guid from list_bt_graph_nodes, a runtime address from read_behavior_tree_graph, a unique node name, or 'root' (default)"
-        },
-        {
-          "name": "index",
-          "type": "number",
-          "required": false,
-          "description": "Position among the parent's children, which is the execution order. For a decorator or service, its position in the parent's subnode list; on a SimpleParallel, the output pin (0 = main task, 1 = background)"
-        },
-        {
-          "name": "nodeName",
-          "type": "string",
-          "required": false,
-          "description": "Display name for the new node"
-        },
-        {
-          "name": "properties",
-          "type": "object",
-          "required": false,
-          "description": "UPROPERTY writes on the new node, as a map of property path to value"
-        },
-        {
-          "name": "blackboardKeys",
-          "type": "object",
-          "required": false,
-          "description": "Map of FBlackboardKeySelector property to blackboard key name, e.g. {BlackboardKey: 'TargetActor'}; resolved against the tree's blackboard"
-        }
-      ]
-    },
     "add_curve": {
       "category": "animation",
       "params": [
@@ -146,290 +21,92 @@
         }
       ]
     },
-    "add_effect_cue": {
-      "category": "gas",
+    "add_sequence_section": {
+      "category": "editor",
       "params": [
         {
-          "name": "effectPath",
+          "name": "sequencePath",
           "type": "string",
           "required": true,
-          "description": "GameplayEffect Blueprint asset path",
+          "description": "Level Sequence asset path",
           "aliases": [
-            "effectClass"
+            "assetPath",
+            "path"
           ]
         },
         {
-          "name": "cueTag",
+          "name": "trackType",
           "type": "string",
           "required": true,
-          "description": "Registered GameplayCue tag, under the GameplayCue root"
+          "description": "Transform | Float | SkeletalAnimation | CameraCut | Audio | Event | Fade"
         },
-        {
-          "name": "minLevel",
-          "type": "number",
-          "required": false,
-          "description": "Lowest effect level this cue covers, used to normalise the magnitude"
-        },
-        {
-          "name": "maxLevel",
-          "type": "number",
-          "required": false,
-          "description": "Highest effect level this cue covers"
-        },
-        {
-          "name": "magnitudeAttribute",
-          "type": "string",
-          "required": false,
-          "description": "Attribute the cue takes its magnitude from (SetName.Attribute), instead of the effect level"
-        }
-      ]
-    },
-    "add_eqs_generator": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "queryPath",
-          "type": "string",
-          "required": true,
-          "description": "EnvQuery asset path"
-        },
-        {
-          "name": "generatorClass",
-          "type": "string",
-          "required": true,
-          "description": "Generator class, short name (OnCircle) or full path"
-        }
-      ]
-    },
-    "add_eqs_test": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "queryPath",
-          "type": "string",
-          "required": true,
-          "description": "EnvQuery asset path"
-        },
-        {
-          "name": "testClass",
-          "type": "string",
-          "required": true,
-          "description": "Test class, short name (Distance) or full path"
-        },
-        {
-          "name": "optionIndex",
-          "type": "number",
-          "required": false,
-          "description": "Option to add the test to (default 0)"
-        },
-        {
-          "name": "purpose",
-          "type": "string",
-          "required": false,
-          "description": "filter | score | both"
-        }
-      ]
-    },
-    "add_imc_mapping": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "imcPath",
-          "type": "string",
-          "required": true,
-          "description": "InputMappingContext asset path"
-        },
-        {
-          "name": "inputActionPath",
-          "type": "string",
-          "required": true,
-          "description": "InputAction asset path to map"
-        },
-        {
-          "name": "key",
-          "type": "string",
-          "required": true,
-          "description": "FKey name to bind"
-        },
-        {
-          "name": "save",
-          "type": "boolean",
-          "required": false,
-          "description": "Persist the asset (default true); false defers the write"
-        }
-      ]
-    },
-    "add_loose_gameplay_tag": {
-      "category": "gas",
-      "params": [
         {
           "name": "actorLabel",
           "type": "string",
           "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
+          "description": "Actor label. Editor labels are not unique, so a label naming several actors is refused"
         },
         {
           "name": "actorPath",
           "type": "string",
           "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
+          "description": "Full actor object path, the unambiguous selector. Wins over actorLabel"
         },
         {
-          "name": "tag",
-          "type": "string",
-          "required": true,
-          "description": "A registered gameplay tag"
-        },
-        {
-          "name": "count",
-          "type": "integer",
-          "required": false,
-          "description": "References to add, at least 1 (default 1)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "add_perception_component": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "blueprintPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path"
-        },
-        {
-          "name": "senses",
-          "type": "array",
-          "required": false,
-          "description": "Sense names (Sight, Hearing, Damage, Touch, Team, Prediction), AISenseConfig_* names or class paths",
-          "items": "string"
-        }
-      ]
-    },
-    "add_smart_object_component": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "blueprintPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path"
-        }
-      ]
-    },
-    "add_smart_object_default_behavior": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "SmartObjectDefinition asset path"
-        },
-        {
-          "name": "behaviorClass",
-          "type": "string",
-          "required": true,
-          "description": "Behavior definition asset path or class path"
-        },
-        {
-          "name": "instanceProperties",
-          "type": "object",
-          "required": false,
-          "description": "Property writes applied to a freshly-spawned behavior instance"
-        }
-      ]
-    },
-    "add_smart_object_slot": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "SmartObjectDefinition asset path"
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": false,
-          "description": "Slot name"
-        },
-        {
-          "name": "offset",
-          "type": "vec3",
-          "required": false,
-          "description": "Slot offset {x,y,z}"
-        },
-        {
-          "name": "rotation",
-          "type": "rotator",
-          "required": false,
-          "description": "Slot rotation {pitch,yaw,roll}"
-        },
-        {
-          "name": "tags",
-          "type": "array",
-          "required": false,
-          "description": "Slot runtime tags (gameplay tag strings or struct shapes)"
-        },
-        {
-          "name": "behaviorClass",
-          "type": "string",
-          "required": false,
-          "description": "Behavior definition class or asset path to give the slot"
-        },
-        {
-          "name": "instanceProperties",
-          "type": "object",
-          "required": false,
-          "description": "Property writes applied to a freshly-spawned behavior instance"
-        }
-      ]
-    },
-    "add_smart_object_slot_behavior": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "SmartObjectDefinition asset path"
-        },
-        {
-          "name": "slotIndex",
+          "name": "startSeconds",
           "type": "number",
-          "required": true,
-          "description": "Slot index"
-        },
-        {
-          "name": "behaviorClass",
-          "type": "string",
-          "required": true,
-          "description": "Behavior definition asset path or class path"
-        },
-        {
-          "name": "instanceProperties",
-          "type": "object",
           "required": false,
-          "description": "Property writes applied to a freshly-spawned behavior instance"
+          "description": "Section start in seconds"
+        },
+        {
+          "name": "endSeconds",
+          "type": "number",
+          "required": false,
+          "description": "Section end in seconds (default one second after the start)"
+        },
+        {
+          "name": "cameraActorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Camera actor to bind a CameraCut section to"
+        },
+        {
+          "name": "cameraActorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full object path of the camera actor. Wins over cameraActorLabel"
         }
       ]
     },
-    "add_state_tree_component": {
-      "category": "gameplay",
+    "add_sequence_track": {
+      "category": "editor",
       "params": [
         {
-          "name": "blueprintPath",
+          "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "Blueprint asset path"
+          "description": "Level Sequence asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "trackType",
+          "type": "string",
+          "required": true,
+          "description": "Transform | Float | SkeletalAnimation | CameraCut | Audio | Event | Fade"
+        },
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor label. Editor labels are not unique, so a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path, the unambiguous selector. Wins over actorLabel"
         }
       ]
     },
@@ -456,850 +133,270 @@
         }
       ]
     },
-    "apply_effect": {
-      "category": "gas",
+    "check_for_crashes": {
+      "category": "editor",
+      "params": []
+    },
+    "clear_dialog_policy": {
+      "category": "editor",
       "params": [
         {
-          "name": "actorLabel",
+          "name": "pattern",
           "type": "string",
           "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
+          "description": "Exact pattern of the policy to clear; omit to clear every policy"
+        }
+      ]
+    },
+    "describe_object": {
+      "category": "editor",
+      "params": [
         {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "effectClass",
+          "name": "objectPath",
           "type": "string",
           "required": true,
-          "description": "GameplayEffect content path or class name",
+          "description": "Object, asset, class or Blueprint path. A class or Blueprint resolves to its default object",
           "aliases": [
-            "effectPath"
+            "path",
+            "assetPath"
           ]
         },
         {
-          "name": "level",
-          "type": "number",
-          "required": false,
-          "description": "Effect level (default 1)"
-        },
-        {
-          "name": "setByCaller",
-          "type": "object",
-          "required": false,
-          "description": "SetByCaller magnitudes keyed by gameplay tag or name"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "apply_mapping_context": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "mappingContext",
-          "type": "string",
-          "required": true,
-          "description": "InputMappingContext asset path to apply to the live player"
-        },
-        {
-          "name": "priority",
-          "type": "number",
-          "required": false,
-          "description": "Enhanced Input context priority; higher wins for the same key (default 0)"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the first running one"
-        },
-        {
-          "name": "playerIndex",
-          "type": "number",
-          "required": false,
-          "description": "Local player to act on (default 0)"
-        }
-      ]
-    },
-    "audit_attributes": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "attributeSet",
-          "type": "string",
-          "required": false,
-          "description": "AttributeSet content path or class name. Pass this, a live actor, or both"
-        },
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "probeClamping",
+          "name": "includeProperties",
           "type": "boolean",
           "required": false,
-          "description": "Measure an existing clamp by driving the set's own PreAttributeChange. Needs a live registered set (default false)"
+          "description": "Include reflected property metadata (default true)"
         },
         {
-          "name": "world",
-          "type": "string",
+          "name": "includeValues",
+          "type": "boolean",
           "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
+          "description": "Include current property values (default false)"
+        },
+        {
+          "name": "propertyNames",
+          "type": "array",
+          "required": false,
+          "description": "Dotted or indexed property paths to report instead of every property",
+          "items": "string"
         }
       ]
     },
-    "bind_ability_input": {
-      "category": "gas",
+    "end_profile_region": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "regionName",
+          "type": "string",
+          "required": true,
+          "description": "Name the region was opened under"
+        }
+      ]
+    },
+    "focus_viewport_on_actor": {
+      "category": "editor",
       "params": [
         {
           "name": "actorLabel",
           "type": "string",
           "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
+          "description": "Actor label. Editor labels are not unique, so a label naming several actors is refused"
         },
         {
           "name": "actorPath",
           "type": "string",
           "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
+          "description": "Full actor object path, the unambiguous selector. Wins over actorLabel"
+        }
+      ]
+    },
+    "get_build_status": {
+      "category": "editor",
+      "params": []
+    },
+    "get_crash_info": {
+      "category": "editor",
+      "params": [
         {
-          "name": "abilityClass",
+          "name": "crashFolder",
           "type": "string",
           "required": true,
-          "description": "Granted GameplayAbility class to bind"
+          "description": "Crash folder name, as list_crashes reports it"
+        }
+      ]
+    },
+    "get_cvars": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Console variable to read"
         },
         {
-          "name": "inputId",
+          "name": "names",
+          "type": "array",
+          "required": false,
+          "description": "Console variables to read",
+          "items": "string"
+        },
+        {
+          "name": "pattern",
+          "type": "string",
+          "required": false,
+          "description": "Substring matched against every registered console variable. Pass at least one of name, names and pattern"
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "required": false,
+          "description": "Max rows for a pattern search (default 100, max 1000)"
+        }
+      ]
+    },
+    "get_dialog_policy": {
+      "category": "editor",
+      "params": []
+    },
+    "get_editor_performance_stats": {
+      "category": "editor",
+      "params": []
+    },
+    "get_frame_timing": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "cpuGpuMarginPercent",
+          "type": "number",
+          "required": false,
+          "description": "How far ahead one side must be before the frame is called bound by it (default 10)"
+        }
+      ]
+    },
+    "get_insights_trace_status": {
+      "category": "editor",
+      "params": []
+    },
+    "get_message_log": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "logName",
+          "type": "string",
+          "required": false,
+          "description": "Listing to read (MapCheck, AssetCheck, PIE, LoadErrors...); omit to list the registered ones"
+        },
+        {
+          "name": "maxLines",
           "type": "integer",
-          "required": true,
-          "description": "Input id to bind; -1 leaves the ability unbound"
+          "required": false,
+          "description": "Messages to return (default 200)"
         },
         {
-          "name": "world",
+          "name": "severity",
           "type": "string",
           "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
+          "description": "Severity-name substring: Error | Warning | PerformanceWarning | Info"
         }
       ]
     },
-    "capture_gas_state": {
-      "category": "gas",
+    "get_object_properties": {
+      "category": "editor",
       "params": [
         {
-          "name": "actorLabel",
+          "name": "objectPath",
           "type": "string",
           "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
+          "description": "Object path of the live instance. Wins over target"
         },
         {
-          "name": "actorPath",
+          "name": "target",
           "type": "string",
           "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
+          "description": "gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem"
         },
         {
-          "name": "snapshotId",
+          "name": "subsystemClass",
           "type": "string",
           "required": false,
-          "description": "Id to store the snapshot under (generated when omitted)"
-        },
-        {
-          "name": "compareWith",
-          "type": "string",
-          "required": false,
-          "description": "Earlier snapshot id to diff this capture against"
-        },
-        {
-          "name": "registerOwnerSets",
-          "type": "boolean",
-          "required": false,
-          "description": "Register the actor's own attribute sets on its ASC when it has none, the way BeginPlay would (default true)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "check_perception": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "perceiverLabel",
-          "type": "string",
-          "required": false,
-          "description": "The actor doing the perceiving"
-        },
-        {
-          "name": "perceiverPath",
-          "type": "string",
-          "required": false,
-          "description": "Full object path of the perceiver"
-        },
-        {
-          "name": "targetLabel",
-          "type": "string",
-          "required": false,
-          "description": "The actor being perceived"
-        },
-        {
-          "name": "targetPath",
-          "type": "string",
-          "required": false,
-          "description": "Full object path of the target"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: auto (default) | pie | editor"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the primary world"
-        }
-      ]
-    },
-    "clear_ability_input": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "abilityClass",
-          "type": "string",
-          "required": true,
-          "description": "Granted GameplayAbility class to unbind"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "compare_gas_states": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "beforeId",
-          "type": "string",
-          "required": false,
-          "description": "Snapshot id of the earlier reading. Pass this or beforeSnapshot"
-        },
-        {
-          "name": "beforeSnapshot",
-          "type": "object",
-          "required": false,
-          "description": "The earlier snapshot object itself"
-        },
-        {
-          "name": "afterId",
-          "type": "string",
-          "required": false,
-          "description": "Snapshot id of the later reading. Pass this or afterSnapshot"
-        },
-        {
-          "name": "afterSnapshot",
-          "type": "object",
-          "required": false,
-          "description": "The later snapshot object itself"
-        }
-      ]
-    },
-    "configure_ai_perception_sense": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "blueprintPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path"
-        },
-        {
-          "name": "senseType",
-          "type": "string",
-          "required": false,
-          "description": "Sight (default) | Hearing | Damage | Touch | Team | Prediction | Blueprint"
-        },
-        {
-          "name": "settings",
-          "type": "object",
-          "required": false,
-          "description": "Per-sense property writes, e.g. {SightRadius: 1500}"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "Target AIPerceptionComponent name (default: first found)"
-        }
-      ]
-    },
-    "create_behavior_tree": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/AI)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default, returns the existing asset) or error when the asset already exists"
-        },
-        {
-          "name": "blackboardPath",
-          "type": "string",
-          "required": false,
-          "description": "BlackboardData assigned before the first save; an unknown path creates nothing"
-        }
-      ]
-    },
-    "create_game_mode": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/Blueprints/GameFramework)"
-        },
-        {
-          "name": "parentClass",
-          "type": "string",
-          "required": false,
-          "description": "Parent deriving from GameModeBase: short name, /Script path or Blueprint asset path"
-        }
-      ]
-    },
-    "create_game_state": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/Blueprints/GameFramework)"
-        },
-        {
-          "name": "parentClass",
-          "type": "string",
-          "required": false,
-          "description": "Parent deriving from GameStateBase: short name, /Script path or Blueprint asset path"
-        }
-      ]
-    },
-    "create_hud": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/Blueprints/GameFramework)"
-        },
-        {
-          "name": "parentClass",
-          "type": "string",
-          "required": false,
-          "description": "Parent deriving from HUD: short name, /Script path or Blueprint asset path"
-        }
-      ]
-    },
-    "create_player_controller": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/Blueprints/GameFramework)"
-        },
-        {
-          "name": "parentClass",
-          "type": "string",
-          "required": false,
-          "description": "Parent deriving from PlayerController: short name, /Script path or Blueprint asset path"
-        }
-      ]
-    },
-    "create_player_state": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/Blueprints/GameFramework)"
-        },
-        {
-          "name": "parentClass",
-          "type": "string",
-          "required": false,
-          "description": "Parent deriving from PlayerState: short name, /Script path or Blueprint asset path"
-        }
-      ]
-    },
-    "delete_gas_snapshot": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "snapshotId",
-          "type": "string",
-          "required": true,
-          "description": "Snapshot id to drop"
-        }
-      ]
-    },
-    "find_nav_path": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "start",
-          "type": "vec3",
-          "required": true,
-          "description": "Query start (world point)"
-        },
-        {
-          "name": "end",
-          "type": "vec3",
-          "required": true,
-          "description": "Query end (world point)"
-        },
-        {
-          "name": "pathfindingContext",
-          "type": "string",
-          "required": false,
-          "description": "Actor label whose navigation agent and filter the query uses"
-        },
-        {
-          "name": "pathfindingContextPath",
-          "type": "string",
-          "required": false,
-          "description": "Full object path of the pathfinding context actor; alternative to pathfindingContext"
-        }
-      ]
-    },
-    "get_action_value": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "inputActionPath",
-          "type": "string",
-          "required": false,
-          "description": "InputAction to read; omit for every action the player has bound"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the first running one"
+          "description": "Subsystem class name or /Script path, with target=subsystem"
         },
         {
           "name": "playerIndex",
           "type": "number",
           "required": false,
-          "description": "Local player to read (default 0)"
-        }
-      ]
-    },
-    "get_active_effects": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
+          "description": "Player index for target=playercontroller or playerpawn (default 0)"
         },
         {
-          "name": "actorPath",
-          "type": "string",
+          "name": "propertyNames",
+          "type": "array",
           "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
+          "description": "Only these properties. The Details-panel spelling is accepted",
+          "items": "string"
         },
         {
           "name": "world",
           "type": "string",
           "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "get_applied_imcs": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for every running PIE world"
-        },
-        {
-          "name": "playerIndex",
-          "type": "number",
-          "required": false,
-          "description": "Player index; omit for every player"
-        },
-        {
-          "name": "mappingContext",
-          "type": "string",
-          "required": false,
-          "description": "Name or path of one context to answer yes/no about"
-        },
-        {
-          "name": "includeActions",
-          "type": "boolean",
-          "required": false,
-          "description": "Include each context's action/key mappings"
-        }
-      ]
-    },
-    "get_asc_state": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "get_attribute": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "attribute",
-          "type": "string",
-          "required": false,
-          "description": "Attribute to read. Omit to list every attribute"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "get_behavior_tree_info": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "BehaviorTree asset path",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "get_bt_runtime": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label or name (the pawn or its AIController)"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; wins over actorLabel"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: auto (default) | pie | editor"
+          "description": "World scope: editor | pie | auto. Each action names its own default"
         },
         {
           "name": "pieInstance",
           "type": "number",
           "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the primary world"
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
         },
         {
-          "name": "includeAuxNodes",
-          "type": "boolean",
+          "name": "limit",
+          "type": "number",
           "required": false,
-          "description": "Include the decorators and services currently active (default true)"
+          "description": "Max properties returned (default 200)"
         },
         {
-          "name": "includeDebugStrings",
-          "type": "boolean",
+          "name": "maxValueLength",
+          "type": "number",
           "required": false,
-          "description": "Include the engine's DescribeActiveTasks / DescribeActiveTrees dumps (default true)"
+          "description": "Truncate each exported value past this many characters (default 2000)"
         }
       ]
     },
-    "get_game_framework_info": {
-      "category": "gameplay",
+    "get_open_asset_editors": {
+      "category": "editor",
       "params": []
     },
-    "get_gas_info": {
-      "category": "gas",
+    "get_output_log": {
+      "category": "editor",
       "params": [
         {
-          "name": "blueprintPath",
+          "name": "maxLines",
+          "type": "integer",
+          "required": false,
+          "description": "How far back into the ring buffer to read (default 100)"
+        },
+        {
+          "name": "filter",
           "type": "string",
-          "required": true,
-          "description": "Blueprint asset path to inspect"
-        }
-      ]
-    },
-    "get_input_mapping_contexts": {
-      "category": "gameplay",
-      "params": [
+          "required": false,
+          "description": "Case-insensitive substring the message must contain"
+        },
         {
-          "name": "pieInstance",
+          "name": "category",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive substring the log category must contain"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
+        },
+        {
+          "name": "limit",
           "type": "number",
           "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for every running PIE world"
-        },
-        {
-          "name": "playerIndex",
-          "type": "number",
-          "required": false,
-          "description": "Player index; omit for every player"
-        },
-        {
-          "name": "mappingContext",
-          "type": "string",
-          "required": false,
-          "description": "Name or path of one context to answer yes/no about"
-        },
-        {
-          "name": "includeActions",
-          "type": "boolean",
-          "required": false,
-          "description": "Include each context's action/key mappings"
-        }
-      ]
-    },
-    "get_live_attribute_value": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "attributeSet",
-          "type": "string",
-          "required": true,
-          "description": "AttributeSet content path or class name"
-        },
-        {
-          "name": "attribute",
-          "type": "string",
-          "required": true,
-          "description": "Attribute property name, or Set.Property"
-        },
-        {
-          "name": "registerOwnerSets",
-          "type": "boolean",
-          "required": false,
-          "description": "Register the actor's own attribute sets on its ASC when it has none, the way BeginPlay would (default true)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "get_live_blackboard": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label or name (the pawn or its AIController)"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; wins over actorLabel"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: auto (default) | pie | editor"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the primary world"
-        },
-        {
-          "name": "key",
-          "type": "string",
-          "required": false,
-          "description": "Report this one blackboard key; a miss lists every real key name"
-        },
-        {
-          "name": "verbosity",
-          "type": "string",
-          "required": false,
-          "description": "onlyValue | keyWithValue | detailed (default) | full"
-        }
-      ]
-    },
-    "get_navmesh_details": {
-      "category": "gameplay",
-      "params": []
-    },
-    "get_navmesh_info": {
-      "category": "gameplay",
-      "params": []
-    },
-    "get_perceived_actors": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label or name (the pawn or its AIController)"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; wins over actorLabel"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: auto (default) | pie | editor"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the primary world"
-        },
-        {
-          "name": "senseType",
-          "type": "string",
-          "required": false,
-          "description": "Only report this sense: Sight | Hearing | Damage | Touch | Team | Prediction"
+          "description": "Lines on this page (default 200, max 4096)"
         }
       ]
     },
@@ -1317,6 +414,133 @@
         }
       ]
     },
+    "get_pie_config": {
+      "category": "editor",
+      "params": []
+    },
+    "get_pie_pawn": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "playerIndex",
+          "type": "number",
+          "required": false,
+          "description": "0-based player index (default 0)"
+        }
+      ]
+    },
+    "get_property": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "objectPath",
+          "type": "string",
+          "required": true,
+          "description": "Object, asset, class or Blueprint path. A class or Blueprint resolves to its default object",
+          "aliases": [
+            "path",
+            "assetPath"
+          ]
+        },
+        {
+          "name": "propertyName",
+          "type": "string",
+          "required": true,
+          "description": "Property name; dotted and indexed paths reach component and struct fields"
+        }
+      ]
+    },
+    "get_runtime_value": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor label. Editor labels are not unique, so a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path, the unambiguous selector. Wins over actorLabel"
+        },
+        {
+          "name": "propertyName",
+          "type": "string",
+          "required": true,
+          "description": "Property name; dotted and indexed paths reach component and struct fields"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: editor | pie | auto. Each action names its own default"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+        }
+      ]
+    },
+    "get_runtime_values": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "classFilter",
+          "type": "string",
+          "required": false,
+          "description": "Actor or component class name substring; omit to match every actor"
+        },
+        {
+          "name": "componentName",
+          "type": "string",
+          "required": false,
+          "description": "Root every path at the component with this instance name"
+        },
+        {
+          "name": "paths",
+          "type": "array",
+          "required": true,
+          "description": "Dotted property or function paths to evaluate per match. A function segment may carry literal arguments, e.g. GetBalance(gold, 2)",
+          "items": "string"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: editor | pie | auto. Each action names its own default"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+        }
+      ]
+    },
+    "get_sequence_info": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Level Sequence asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "includeSectionDetails",
+          "type": "boolean",
+          "required": false,
+          "description": "Include attach sockets and first-key transform values per track"
+        }
+      ]
+    },
     "get_skeleton_info": {
       "category": "animation",
       "params": [
@@ -1331,149 +555,83 @@
         }
       ]
     },
-    "get_state_tree_runtime": {
-      "category": "gameplay",
+    "get_standalone_status": {
+      "category": "editor",
+      "params": []
+    },
+    "get_transaction_history": {
+      "category": "editor",
       "params": [
         {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Actor label, name or path. Pass actorLabel or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; the unambiguous selector"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "pie (default) | editor | auto"
-        },
-        {
-          "name": "pieInstance",
+          "name": "maxEntries",
           "type": "number",
           "required": false,
-          "description": "PIE world instance (0 = server/primary)"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "StateTree component to read (default: first found)"
+          "description": "Cap on entries returned (default 50)"
         }
       ]
     },
-    "grant_ability": {
-      "category": "gas",
+    "get_undo_state": {
+      "category": "editor",
+      "params": []
+    },
+    "get_viewport_info": {
+      "category": "editor",
+      "params": []
+    },
+    "get_viewport_state": {
+      "category": "editor",
       "params": [
         {
-          "name": "actorLabel",
-          "type": "string",
+          "name": "viewportIndex",
+          "type": "number",
           "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
+          "description": "Level viewport to act on (default the active one)"
+        }
+      ]
+    },
+    "get_world_state": {
+      "category": "editor",
+      "params": []
+    },
+    "hit_test_viewport_pixel": {
+      "category": "editor",
+      "params": [
         {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "abilityClass",
-          "type": "string",
+          "name": "x",
+          "type": "number",
           "required": true,
-          "description": "GameplayAbility Blueprint path, generated class path, or native class name"
+          "description": "Viewport pixel X"
         },
         {
-          "name": "level",
+          "name": "y",
+          "type": "number",
+          "required": true,
+          "description": "Viewport pixel Y"
+        },
+        {
+          "name": "width",
           "type": "number",
           "required": false,
-          "description": "Ability level (default 1)"
+          "description": "Viewport width to read x against, when picking from a screenshot of another resolution"
         },
         {
-          "name": "inputId",
-          "type": "integer",
-          "required": false,
-          "description": "InputID for the spec (default -1, unbound)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "init_asc": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "attributeSet",
-          "type": "string",
-          "required": false,
-          "description": "AttributeSet content path or class name to make sure is registered"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "list_ai_agents": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: auto (default) | pie | editor"
-        },
-        {
-          "name": "pieInstance",
+          "name": "height",
           "type": "number",
           "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the primary world"
+          "description": "Viewport height to read y against, when picking from a screenshot of another resolution"
         },
         {
-          "name": "runningOnly",
-          "type": "boolean",
-          "required": false,
-          "description": "Only agents whose brain is currently running"
-        },
-        {
-          "name": "behaviorTreeOnly",
-          "type": "boolean",
-          "required": false,
-          "description": "Only agents running a BehaviorTree"
-        },
-        {
-          "name": "classFilter",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring over the agent's class name"
-        },
-        {
-          "name": "limit",
+          "name": "maxDistance",
           "type": "number",
           "required": false,
-          "description": "Maximum agents to return"
+          "description": "Max ray length in cm (default 200000)"
+        },
+        {
+          "name": "ignoreActors",
+          "type": "array",
+          "required": false,
+          "description": "Actor labels to skip",
+          "items": "string"
         }
       ]
     },
@@ -1505,360 +663,80 @@
         }
       ]
     },
-    "list_behavior_trees": {
-      "category": "gameplay",
+    "list_crashes": {
+      "category": "editor",
       "params": [
         {
           "name": "cursor",
           "type": "string",
           "required": false,
-          "description": "nextCursor from the previous page, passed back unmodified. Omit for the first page"
+          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
         },
         {
           "name": "limit",
           "type": "number",
           "required": false,
-          "description": "Rows on this page (default 200, max 2000)"
+          "description": "Crash folders on this page (default 50, max 500)"
         }
       ]
     },
-    "list_bt_graph_nodes": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "BehaviorTree asset path",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "list_bt_node_classes": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": false,
-          "description": "composite | task | decorator | service. Omit for every kind; anything else is refused"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "nextCursor from the previous page, passed back unmodified. Omit for the first page"
-        },
-        {
-          "name": "limit",
-          "type": "number",
-          "required": false,
-          "description": "Rows on this page (default 200, max 2000)"
-        }
-      ]
-    },
-    "list_bt_tasks": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": false,
-          "description": "BehaviorTree asset path; omit to sweep directory"
-        },
-        {
-          "name": "directory",
-          "type": "string",
-          "required": false,
-          "description": "Content folder to sweep when assetPath is omitted (default: every BehaviorTree)"
-        },
-        {
-          "name": "recursive",
-          "type": "boolean",
-          "required": false,
-          "description": "Include subfolders of directory (default true)"
-        },
-        {
-          "name": "taskClass",
-          "type": "string",
-          "required": false,
-          "description": "Keep only tasks of this class or its subclasses, e.g. BTTask_MoveTo"
-        },
-        {
-          "name": "filterClassOnly",
-          "type": "boolean",
-          "required": false,
-          "description": "Keep only tasks that declare a FilterClass"
-        },
-        {
-          "name": "limit",
-          "type": "number",
-          "required": false,
-          "description": "How many BehaviorTree assets a directory sweep loads (default 200)"
-        },
-        {
-          "name": "nodeClass",
-          "type": "string",
-          "required": false,
-          "description": "BT node selector: class name, /Script path or partial name; a resolved class matches its whole subtree"
-        },
-        {
-          "name": "nodeName",
-          "type": "string",
-          "required": false,
-          "description": "BT node selector: the node's object name or its NodeName display text"
-        },
-        {
-          "name": "nodePath",
-          "type": "string",
-          "required": false,
-          "description": "BT node address from read_behavior_tree_graph, e.g. 'Root.Children[0].Decorators[1]'"
-        },
-        {
-          "name": "kind",
-          "type": "string",
-          "required": false,
-          "description": "BT node kind: composite | task | decorator | service"
-        }
-      ]
-    },
-    "list_eqs_queries": {
-      "category": "gameplay",
+    "list_dialogs": {
+      "category": "editor",
       "params": []
     },
-    "list_eqs_types": {
-      "category": "gameplay",
+    "list_dirty_packages": {
+      "category": "editor",
+      "params": []
+    },
+    "list_function_libraries": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "pattern",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive substring of the library class name"
+        },
+        {
+          "name": "includeFunctions",
+          "type": "boolean",
+          "required": false,
+          "description": "Include each library's static BlueprintCallable functions (default true)"
+        }
+      ]
+    },
+    "list_pie_instances": {
+      "category": "editor",
+      "params": []
+    },
+    "list_trace_channels": {
+      "category": "editor",
       "params": [
         {
           "name": "filter",
           "type": "string",
           "required": false,
-          "description": "Case-insensitive substring over the class names"
+          "description": "Case-insensitive substring over channel name and description"
         },
         {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "nextCursor from the previous page, passed back unmodified. Omit for the first page"
-        },
-        {
-          "name": "limit",
-          "type": "number",
-          "required": false,
-          "description": "Rows on this page (default 200, max 2000)"
-        }
-      ]
-    },
-    "list_gas_snapshots": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Only snapshots of this actor object path"
-        },
-        {
-          "name": "includeSnapshots",
+          "name": "enabledOnly",
           "type": "boolean",
           "required": false,
-          "description": "Return the full snapshot bodies rather than a summary row each"
+          "description": "Only channels that are currently on (default false)"
         }
       ]
     },
-    "list_imc_mappings": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "imcPath",
-          "type": "string",
-          "required": true,
-          "description": "InputMappingContext asset path"
-        }
-      ]
-    },
-    "list_input_assets": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "nextCursor from the previous page, passed back unmodified. Omit for the first page"
-        },
-        {
-          "name": "limit",
-          "type": "number",
-          "required": false,
-          "description": "Rows on this page (default 200, max 2000)"
-        }
-      ]
-    },
-    "list_mass_types": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "kind",
-          "type": "string",
-          "required": false,
-          "description": "all | traits | processors (default all)"
-        },
-        {
-          "name": "filter",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring over the class names"
-        },
-        {
-          "name": "limit",
-          "type": "number",
-          "required": false,
-          "description": "How many classes per kind (default 200)"
-        }
-      ]
-    },
-    "list_nav_invokers": {
-      "category": "gameplay",
-      "params": []
-    },
-    "list_smart_object_slots": {
-      "category": "gameplay",
+    "open_asset": {
+      "category": "editor",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "SmartObjectDefinition asset path"
-        }
-      ]
-    },
-    "list_state_trees": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "nextCursor from the previous page, passed back unmodified. Omit for the first page"
-        },
-        {
-          "name": "limit",
-          "type": "number",
-          "required": false,
-          "description": "Rows on this page (default 200, max 2000)"
-        }
-      ]
-    },
-    "move_bt_node": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "BehaviorTree asset path",
+          "description": "Asset to open in its editor",
           "aliases": [
             "path"
           ]
-        },
-        {
-          "name": "node",
-          "type": "string",
-          "required": true,
-          "description": "Node to move: a guid, a runtime address, or a unique node name",
-          "aliases": [
-            "nodePath"
-          ]
-        },
-        {
-          "name": "parent",
-          "type": "string",
-          "required": false,
-          "description": "Node to attach under: a guid from list_bt_graph_nodes, a runtime address from read_behavior_tree_graph, a unique node name, or 'root' (default)"
-        },
-        {
-          "name": "index",
-          "type": "number",
-          "required": false,
-          "description": "Position among the parent's children, which is the execution order. For a decorator or service, its position in the parent's subnode list; on a SimpleParallel, the output pin (0 = main task, 1 = background)"
-        }
-      ]
-    },
-    "project_point_to_navigation": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "location",
-          "type": "vec3",
-          "required": true,
-          "description": "World point to project onto the navmesh"
-        }
-      ]
-    },
-    "query_zone_graph": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "queryMode",
-          "type": "string",
-          "required": false,
-          "description": "summary | lanes | lane | nearest (default summary)"
-        },
-        {
-          "name": "laneIndex",
-          "type": "number",
-          "required": false,
-          "description": "Lane queryMode=lane reports, as queryMode=lanes numbers them"
-        },
-        {
-          "name": "location",
-          "type": "vec3",
-          "required": false,
-          "description": "Query point for queryMode=nearest"
-        },
-        {
-          "name": "radius",
-          "type": "number",
-          "required": false,
-          "description": "How far from location a nearest-lane hit is accepted, in world units (default 100000)"
-        },
-        {
-          "name": "tags",
-          "type": "array",
-          "required": false,
-          "description": "Zone Graph tag names to keep, as the project settings name them"
-        },
-        {
-          "name": "limit",
-          "type": "number",
-          "required": false,
-          "description": "How many lanes to report (default 50)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "editor | pie | auto (default editor)"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance when world is pie or auto"
-        },
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Only this ZoneGraphData actor, by label or name"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Only this ZoneGraphData actor, by full object path"
         }
       ]
     },
@@ -1910,53 +788,6 @@
         }
       ]
     },
-    "read_behavior_tree_graph": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "BehaviorTree asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "includeProperties",
-          "type": "boolean",
-          "required": false,
-          "description": "Include each node's own UPROPERTY values"
-        },
-        {
-          "name": "includeInherited",
-          "type": "boolean",
-          "required": false,
-          "description": "Keep the properties UBTNode itself declares (TreeAsset, ParentNode, NodeName), omitted by default"
-        },
-        {
-          "name": "propertyNames",
-          "type": "array",
-          "required": false,
-          "description": "Only report these UPROPERTY names",
-          "items": "string"
-        }
-      ]
-    },
-    "read_blackboard": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "blackboardPath",
-          "type": "string",
-          "required": true,
-          "description": "BlackboardData asset path",
-          "aliases": [
-            "assetPath"
-          ]
-        }
-      ]
-    },
     "read_blendspace": {
       "category": "animation",
       "params": [
@@ -1995,128 +826,63 @@
         }
       ]
     },
-    "read_bt_node_properties": {
-      "category": "gameplay",
+    "read_bone_transforms": {
+      "category": "editor",
       "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "BehaviorTree asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "nodeClass",
-          "type": "string",
-          "required": false,
-          "description": "BT node selector: class name, /Script path or partial name; a resolved class matches its whole subtree"
-        },
-        {
-          "name": "nodeName",
-          "type": "string",
-          "required": false,
-          "description": "BT node selector: the node's object name or its NodeName display text"
-        },
-        {
-          "name": "nodePath",
-          "type": "string",
-          "required": false,
-          "description": "BT node address from read_behavior_tree_graph, e.g. 'Root.Children[0].Decorators[1]'"
-        },
-        {
-          "name": "kind",
-          "type": "string",
-          "required": false,
-          "description": "BT node kind: composite | task | decorator | service"
-        },
-        {
-          "name": "propertyNames",
-          "type": "array",
-          "required": false,
-          "description": "Only report these UPROPERTY names",
-          "items": "string"
-        },
-        {
-          "name": "includeInherited",
-          "type": "boolean",
-          "required": false,
-          "description": "Keep the properties UBTNode itself declares (TreeAsset, ParentNode, NodeName), omitted by default"
-        }
-      ]
-    },
-    "read_eqs_query": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "queryPath",
-          "type": "string",
-          "required": true,
-          "description": "EnvQuery asset path"
-        }
-      ]
-    },
-    "read_imc": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "imcPath",
-          "type": "string",
-          "required": true,
-          "description": "InputMappingContext asset path"
-        }
-      ]
-    },
-    "read_input_action": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "inputActionPath",
-          "type": "string",
-          "required": true,
-          "description": "InputAction asset path"
-        }
-      ]
-    },
-    "read_perception": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "blueprintPath",
-          "type": "string",
-          "required": false,
-          "description": "Blueprint whose AIPerceptionComponent template to read; or pass actorLabel/actorPath"
-        },
         {
           "name": "actorLabel",
           "type": "string",
           "required": false,
-          "description": "Live actor label or name (the pawn or its AIController)"
+          "description": "Actor label. Editor labels are not unique, so a label naming several actors is refused"
         },
         {
           "name": "actorPath",
           "type": "string",
           "required": false,
-          "description": "Full actor object path; wins over actorLabel"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: auto (default) | pie | editor"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the primary world"
+          "description": "Full actor object path, the unambiguous selector. Wins over actorLabel"
         },
         {
           "name": "componentName",
           "type": "string",
           "required": false,
-          "description": "Target AIPerceptionComponent name (default: first found)"
+          "description": "SkeletalMeshComponent to read; omit for the first one"
+        },
+        {
+          "name": "bones",
+          "type": "array",
+          "required": false,
+          "description": "Bone or socket names; omit for every bone up to limit",
+          "items": "string"
+        },
+        {
+          "name": "relativeTo",
+          "type": "string",
+          "required": false,
+          "description": "Bone or socket whose live frame every sample is expressed in; supersedes space"
+        },
+        {
+          "name": "space",
+          "type": "string",
+          "required": false,
+          "description": "world (default) | component"
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "required": false,
+          "description": "Max bones when bones is omitted (default 200)"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: editor | pie | auto. Each action names its own default"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
         }
       ]
     },
@@ -2137,6 +903,29 @@
           "type": "string",
           "required": true,
           "description": "State machine to read"
+        }
+      ]
+    },
+    "redraw_viewport": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "allViewports",
+          "type": "boolean",
+          "required": false,
+          "description": "Redraw every level viewport rather than one (default false)"
+        },
+        {
+          "name": "invalidateHitProxies",
+          "type": "boolean",
+          "required": false,
+          "description": "Also invalidate hit proxies, needed before a hit test (default true)"
+        },
+        {
+          "name": "viewportIndex",
+          "type": "number",
+          "required": false,
+          "description": "Level viewport to act on (default the active one)"
         }
       ]
     },
@@ -2192,312 +981,6 @@
         }
       ]
     },
-    "remove_blackboard_key": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "blackboardPath",
-          "type": "string",
-          "required": true,
-          "description": "BlackboardData asset path"
-        },
-        {
-          "name": "keyName",
-          "type": "string",
-          "required": true,
-          "description": "Key name to remove"
-        }
-      ]
-    },
-    "remove_bt_node": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "BehaviorTree asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "node",
-          "type": "string",
-          "required": true,
-          "description": "Node to remove: a guid, a runtime address, or a unique node name",
-          "aliases": [
-            "nodePath"
-          ]
-        }
-      ]
-    },
-    "remove_effect": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "effectHandle",
-          "type": "string",
-          "required": false,
-          "description": "Active-effect handle apply_effect reported. Removes exactly that effect"
-        },
-        {
-          "name": "effectClass",
-          "type": "string",
-          "required": false,
-          "description": "GameplayEffect content path or class name. Removes every active effect of that class",
-          "aliases": [
-            "effectPath"
-          ]
-        },
-        {
-          "name": "stacksToRemove",
-          "type": "integer",
-          "required": false,
-          "description": "Stacks to take off (default -1, the whole effect)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "remove_effect_cue": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "effectPath",
-          "type": "string",
-          "required": true,
-          "description": "GameplayEffect Blueprint asset path",
-          "aliases": [
-            "effectClass"
-          ]
-        },
-        {
-          "name": "cueTag",
-          "type": "string",
-          "required": true,
-          "description": "GameplayCue tag to unlink. May be one that is no longer registered"
-        }
-      ]
-    },
-    "remove_eqs_option": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "queryPath",
-          "type": "string",
-          "required": true,
-          "description": "EnvQuery asset path"
-        },
-        {
-          "name": "optionIndex",
-          "type": "number",
-          "required": true,
-          "description": "Option to remove, as read_eqs_query reports it"
-        }
-      ]
-    },
-    "remove_eqs_test": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "queryPath",
-          "type": "string",
-          "required": true,
-          "description": "EnvQuery asset path"
-        },
-        {
-          "name": "testIndex",
-          "type": "number",
-          "required": true,
-          "description": "Test to remove, as read_eqs_query reports it"
-        },
-        {
-          "name": "optionIndex",
-          "type": "number",
-          "required": false,
-          "description": "Option the test belongs to (default 0)"
-        }
-      ]
-    },
-    "remove_imc_mapping": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "imcPath",
-          "type": "string",
-          "required": true,
-          "description": "InputMappingContext asset path"
-        },
-        {
-          "name": "mappingIndex",
-          "type": "number",
-          "required": false,
-          "description": "Index of the mapping to remove"
-        },
-        {
-          "name": "inputActionPath",
-          "type": "string",
-          "required": false,
-          "description": "Select the mapping by InputAction (with key)"
-        },
-        {
-          "name": "key",
-          "type": "string",
-          "required": false,
-          "description": "Select the mapping by key (with inputActionPath)"
-        },
-        {
-          "name": "save",
-          "type": "boolean",
-          "required": false,
-          "description": "Persist the asset (default true); false defers the write"
-        }
-      ]
-    },
-    "remove_loose_gameplay_tag": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "tag",
-          "type": "string",
-          "required": true,
-          "description": "A registered gameplay tag"
-        },
-        {
-          "name": "count",
-          "type": "integer",
-          "required": false,
-          "description": "References to remove, at least 1 (default 1)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "remove_mapping_context": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "mappingContext",
-          "type": "string",
-          "required": true,
-          "description": "InputMappingContext asset path to remove from the live player"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the first running one"
-        },
-        {
-          "name": "playerIndex",
-          "type": "number",
-          "required": false,
-          "description": "Local player to act on (default 0)"
-        }
-      ]
-    },
-    "remove_mass_trait": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "MassEntityConfigAsset path"
-        },
-        {
-          "name": "traitClass",
-          "type": "string",
-          "required": false,
-          "description": "Concrete UMassEntityTraitBase subclass to remove, short name or /Script path. Idempotent selector"
-        },
-        {
-          "name": "index",
-          "type": "number",
-          "required": false,
-          "description": "Positional index into Config.Traits, as read_mass_entity_config reports it"
-        }
-      ]
-    },
-    "remove_sense": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "blueprintPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint carrying the AIPerceptionComponent template"
-        },
-        {
-          "name": "index",
-          "type": "number",
-          "required": false,
-          "description": "Index of the sense config to remove, as read_perception reports it"
-        },
-        {
-          "name": "senseType",
-          "type": "string",
-          "required": false,
-          "description": "Sense to remove when index is omitted: Sight | Hearing | Damage | Touch | Team | Prediction | Blueprint"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "Target AIPerceptionComponent name (default: first found)"
-        }
-      ]
-    },
-    "remove_smart_object_slot": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "SmartObjectDefinition asset path"
-        },
-        {
-          "name": "slotIndex",
-          "type": "number",
-          "required": true,
-          "description": "Slot index to remove"
-        }
-      ]
-    },
     "remove_virtual_bone": {
       "category": "animation",
       "params": [
@@ -2515,372 +998,88 @@
         }
       ]
     },
-    "reorder_eqs_tests": {
-      "category": "gameplay",
+    "restore_runtime_visibility": {
+      "category": "editor",
       "params": [
         {
-          "name": "queryPath",
+          "name": "rollbackToken",
           "type": "string",
           "required": true,
-          "description": "EnvQuery asset path"
-        },
-        {
-          "name": "order",
-          "type": "array",
-          "required": true,
-          "description": "Current test indices in the order wanted; must be a full permutation",
-          "items": "number"
-        },
-        {
-          "name": "optionIndex",
-          "type": "number",
-          "required": false,
-          "description": "Option whose tests to reorder (default 0)"
-        }
-      ]
-    },
-    "reorder_mass_traits": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "MassEntityConfigAsset path"
-        },
-        {
-          "name": "order",
-          "type": "array",
-          "required": true,
-          "description": "Current trait indices in the order wanted; must be a full permutation",
-          "items": "number"
-        }
-      ]
-    },
-    "report_noise_event": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "senseType",
-          "type": "string",
-          "required": false,
-          "description": "hearing (default) | damage"
-        },
-        {
-          "name": "location",
-          "type": "vec3",
-          "required": false,
-          "description": "Event location; defaults to the instigator's (hearing) or the damaged actor's (damage)"
-        },
-        {
-          "name": "loudness",
-          "type": "number",
-          "required": false,
-          "description": "Noise loudness (default 1)"
-        },
-        {
-          "name": "maxRange",
-          "type": "number",
-          "required": false,
-          "description": "Maximum range the noise carries (0 = unlimited)"
-        },
-        {
-          "name": "instigatorLabel",
-          "type": "string",
-          "required": false,
-          "description": "The actor that caused the event"
-        },
-        {
-          "name": "instigatorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full object path of the instigator"
-        },
-        {
-          "name": "tag",
-          "type": "string",
-          "required": false,
-          "description": "Tag recorded on the stimulus"
-        },
-        {
-          "name": "targetLabel",
-          "type": "string",
-          "required": false,
-          "description": "Damaged actor (damage only)"
-        },
-        {
-          "name": "targetPath",
-          "type": "string",
-          "required": false,
-          "description": "Full object path of the damaged actor (damage only)"
-        },
-        {
-          "name": "amount",
-          "type": "number",
-          "required": false,
-          "description": "Damage amount (damage only, required there)"
-        },
-        {
-          "name": "hitLocation",
-          "type": "object",
-          "required": false,
-          "description": "Impact point {x,y,z} (damage only)"
+          "description": "Token from a non-dry-run set_runtime_visibility, valid for that PIE session only"
         },
         {
           "name": "world",
           "type": "string",
           "required": false,
-          "description": "World scope: auto (default) | pie | editor"
+          "description": "World scope: editor | pie | auto. Each action names its own default"
         },
         {
           "name": "pieInstance",
           "type": "number",
           "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the primary world"
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
         }
       ]
     },
-    "revoke_ability": {
-      "category": "gas",
+    "scrub_sequence": {
+      "category": "editor",
       "params": [
         {
-          "name": "actorLabel",
+          "name": "sequencePath",
           "type": "string",
           "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "abilityClass",
-          "type": "string",
-          "required": true,
-          "description": "GameplayAbility class to revoke"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "run_behavior_tree": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "BehaviorTree asset to run",
+          "description": "Level Sequence to open and scrub; omit to scrub the one already open",
           "aliases": [
-            "behaviorTreePath"
+            "assetPath",
+            "path"
           ]
         },
         {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label or name (the pawn or its AIController)"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; wins over actorLabel"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: auto (default) | pie | editor"
-        },
-        {
-          "name": "pieInstance",
+          "name": "seconds",
           "type": "number",
           "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the primary world"
+          "description": "Playhead position in seconds. Pass exactly one of seconds and frame"
         },
         {
-          "name": "executionMode",
+          "name": "frame",
+          "type": "number",
+          "required": false,
+          "description": "Playhead position as a frame number, read in timeUnit"
+        },
+        {
+          "name": "timeUnit",
           "type": "string",
           "required": false,
-          "description": "looped (default) | singleRun"
-        },
-        {
-          "name": "restartIfRunning",
-          "type": "boolean",
-          "required": false,
-          "description": "Restart the tree even if this one is already running"
+          "description": "How to read frame: display (default, the frame numbers Sequencer shows) | tick (the units get_sequence_info's playbackRange reports)"
         }
       ]
     },
-    "run_eqs_query": {
-      "category": "gameplay",
+    "search_log": {
+      "category": "editor",
       "params": [
         {
-          "name": "queryPath",
+          "name": "query",
           "type": "string",
           "required": true,
-          "description": "EnvQuery asset path"
+          "description": "Case-insensitive substring to search the captured log for"
         },
         {
-          "name": "querierLabel",
+          "name": "maxResults",
+          "type": "integer",
+          "required": false,
+          "description": "Cap on matching lines collected out of the 4096-line ring buffer (default 4096)"
+        },
+        {
+          "name": "cursor",
           "type": "string",
           "required": false,
-          "description": "Actor the query runs from, which querier-relative contexts resolve against"
-        },
-        {
-          "name": "querierPath",
-          "type": "string",
-          "required": false,
-          "description": "Full object path of the querier; unambiguous where a label is not"
-        },
-        {
-          "name": "runMode",
-          "type": "string",
-          "required": false,
-          "description": "all | best | random (default all)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "auto | pie | editor (default auto)"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance when world is pie or auto"
+          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
         },
         {
           "name": "limit",
           "type": "number",
           "required": false,
-          "description": "How many scored items to return (default 50)"
-        }
-      ]
-    },
-    "send_ability_input": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "inputEvent",
-          "type": "string",
-          "required": false,
-          "description": "pressed (default) | released | confirm | cancel. pressed and released address an inputId; confirm and cancel take none"
-        },
-        {
-          "name": "inputId",
-          "type": "integer",
-          "required": false,
-          "description": "Input id to send pressed or released to"
-        },
-        {
-          "name": "abilityClass",
-          "type": "string",
-          "required": false,
-          "description": "Granted ability whose bound input id to use instead of inputId"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "set_ability_tags": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "abilityPath",
-          "type": "string",
-          "required": true,
-          "description": "GameplayAbility Blueprint asset path"
-        },
-        {
-          "name": "ability_tags",
-          "type": "array",
-          "required": false,
-          "description": "AbilityTags container, written whole",
-          "items": "string"
-        },
-        {
-          "name": "cancel_abilities_with_tag",
-          "type": "array",
-          "required": false,
-          "description": "CancelAbilitiesWithTag container, written whole",
-          "items": "string"
-        },
-        {
-          "name": "block_abilities_with_tag",
-          "type": "array",
-          "required": false,
-          "description": "BlockAbilitiesWithTag container, written whole",
-          "items": "string"
-        },
-        {
-          "name": "activation_required_tags",
-          "type": "array",
-          "required": false,
-          "description": "ActivationRequiredTags container, written whole",
-          "items": "string"
-        },
-        {
-          "name": "activation_blocked_tags",
-          "type": "array",
-          "required": false,
-          "description": "ActivationBlockedTags container, written whole",
-          "items": "string"
-        }
-      ]
-    },
-    "set_action_triggers": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "inputActionPath",
-          "type": "string",
-          "required": true,
-          "description": "InputAction asset path"
-        },
-        {
-          "name": "triggers",
-          "type": "array",
-          "required": false,
-          "description": "Trigger specs that replace the action's own Triggers array",
-          "items": "object"
-        },
-        {
-          "name": "modifiers",
-          "type": "array",
-          "required": false,
-          "description": "Modifier specs that replace the action's own Modifiers array",
-          "items": "object"
-        },
-        {
-          "name": "clear",
-          "type": "boolean",
-          "required": false,
-          "description": "Empty both arrays; an omitted array then means empty rather than left alone"
+          "description": "Matches on this page (default 100, max 4096)"
         }
       ]
     },
@@ -2898,473 +1097,6 @@
           "type": "string",
           "required": true,
           "description": "USkeleton to target"
-        }
-      ]
-    },
-    "set_asc_defaults": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "blueprintPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path carrying the AbilitySystemComponent"
-        },
-        {
-          "name": "attributeSet",
-          "type": "string",
-          "required": true,
-          "description": "AttributeSet content path or class name",
-          "aliases": [
-            "attributeSetPath"
-          ]
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "AbilitySystemComponent to wire (default: the first one)"
-        },
-        {
-          "name": "initDataTable",
-          "type": "string",
-          "required": false,
-          "description": "DataTable of starting attribute values"
-        }
-      ]
-    },
-    "set_attribute": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "attribute",
-          "type": "string",
-          "required": true,
-          "description": "Attribute name: Health or SetName.Health"
-        },
-        {
-          "name": "value",
-          "type": "number",
-          "required": true,
-          "description": "New base value"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "set_behavior_tree_blackboard": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "behaviorTreePath",
-          "type": "string",
-          "required": true,
-          "description": "BehaviorTree asset path"
-        },
-        {
-          "name": "blackboardPath",
-          "type": "string",
-          "required": true,
-          "description": "BlackboardData asset to bind"
-        }
-      ]
-    },
-    "set_blackboard_parent": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "blackboardPath",
-          "type": "string",
-          "required": true,
-          "description": "Child BlackboardData asset path"
-        },
-        {
-          "name": "parentPath",
-          "type": "string",
-          "required": false,
-          "description": "Parent BlackboardData asset path; None or omitted clears it"
-        },
-        {
-          "name": "autoPruneDuplicateKeys",
-          "type": "boolean",
-          "required": false,
-          "description": "Remove own keys the parent chain already defines (default true)"
-        }
-      ]
-    },
-    "set_bt_node_property": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "BehaviorTree asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "nodePath",
-          "type": "string",
-          "required": false,
-          "description": "BT node address from read_behavior_tree_graph, e.g. 'Root.Children[0].Decorators[1]'"
-        },
-        {
-          "name": "nodeName",
-          "type": "string",
-          "required": false,
-          "description": "BT node selector: the node's object name or its NodeName display text"
-        },
-        {
-          "name": "nodeClass",
-          "type": "string",
-          "required": false,
-          "description": "BT node selector: class name, /Script path or partial name; a resolved class matches its whole subtree"
-        },
-        {
-          "name": "kind",
-          "type": "string",
-          "required": false,
-          "description": "BT node kind: composite | task | decorator | service"
-        },
-        {
-          "name": "property",
-          "type": "string",
-          "required": false,
-          "description": "Dotted, indexed property path on the node, e.g. 'FilterClass' or 'Lines[1].Text'"
-        },
-        {
-          "name": "value",
-          "type": "any",
-          "required": false,
-          "description": "Value for property: scalar, object, array, class path, or null to clear a reference"
-        },
-        {
-          "name": "properties",
-          "type": "object",
-          "required": false,
-          "description": "Several writes at once, as a map of property path to value. Applied as one batch: a rejected write puts the others back"
-        }
-      ]
-    },
-    "set_bt_task_property": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "BehaviorTree asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "nodePath",
-          "type": "string",
-          "required": false,
-          "description": "BT node address from read_behavior_tree_graph, e.g. 'Root.Children[0].Decorators[1]'"
-        },
-        {
-          "name": "nodeName",
-          "type": "string",
-          "required": false,
-          "description": "BT node selector: the node's object name or its NodeName display text"
-        },
-        {
-          "name": "nodeClass",
-          "type": "string",
-          "required": false,
-          "description": "BT node selector: class name, /Script path or partial name; a resolved class matches its whole subtree"
-        },
-        {
-          "name": "kind",
-          "type": "string",
-          "required": false,
-          "description": "BT node kind: composite | task | decorator | service"
-        },
-        {
-          "name": "property",
-          "type": "string",
-          "required": false,
-          "description": "Dotted, indexed property path on the node, e.g. 'FilterClass' or 'Lines[1].Text'"
-        },
-        {
-          "name": "value",
-          "type": "any",
-          "required": false,
-          "description": "Value for property: scalar, object, array, class path, or null to clear a reference"
-        },
-        {
-          "name": "properties",
-          "type": "object",
-          "required": false,
-          "description": "Several writes at once, as a map of property path to value. Applied as one batch: a rejected write puts the others back"
-        }
-      ]
-    },
-    "set_effect_modifier": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "effectPath",
-          "type": "string",
-          "required": true,
-          "description": "GameplayEffect Blueprint asset path"
-        },
-        {
-          "name": "attribute",
-          "type": "string",
-          "required": true,
-          "description": "Attribute to modify: SetName.Attribute, or a unique attribute name"
-        },
-        {
-          "name": "operation",
-          "type": "string",
-          "required": false,
-          "description": "Additive (default) | Multiplicative | Division | Override"
-        },
-        {
-          "name": "magnitude",
-          "type": "number",
-          "required": false,
-          "description": "Static magnitude (default 0)"
-        }
-      ]
-    },
-    "set_imc_mapping_action": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "imcPath",
-          "type": "string",
-          "required": true,
-          "description": "InputMappingContext asset path"
-        },
-        {
-          "name": "newInputActionPath",
-          "type": "string",
-          "required": true,
-          "description": "InputAction the mapping should use"
-        },
-        {
-          "name": "mappingIndex",
-          "type": "number",
-          "required": false,
-          "description": "Index of the mapping to retarget"
-        },
-        {
-          "name": "key",
-          "type": "string",
-          "required": false,
-          "description": "Select the mapping by its key"
-        },
-        {
-          "name": "inputActionPath",
-          "type": "string",
-          "required": false,
-          "description": "Select the mapping by its current InputAction"
-        },
-        {
-          "name": "save",
-          "type": "boolean",
-          "required": false,
-          "description": "Persist the asset (default true); false defers the write"
-        }
-      ]
-    },
-    "set_imc_mapping_key": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "imcPath",
-          "type": "string",
-          "required": true,
-          "description": "InputMappingContext asset path"
-        },
-        {
-          "name": "newKey",
-          "type": "string",
-          "required": true,
-          "description": "New FKey name"
-        },
-        {
-          "name": "mappingIndex",
-          "type": "number",
-          "required": false,
-          "description": "Index of the mapping to rebind"
-        },
-        {
-          "name": "key",
-          "type": "string",
-          "required": false,
-          "description": "Select the mapping by its current key"
-        },
-        {
-          "name": "inputActionPath",
-          "type": "string",
-          "required": false,
-          "description": "Select the mapping by its InputAction"
-        },
-        {
-          "name": "save",
-          "type": "boolean",
-          "required": false,
-          "description": "Persist the asset (default true); false defers the write"
-        }
-      ]
-    },
-    "set_live_attribute_value": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
-        },
-        {
-          "name": "attributeSet",
-          "type": "string",
-          "required": true,
-          "description": "AttributeSet content path or class name"
-        },
-        {
-          "name": "attribute",
-          "type": "string",
-          "required": true,
-          "description": "Attribute property name, or Set.Property"
-        },
-        {
-          "name": "value",
-          "type": "number",
-          "required": true,
-          "description": "Value to write"
-        },
-        {
-          "name": "valueType",
-          "type": "string",
-          "required": false,
-          "description": "current (default, writes the attribute data in place) | base (writes through the ASC aggregator)"
-        },
-        {
-          "name": "registerOwnerSets",
-          "type": "boolean",
-          "required": false,
-          "description": "Register the actor's own attribute sets on its ASC when it has none, the way BeginPlay would (default true)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "set_live_blackboard": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Live actor label or name (the pawn or its AIController)"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; wins over actorLabel"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: auto (default) | pie | editor"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the primary world"
-        },
-        {
-          "name": "key",
-          "type": "string",
-          "required": true,
-          "description": "Blackboard key to write"
-        },
-        {
-          "name": "value",
-          "type": "any",
-          "required": false,
-          "description": "Value to write, typed to the key; required unless clear is true"
-        },
-        {
-          "name": "clear",
-          "type": "boolean",
-          "required": false,
-          "description": "Clear the key instead of writing a value"
-        }
-      ]
-    },
-    "set_mapping_modifiers": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "imcPath",
-          "type": "string",
-          "required": true,
-          "description": "InputMappingContext asset path"
-        },
-        {
-          "name": "mappingIndex",
-          "type": "number",
-          "required": false,
-          "description": "Index of the mapping in the IMC (default 0)"
-        },
-        {
-          "name": "modifiers",
-          "type": "array",
-          "required": false,
-          "description": "Modifier objects: {type, ...props} or {class, properties}. Replaces the mapping's list",
-          "items": "object"
-        },
-        {
-          "name": "triggers",
-          "type": "array",
-          "required": false,
-          "description": "Trigger objects: {type, ...props} or {class, properties}. Replaces the mapping's list",
-          "items": "object"
-        },
-        {
-          "name": "save",
-          "type": "boolean",
-          "required": false,
-          "description": "Persist the asset (default true); false defers the write"
         }
       ]
     },
@@ -3432,38 +1164,153 @@
         }
       ]
     },
-    "set_player_mappable_settings": {
-      "category": "gameplay",
+    "set_movement_mode": {
+      "category": "editor",
       "params": [
         {
-          "name": "inputActionPath",
-          "type": "string",
-          "required": true,
-          "description": "InputAction asset path"
-        },
-        {
-          "name": "mappingName",
-          "type": "string",
-          "required": true,
-          "description": "Stable FName saved with the player mapping; must be non-empty"
-        },
-        {
-          "name": "displayName",
+          "name": "actorLabel",
           "type": "string",
           "required": false,
-          "description": "Display name written onto UPlayerMappableKeySettings"
+          "description": "Actor label. Editor labels are not unique, so a label naming several actors is refused"
         },
         {
-          "name": "displayCategory",
+          "name": "actorPath",
           "type": "string",
           "required": false,
-          "description": "Display category (Movement, Combat, ...) written onto UPlayerMappableKeySettings"
+          "description": "Full actor object path, the unambiguous selector. Wins over actorLabel"
+        },
+        {
+          "name": "mode",
+          "type": "string",
+          "required": false,
+          "description": "none | walking | navwalking | falling | swimming | flying | custom"
+        },
+        {
+          "name": "customMode",
+          "type": "integer",
+          "required": false,
+          "description": "0-255, only with mode=custom"
+        },
+        {
+          "name": "velocity",
+          "type": "vec3",
+          "required": false,
+          "description": "Velocity written to the CharacterMovementComponent"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: editor | pie | auto. Each action names its own default"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+        }
+      ]
+    },
+    "set_object_property": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "propertyName",
+          "type": "string",
+          "required": true,
+          "description": "Property name; dotted and indexed paths reach component and struct fields"
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": true,
+          "description": "New value as structured JSON, the form get_property returns under value"
+        },
+        {
+          "name": "objectPath",
+          "type": "string",
+          "required": false,
+          "description": "Object path of the live instance. Wins over target"
+        },
+        {
+          "name": "target",
+          "type": "string",
+          "required": false,
+          "description": "gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem"
+        },
+        {
+          "name": "subsystemClass",
+          "type": "string",
+          "required": false,
+          "description": "Subsystem class name or /Script path, with target=subsystem"
+        },
+        {
+          "name": "playerIndex",
+          "type": "number",
+          "required": false,
+          "description": "Player index for target=playercontroller or playerpawn (default 0)"
+        },
+        {
+          "name": "postEditChange",
+          "type": "boolean",
+          "required": false,
+          "description": "Fire PostEditChangeProperty after the write (default false)"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: editor | pie | auto. Each action names its own default"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+        }
+      ]
+    },
+    "set_pie_time_scale": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "factor",
+          "type": "number",
+          "required": true,
+          "description": "Time-scale factor, greater than 0 (e.g. 500)"
+        }
+      ]
+    },
+    "set_property": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "objectPath",
+          "type": "string",
+          "required": true,
+          "description": "Object, asset, class or Blueprint path. A class or Blueprint resolves to its default object",
+          "aliases": [
+            "path",
+            "assetPath"
+          ]
+        },
+        {
+          "name": "propertyName",
+          "type": "string",
+          "required": true,
+          "description": "Property name; dotted and indexed paths reach component and struct fields"
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": true,
+          "description": "New value as structured JSON, the form get_property returns under value"
         },
         {
           "name": "save",
           "type": "boolean",
           "required": false,
-          "description": "Persist the asset (default true); false defers the write"
+          "description": "Save the package to disk after the write (default true; false leaves it dirty)"
         }
       ]
     },
@@ -3505,206 +1352,291 @@
         }
       ]
     },
-    "set_smart_object_slot": {
-      "category": "gameplay",
+    "set_scalability": {
+      "category": "editor",
       "params": [
         {
-          "name": "assetPath",
+          "name": "level",
+          "type": "string",
+          "required": false,
+          "description": "Low | Medium | High | Epic | Cinematic (default Epic)"
+        }
+      ]
+    },
+    "set_sequence_keyframes": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "sequencePath",
           "type": "string",
           "required": true,
-          "description": "SmartObjectDefinition asset path"
+          "description": "Level Sequence asset path",
+          "aliases": [
+            "assetPath",
+            "path"
+          ]
         },
         {
-          "name": "slotIndex",
+          "name": "trackType",
+          "type": "string",
+          "required": true,
+          "description": "Transform | Float | SkeletalAnimation | CameraCut | Audio | Event | Fade"
+        },
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor label. Editor labels are not unique, so a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path, the unambiguous selector. Wins over actorLabel"
+        },
+        {
+          "name": "sectionIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Target section index (default 0)"
+        },
+        {
+          "name": "channel",
+          "type": "string",
+          "required": true,
+          "description": "Location.X/Y/Z or Rotation.X/Y/Z (also x/y/z, yaw/pitch/roll) on a Transform track; the float channel on Fade or Float"
+        },
+        {
+          "name": "keyframes",
+          "type": "array",
+          "required": true,
+          "description": "Keys to add, as [{seconds, value}]",
+          "items": "object"
+        },
+        {
+          "name": "interpolation",
+          "type": "string",
+          "required": false,
+          "description": "cubic (default) | linear"
+        }
+      ]
+    },
+    "set_sequence_playback_range": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "sequencePath",
+          "type": "string",
+          "required": true,
+          "description": "Level Sequence asset path",
+          "aliases": [
+            "assetPath",
+            "path"
+          ]
+        },
+        {
+          "name": "startSeconds",
           "type": "number",
           "required": true,
-          "description": "Slot index"
+          "description": "Range start in seconds"
         },
         {
-          "name": "name",
+          "name": "endSeconds",
+          "type": "number",
+          "required": true,
+          "description": "Range end in seconds"
+        }
+      ]
+    },
+    "set_view_mode": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "viewMode",
           "type": "string",
-          "required": false,
-          "description": "Slot name"
+          "required": true,
+          "description": "Lit | Unlit | Wireframe | LightingOnly | DetailLighting | ShaderComplexity | ... get_viewport_state lists what this build supports"
         },
         {
-          "name": "offset",
+          "name": "viewportIndex",
+          "type": "number",
+          "required": false,
+          "description": "Level viewport to act on (default the active one)"
+        }
+      ]
+    },
+    "set_viewport_camera": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "location",
           "type": "vec3",
           "required": false,
-          "description": "Slot offset {x,y,z}"
+          "description": "Camera location"
         },
         {
           "name": "rotation",
           "type": "rotator",
           "required": false,
-          "description": "Slot rotation {pitch,yaw,roll}"
+          "description": "Camera rotation"
         },
         {
-          "name": "tags",
-          "type": "array",
-          "required": false,
-          "description": "Slot runtime tags (gameplay tag strings or struct shapes)"
-        }
-      ]
-    },
-    "set_world_game_mode": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "gameModeClass",
-          "type": "string",
-          "required": true,
-          "description": "GameMode class or Blueprint path",
-          "aliases": [
-            "gameModePath"
-          ]
-        }
-      ]
-    },
-    "stop_behavior_tree": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "actorLabel",
+          "name": "projection",
           "type": "string",
           "required": false,
-          "description": "Live actor label or name (the pawn or its AIController)"
+          "description": "perspective | top | bottom | left | right | front | back | orthoFreelook. Switched before the pose is applied"
         },
         {
-          "name": "actorPath",
+          "name": "viewportType",
           "type": "string",
           "required": false,
-          "description": "Full actor object path; wins over actorLabel"
+          "description": "Perspective | Top | Bottom | Left | Right | Front | Back | OrthoFreelook"
         },
         {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: auto (default) | pie | editor"
-        },
-        {
-          "name": "pieInstance",
+          "name": "orthoZoom",
           "type": "number",
           "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the primary world"
+          "description": "Orthographic zoom, within the engine's own limits"
+        }
+      ]
+    },
+    "set_viewport_exposure": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "ev100",
+          "type": "number",
+          "required": false,
+          "description": "Fixed EV100 to pin the viewport to; implies fixed exposure"
+        },
+        {
+          "name": "fixed",
+          "type": "boolean",
+          "required": false,
+          "description": "Use a fixed exposure rather than eye adaptation"
         },
         {
           "name": "mode",
           "type": "string",
           "required": false,
-          "description": "stop (default) | forced | restart | pause | resume"
+          "description": "fixed | auto"
         },
         {
-          "name": "reason",
-          "type": "string",
+          "name": "viewportIndex",
+          "type": "number",
           "required": false,
-          "description": "Recorded with the stop, for the log"
-        },
-        {
-          "name": "completeRestart",
-          "type": "boolean",
-          "required": false,
-          "description": "With mode=restart, restart from the root rather than resuming"
+          "description": "Level viewport to act on (default the active one)"
         }
       ]
     },
-    "trace_ability_activation": {
-      "category": "gas",
+    "set_viewport_view": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "fov",
+          "type": "number",
+          "required": false,
+          "description": "Field of view in degrees, greater than 0 and less than 180"
+        },
+        {
+          "name": "nearClip",
+          "type": "number",
+          "required": false,
+          "description": "Near clip plane; negative clears the override"
+        },
+        {
+          "name": "farClip",
+          "type": "number",
+          "required": false,
+          "description": "Far clip plane override"
+        },
+        {
+          "name": "viewportType",
+          "type": "string",
+          "required": false,
+          "description": "Perspective | Top | Bottom | Left | Right | Front | Back | OrthoFreelook"
+        },
+        {
+          "name": "cameraSpeed",
+          "type": "number",
+          "required": false,
+          "description": "Viewport camera speed, greater than 0"
+        },
+        {
+          "name": "viewportIndex",
+          "type": "number",
+          "required": false,
+          "description": "Level viewport to act on (default the active one)"
+        }
+      ]
+    },
+    "teleport_runtime_actor": {
+      "category": "editor",
       "params": [
         {
           "name": "actorLabel",
           "type": "string",
           "required": false,
-          "description": "Live actor label, internal name or object path. Pass this or actorPath"
+          "description": "Actor label. Editor labels are not unique, so a label naming several actors is refused"
         },
         {
           "name": "actorPath",
           "type": "string",
           "required": false,
-          "description": "Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"
+          "description": "Full actor object path, the unambiguous selector. Wins over actorLabel"
         },
         {
-          "name": "abilityClass",
-          "type": "string",
-          "required": true,
-          "description": "GameplayAbility class to trace"
+          "name": "location",
+          "type": "vec3",
+          "required": false,
+          "description": "Destination; omit to keep the current location"
         },
         {
-          "name": "activate",
+          "name": "rotation",
+          "type": "rotator",
+          "required": false,
+          "description": "Destination rotation; omit to keep the current one"
+        },
+        {
+          "name": "stopMovement",
           "type": "boolean",
           "required": false,
-          "description": "Also call TryActivateAbility, to prove the verdict (default false)"
+          "description": "Stop the movement component so the move is not undone (default true)"
+        },
+        {
+          "name": "sweep",
+          "type": "boolean",
+          "required": false,
+          "description": "Collide on the way (default false)"
         },
         {
           "name": "world",
           "type": "string",
           "required": false,
-          "description": "Runtime world scope: auto (default) | pie | editor"
-        }
-      ]
-    },
-    "validate_cue_coverage": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "directory",
-          "type": "string",
-          "required": false,
-          "description": "Content path to scan (default /Game)"
+          "description": "World scope: editor | pie | auto. Each action names its own default"
         },
         {
-          "name": "effectPath",
-          "type": "string",
-          "required": false,
-          "description": "Audit this one GameplayEffect instead of scanning",
-          "aliases": [
-            "effectClass"
-          ]
-        },
-        {
-          "name": "maxEffects",
-          "type": "integer",
-          "required": false,
-          "description": "Cap on effect classes scanned (default 500, max 5000)"
-        }
-      ]
-    },
-    "validate_input": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "imcPath",
-          "type": "string",
-          "required": false,
-          "description": "Audit this one InputMappingContext instead of sweeping directory"
-        },
-        {
-          "name": "directory",
-          "type": "string",
-          "required": false,
-          "description": "Content root the InputMappingContext sweep covers (default /Game)"
-        },
-        {
-          "name": "recursive",
-          "type": "boolean",
-          "required": false,
-          "description": "Include subfolders of directory (default true)"
-        },
-        {
-          "name": "limit",
+          "name": "pieInstance",
           "type": "number",
           "required": false,
-          "description": "How many InputMappingContexts a sweep loads (default 200)"
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
         }
       ]
     },
-    "validate_mass_entity_config": {
-      "category": "gameplay",
+    "undo_redo_steps": {
+      "category": "editor",
       "params": [
         {
-          "name": "assetPath",
+          "name": "steps",
+          "type": "integer",
+          "required": false,
+          "description": "How many steps to apply (default 1)"
+        },
+        {
+          "name": "direction",
           "type": "string",
-          "required": true,
-          "description": "MassEntityConfigAsset path"
+          "required": false,
+          "description": "undo (default) | redo"
         }
       ]
     }
