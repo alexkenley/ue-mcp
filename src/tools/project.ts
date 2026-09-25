@@ -40,6 +40,7 @@ import { ueMcpConfigRejections, describeConfigRejections } from "../project.js";
 import { CURSOR_PARAM, paged } from "../pagination.js";
 import { actions as epicActions, schema as epicSchema } from "./epic/project.generated.js";
 import { specBp, schema as specSchema } from "./specs/project.generated.js";
+import { specBp as reflectionSpecBp } from "./specs/reflection.generated.js";
 
 /**
  * The environment variables flattening every registered editor into one, right
@@ -1055,15 +1056,14 @@ export const projectTool: ToolDef = categoryTool(
       "List native modules in the current project (name, host type, source path), in the .uproject's own declaration order. Feed moduleName from here into create_cpp_class.",
       "list_project_modules",
     ),
-    list_loaded_modules: bp("read", 
-      paged("Enumerate ALL engine+project modules with runtime load state (loaded/gameModule), not just uproject-declared ones. Params: filter? (case-insensitive substring), loadedOnly? (default false) (#689)"),
+    // Registered under reflection in C++; project exposes the same handlers.
+    list_loaded_modules: reflectionSpecBp("read", 
+      "Enumerate ALL engine+project modules with runtime load state (loaded/gameModule), not just uproject-declared ones. filter is a case-insensitive substring; loadedOnly defaults to false (#689).",
       "list_loaded_modules",
-      (p) => ({ filter: p.filter, loadedOnly: p.loadedOnly, cursor: p.cursor, limit: p.limit }),
     ),
-    is_module_loaded: bp("read", 
-      "Report whether a named module is currently loaded in the editor. Params: moduleName (#689)",
+    is_module_loaded: reflectionSpecBp("read", 
+      "Report whether a named module is currently loaded in the editor (#689).",
       "is_module_loaded",
-      (p) => ({ moduleName: p.moduleName }),
     ),
     list_available_plugins: specBp("read", 
       "List every plugin installed in this engine or project, sorted by name, with its category, version, type, whether it is enabled in THIS editor session, whether it is enabled by default, and the .uproject's current reference to it under projectReference {present, enabled}. Those two disagree after enable_plugin until the editor restarts, which is the point of reporting both.",

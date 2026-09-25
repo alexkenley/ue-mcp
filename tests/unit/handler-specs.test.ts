@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { renderAll, paramsClause } from "../../scripts/lib/handler-spec-gen.mjs";
 import { readCategory } from "../../scripts/lib/tool-source.mjs";
+import { readRegistrations } from "../../scripts/audit-handler-conventions.mjs";
 import {
   compareHandlerSpecs,
   makeSpecBp,
@@ -203,50 +204,77 @@ function specSignature(type: string, items?: string): string {
   return `${type === "array" ? `array<${base[items ?? "any"]}>` : base[type]}?`;
 }
 
+/**
+ * Whether a key a tool advertises accepts what a spec declares for it. A key
+ * the tool shares with its own category must match exactly (checked per
+ * category below); a key another category's handler declares only has to be
+ * accepted, and an integer is a number.
+ */
+function accepts(advertised: string, declared: string): boolean {
+  return advertised === declared || (advertised === "number?" && declared === "integer?");
+}
+
+/** Every action, in any tool, that dispatches each spec'd method, as tool.action. */
+const DISPATCHERS = new Map<string, string[]>();
+for (const tool of ALL_TOOLS) {
+  for (const [action, spec] of specdActions(tool)) {
+    DISPATCHERS.set(spec.bridge, [...(DISPATCHERS.get(spec.bridge) ?? []), `${tool.name}.${action}`]);
+  }
+}
+
+/** The C++ function each registered method runs, as FClass::Function. */
+const HANDLER_FUNCTIONS = new Map(
+  [...(readRegistrations() as Map<string, { method: string; className: string | null }>)].map(
+    ([method, reg]) => [method, `${reg.className}::${reg.method}`],
+  ),
+);
+
+/**
+ * The dispatched spec'd method a spec'd method is a C++ alias of: a second
+ * RegisterHandler call binding the same function under an older spelling,
+ * kept so the old name does not become "Unknown method".
+ */
+function aliasOf(method: string): string | undefined {
+  const fn = HANDLER_FUNCTIONS.get(method);
+  if (!fn) return undefined;
+  for (const [other, otherFn] of HANDLER_FUNCTIONS) {
+    if (other !== method && otherFn === fn && SNAPSHOT.handlers[other] && DISPATCHERS.has(other)) return other;
+  }
+  return undefined;
+}
+
+/**
+ * Actions that dispatch another category's spec'd method but still carry a
+ * hand-written clause, because the recording lacks names they advertise. The
+ * RegisterHandler spec already declares those names as aliases; once
+ * specs:record picks them up, convert the action to that category's specBp
+ * and delete its entry here. The last test below fails when that is due.
+ */
+const HAND_WRITTEN_CROSS_TOOL: ReadonlyMap<string, string> = new Map([
+  // mappingContext, inputAction and assetPath: aliases added to the
+  // add_imc_mapping spec in GameplayHandlers.cpp, not yet recorded.
+  ["asset.add_input_mapping", "add_imc_mapping"],
+  // mappingContext, inputAction and assetPath: aliases added to the
+  // remove_imc_mapping spec in GameplayHandlers.cpp, not yet recorded.
+  ["asset.remove_input_mapping", "remove_imc_mapping"],
+  // mappingContext and assetPath: aliases added to the read_imc spec in
+  // GameplayHandlers.cpp, not yet recorded.
+  ["asset.list_input_mappings", "read_imc"],
+]);
+
 // Every other recorded category is held to the same surface rules as the pilot.
 const OTHER_CATEGORIES = [...new Set(Object.values(SNAPSHOT.handlers).map((s) => s.category as string))]
   .filter((c) => c !== "animation")
   .sort();
 
-describe.each(OTHER_CATEGORIES)("the %s surface", (category) => {
+describe.each(OTHER_CATEGORIES)("the %s category", (category) => {
   const tool = ALL_TOOLS.find((t) => t.name === category)!;
   const methods = Object.entries(SNAPSHOT.handlers).filter(([, s]) => s.category === category);
 
-  it("is a tool, and every spec'd method is dispatched by one of its actions", () => {
+  it("is a tool, and every spec'd method is dispatched by an action or is a C++ alias of one that is", () => {
     expect(tool, category).toBeDefined();
-    const bridged = new Set(specdActions(tool).map(([, spec]) => spec.bridge));
-    for (const [method] of methods) expect(bridged.has(method), method).toBe(true);
-  });
-
-  it("takes each spec'd action's Params clause from its spec, and renames nothing in TS", () => {
-    for (const [action, spec] of specdActions(tool)) {
-      const clause = paramsClause(SNAPSHOT.handlers[spec.bridge]);
-      expect(spec.description.endsWith(` ${clause}`), `${action}: description does not end with its generated clause`).toBe(true);
-      expect(spec.mapParams, `${action}: a spec'd action forwards its bag as sent; renames are aliases in the spec`).toBeUndefined();
-    }
-  });
-
-  it("documents every declared name and alias, and nothing else", () => {
-    const known = new Set(Object.keys(tool.schema));
-    for (const [action, spec] of specdActions(tool)) {
-      const declared = SNAPSHOT.handlers[spec.bridge].params.flatMap((p) => [p.name, ...(p.aliases ?? [])]).sort();
-      const documented = parseParams(spec.description, known).params.map((p) => p.name).sort();
-      expect(documented, action).toEqual(declared);
-    }
-  });
-
-  it("marks exactly the required parameters required", () => {
-    for (const [action, spec] of specdActions(tool)) {
-      const schema = actionSchema(tool, action);
-      for (const param of SNAPSHOT.handlers[spec.bridge].params) {
-        const entry = schema.params.find((p) => p.name === param.name);
-        expect(entry, `${action}.${param.name}`).toBeDefined();
-        if (param.aliases?.length) {
-          expect(entry?.alternativeGroup, `${action}.${param.name} is a choice`).toBeDefined();
-        } else {
-          expect(entry?.required, `${action}.${param.name}`).toBe(param.required);
-        }
-      }
+    for (const [method] of methods) {
+      expect(DISPATCHERS.has(method) || aliasOf(method) !== undefined, `${method}: no action dispatches it`).toBe(true);
     }
   });
 
@@ -265,14 +293,88 @@ describe.each(OTHER_CATEGORIES)("the %s surface", (category) => {
   it("keeps the dispatch parameter categoryTool authored", () => {
     expect(tool.schema.action.description).toMatch(/^Action to perform/);
   });
+});
+
+// Every tool that dispatches a spec'd method, whichever category registered it.
+const SPEC_TOOLS = ALL_TOOLS.filter((t) => t.name !== "animation" && specdActions(t).length > 0).map((t) => t.name).sort();
+
+describe.each(SPEC_TOOLS)("the %s tool", (toolName) => {
+  const tool = ALL_TOOLS.find((t) => t.name === toolName)!;
+  const actions = specdActions(tool).filter(([action]) => !HAND_WRITTEN_CROSS_TOOL.has(`${toolName}.${action}`));
+
+  it("takes each spec'd action's Params clause from its spec, and renames nothing in TS", () => {
+    for (const [action, spec] of actions) {
+      const clause = paramsClause(SNAPSHOT.handlers[spec.bridge]);
+      expect(spec.description.endsWith(` ${clause}`), `${action}: description does not end with its generated clause`).toBe(true);
+      expect(spec.mapParams, `${action}: a spec'd action forwards its bag as sent; renames are aliases in the spec`).toBeUndefined();
+    }
+  });
+
+  it("documents every declared name and alias, and nothing else", () => {
+    const known = new Set(Object.keys(tool.schema));
+    for (const [action, spec] of actions) {
+      const declared = SNAPSHOT.handlers[spec.bridge].params.flatMap((p) => [p.name, ...(p.aliases ?? [])]).sort();
+      const documented = parseParams(spec.description, known).params.map((p) => p.name).sort();
+      expect(documented, action).toEqual(declared);
+    }
+  });
+
+  it("marks exactly the required parameters required", () => {
+    for (const [action, spec] of actions) {
+      const schema = actionSchema(tool, action);
+      for (const param of SNAPSHOT.handlers[spec.bridge].params) {
+        const entry = schema.params.find((p) => p.name === param.name);
+        expect(entry, `${action}.${param.name}`).toBeDefined();
+        if (param.aliases?.length) {
+          expect(entry?.alternativeGroup, `${action}.${param.name} is a choice`).toBeDefined();
+        } else {
+          expect(entry?.required, `${action}.${param.name}`).toBe(param.required);
+        }
+      }
+    }
+  });
+
+  it("advertises every key its spec'd actions declare, accepting what the spec declares", () => {
+    for (const [action, spec] of actions) {
+      for (const param of SNAPSHOT.handlers[spec.bridge].params) {
+        for (const key of [param.name, ...(param.aliases ?? [])]) {
+          const advertised = tool.schema[key];
+          expect(advertised, `${action}: ${key} is advertised`).toBeDefined();
+          const signature = zodSignature(advertised as z.ZodTypeAny);
+          expect(accepts(signature, specSignature(param.type, param.items)), `${action}: ${key} is ${signature}`).toBe(true);
+        }
+      }
+    }
+  });
 
   it("reads the same in the source the audits parse as it does at runtime", () => {
-    const parsed = readCategory(path.join(ROOT, "src", "tools", `${category}.ts`));
+    const parsed = readCategory(path.join(ROOT, "src", "tools", `${toolName}.ts`));
     expect(parsed).not.toBeNull();
     const byName = new Map(parsed!.actions.map((a: { name: string; description: string }) => [a.name, a.description]));
-    for (const [action, spec] of specdActions(tool)) {
+    for (const [action, spec] of actions) {
       expect(byName.get(action), action).toBe(spec.description);
     }
+  });
+});
+
+describe("the hand-written cross-tool exceptions", () => {
+  it.each([...HAND_WRITTEN_CROSS_TOOL])("%s still dispatches %s, registered under another category", (qualified, method) => {
+    const [toolName, action] = qualified.split(".");
+    const tool = ALL_TOOLS.find((t) => t.name === toolName);
+    const spec = tool?.actions[action];
+    expect(spec?.kind === "bridge" && spec.bridge, qualified).toBe(method);
+    expect(SNAPSHOT.handlers[method]?.category, qualified).not.toBe(toolName);
+  });
+
+  it.each([...HAND_WRITTEN_CROSS_TOOL])("%s is still needed: the recorded %s spec lacks a name it advertises", (qualified, method) => {
+    const [toolName, action] = qualified.split(".");
+    const tool = ALL_TOOLS.find((t) => t.name === toolName)!;
+    const declared = new Set(SNAPSHOT.handlers[method].params.flatMap((p) => [p.name, ...(p.aliases ?? [])]));
+    const documented = parseParams(tool.actions[action].description ?? "", new Set(Object.keys(tool.schema))).params.map((p) => p.name);
+    expect(
+      documented.every((name) => declared.has(name)),
+      `${qualified}: the recording now declares every name it documents; convert it to specBp and drop the exception`,
+    ).toBe(false);
   });
 });
 

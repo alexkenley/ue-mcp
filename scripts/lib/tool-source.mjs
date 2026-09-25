@@ -235,8 +235,7 @@ function resolveSpreadActions(categoryFile, spreadName) {
  * C++ spec at load time. Reading it from the generated module is what keeps
  * those actions in front of the same audits as the rest.
  */
-function readSpecClauses(categoryFile) {
-  const category = path.basename(categoryFile, ".ts");
+function readSpecClauses(categoryFile, category) {
   const generated = path.join(path.dirname(categoryFile), "specs", `${category}.generated.ts`);
   const clauses = new Map();
   if (!fs.existsSync(generated)) return clauses;
@@ -248,6 +247,21 @@ function readSpecClauses(categoryFile) {
     clauses.set(m[1], JSON.parse(m[2]));
   }
   return clauses;
+}
+
+/**
+ * Every spec builder a category file imports, as local name to the clauses of
+ * the category it came from. A tool can expose a handler another category
+ * registered, importing that category's builder under its own name:
+ * `import { specBp as reflectionSpecBp } from "./specs/reflection.generated.js"`.
+ */
+function readSpecBuilders(categoryFile, src) {
+  const builders = new Map();
+  for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*"\.\/specs\/([a-z_]+)\.generated\.js"/g)) {
+    const binding = m[1].match(/(?:^|,)\s*specBp(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*(?:,|$)/);
+    if (binding) builders.set(binding[1] ?? "specBp", readSpecClauses(categoryFile, m[2]));
+  }
+  return builders;
 }
 
 /** Offset of the `}` closing the `{` at `open`, or -1. */
@@ -304,7 +318,7 @@ function walkActionKeys(src, masked, brace, bodyEnd) {
 export function readCategory(file) {
   const src = fs.readFileSync(file, "utf8");
   const masked = maskLiterals(src);
-  const specClauses = readSpecClauses(file);
+  const specBuilders = readSpecBuilders(file, src);
   const call = masked.indexOf("categoryTool(");
   if (call === -1) return null;
   const args = topLevelArgs(masked, masked.indexOf("(", call));
@@ -389,7 +403,7 @@ export function readCategory(file) {
       // through. Re-deriving it here would read whatever happens to sit at
       // that offset in the category source, which pairs an engine tool's name
       // with a native action's prose.
-      description: a.generated ? a.description : describeAction(src, masked, a.start, a.end, specClauses),
+      description: a.generated ? a.description : describeAction(src, masked, a.start, a.end, specBuilders),
       generated: a.generated === true,
       // `paged()` rewrites the description at runtime to add `cursor?, limit?`
       // to its Params clause, so the generated doc row lists two parameters the
@@ -430,12 +444,14 @@ export function readCategory(file) {
  * wrapped in a helper such as `paged(...)`, so the whole argument span is read
  * for literals rather than the first one matched.
  */
-function describeAction(src, masked, start, end, specClauses = new Map()) {
+function describeAction(src, masked, start, end, specBuilders = new Map()) {
   const head = masked.slice(start, end);
-  // specBp("effect", "summary", "method"): the summary, then the clause the
-  // generated spec module appends for that method at load time (#1057).
-  const spec = head.match(/(?:^|[^\w$])specBp\s*\(/);
-  if (spec) {
+  // specBp("effect", "summary", "method"), under whichever name the file
+  // imported it: the summary, then the clause that builder's generated spec
+  // module appends for that method at load time (#1057).
+  for (const [builder, specClauses] of specBuilders) {
+    const spec = head.match(new RegExp(`(?:^|[^\\w$])${builder.replace(/\$/g, "\\$")}\\s*\\(`));
+    if (!spec) continue;
     const args = topLevelArgs(masked, start + spec.index + spec[0].length - 1);
     if (!args || args.length < 3) return "";
     const summary = concatenatedLiterals(src, masked, args[1][0], args[1][1]);
