@@ -6,10 +6,10 @@
 // spec, re-record, and regenerate (#1057).
 import type { HandlerSpecs } from "../../handler-spec.js";
 import { handlerSpecs as animation } from "./animation.generated.js";
-import { handlerSpecs as asset } from "./asset.generated.js";
+import { handlerSpecs as chooser } from "./chooser.generated.js";
 
 /** Every recorded handler spec, across categories. */
 export const RECORDED_HANDLER_SPECS: HandlerSpecs = {
   ...animation,
-  ...asset,
+  ...chooser,
 };

@@ -41,6 +41,7 @@
 #include "Handlers/WidgetHandlers.h"
 #include "Handlers/AssetHandlers.h"
 #include "Handlers/AssetHandlers_Geometry.h"
+#include "Handlers/ChooserHandlers.h"
 #include "Misc/AutomationTest.h"
 
 namespace MCPHandlerSpecTests
@@ -129,6 +130,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	// invalid package name) runs before anything is created.
 	FAssetHandlers::RegisterHandlers(Registry);
 	FAssetGeometryHandlers::RegisterHandlers(Registry);
+	FChooserHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
 	TestTrue(TEXT("handlers register with a parameter spec"), Specs.Num() > 0);
