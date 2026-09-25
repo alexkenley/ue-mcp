@@ -1708,6 +1708,113 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "set_actor_hlod_layer": {
+    "category": "level",
+    "params": [
+      {
+        "name": "hlodLayer",
+        "type": "string",
+        "required": true,
+        "description": "HLODLayer asset path, or null to clear the per-actor override",
+        "nullable": true
+      },
+      {
+        "name": "actorLabels",
+        "type": "array",
+        "required": false,
+        "description": "Exact actor editor labels",
+        "items": "string"
+      },
+      {
+        "name": "labelPrefix",
+        "type": "string",
+        "required": false,
+        "description": "Case-sensitive prefix over the actor's editor label"
+      },
+      {
+        "name": "labelContains",
+        "type": "string",
+        "required": false,
+        "description": "Case-insensitive substring over the actor's editor label"
+      },
+      {
+        "name": "tag",
+        "type": "string",
+        "required": false,
+        "description": "Actor must carry this tag"
+      },
+      {
+        "name": "classFilter",
+        "type": "string",
+        "required": false,
+        "description": "Actor class, resolved as a class or matched as a substring"
+      },
+      {
+        "name": "folderPath",
+        "type": "string",
+        "required": false,
+        "description": "World Outliner folder, matched exactly"
+      },
+      {
+        "name": "folderPathPrefix",
+        "type": "string",
+        "required": false,
+        "description": "World Outliner folder prefix"
+      },
+      {
+        "name": "matchSubclasses",
+        "type": "boolean",
+        "required": false,
+        "description": "Match subclasses of the class filter (default true)"
+      },
+      {
+        "name": "enableAutoLODGeneration",
+        "type": "boolean",
+        "required": false,
+        "description": "Also set bEnableAutoLODGeneration on each matched actor"
+      },
+      {
+        "name": "dryRun",
+        "type": "boolean",
+        "required": false,
+        "description": "Report what would change without writing"
+      },
+      {
+        "name": "transactionLabel",
+        "type": "string",
+        "required": false,
+        "description": "Undo-stack entry name"
+      }
+    ],
+    "choices": [
+      {
+        "mode": "atLeastOne",
+        "branches": [
+          [
+            "actorLabels"
+          ],
+          [
+            "labelPrefix"
+          ],
+          [
+            "labelContains"
+          ],
+          [
+            "tag"
+          ],
+          [
+            "classFilter"
+          ],
+          [
+            "folderPath"
+          ],
+          [
+            "folderPathPrefix"
+          ]
+        ]
+      }
+    ]
+  },
   "set_actor_material": {
     "category": "level",
     "params": [
@@ -2888,6 +2995,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   remove_instance: "Params: actorLabel?, actorPath?, componentName?, index",
   remove_streaming_sublevel: "Params: levelName (or levelPath)",
   resolve_actor: "Params: internalName",
+  set_actor_hlod_layer: "Params: hlodLayer, at least one of actorLabels/labelPrefix/labelContains/tag/classFilter/folderPath/folderPathPrefix, matchSubclasses?, enableAutoLODGeneration?, dryRun?, transactionLabel?",
   set_actor_material: "Params: actorLabel?, actorPath?, materialPath, slotIndex?",
   set_actor_mobility: "Params: actorLabel?, actorPath?, mobility",
   set_actor_property: "Params: actorLabel?, actorPath?, propertyName, value, force?, world?, pieInstance?",
@@ -2938,7 +3046,7 @@ export const schema: Record<string, z.ZodType> = {
   childComponentName: z.string().optional().describe("Child SceneComponent instance name; omitted selects the actor root"),
   childLabel: z.string().optional().describe("Child actor label; pass childLabel or childPath"),
   childPath: z.string().optional().describe("Child actor object path"),
-  classFilter: z.string().optional().describe("Actor class, resolved as a class or matched as a substring (batch_set_actor_properties). Case-sensitive substring over the class name (get_world_outliner). Restrict to actors of this class (remove_components_by_class)"),
+  classFilter: z.string().optional().describe("Actor class, resolved as a class or matched as a substring (batch_set_actor_properties, set_actor_hlod_layer). Case-sensitive substring over the class name (get_world_outliner). Restrict to actors of this class (remove_components_by_class)"),
   className: z.string().optional().describe("Class name, /Script path or Blueprint class path; required without labelPrefix (get_actors_by_class). Alias for componentClass (get_actors_by_component_class). Actor class filter (list_actor_descs)"),
   color: z.record(z.unknown()).optional().describe("Alias for fogInscatteringColor (set_fog_properties). Colour {r, g, b} in 0-255 (set_light_properties, spawn_light)"),
   componentClass: z.string().optional().describe("Component class: short name or full path (add_component_to_actor). Component class name, exact or substring (get_actors_by_component_class). Case-insensitive substring over the component class name (get_component_tree). Component class to remove (remove_components_by_class)"),
@@ -2952,9 +3060,10 @@ export const schema: Record<string, z.ZodType> = {
   cursor: z.string().optional().describe("Resume a paged read: pass back the nextCursor from the previous page, unmodified"),
   direction: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Ray direction, normalised internally (line_trace). Trace direction (default straight down) (snap_instances_to_surface)"),
   distance: z.number().optional().describe("Ray length when direction is given (default 200000)"),
-  dryRun: z.boolean().optional().describe("Report what would change without writing (batch_set_actor_properties, snap_instances_to_surface). Report what would be removed without removing it (default TRUE) (remove_components_by_class)"),
+  dryRun: z.boolean().optional().describe("Report what would change without writing (batch_set_actor_properties, set_actor_hlod_layer, snap_instances_to_surface). Report what would be removed without removing it (default TRUE) (remove_components_by_class)"),
   editorHidden: z.boolean().optional().describe("Only editor-hidden (true) or only visible (false) actors"),
   editorVisible: z.boolean().optional().describe("Editor viewport visibility"),
+  enableAutoLODGeneration: z.boolean().optional().describe("Also set bEnableAutoLODGeneration on each matched actor"),
   enabled: z.boolean().optional().describe("Enable Nanite (default true)"),
   enableOverrides: z.boolean().optional().describe("Enable each written setting's bOverride flag (default true)"),
   enableVolumetricFog: z.boolean().optional().describe("Enable volumetric fog"),
@@ -2975,6 +3084,7 @@ export const schema: Record<string, z.ZodType> = {
   guids: z.array(z.string()).optional().describe("Exact actor GUIDs"),
   hidden: z.boolean().optional().describe("true hides the actors in the editor, false shows them"),
   hideFromOutliner: z.boolean().optional().describe("Keep the actor out of the World Outliner (default false)"),
+  hlodLayer: z.string().nullable().optional().describe("HLODLayer asset path, or null to clear the per-actor override"),
   ignoreActors: z.array(z.string()).optional().describe("Actor labels to skip"),
   includeOccurrences: z.boolean().optional().describe("Include example actor and component occurrences per mesh"),
   includeProperties: z.boolean().optional().describe("Include reflected UPROPERTY values"),
@@ -2992,7 +3102,7 @@ export const schema: Record<string, z.ZodType> = {
   jitter: z.number().optional().describe("Per-axis location jitter"),
   label: z.string().optional().describe("Actor label; an existing actor with this label is reported rather than duplicated (place_actor, spawn_light, spawn_volume). Actor label (spawn_transient_actor)"),
   labelContains: z.string().optional().describe("Case-insensitive substring over the actor's editor label"),
-  labelPrefix: z.string().optional().describe("Case-sensitive prefix over the actor's editor label (batch_set_actor_properties, get_actors_by_class, remove_components_by_class). Label prefix for the spawned actors (default Grid) (spawn_grid)"),
+  labelPrefix: z.string().optional().describe("Case-sensitive prefix over the actor's editor label (batch_set_actor_properties, get_actors_by_class, remove_components_by_class, set_actor_hlod_layer). Label prefix for the spawned actors (default Grid) (spawn_grid)"),
   levelName: z.string().optional().describe("Streaming sub-level name or package path (remove_streaming_sublevel, set_streaming_sublevel_properties). Loaded sub-level to make current (set_current_edit_level)"),
   levelPath: z.string().optional().describe("Alias for levelName"),
   lightType: z.string().optional().describe("point | spot | directional | rect | sky"),
@@ -3050,7 +3160,7 @@ export const schema: Record<string, z.ZodType> = {
   surfaceActorClass: z.string().optional().describe("Only accept hits on actors of this class"),
   surfaceActorLabels: z.array(z.string()).optional().describe("Only accept hits on actors with these labels"),
   surfaceOffset: z.number().optional().describe("Offset along the surface normal after the hit"),
-  tag: z.string().optional().describe("Actor tag (add_actor_tag, remove_actor_tag). Actor must carry this tag (batch_set_actor_properties, remove_components_by_class)"),
+  tag: z.string().optional().describe("Actor tag (add_actor_tag, remove_actor_tag). Actor must carry this tag (batch_set_actor_properties, remove_components_by_class, set_actor_hlod_layer)"),
   tags: z.array(z.string()).optional().describe("The actor's complete tag list"),
   target: z.string().optional().describe("Alias for targetLabel"),
   targetActor: z.string().optional().describe("Label of the actor to look at"),

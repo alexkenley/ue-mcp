@@ -1,5 +1,5 @@
 {
-  "handlerCount": 830,
+  "handlerCount": 831,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -19510,6 +19510,113 @@
           "type": "boolean",
           "required": false,
           "description": "Empty both arrays; an omitted array then means empty rather than left alone"
+        }
+      ]
+    },
+    "set_actor_hlod_layer": {
+      "category": "level",
+      "params": [
+        {
+          "name": "hlodLayer",
+          "type": "string",
+          "required": true,
+          "description": "HLODLayer asset path, or null to clear the per-actor override",
+          "nullable": true
+        },
+        {
+          "name": "actorLabels",
+          "type": "array",
+          "required": false,
+          "description": "Exact actor editor labels",
+          "items": "string"
+        },
+        {
+          "name": "labelPrefix",
+          "type": "string",
+          "required": false,
+          "description": "Case-sensitive prefix over the actor's editor label"
+        },
+        {
+          "name": "labelContains",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive substring over the actor's editor label"
+        },
+        {
+          "name": "tag",
+          "type": "string",
+          "required": false,
+          "description": "Actor must carry this tag"
+        },
+        {
+          "name": "classFilter",
+          "type": "string",
+          "required": false,
+          "description": "Actor class, resolved as a class or matched as a substring"
+        },
+        {
+          "name": "folderPath",
+          "type": "string",
+          "required": false,
+          "description": "World Outliner folder, matched exactly"
+        },
+        {
+          "name": "folderPathPrefix",
+          "type": "string",
+          "required": false,
+          "description": "World Outliner folder prefix"
+        },
+        {
+          "name": "matchSubclasses",
+          "type": "boolean",
+          "required": false,
+          "description": "Match subclasses of the class filter (default true)"
+        },
+        {
+          "name": "enableAutoLODGeneration",
+          "type": "boolean",
+          "required": false,
+          "description": "Also set bEnableAutoLODGeneration on each matched actor"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Report what would change without writing"
+        },
+        {
+          "name": "transactionLabel",
+          "type": "string",
+          "required": false,
+          "description": "Undo-stack entry name"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "actorLabels"
+            ],
+            [
+              "labelPrefix"
+            ],
+            [
+              "labelContains"
+            ],
+            [
+              "tag"
+            ],
+            [
+              "classFilter"
+            ],
+            [
+              "folderPath"
+            ],
+            [
+              "folderPathPrefix"
+            ]
+          ]
         }
       ]
     },

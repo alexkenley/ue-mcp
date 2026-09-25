@@ -46,6 +46,17 @@ describe("level.set_component_skeletal_mesh (#1099)", () => {
   });
 });
 
+describe("level.set_actor_hlod_layer (#985)", () => {
+  it("clears with null across a selector, and refuses a call with no selector before sending", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    await levelTool.handler(fakeCtx(seen), { action: "set_actor_hlod_layer", hlodLayer: null, tag: "Foliage", labelPrefix: "Tree_" });
+    expect(seen).toEqual([{ hlodLayer: null, tag: "Foliage", labelPrefix: "Tree_" }]);
+    await expect(levelTool.handler(fakeCtx(seen), { action: "set_actor_hlod_layer", hlodLayer: null, dryRun: true }))
+      .rejects.toThrow(/needs at least one of actorLabels\/labelPrefix\/labelContains\/tag\/classFilter\/folderPath\/folderPathPrefix/);
+    expect(seen).toHaveLength(1);
+  });
+});
+
 describe("level.set_component_materials null entries (#1099)", () => {
   it("accepts a null entry, which the description promises clears one slot", () => {
     expect(levelTool.schema.materials.safeParse([null, "/Game/M_A", ""]).success).toBe(true);

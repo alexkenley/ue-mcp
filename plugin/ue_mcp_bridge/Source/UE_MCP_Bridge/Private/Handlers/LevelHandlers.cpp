@@ -494,8 +494,19 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// #985: bulk HLOD layer assignment. A whole-map selector, so it takes the
 	// same 300 second budget as the other batch writes. Mirrored in
 	// src/bridge-timeouts.ts, which a parity test checks.
-	// Unspecced: hlodLayer takes null, which the spec types cannot express yet.
-	Registry.RegisterHandlerWithTimeout(TEXT("set_actor_hlod_layer"), &SetActorHLODLayer, 300.0f);
+	// The layer load fails first under the contract values, so the handler reads
+	// its selector ahead; the contract test calls it once per selector.
+	Registry.RegisterHandlerWithTimeout(TEXT("set_actor_hlod_layer"), &SetActorHLODLayer, 300.0f, {
+		MCPParam::Required(TEXT("hlodLayer"), EType::String, TEXT("HLODLayer asset path, or null to clear the per-actor override")).Nullable(),
+		SpecActorLabels, SpecLabelPrefix, SpecLabelContains, SpecSelectorTag,
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Actor class, resolved as a class or matched as a substring")),
+		SpecFolderPath, SpecFolderPathPrefix, SpecMatchSubclasses,
+		MCPParam::Optional(TEXT("enableAutoLODGeneration"), EType::Boolean, TEXT("Also set bEnableAutoLODGeneration on each matched actor")),
+		SpecDryRun, SpecTransactionLabel,
+	}, MCPSpec::AtLeastOne({
+		{ TEXT("actorLabels") }, { TEXT("labelPrefix") }, { TEXT("labelContains") }, { TEXT("tag") },
+		{ TEXT("classFilter") }, { TEXT("folderPath") }, { TEXT("folderPathPrefix") },
+	}));
 	Registry.RegisterHandler(TEXT("add_actor_tag"), &AddActorTag, {
 		SpecActorLabel, SpecActorPath, SpecTag,
 	});
