@@ -18,10 +18,20 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { renderAll } from "../../scripts/lib/handler-spec-gen.mjs";
-import { makeSpecBp, specProblems, type HandlerSpec, type HandlerSpecs } from "../../src/handler-spec.js";
+import type { z } from "zod";
+import { renderAll, paramsClause } from "../../scripts/lib/handler-spec-gen.mjs";
+import { readCategory } from "../../scripts/lib/tool-source.mjs";
+import {
+  makeSpecBp,
+  specProblems,
+  zodSignature,
+  type HandlerSpec,
+  type HandlerSpecs,
+} from "../../src/handler-spec.js";
 import { ROUTING_PARAM_NAMES } from "../../src/routing-params.js";
-import { handlerSpecs } from "../../src/tools/specs/animation.generated.js";
+import { parseParams, actionSchema } from "../../src/action-schema.js";
+import { animationTool } from "../../src/tools/animation.js";
+import { schema as specSchema, handlerSpecs } from "../../src/tools/specs/animation.generated.js";
 import { RECORDED_HANDLER_SPECS } from "../../src/tools/specs/index.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -29,6 +39,17 @@ const SNAPSHOT = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "golden", "
   handlerCount: number;
   handlers: HandlerSpecs;
 };
+
+/** Actions of the animation tool that dispatch to a spec'd bridge method. */
+function specdActions(): Array<[string, { bridge: string; description: string; mapParams?: unknown }]> {
+  const out: Array<[string, { bridge: string; description: string; mapParams?: unknown }]> = [];
+  for (const [name, spec] of Object.entries(animationTool.actions)) {
+    if (spec.kind === "bridge" && SNAPSHOT.handlers[spec.bridge]) {
+      out.push([name, { bridge: spec.bridge, description: spec.description ?? "", mapParams: spec.mapParams }]);
+    }
+  }
+  return out;
+}
 
 describe("the recording", () => {
   it("is well formed and counts itself", () => {
@@ -97,6 +118,68 @@ describe("the generated modules", () => {
     const specBp = makeSpecBp({ known_method: "Params: none" });
     expect(specBp("read", "Read it.", "known_method").description).toBe("Read it. Params: none");
     expect(() => specBp("read", "Read it.", "unrecorded_method")).toThrow(/No recorded parameter spec/);
+  });
+});
+
+describe("the animation surface", () => {
+  it("has spec'd actions to check", () => {
+    expect(specdActions().length).toBeGreaterThanOrEqual(15);
+  });
+
+  it("takes each spec'd action's Params clause from its spec, and renames nothing in TS", () => {
+    for (const [action, spec] of specdActions()) {
+      const clause = paramsClause(SNAPSHOT.handlers[spec.bridge]);
+      expect(spec.description.endsWith(` ${clause}`), `${action}: description does not end with its generated clause`).toBe(true);
+      expect(spec.mapParams, `${action}: a spec'd action forwards its bag as sent; renames are aliases in the spec`).toBeUndefined();
+    }
+  });
+
+  it("documents every declared name and alias, and nothing else", () => {
+    const known = new Set(Object.keys(animationTool.schema));
+    for (const [action, spec] of specdActions()) {
+      const declared = SNAPSHOT.handlers[spec.bridge].params.flatMap((p) => [p.name, ...(p.aliases ?? [])]).sort();
+      const documented = parseParams(spec.description, known).params.map((p) => p.name).sort();
+      expect(documented, action).toEqual(declared);
+    }
+  });
+
+  it("marks exactly the required parameters required", () => {
+    for (const [action, spec] of specdActions()) {
+      const schema = actionSchema(animationTool, action);
+      for (const param of SNAPSHOT.handlers[spec.bridge].params) {
+        const entry = schema.params.find((p) => p.name === param.name);
+        expect(entry, `${action}.${param.name}`).toBeDefined();
+        if (param.aliases?.length) {
+          // A required name with an alias is a required choice between the two.
+          expect(entry?.alternativeGroup, `${action}.${param.name} is a choice`).toBeDefined();
+        } else {
+          expect(entry?.required, `${action}.${param.name}`).toBe(param.required);
+        }
+      }
+    }
+  });
+
+  it("declares every spec'd key, with one type wherever the category also declares it by hand", () => {
+    for (const [key, generated] of Object.entries(specSchema)) {
+      const advertised = animationTool.schema[key];
+      expect(advertised, `${key} is advertised`).toBeDefined();
+      expect(zodSignature(advertised as z.ZodTypeAny), key).toBe(zodSignature(generated as z.ZodTypeAny));
+    }
+  });
+
+  it("never lets a spec'd key replace a routing parameter", () => {
+    for (const routing of ROUTING_PARAM_NAMES) expect(Object.keys(specSchema)).not.toContain(routing);
+    // The dispatch parameter is still the one categoryTool authored.
+    expect(animationTool.schema.action.description).toMatch(/^Action to perform/);
+  });
+
+  it("reads the same in the source the audits parse as it does at runtime", () => {
+    const parsed = readCategory(path.join(ROOT, "src", "tools", "animation.ts"));
+    expect(parsed).not.toBeNull();
+    const byName = new Map(parsed!.actions.map((a: { name: string; description: string }) => [a.name, a.description]));
+    for (const [action, spec] of specdActions()) {
+      expect(byName.get(action), action).toBe(spec.description);
+    }
   });
 });
 
