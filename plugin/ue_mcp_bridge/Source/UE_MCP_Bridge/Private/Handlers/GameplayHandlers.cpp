@@ -126,6 +126,12 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	{
 		return MCPParam::Required(TEXT("imcPath"), EType::String, TEXT("InputMappingContext asset path"));
 	};
+	// asset(add_input_mapping / remove_input_mapping / list_input_mappings)
+	// expose the IMC handlers below under the asset tool's names (#525).
+	auto AssetImcPath = [&ImcPath]()
+	{
+		return ImcPath().Alias(TEXT("mappingContext")).Alias(TEXT("assetPath"));
+	};
 	auto SaveFlag = []()
 	{
 		return MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Persist the asset (default true); false defers the write"));
@@ -244,7 +250,7 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("create_input_action"), &CreateInputAction);
 	Registry.RegisterHandler(TEXT("create_input_mapping_context"), &CreateInputMappingContext);
 	Registry.RegisterHandler(TEXT("read_imc"), &ReadImc, {
-		ImcPath(),
+		AssetImcPath(),
 	});
 	// #778: superseded by GetInputMappingContexts, which covers every PIE world
 	// rather than only the primary one. The old name stays registered so it does
@@ -263,8 +269,8 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		ImcPath(),
 	});
 	Registry.RegisterHandler(TEXT("add_imc_mapping"), &AddImcMapping, {
-		ImcPath(),
-		MCPParam::Required(TEXT("inputActionPath"), EType::String, TEXT("InputAction asset path to map")),
+		AssetImcPath(),
+		MCPParam::Required(TEXT("inputActionPath"), EType::String, TEXT("InputAction asset path to map")).Alias(TEXT("inputAction")),
 		MCPParam::Required(TEXT("key"), EType::String, TEXT("FKey name to bind")),
 		SaveFlag(),
 	});
@@ -276,9 +282,9 @@ void FGameplayHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		SaveFlag(),
 	});
 	Registry.RegisterHandler(TEXT("remove_imc_mapping"), &RemoveImcMapping, {
-		ImcPath(),
+		AssetImcPath(),
 		MCPParam::Optional(TEXT("mappingIndex"), EType::Number, TEXT("Index of the mapping to remove")),
-		MCPParam::Optional(TEXT("inputActionPath"), EType::String, TEXT("Select the mapping by InputAction (with key)")),
+		MCPParam::Optional(TEXT("inputActionPath"), EType::String, TEXT("Select the mapping by InputAction (with key)")).Alias(TEXT("inputAction")),
 		MCPParam::Optional(TEXT("key"), EType::String, TEXT("Select the mapping by key (with inputActionPath)")),
 		SaveFlag(),
 	});
