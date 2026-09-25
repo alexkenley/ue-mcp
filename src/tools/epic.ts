@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { categoryTool, bp, type ToolDef } from "../types.js";
+import { categoryTool, type ToolDef } from "../types.js";
 import { actions as epicActions, schema as epicSchema } from "./epic/epic.generated.js";
 import { specBp, schema as specSchema } from "./specs/epic.generated.js";
 
@@ -17,19 +16,16 @@ export const epicTool: ToolDef = categoryTool(
     status:           specBp("read", "Report whether Epic's ToolsetRegistry is available and how many toolsets are registered. Never errors (reports available=false with a reason when the plugin is absent).", "epic_status"),
     list_toolsets:    specBp("read", "List registered toolsets: name, version, description, tool names + count. Strips the verbose per-tool input/output schemas to stay small - use describe_toolset for those (or includeSchemas).", "epic_list_toolsets"),
     describe_toolset: specBp("read", "Full schema for one toolset: every tool with its input/output JSON schema.", "epic_describe_toolset"),
-    call_tool:        bp("unknown", "Execute a registered Epic tool exactly as its MCP server would. Params: toolset (qualified), tool (qualified name from describe_toolset, e.g. 'GASToolsets.AttributeSetToolset.ListAttributeSets'), input? (object) or inputJson? (raw JSON string). Returns the tool's JSON result.", "epic_call_tool", (p) => ({ toolset: p.toolset, tool: p.tool, input: p.input, inputJson: p.inputJson })),
+    call_tool:        specBp("unknown", "Execute a registered Epic tool exactly as its MCP server would. tool takes the qualified name from describe_toolset, e.g. GASToolsets.AttributeSetToolset.ListAttributeSets; pass the arguments as input, or as inputJson to send raw JSON. Returns the tool's JSON result.", "epic_call_tool"),
     ...epicActions,
   },
   undefined,
   {
     ...epicSchema,
-    // #1057: every key the discovery handlers declare, generated from their C++
-    // registrations. call_tool is declared by hand: every generated epic_* action
-    // dispatches to it with a bag its own mapParams builds.
+    // #1057: every key the discovery handlers and call_tool declare, generated
+    // from their C++ registrations. The epic_* actions in other categories
+    // dispatch to call_tool too; each builds its bag from its wrapped tool's
+    // recorded input schema.
     ...specSchema,
-    toolset: z.string().optional().describe("Qualified toolset name, e.g. 'GASToolsets.AttributeSetToolset'"),
-    tool: z.string().optional().describe("Qualified tool name, e.g. 'GASToolsets.AttributeSetToolset.ListAttributeSets'"),
-    input: z.record(z.unknown()).optional().describe("call_tool: tool arguments as a JSON object"),
-    inputJson: z.string().optional().describe("call_tool: tool arguments as a raw JSON string (alternative to input)"),
   },
 );

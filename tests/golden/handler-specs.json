@@ -1,5 +1,5 @@
 {
-  "handlerCount": 1079,
+  "handlerCount": 1080,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -13118,6 +13118,36 @@
           ]
         }
       ]
+    },
+    "epic_call_tool": {
+      "category": "epic",
+      "params": [
+        {
+          "name": "toolset",
+          "type": "string",
+          "required": true,
+          "description": "Qualified toolset name from epic_list_toolsets, e.g. GASToolsets.AttributeSetToolset"
+        },
+        {
+          "name": "tool",
+          "type": "string",
+          "required": true,
+          "description": "Tool name from describe_toolset, bare or qualified with its toolset"
+        },
+        {
+          "name": "input",
+          "type": "object",
+          "required": false,
+          "description": "Tool arguments as a JSON object"
+        },
+        {
+          "name": "inputJson",
+          "type": "string",
+          "required": false,
+          "description": "Tool arguments as a raw JSON string; wins over input"
+        }
+      ],
+      "contractExempt": "runs a registered engine tool"
     },
     "epic_describe_toolset": {
       "category": "epic",

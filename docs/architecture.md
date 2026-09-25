@@ -160,7 +160,7 @@ Beyond a list of named, typed parameters:
 
 A choice or an exemption goes in the last argument, after the parameter list: `RegisterHandler(name, fn, { ... }, MCPSpec::ExactlyOne(...).ContractExempt(...))`, or `RegisterHandlerWithTimeout(name, fn, seconds, { ... }, rules)`. Each addition is written into the recording only when it is used (`choices`, `contractExempt`, and on a parameter `nullable`, `orTypes`, `literal`, `fields`, `forms`, `oneOf`), so a spec that uses none of them records exactly what it did before they existed.
 
-Handlers without a spec are declared by hand as before. What keeps one that way now is a shape none of the above covers (a union of several object shapes, say), or a handler not yet migrated.
+Every bridge action takes its parameters from a spec, and `tests/unit/handler-specs.test.ts` fails on one that does not. The one passthrough is the generated `epic_*` actions: each dispatches to `epic_call_tool`, whose spec declares the bag it takes (`toolset`, `tool`, `input`, `inputJson`), through a mapper that builds that bag from the wrapped tool's recorded Epic input schema. That schema is the action's contract, and the test holds every such action to building exactly the bag the spec declares.
 
 #### Socket and thread ownership
 
