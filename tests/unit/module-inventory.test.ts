@@ -108,6 +108,7 @@ const SESSION_INDEPENDENT: Record<string, string> = {
   "lock-owner.ts": "The process-wide fallback lock owner id. A session mints its own through this and holds it itself.",
   "offline.ts": "Classifies whichever tool graph it is handed as offline or editor-bound, and builds the editor-down message from a context handed to it; holds nothing per editor.",
   "action-schema.ts": "Derives one action's parameter schema from whichever tool graph it is handed; holds nothing of its own.",
+  "action-signature.ts": "Renders one action's compact signature from whichever tool graph it is handed; its cache is keyed by the action object, never by editor.",
   "bridge-timeouts.ts": "The call budget table and its resolution; the same answer for every editor.",
   "asset-path.ts": "Pure Unreal path handling.",
   "bridge-parity.ts": "Compares whichever graph and handshake it is handed; holds nothing per editor.",
