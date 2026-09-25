@@ -15269,9 +15269,22 @@
             "type": "number"
           },
           "entries": {
-            "description": "Array of {mesh, weight?} entries",
+            "description": "Weighted mesh entries",
             "items": {
-              "additionalProperties": {},
+              "additionalProperties": false,
+              "properties": {
+                "mesh": {
+                  "description": "StaticMesh asset path; an entry without one is skipped",
+                  "type": "string"
+                },
+                "weight": {
+                  "description": "Relative pick weight (default 1), truncated to a whole number",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "mesh"
+              ],
               "type": "object"
             },
             "type": "array"

@@ -368,8 +368,22 @@ export const handlerSpecs: HandlerSpecs = {
         "name": "entries",
         "type": "array",
         "required": true,
-        "description": "Array of {mesh, weight?} entries",
-        "items": "object"
+        "description": "Weighted mesh entries",
+        "items": "object",
+        "fields": [
+          {
+            "name": "mesh",
+            "type": "string",
+            "required": true,
+            "description": "StaticMesh asset path; an entry without one is skipped"
+          },
+          {
+            "name": "weight",
+            "type": "number",
+            "required": false,
+            "description": "Relative pick weight (default 1), truncated to a whole number"
+          }
+        ]
       },
       {
         "name": "replace",
@@ -424,7 +438,7 @@ export const schema: Record<string, z.ZodType> = {
   assetPath: z.string().optional().describe("PCGGraph asset path"),
   connections: z.array(z.record(z.unknown())).optional().describe("[{from, fromPin?, to, toPin?}]"),
   cursor: z.string().optional().describe("Resume a paged read: pass back the 'nextCursor' from the previous page, unmodified"),
-  entries: z.array(z.record(z.unknown())).optional().describe("Array of {mesh, weight?} entries"),
+  entries: z.array(z.object({ mesh: z.string().describe("StaticMesh asset path; an entry without one is skipped"), weight: z.number().optional().describe("Relative pick weight (default 1), truncated to a whole number") })).optional().describe("Weighted mesh entries"),
   includeSettings: z.boolean().optional().describe("Include per-node editable settings in the response (default true)"),
   limit: z.number().int().optional().describe("Rows to return on this page (default 200, max 2000)"),
   name: z.string().optional().describe("Graph asset name"),

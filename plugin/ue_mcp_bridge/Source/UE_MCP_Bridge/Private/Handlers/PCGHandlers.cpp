@@ -218,7 +218,10 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("set_static_mesh_spawner_meshes"), &SetStaticMeshSpawnerMeshes, {
 		GraphPath(),
 		MCPParam::Required(TEXT("nodeName"), EType::String, TEXT("Engine name of the node, as read_graph reports it")),
-		MCPParam::Required(TEXT("entries"), EType::Array, TEXT("Array of {mesh, weight?} entries")).Items(EType::Object),
+		MCPParam::Required(TEXT("entries"), EType::Array, TEXT("Weighted mesh entries")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("mesh"), EType::String, TEXT("StaticMesh asset path; an entry without one is skipped")),
+			MCPParam::OptionalField(TEXT("weight"), EType::Number, TEXT("Relative pick weight (default 1), truncated to a whole number")),
+		}),
 		MCPParam::Optional(TEXT("replace"), EType::Boolean, TEXT("Overwrite existing MeshEntries (default true)")),
 	});
 	// #146: force_regenerate / cleanup / toggle_graph on PCG components

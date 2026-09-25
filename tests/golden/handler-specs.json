@@ -23520,8 +23520,22 @@
           "name": "entries",
           "type": "array",
           "required": true,
-          "description": "Array of {mesh, weight?} entries",
-          "items": "object"
+          "description": "Weighted mesh entries",
+          "items": "object",
+          "fields": [
+            {
+              "name": "mesh",
+              "type": "string",
+              "required": true,
+              "description": "StaticMesh asset path; an entry without one is skipped"
+            },
+            {
+              "name": "weight",
+              "type": "number",
+              "required": false,
+              "description": "Relative pick weight (default 1), truncated to a whole number"
+            }
+          ]
         },
         {
           "name": "replace",
