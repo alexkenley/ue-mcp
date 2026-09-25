@@ -89,6 +89,7 @@ export const REGISTERED_HANDLER_TIMEOUT_SECONDS: Readonly<Record<string, number>
   plan_real_world_landscape: 120,
   query_components: 300,
   read_blueprint_graph: 180,
+  rebuild_water_zone: 120,
   recreate_physics_state: 300,
   refresh_landscape_physical_material_collision: 600,
   remove_components_by_class: 300,

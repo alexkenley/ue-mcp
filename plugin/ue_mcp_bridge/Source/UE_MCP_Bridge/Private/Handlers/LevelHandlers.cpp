@@ -147,6 +147,7 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("count_actors_by_class"), &CountActorsByClass);
 	Registry.RegisterHandler(TEXT("get_runtime_virtual_texture_summary"), &GetRVTSummary);
 	Registry.RegisterHandler(TEXT("set_water_body_property"), &SetWaterBodyProperty);
+	Registry.RegisterHandlerWithTimeout(TEXT("rebuild_water_zone"), &RebuildWaterZone, 120.0f);
 	Registry.RegisterHandler(TEXT("get_actor_bounds"), &GetActorBounds);
 	Registry.RegisterHandler(TEXT("resolve_actor"), &ResolveActor);
 	Registry.RegisterHandler(TEXT("set_actor_property"), &SetActorProperty);
