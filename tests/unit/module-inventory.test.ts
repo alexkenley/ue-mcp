@@ -115,6 +115,7 @@ const SESSION_INDEPENDENT: Record<string, string> = {
   "epic-input.ts": "Pure argument shaping for one wrapped engine tool call; no editor to scope it to.",
   "path-params.ts": "Pure separator repair over a parameter bag; the same rule in every editor.",
   "field-select.ts": "Pure projection over whatever result it is handed; no editor to scope it to.",
+  "param-forwarding.ts": "Pure read tracking over one mapper call; nothing per editor.",
   "call-pipeline.ts": "Composes those two over one call's parameters and result; holds nothing per editor.",
   "pagination.ts": "Declares the cursor/limit parameters and reads the paging fields back; the editor holds the collection and the C++ half holds the cursor.",
   "engine-index.ts": "Indexes an ENGINE tree, which projects share; keyed by engine root, not by editor.",
