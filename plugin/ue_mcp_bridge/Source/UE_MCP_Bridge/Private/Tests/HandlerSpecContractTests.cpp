@@ -53,6 +53,7 @@
 #include "Handlers/FoliageHandlers.h"
 #include "Handlers/LandscapeHandlers.h"
 #include "Handlers/LevelHandlers.h"
+#include "Handlers/SplineHandlers.h"
 #include "Misc/AutomationTest.h"
 
 namespace MCPHandlerSpecTests
@@ -217,6 +218,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FFoliageHandlers::RegisterHandlers(Registry);
 	FLandscapeHandlers::RegisterHandlers(Registry);
 	FLevelHandlers::RegisterHandlers(Registry);
+	FSplineHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
 	TestTrue(TEXT("handlers register with a parameter spec"), Specs.Num() > 0);

@@ -363,6 +363,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetWorldPartitionSettings(const TSharedPt
 // configure by hand in the editor UI.
 TSharedPtr<FJsonValue> FLevelHandlers::SetWorldPartitionSettings(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("cellSize"), TEXT("loadingRange"), TEXT("settings"), TEXT("grid"), TEXT("gridPath"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	FString ResolveError;
@@ -613,14 +617,19 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetWorldPartitionSettings(const TSharedPt
 // leave the manual editor step exactly where it was.
 TSharedPtr<FJsonValue> FLevelHandlers::AddRuntimeCellTransformer(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("transformerClass"), TEXT("properties"), TEXT("position"), TEXT("skipIfPresent"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	FString ResolveError;
 	UWorldPartition* WorldPartition = MCPResolveWorldPartition(World, ResolveError);
 	if (!WorldPartition) return MCPError(ResolveError);
 
+	// className is the spec's alias, renamed to transformerClass before this runs.
 	FString ClassName;
-	if (auto Err = RequireStringAlt(Params, TEXT("transformerClass"), TEXT("className"), ClassName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("transformerClass"), ClassName)) return Err;
 
 	// The base check and the concrete check both come from the shared guard, so
 	// a wrong class here reads the same way it does everywhere else in the

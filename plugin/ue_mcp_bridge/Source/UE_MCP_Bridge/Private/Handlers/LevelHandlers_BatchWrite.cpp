@@ -456,6 +456,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::BatchSetActorProperties(const TSharedPtr<
 TSharedPtr<FJsonValue> FLevelHandlers::BulkSetComponentProperty(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	MCPReadParamsAhead(Params, {
+		TEXT("componentName"), TEXT("propertyName"), TEXT("value"), TEXT("actorLabels"), TEXT("labelPrefix"),
+		TEXT("labelContains"), TEXT("tag"), TEXT("classFilter"), TEXT("folderPath"), TEXT("folderPathPrefix"),
+		TEXT("matchSubclasses"), TEXT("dryRun"), TEXT("transactionLabel"),
+	});
 	REQUIRE_EDITOR_WORLD(World);
 
 	FString ComponentName;
@@ -833,6 +838,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::RemoveComponentsByClass(const TSharedPtr<
 TSharedPtr<FJsonValue> FLevelHandlers::SpawnActorsBatch(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	MCPReadParamsAhead(Params, {
+		TEXT("actorClass"), TEXT("instances"), TEXT("fromComponents"), TEXT("alongSpline"), TEXT("properties"),
+		TEXT("labelPrefix"), TEXT("dryRun"), TEXT("maxSpawn"), TEXT("transactionLabel"),
+	});
 	REQUIRE_EDITOR_WORLD(World);
 
 	FString ActorClassSpec;
@@ -1239,6 +1248,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::SpawnActorsBatch(const TSharedPtr<FJsonOb
 TSharedPtr<FJsonValue> FLevelHandlers::SetComponentMaterials(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabels"), TEXT("labelPrefix"), TEXT("labelContains"), TEXT("tag"), TEXT("classFilter"),
+		TEXT("folderPath"), TEXT("folderPathPrefix"), TEXT("matchSubclasses"), TEXT("componentName"), TEXT("materials"),
+		TEXT("material"), TEXT("clearOverrides"), TEXT("dryRun"), TEXT("transactionLabel"),
+	});
 	REQUIRE_EDITOR_WORLD(World);
 
 	FMCPBatchSelector Selector;

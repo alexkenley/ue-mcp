@@ -104,12 +104,10 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("level"));
 
-	// #1057: a handler registered with a spec declares its parameters here and
-	// nowhere else; the TS surface for it is generated from a recording of these.
-	// A handler registered without one is either one the contract test cannot
-	// call safely (its values would reach a write before anything fails), or one
-	// whose surface the spec types cannot express yet; the comment at each says
-	// which.
+	// #1057: every handler here declares its parameters in its spec and nowhere
+	// else; the TS surface is generated from a recording of these. One whose
+	// contract values would reach a write before anything fails says why in its
+	// ContractExempt reason.
 	using EType = EMCPParamType;
 	const FMCPParamSpec SpecActorLabel = MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Actor editor label; pass actorLabel or actorPath"));
 	const FMCPParamSpec SpecActorPath = MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path; the unambiguous selector, and it wins over actorLabel"));
@@ -198,8 +196,11 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// #964: LevelHandlers_Save.cpp. Saves through the same package path
 	// editor(save_dirty) uses, so the two cannot disagree about one package,
 	// and reports the package, the file and the engine's own reason on failure.
-	// Unspecced: it saves, and the contract test must not.
-	Registry.RegisterHandler(TEXT("save_level"), &SaveLevel);
+	Registry.RegisterHandler(TEXT("save_level"), &SaveLevel, {
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Write a package even when it is already clean (default false)")),
+		MCPParam::Optional(TEXT("includeExternalActors"), EType::Boolean, TEXT("Also save the level's loaded external actor and folder packages (default true)")),
+		MCPParam::Optional(TEXT("commitDeletes"), EType::Boolean, TEXT("Save through the editor's dirty-package save, which deletes the packages of deleted World Partition actors (default false)")),
+	}, MCPSpec::ContractExempt(TEXT("Saves the current level under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("list_levels"), &ListLevels, {
 		SpecCursor, SpecLimit,
 	});
@@ -224,8 +225,11 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("extent"), EType::Vec3, TEXT("Query extent (default 100, 100, 100)")),
 		SpecWorld, SpecPieInstance,
 	});
-	// Unspecced: the contract's empty lists would clear the editor selection.
-	Registry.RegisterHandler(TEXT("select_actors"), &SelectActors);
+	const FMCPParamSpec SpecActorPaths = MCPParam::Optional(TEXT("actorPaths"), EType::Array, TEXT("Full actor object paths")).Items(EType::String);
+	Registry.RegisterHandler(TEXT("select_actors"), &SelectActors, {
+		SpecActorLabels, SpecActorPaths,
+	}, MCPSpec::AtLeastOne({ { TEXT("actorLabels") }, { TEXT("actorPaths") } })
+		.ContractExempt(TEXT("Deselects everything before it selects, so the contract's empty lists would clear the editor selection")));
 	Registry.RegisterHandler(TEXT("spawn_light"), &SpawnLight, {
 		MCPParam::Required(TEXT("lightType"), EType::String, TEXT("point | spot | directional | rect | sky")),
 		SpecOnConflict, SpecLabel, SpecLocation, SpecRotation, SpecIntensity, SpecColor, SpecMobility,
@@ -257,17 +261,51 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		SpecActorLabel, SpecActorPath,
 		MCPParam::Required(TEXT("componentName"), EType::String, TEXT("Component to remove")),
 	});
-	// Unspecced: it loads a map, and the contract test must not.
-	Registry.RegisterHandler(TEXT("load_level"), &LoadLevel);
-	// Unspecced: the contract's dryRun=false would clear the Level Blueprint.
-	Registry.RegisterHandler(TEXT("clear_level_script"), &ClearLevelScript);
+	Registry.RegisterHandler(TEXT("load_level"), &LoadLevel, {
+		MCPParam::Required(TEXT("levelPath"), EType::String, TEXT("Map package to open")),
+	}, MCPSpec::ContractExempt(TEXT("Ends any play session, collects garbage and swaps the open map before the contract path can fail")));
+	Registry.RegisterHandler(TEXT("clear_level_script"), &ClearLevelScript, {
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report what would be removed without removing it (default true)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save only the current level after a successful clear and compile (default false)")),
+	}, MCPSpec::ContractExempt(TEXT("The contract's dryRun=false clears the loaded Level Blueprint; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("set_component_property"), &SetComponentProperty, {
 		SpecActorLabel, SpecActorPath, SpecComponentName, SpecPropertyName,
 		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Value to write; null clears an object reference")),
 		SpecWorld, SpecPieInstance,
 	});
-	// Unspecced: it reads _restoreRelative, an internal rollback key the surface must not advertise.
-	Registry.RegisterHandler(TEXT("nudge_component"), &NudgeComponent);
+	const FMCPParamSpec SpecExactSceneComponent = MCPParam::Required(TEXT("componentName"), EType::String, TEXT("Exact SceneComponent instance name"));
+	Registry.RegisterHandler(TEXT("nudge_component"), &NudgeComponent, {
+		SpecActorLabel, SpecActorPath, SpecExactSceneComponent,
+		MCPParam::Optional(TEXT("frame"), EType::String, TEXT("Frame for translation and axis rotation: world | actor (default) | parent | component")),
+		MCPParam::Optional(TEXT("translationDelta"), EType::Object, TEXT("Frame-relative translation in centimetres")).WithFields({
+			MCPParam::OptionalField(TEXT("forwardCm"), EType::Number, TEXT("Along the frame's forward axis")),
+			MCPParam::OptionalField(TEXT("rightCm"), EType::Number, TEXT("Along the frame's right axis")),
+			MCPParam::OptionalField(TEXT("upCm"), EType::Number, TEXT("Along the frame's up axis")),
+		}),
+		MCPParam::Optional(TEXT("axisRotation"), EType::Object, TEXT("Quaternion rotation about one frame axis; not with viewRotation")).WithFields({
+			MCPParam::RequiredField(TEXT("axis"), EType::String, TEXT("forward | right | up")),
+			MCPParam::RequiredField(TEXT("degrees"), EType::Number, TEXT("Signed rotation in degrees")),
+		}),
+		MCPParam::Optional(TEXT("viewRotation"), EType::Object, TEXT("Observer-relative rotation in the selected frame; not with axisRotation")).WithFields({
+			MCPParam::RequiredField(TEXT("viewFrom"), EType::String, TEXT("front | back | right | left | above | below")),
+			MCPParam::RequiredField(TEXT("direction"), EType::String, TEXT("clockwise | counterclockwise")),
+			MCPParam::RequiredField(TEXT("degrees"), EType::Number, TEXT("Rotation in degrees, greater than zero")),
+		}),
+		MCPParam::Optional(TEXT("scaleMultiplier"), EType::Number, TEXT("Uniform relative-scale multiplier, greater than zero")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Inspect and preview the requested transform without writing (default false)")),
+		SpecWorld, SpecPieInstance,
+	}, MCPSpec::ExactlyOne({ { TEXT("actorLabel") }, { TEXT("actorPath") } }));
+	// nudge_component's rollback names this, so its own surface carries no restore key.
+	Registry.RegisterHandler(TEXT("restore_component_relative_transform"), &RestoreComponentRelativeTransform, {
+		SpecActorLabel, SpecActorPath, SpecExactSceneComponent,
+		MCPParam::Required(TEXT("relativeTransform"), EType::Object, TEXT("The relative transform to put back, as nudge_component's rollback records it")).WithFields({
+			MCPParam::RequiredField(TEXT("location"), EType::Vec3, TEXT("Relative location")),
+			MCPParam::RequiredField(TEXT("quaternion"), EType::Object, TEXT("Relative rotation {x, y, z, w}; this is what is applied")),
+			MCPParam::RequiredField(TEXT("scale"), EType::Vec3, TEXT("Relative scale")),
+			MCPParam::OptionalField(TEXT("rotation"), EType::Rotator, TEXT("The same rotation as a rotator, for reading only")),
+		}),
+		SpecWorld, SpecPieInstance,
+	}, MCPSpec::ExactlyOne({ { TEXT("actorLabel") }, { TEXT("actorPath") } }));
 	Registry.RegisterHandler(TEXT("get_component_details"), &GetComponentDetails, {
 		SpecActorLabel, SpecActorPath, SpecComponentName,
 		MCPParam::Optional(TEXT("includeValues"), EType::Boolean, TEXT("Dump UPROPERTY values")),
@@ -284,8 +322,12 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("properties"), EType::Object, TEXT("Property name to value")),
 	});
 	Registry.RegisterHandler(TEXT("get_world_settings"), &GetWorldSettings, {});
-	// Unspecced: it writes each setting as it reads it, before anything can fail.
-	Registry.RegisterHandler(TEXT("set_world_settings"), &SetWorldSettings);
+	Registry.RegisterHandler(TEXT("set_world_settings"), &SetWorldSettings, {
+		MCPParam::Optional(TEXT("defaultGameMode"), EType::String, TEXT("GameMode class path or short name; None clears it")),
+		MCPParam::Optional(TEXT("killZ"), EType::Number, TEXT("KillZ height")),
+		MCPParam::Optional(TEXT("globalGravityZ"), EType::Number, TEXT("Global gravity Z")),
+		MCPParam::Optional(TEXT("enableWorldBoundsChecks"), EType::Boolean, TEXT("Enable world bounds checks")),
+	});
 	Registry.RegisterHandler(TEXT("set_fog_properties"), &SetFogProperties, {
 		SpecActorLabel, SpecActorPath, SpecWorld, SpecPieInstance,
 		MCPParam::Optional(TEXT("fogDensity"), EType::Number, TEXT("Fog density")),
@@ -362,8 +404,18 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("ignoreActors"), EType::Array, TEXT("Actor labels to skip")).Items(EType::String),
 		SpecWorld, SpecPieInstance,
 	});
-	// Unspecced: its traces entries carry a per-field shape the spec types cannot express yet.
-	Registry.RegisterHandler(TEXT("bulk_line_trace"), &BulkLineTrace);
+	Registry.RegisterHandler(TEXT("bulk_line_trace"), &BulkLineTrace, {
+		MCPParam::Required(TEXT("traces"), EType::Array, TEXT("Line traces, 1 to 256, each read the way line_trace reads its parameters")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("start"), EType::Vec3, TEXT("Ray start")),
+			MCPParam::OptionalField(TEXT("end"), EType::Vec3, TEXT("Ray end; pass end or direction and distance")),
+			MCPParam::OptionalField(TEXT("direction"), EType::Vec3, TEXT("Ray direction, normalised internally")),
+			MCPParam::OptionalField(TEXT("distance"), EType::Number, TEXT("Ray length when direction is given (default 200000)")),
+			MCPParam::OptionalField(TEXT("traceComplex"), EType::Boolean, TEXT("Trace per-triangle collision (default false)")),
+			MCPParam::OptionalField(TEXT("channel"), EType::String, TEXT("Collision channel (default Visibility)")),
+			MCPParam::OptionalField(TEXT("ignoreActors"), EType::Array, TEXT("Actor labels to skip")).Items(EType::String),
+		}),
+		SpecWorld, SpecPieInstance,
+	});
 	// #453: per-actor motion snapshot for telemetry probes. Reads location,
 	// rotation, velocity, angular velocity, scale, and ground state in one
 	// call. Caller is expected to invoke at the desired sample interval.
@@ -422,10 +474,26 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("get_nanite_info"), &GetNaniteInfo, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh asset path")).Alias(TEXT("meshPath")),
 	});
-	// #679/#677: spawn a SkeletalMeshActor for visual/deform verification.
-	// Unspecced: materials entries take null, which a spec cannot declare for an array element yet.
-	Registry.RegisterHandler(TEXT("spawn_skeletal_mesh_actor"), &SpawnSkeletalMeshActor);
-	Registry.RegisterHandler(TEXT("place_skeletal_actor"), &SpawnSkeletalMeshActor);
+	// #679/#677: spawn a SkeletalMeshActor for visual/deform verification. The
+	// mesh load fails first under the contract values. skeletalMesh is nullable
+	// only because the category shares the key with set_component_skeletal_mesh.
+	const TArray<FMCPParamSpec> SpawnSkeletalSpec = {
+		MCPParam::Optional(TEXT("skeletalMesh"), EType::String, TEXT("SkeletalMesh asset path to spawn; null is refused here")).Nullable(),
+		MCPParam::Optional(TEXT("meshPath"), EType::String, TEXT("The older spelling of skeletalMesh")),
+		SpecLabel, SpecOnConflict,
+		MCPParam::Optional(TEXT("transform"), EType::Object, TEXT("Spawn transform; location, rotation and scale given on their own win over its parts")).WithFields({
+			MCPParam::OptionalField(TEXT("location"), EType::Vec3, TEXT("World location")),
+			MCPParam::OptionalField(TEXT("rotation"), EType::Rotator, TEXT("World rotation")),
+			MCPParam::OptionalField(TEXT("scale"), EType::Vec3, TEXT("Actor scale")),
+		}),
+		SpecLocation, SpecRotation, SpecScale,
+		MCPParam::Optional(TEXT("materials"), EType::Array, TEXT("Per-slot component material override paths; index is the slot, and a null or empty entry leaves that slot alone")),
+		MCPParam::Optional(TEXT("animSequence"), EType::String, TEXT("Single-node preview animation")),
+		MCPParam::Optional(TEXT("loop"), EType::Boolean, TEXT("Loop the preview animation (default true)")),
+	};
+	const FMCPSpecRules SpawnSkeletalRules = MCPSpec::ExactlyOne({ { TEXT("skeletalMesh") }, { TEXT("meshPath") } });
+	Registry.RegisterHandler(TEXT("spawn_skeletal_mesh_actor"), &SpawnSkeletalMeshActor, SpawnSkeletalSpec, SpawnSkeletalRules);
+	Registry.RegisterHandler(TEXT("place_skeletal_actor"), &SpawnSkeletalMeshActor, SpawnSkeletalSpec, SpawnSkeletalRules);
 	// Called once per selector by the contract test; the actor lookup fails first.
 	Registry.RegisterHandler(TEXT("set_component_skeletal_mesh"), &SetComponentSkeletalMesh, {
 		SpecActorLabel, SpecActorPath,
@@ -468,29 +536,75 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("maxDistance"), EType::Number, TEXT("Downward trace length (default 100000)")),
 		SpecWorld, SpecPieInstance,
 	});
-	// Unspecced, like every selector-driven batch write here: the contract
-	// values match nothing, but nothing fails before the write path runs.
-	Registry.RegisterHandler(TEXT("delete_actors"), &DeleteActors);
-	Registry.RegisterHandlerWithTimeout(TEXT("delete_exact_labeled_actors_in_levels"), &DeleteExactLabeledActorsInLevels, 300.0f);
-	Registry.RegisterHandler(TEXT("set_actor_folder_path"), &SetActorFolderPath);
+	// The contract values match no actor, and the delete loop then has nothing to destroy.
+	Registry.RegisterHandler(TEXT("delete_actors"), &DeleteActors, {
+		SpecLabelPrefix, SpecLabelContains,
+		MCPParam::Optional(TEXT("nameContains"), EType::String, TEXT("Case-insensitive substring over the actor's internal name")),
+		MCPParam::Optional(TEXT("className"), EType::String, TEXT("Case-sensitive substring over the class name")),
+		SpecSelectorTag,
+		MCPParam::Optional(TEXT("classPathContains"), EType::String, TEXT("Case-insensitive substring of the generated class path")),
+		MCPParam::Optional(TEXT("classPathContainsAny"), EType::Array, TEXT("Match when the class path contains any of these case-insensitive substrings")).Items(EType::String),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report the matches without deleting them (default false)")),
+	}, MCPSpec::AtLeastOne({
+		{ TEXT("labelPrefix") }, { TEXT("labelContains") }, { TEXT("nameContains") }, { TEXT("className") },
+		{ TEXT("tag") }, { TEXT("classPathContains") }, { TEXT("classPathContainsAny") },
+	}));
+	// Its onMissing check refuses the contract value before any map is loaded.
+	Registry.RegisterHandlerWithTimeout(TEXT("delete_exact_labeled_actors_in_levels"), &DeleteExactLabeledActorsInLevels, 300.0f, {
+		MCPParam::Required(TEXT("levels"), EType::Array, TEXT("Per-map targets, at most 16")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("levelPath"), EType::String, TEXT("Long package name of the .umap, such as /Game/Maps/Arena")),
+			MCPParam::RequiredField(TEXT("actorLabels"), EType::Array, TEXT("Exact editor labels to delete in that map, at most 256, no duplicates")).Items(EType::String),
+			MCPParam::OptionalField(TEXT("expectedClassPath"), EType::String, TEXT("Actor class every matched actor must be, such as /Script/Engine.StaticMeshActor")),
+		}),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Preview without deleting (default TRUE)")),
+		MCPParam::Optional(TEXT("onMissing"), EType::String, TEXT("error (default) | ignore")),
+		MCPParam::Optional(TEXT("restoreOriginalLevel"), EType::Boolean, TEXT("Reopen the map that was open before the call (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("set_actor_folder_path"), &SetActorFolderPath, {
+		MCPParam::Required(TEXT("folderPath"), EType::String, TEXT("World Outliner folder; an empty string moves the actors to the root")),
+		SpecActorLabels, SpecLabelPrefix,
+		MCPParam::Optional(TEXT("className"), EType::String, TEXT("Case-sensitive substring over the class name")),
+		SpecSelectorTag,
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report the matches without moving them (default false)")),
+		SpecTransactionLabel,
+	}, MCPSpec::AtLeastOne({ { TEXT("actorLabels") }, { TEXT("labelPrefix") }, { TEXT("className") }, { TEXT("tag") } })
+		.ContractExempt(TEXT("Opens an undo transaction and runs its write loop under the contract values, which match no actor; nothing it reads fails first")));
+	const FMCPParamSpec SpecDescFilter = MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring over label, name, class and path"));
+	const FMCPParamSpec SpecDescClassName = MCPParam::Optional(TEXT("className"), EType::String, TEXT("Actor class filter"));
+	const FMCPParamSpec SpecDescGuids = MCPParam::Optional(TEXT("guids"), EType::Array, TEXT("Exact actor GUIDs")).Items(EType::String);
+	const FMCPParamSpec SpecDescBounds = MCPParam::Optional(TEXT("bounds"), EType::Object, TEXT("{min:{x,y,z}, max:{x,y,z}} intersection test"));
+	const FMCPParamSpec SpecDescLoadedOnly = MCPParam::Optional(TEXT("loadedOnly"), EType::Boolean, TEXT("Only actors currently streamed in"));
+	const FMCPParamSpec SpecDescUnloadedOnly = MCPParam::Optional(TEXT("unloadedOnly"), EType::Boolean, TEXT("Only actors on disk that are not streamed in"));
 	Registry.RegisterHandler(TEXT("list_actor_descs"), &ListActorDescs, {
-		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring over label, name, class and path")),
-		MCPParam::Optional(TEXT("className"), EType::String, TEXT("Actor class filter")),
-		MCPParam::Optional(TEXT("guids"), EType::Array, TEXT("Exact actor GUIDs")).Items(EType::String),
-		MCPParam::Optional(TEXT("bounds"), EType::Object, TEXT("{min:{x,y,z}, max:{x,y,z}} intersection test")),
-		MCPParam::Optional(TEXT("loadedOnly"), EType::Boolean, TEXT("Only actors currently streamed in")),
-		MCPParam::Optional(TEXT("unloadedOnly"), EType::Boolean, TEXT("Only actors on disk that are not streamed in")),
+		SpecDescFilter, SpecDescClassName, SpecDescGuids, SpecDescBounds, SpecDescLoadedOnly, SpecDescUnloadedOnly,
 		SpecCursor, SpecLimit,
 	});
-	// Unspecced: it pins actors into the editor world, which the contract test must not.
-	Registry.RegisterHandlerWithTimeout(TEXT("load_actor_descs"), &LoadActorDescs, 300.0f);
+	// Its mode check refuses the contract value before anything is pinned.
+	Registry.RegisterHandlerWithTimeout(TEXT("load_actor_descs"), &LoadActorDescs, 300.0f, {
+		MCPParam::Optional(TEXT("mode"), EType::String, TEXT("pin (make resident, default) | unpin (release)")),
+		SpecDescFilter, SpecDescClassName, SpecDescGuids, SpecDescBounds, SpecDescLoadedOnly, SpecDescUnloadedOnly,
+		MCPParam::Optional(TEXT("maxActors"), EType::Integer, TEXT("Refuse to act on more than this many actors (default 256)")),
+		SpecDryRun,
+	});
 	// #985: LevelHandlers_WorldPartitionSettings.cpp. The streaming knobs and
 	// the runtime cell transformer stack live with the other World Partition
 	// actions rather than in a category of their own.
 	Registry.RegisterHandler(TEXT("get_world_partition_settings"), &GetWorldPartitionSettings, {});
-	// Unspecced: both write the world partition, and on 5.4 the transformer class is not checked before the write.
-	Registry.RegisterHandler(TEXT("set_world_partition_settings"), &SetWorldPartitionSettings);
-	Registry.RegisterHandler(TEXT("add_runtime_cell_transformer"), &AddRuntimeCellTransformer);
+	// A contract grid path names no grid and a zero cell size is refused, so nothing is written.
+	Registry.RegisterHandler(TEXT("set_world_partition_settings"), &SetWorldPartitionSettings, {
+		MCPParam::Optional(TEXT("cellSize"), EType::Number, TEXT("Streaming cell size in world centimetres")),
+		MCPParam::Optional(TEXT("loadingRange"), EType::Number, TEXT("Streaming loading range in world centimetres")),
+		MCPParam::Optional(TEXT("settings"), EType::Object, TEXT("Dotted path rooted at the world partition to value")),
+		MCPParam::Optional(TEXT("grid"), EType::String, TEXT("Streaming grid for cellSize and loadingRange, by name; needed when the map has several")),
+		MCPParam::Optional(TEXT("gridPath"), EType::String, TEXT("Streaming grid for cellSize and loadingRange, by the dotted path get_world_partition_settings reports")),
+	}, MCPSpec::AtLeastOne({ { TEXT("cellSize") }, { TEXT("loadingRange") }, { TEXT("settings") } }));
+	// The contract class resolves to nothing and is refused before the stack is touched.
+	Registry.RegisterHandler(TEXT("add_runtime_cell_transformer"), &AddRuntimeCellTransformer, {
+		MCPParam::Required(TEXT("transformerClass"), EType::String, TEXT("WorldPartitionRuntimeCellTransformer subclass: short name, Module.Class or /Script path")).Alias(TEXT("className")),
+		MCPParam::Optional(TEXT("properties"), EType::Object, TEXT("Property name to value, applied to the new transformer instance")),
+		MCPParam::Optional(TEXT("position"), EType::Integer, TEXT("Stack index to insert at; -1 (default) appends")),
+		MCPParam::Optional(TEXT("skipIfPresent"), EType::Boolean, TEXT("Report an existing transformer of this class instead of adding a duplicate (default true)")),
+	});
 	// #985: bulk HLOD layer assignment. A whole-map selector, so it takes the
 	// same 300 second budget as the other batch writes. Mirrored in
 	// src/bridge-timeouts.ts, which a parity test checks.
@@ -547,8 +661,13 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("levelName"), EType::String, TEXT("Loaded sub-level to make current")).Alias(TEXT("levelPath")),
 	});
 	Registry.RegisterHandler(TEXT("list_streaming_sublevels"), &ListStreamingSublevels, {});
-	// Unspecced: it loads the sub-level package, which the contract test must not.
-	Registry.RegisterHandler(TEXT("add_streaming_sublevel"), &AddStreamingSublevel);
+	Registry.RegisterHandler(TEXT("add_streaming_sublevel"), &AddStreamingSublevel, {
+		MCPParam::Required(TEXT("levelPath"), EType::String, TEXT("Map package to add as a streaming sub-level")),
+		MCPParam::Optional(TEXT("streamingClass"), EType::String, TEXT("LevelStreamingDynamic (default) | LevelStreamingAlwaysLoaded")),
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("Sub-level offset")),
+		MCPParam::Optional(TEXT("initiallyLoaded"), EType::Boolean, TEXT("Load the sub-level with the persistent level")),
+		MCPParam::Optional(TEXT("initiallyVisible"), EType::Boolean, TEXT("Make the sub-level visible when loaded")),
+	}, MCPSpec::ContractExempt(TEXT("Hands the contract path to AddLevelToWorld, which loads the package; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("remove_streaming_sublevel"), &RemoveStreamingSublevel, {
 		SpecLevelName,
 	});
@@ -569,13 +688,53 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("jitter"), EType::Number, TEXT("Per-axis location jitter")),
 		MCPParam::Optional(TEXT("labelPrefix"), EType::String, TEXT("Label prefix for the spawned actors (default Grid)")),
 	});
-	Registry.RegisterHandler(TEXT("batch_translate"), &BatchTranslate);
-	Registry.RegisterHandler(TEXT("place_actors_batch"), &PlaceActorsBatch);
+	// The contract selectors match no actor, which is refused before anything moves.
+	Registry.RegisterHandler(TEXT("batch_translate"), &BatchTranslate, {
+		MCPParam::Required(TEXT("offset"), EType::Vec3, TEXT("World-space offset added to each actor's location")),
+		SpecActorLabels, SpecActorPaths, SpecSelectorTag,
+	}, MCPSpec::AtLeastOne({ { TEXT("actorLabels") }, { TEXT("actorPaths") }, { TEXT("tag") } }));
+	// The contract's empty actors list spawns nothing.
+	Registry.RegisterHandler(TEXT("place_actors_batch"), &PlaceActorsBatch, {
+		MCPParam::Required(TEXT("actors"), EType::Array, TEXT("StaticMeshActors to spawn; meshes load once per path")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("staticMesh"), EType::String, TEXT("Static mesh asset path")),
+			MCPParam::OptionalField(TEXT("location"), EType::Vec3, TEXT("World location")),
+			MCPParam::OptionalField(TEXT("rotation"), EType::Rotator, TEXT("World rotation")),
+			MCPParam::OptionalField(TEXT("scale"), EType::Vec3, TEXT("World scale")),
+			MCPParam::OptionalField(TEXT("label"), EType::String, TEXT("Actor label")),
+		}),
+	});
 	// #910/#943/#912: the general editor-side component query. A whole-map
 	// scan with a projection can take a while on a 4,000 actor level, so it
-	// gets its own timeout rather than the 30 second default.
-	// Unspecced: levelPath temporarily opens another map, which the contract test must not.
-	Registry.RegisterHandlerWithTimeout(TEXT("query_components"), &QueryComponents, 300.0f);
+	// gets its own timeout rather than the 30 second default. The contract's
+	// whereMode is refused before levelPath could open another map.
+	Registry.RegisterHandlerWithTimeout(TEXT("query_components"), &QueryComponents, 300.0f, {
+		MCPParam::Optional(TEXT("componentClass"), EType::String, TEXT("Component class, resolved as a class or matched as a substring")),
+		MCPParam::Optional(TEXT("actorClass"), EType::String, TEXT("Owning actor class, resolved as a class or matched as a substring")),
+		SpecMatchSubclasses,
+		MCPParam::Optional(TEXT("componentNameContains"), EType::String, TEXT("Case-insensitive substring over the component instance name")),
+		MCPParam::Optional(TEXT("actorLabelPrefix"), EType::String, TEXT("Case-sensitive prefix over the actor's editor label")),
+		MCPParam::Optional(TEXT("actorLabelContains"), EType::String, TEXT("Case-insensitive substring over the actor's editor label")),
+		MCPParam::Optional(TEXT("actorTag"), EType::String, TEXT("Actor must carry this tag")),
+		SpecFolderPath, SpecFolderPathPrefix,
+		MCPParam::Optional(TEXT("fields"), EType::Array, TEXT("Field groups: transform, bounds, localBounds, shadow, nanite, navigation, tick, materials, mesh, decal, health")).Items(EType::String),
+		MCPParam::Optional(TEXT("propertyNames"), EType::Array, TEXT("Component UPROPERTY names projected under props.*, at most 32")).Items(EType::String),
+		MCPParam::Optional(TEXT("where"), EType::Array, TEXT("Predicates evaluated in the editor, at most 24")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("field"), EType::String, TEXT("Dot path into the row, such as shadow.effectiveCastShadow or props.CullDistance")),
+			MCPParam::OptionalField(TEXT("op"), EType::String, TEXT("eq (default) | ne | lt | lte | gt | gte | contains | notContains | startsWith | endsWith | in | notIn | exists | notExists | isNull | isNotNull | isTrue | isFalse")),
+			MCPParam::OptionalField(TEXT("value"), EType::Any, TEXT("Value the operator compares against")),
+		}),
+		MCPParam::Optional(TEXT("whereMode"), EType::String, TEXT("all (default) | any")),
+		MCPParam::Optional(TEXT("suspectOnly"), EType::Boolean, TEXT("Shorthand for where health.suspect isTrue")),
+		MCPParam::Optional(TEXT("groupBy"), EType::String, TEXT("Dot path to group matches by; counts components, not instances")),
+		MCPParam::Optional(TEXT("countBy"), EType::Array, TEXT("Dot paths to build value histograms for, at most 8")).Items(EType::String),
+		MCPParam::Optional(TEXT("sampleLimit"), EType::Integer, TEXT("Sample labels per group (default 5, max 25)")),
+		MCPParam::Optional(TEXT("countOnly"), EType::Boolean, TEXT("Return the aggregates without rows")),
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows returned (default 200, max 2000)")),
+		MCPParam::Optional(TEXT("startIndex"), EType::Integer, TEXT("First row index; rows are sorted so the index is stable across calls")),
+		MCPParam::Optional(TEXT("duplicateTransformTolerance"), EType::Number, TEXT("Centimetre bucket for duplicate-transform detection")),
+		MCPParam::Optional(TEXT("levelPath"), EType::String, TEXT("Query another map: opened temporarily, refused while anything is dirty, and the open map restored")),
+		SpecWorld, SpecPieInstance,
+	});
 	// #984/#941/#907/#987: level-wide writes driven by an editor-side selector.
 	// Each can touch thousands of actors, so each gets its own timeout.
 	Registry.RegisterHandlerWithTimeout(TEXT("batch_set_actor_properties"), &BatchSetActorProperties, 300.0f, {
@@ -586,7 +745,19 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Bypass EditDefaultsOnly to write per-instance overrides")),
 		SpecTransactionLabel,
 	});
-	Registry.RegisterHandlerWithTimeout(TEXT("bulk_set_component_property"), &BulkSetComponentProperty, 300.0f);
+	const FMCPParamSpec SpecClassFilter = MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Actor class, resolved as a class or matched as a substring"));
+	const TArray<TArray<FString>> SelectorBranches = {
+		{ TEXT("actorLabels") }, { TEXT("labelPrefix") }, { TEXT("labelContains") }, { TEXT("tag") },
+		{ TEXT("classFilter") }, { TEXT("folderPath") }, { TEXT("folderPathPrefix") },
+	};
+	// The contract selectors match no actor, so no transaction opens and nothing is written.
+	Registry.RegisterHandlerWithTimeout(TEXT("bulk_set_component_property"), &BulkSetComponentProperty, 300.0f, {
+		MCPParam::Required(TEXT("componentName"), EType::String, TEXT("Component name looked up on every matched actor")),
+		SpecPropertyName,
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Value to write; null clears an object reference")),
+		SpecActorLabels, SpecLabelPrefix, SpecLabelContains, SpecSelectorTag, SpecClassFilter,
+		SpecFolderPath, SpecFolderPathPrefix, SpecMatchSubclasses, SpecDryRun, SpecTransactionLabel,
+	}, MCPSpec::AtLeastOne(SelectorBranches));
 	Registry.RegisterHandlerWithTimeout(TEXT("remove_components_by_class"), &RemoveComponentsByClass, 300.0f, {
 		MCPParam::Required(TEXT("componentClass"), EType::String, TEXT("Component class to remove")),
 		MCPParam::Optional(TEXT("matchComponentSubclasses"), EType::Boolean, TEXT("Also match subclasses of componentClass (default true)")),
@@ -598,12 +769,68 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the level after a committed removal (default false)")),
 		SpecTransactionLabel,
 	});
-	// Unspecced: instances, fromComponents and alongSpline carry per-field shapes the spec types cannot express yet.
-	Registry.RegisterHandlerWithTimeout(TEXT("spawn_actors_batch"), &SpawnActorsBatch, 300.0f);
+	// The contract class resolves to nothing and is refused before anything spawns.
+	Registry.RegisterHandlerWithTimeout(TEXT("spawn_actors_batch"), &SpawnActorsBatch, 300.0f, {
+		MCPParam::Required(TEXT("actorClass"), EType::String, TEXT("Actor class: short name, /Script path or Blueprint class path")),
+		MCPParam::Optional(TEXT("instances"), EType::Array, TEXT("Explicit spawns")).Items(EType::Object).WithFields({
+			MCPParam::OptionalField(TEXT("location"), EType::Vec3, TEXT("World location")),
+			MCPParam::OptionalField(TEXT("rotation"), EType::Rotator, TEXT("World rotation")),
+			MCPParam::OptionalField(TEXT("scale"), EType::Vec3, TEXT("Actor scale")),
+			MCPParam::OptionalField(TEXT("label"), EType::String, TEXT("Actor label")),
+			MCPParam::OptionalField(TEXT("properties"), EType::Object, TEXT("Property name to value for this spawn; wins over the shared properties")),
+		}),
+		MCPParam::Optional(TEXT("fromComponents"), EType::Object, TEXT("One spawn per matched component, placed from its bounds")).WithFields({
+			MCPParam::OptionalField(TEXT("componentClass"), EType::String, TEXT("Component class the components must be")),
+			MCPParam::OptionalField(TEXT("componentNameContains"), EType::String, TEXT("Case-insensitive substring over the component name")),
+			MCPParam::OptionalField(TEXT("actorLabels"), EType::Array, TEXT("Exact actor editor labels")).Items(EType::String),
+			MCPParam::OptionalField(TEXT("labelPrefix"), EType::String, TEXT("Case-sensitive prefix over the actor's editor label")),
+			MCPParam::OptionalField(TEXT("labelContains"), EType::String, TEXT("Case-insensitive substring over the actor's editor label")),
+			MCPParam::OptionalField(TEXT("tag"), EType::String, TEXT("Actor must carry this tag")),
+			MCPParam::OptionalField(TEXT("classFilter"), EType::String, TEXT("Actor class, resolved as a class or matched as a substring")),
+			MCPParam::OptionalField(TEXT("folderPath"), EType::String, TEXT("World Outliner folder, matched exactly")),
+			MCPParam::OptionalField(TEXT("folderPathPrefix"), EType::String, TEXT("World Outliner folder prefix")),
+			MCPParam::OptionalField(TEXT("matchSubclasses"), EType::Boolean, TEXT("Match subclasses of classFilter (default true)")),
+			MCPParam::OptionalField(TEXT("space"), EType::String, TEXT("local (default, the component's own orientation) | world (axis-aligned bounds)")),
+			MCPParam::OptionalField(TEXT("offset"), EType::Vec3, TEXT("Offset added to the computed point")),
+			MCPParam::OptionalField(TEXT("extentFraction"), EType::Vec3, TEXT("Fraction of the box extent added per axis, such as {z: 0.72}")),
+			MCPParam::OptionalField(TEXT("inheritRotation"), EType::Boolean, TEXT("Spawn with the component's rotation (default false)")),
+		}),
+		MCPParam::Optional(TEXT("alongSpline"), EType::Object, TEXT("Spawns scattered along a spline by distance")).WithFields({
+			MCPParam::OptionalField(TEXT("actorLabel"), EType::String, TEXT("Spline actor label; pass actorLabel or actorPath")),
+			MCPParam::OptionalField(TEXT("actorPath"), EType::String, TEXT("Spline actor object path")),
+			MCPParam::OptionalField(TEXT("componentName"), EType::String, TEXT("Spline component, when the actor has several")),
+			MCPParam::RequiredField(TEXT("spacing"), EType::Number, TEXT("Distance between spawns in cm, at least 1")),
+			MCPParam::OptionalField(TEXT("startDistance"), EType::Number, TEXT("Distance along the spline to start at (default 0)")),
+			MCPParam::OptionalField(TEXT("endDistance"), EType::Number, TEXT("Distance along the spline to stop at (default its length)")),
+			MCPParam::OptionalField(TEXT("offset"), EType::Vec3, TEXT("Offset, in the spline's frame when aligning to it")),
+			MCPParam::OptionalField(TEXT("alignToTangent"), EType::Boolean, TEXT("Rotate each spawn to the spline (default true)")),
+		}),
+		MCPParam::Optional(TEXT("properties"), EType::Object, TEXT("Property name to value applied to every spawn")),
+		MCPParam::Optional(TEXT("labelPrefix"), EType::String, TEXT("Label prefix for the spawned actors")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Return every computed transform without spawning")),
+		MCPParam::Optional(TEXT("maxSpawn"), EType::Integer, TEXT("Refuse a plan larger than this (default 500, max 5000)")),
+		SpecTransactionLabel,
+	}, MCPSpec::ExactlyOne({ { TEXT("instances") }, { TEXT("fromComponents") }, { TEXT("alongSpline") } }));
 	// #944/#915/#914: refresh state the editor is caching, and read the bounds
-	// a caller needs to check the result.
-	Registry.RegisterHandlerWithTimeout(TEXT("rerun_construction_scripts"), &RerunConstruction, 300.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("recreate_physics_state"), &RecreatePhysicsState, 300.0f);
+	// a caller needs to check the result. The contract world scope is refused
+	// before any actor is touched.
+	Registry.RegisterHandlerWithTimeout(TEXT("rerun_construction_scripts"), &RerunConstruction, 300.0f, {
+		SpecActorLabels,
+		MCPParam::Optional(TEXT("className"), EType::String, TEXT("Blueprint or native class, resolved as a class or matched as a substring")),
+		SpecMatchSubclasses, SpecWorld, SpecPieInstance,
+	}, MCPSpec::AtLeastOne({ { TEXT("actorLabels") }, { TEXT("className") } }));
+	Registry.RegisterHandlerWithTimeout(TEXT("recreate_physics_state"), &RecreatePhysicsState, 300.0f, {
+		SpecActorLabels, SpecLabelPrefix, SpecSelectorTag,
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Actor class the owners must be")),
+		MCPParam::Optional(TEXT("componentClass"), EType::String, TEXT("Primitive component class to rebuild")),
+		MCPParam::Optional(TEXT("componentNameContains"), EType::String, TEXT("Case-insensitive substring over the component instance name")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("List what would be rebuilt without rebuilding it (default TRUE)")),
+		MCPParam::Optional(TEXT("maxComponents"), EType::Integer, TEXT("Refuse to rebuild more than this many components (default 2000, max 20000)")),
+		SpecWorld, SpecPieInstance,
+	}, MCPSpec::AtLeastOne({
+		{ TEXT("actorLabels") }, { TEXT("labelPrefix") }, { TEXT("tag") }, { TEXT("classFilter") },
+		{ TEXT("componentClass") }, { TEXT("componentNameContains") },
+	}));
 	Registry.RegisterHandler(TEXT("test_component_overlap"), &TestComponentOverlap, {
 		MCPParam::Optional(TEXT("actorLabelA"), EType::String, TEXT("First actor label; pass actorLabelA or actorPathA")),
 		MCPParam::Optional(TEXT("actorPathA"), EType::String, TEXT("First actor object path")),
@@ -615,10 +842,31 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		SpecWorld, SpecPieInstance,
 	});
 	// #911: BSP to StaticMesh. Generating meshes for hundreds of brushes takes
-	// far longer than the default handler timeout.
-	Registry.RegisterHandlerWithTimeout(TEXT("convert_brushes_to_static_mesh"), &ConvertBrushesToStaticMesh, 600.0f);
-	// #946: component-level material overrides on placed actors.
-	Registry.RegisterHandlerWithTimeout(TEXT("set_component_materials"), &SetComponentMaterials, 300.0f);
+	// far longer than the default handler timeout. The contract class filter
+	// resolves to no brush class and is refused before anything converts.
+	Registry.RegisterHandlerWithTimeout(TEXT("convert_brushes_to_static_mesh"), &ConvertBrushesToStaticMesh, 600.0f, {
+		SpecActorLabels,
+		MCPParam::Optional(TEXT("folderPath"), EType::String, TEXT("World Outliner folder whose brushes are converted")),
+		MCPParam::Optional(TEXT("recursiveFolder"), EType::Boolean, TEXT("Also take brushes in folders nested under folderPath (default true)")),
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Brush class to convert")),
+		MCPParam::Optional(TEXT("exactClass"), EType::Boolean, TEXT("Require classFilter to be the exact class (default true)")),
+		MCPParam::Optional(TEXT("destinationPath"), EType::String, TEXT("Content path the generated static meshes are written to (default /Game/Meshes/Converted)")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report the verdict per brush without converting (default TRUE)")),
+		MCPParam::Optional(TEXT("allowSubtractive"), EType::Boolean, TEXT("Also convert subtractive brushes, which have no surface of their own")),
+		MCPParam::Optional(TEXT("includeVolumes"), EType::Boolean, TEXT("Also convert volume brushes, which are collision rather than visible geometry")),
+	}, MCPSpec::AtLeastOne({ { TEXT("actorLabels") }, { TEXT("folderPath") } }));
+	// #946: component-level material overrides on placed actors. The contract
+	// selectors match no actor and the contract material does not load.
+	Registry.RegisterHandlerWithTimeout(TEXT("set_component_materials"), &SetComponentMaterials, 300.0f, {
+		SpecActorLabels, SpecLabelPrefix, SpecLabelContains, SpecSelectorTag, SpecClassFilter,
+		SpecFolderPath, SpecFolderPathPrefix, SpecMatchSubclasses,
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Mesh component (default: the actor's first mesh component)")),
+		MCPParam::Optional(TEXT("materials"), EType::Array, TEXT("Per-slot material paths; index is the slot, and a null or empty entry clears that slot's override")),
+		MCPParam::Optional(TEXT("material"), EType::String, TEXT("One material path applied to every slot")),
+		MCPParam::Optional(TEXT("clearOverrides"), EType::Boolean, TEXT("true drops every component override so the mesh asset's own slots show through")),
+		SpecDryRun, SpecTransactionLabel,
+	}, MCPSpec::AtLeastOne(SelectorBranches)
+		.ExactlyOne({ { TEXT("materials") }, { TEXT("material") }, { TEXT("clearOverrides") } }));
 	// #956: a transient verification subject, and the two actions that keep it
 	// from being left behind.
 	Registry.RegisterHandler(TEXT("spawn_transient_actor"), &SpawnTransientActor, {
@@ -2960,6 +3208,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetWorldSettings(const TSharedPtr<FJsonOb
 
 TSharedPtr<FJsonValue> FLevelHandlers::SetWorldSettings(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("defaultGameMode"), TEXT("killZ"), TEXT("globalGravityZ"), TEXT("enableWorldBoundsChecks"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	AWorldSettings* Settings = World->GetWorldSettings();
@@ -4649,6 +4901,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::ExportActorFbx(const TSharedPtr<FJsonObje
 // single-node animation) for visual and deform verification.
 TSharedPtr<FJsonValue> FLevelHandlers::SpawnSkeletalMeshActor(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("skeletalMesh"), TEXT("meshPath"), TEXT("label"), TEXT("onConflict"), TEXT("transform"), TEXT("location"),
+		TEXT("rotation"), TEXT("scale"), TEXT("materials"), TEXT("animSequence"), TEXT("loop"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	FString MeshPath;

@@ -265,6 +265,8 @@ TSharedPtr<FJsonValue> FLevelHandlers::LineTrace(const TSharedPtr<FJsonObject>& 
 
 TSharedPtr<FJsonValue> FLevelHandlers::BulkLineTrace(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, { TEXT("traces"), TEXT("world"), TEXT("pieInstance") });
+
 	// #933: one world for the whole batch, chosen by the top-level `world`. A
 	// per-item scope would let one batch straddle two worlds and report the
 	// results in one array as though they were comparable.

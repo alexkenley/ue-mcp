@@ -65,6 +65,10 @@ namespace
 TSharedPtr<FJsonValue> FLevelHandlers::ConvertBrushesToStaticMesh(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabels"), TEXT("folderPath"), TEXT("recursiveFolder"), TEXT("classFilter"), TEXT("exactClass"),
+		TEXT("destinationPath"), TEXT("dryRun"), TEXT("allowSubtractive"), TEXT("includeVolumes"),
+	});
 	REQUIRE_EDITOR_WORLD(World);
 
 	if (!GEditor)

@@ -49,10 +49,12 @@ describe("spatial request contract", () => {
   it("publishes the nested viewpoint vocabulary and rejects malformed wire values", () => {
     const schema = actionSchema(levelTool, "nudge_component");
     const rotation = schema.params.find((p) => p.name === "viewRotation")!;
-    expect(rotation.properties!.viewFrom.enumValues).toEqual(["front", "back", "right", "left", "above", "below"]);
-    expect(rotation.properties!.direction.enumValues).toEqual(["clockwise", "counterclockwise"]);
+    // The spec publishes the vocabulary in each field's description; the handler
+    // refuses anything outside it, and a degrees value that is not above zero.
+    expect(rotation.properties!.viewFrom.description).toBe("front | back | right | left | above | below");
+    expect(rotation.properties!.direction.description).toBe("clockwise | counterclockwise");
     const wire = z.object(levelTool.schema);
-    for (const invalid of [null, { viewFrom: "above", degrees: 15 }, { ...request.viewRotation, degrees: -1 }, { ...request.viewRotation, degrees: Infinity }]) {
+    for (const invalid of [null, { viewFrom: "above", degrees: 15 }, { ...request.viewRotation, degrees: "15" }]) {
       expect(wire.safeParse({ ...request, viewRotation: invalid }).success).toBe(false);
     }
     expect(wire.safeParse({ ...request, dryRun: "true" }).success).toBe(false);
