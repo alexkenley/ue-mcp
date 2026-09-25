@@ -22,6 +22,7 @@ import type { z } from "zod";
 import { renderAll, paramsClause } from "../../scripts/lib/handler-spec-gen.mjs";
 import { readCategory } from "../../scripts/lib/tool-source.mjs";
 import {
+  compareHandlerSpecs,
   makeSpecBp,
   specProblems,
   zodSignature,
@@ -33,6 +34,8 @@ import { parseParams, actionSchema } from "../../src/action-schema.js";
 import { animationTool } from "../../src/tools/animation.js";
 import { schema as specSchema, handlerSpecs } from "../../src/tools/specs/animation.generated.js";
 import { RECORDED_HANDLER_SPECS } from "../../src/tools/specs/index.js";
+import { deployedPlugin, checkBridgeParity } from "../../src/bridge-parity.js";
+import type { BridgeCapabilities } from "../../src/bridge.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SNAPSHOT = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "golden", "handler-specs.json"), "utf8")) as {
@@ -183,3 +186,30 @@ describe("the animation surface", () => {
   });
 });
 
+describe("drift against a connected editor", () => {
+  const recorded: HandlerSpecs = {
+    one: { category: "animation", params: [{ name: "assetPath", type: "string", required: true, description: "d", aliases: ["path"] }] },
+  };
+
+  it("compares nothing when the plugin published no specs", () => {
+    expect(compareHandlerSpecs(recorded, undefined)).toEqual({ checked: false, drifted: [] });
+  });
+
+  it("names a method whose contract changed, appeared or vanished", () => {
+    expect(compareHandlerSpecs(recorded, recorded).drifted).toEqual([]);
+    const changed = { one: { ...recorded.one, params: [{ ...recorded.one.params[0], required: false }] } };
+    expect(compareHandlerSpecs(recorded, changed).drifted).toEqual(["one"]);
+    expect(compareHandlerSpecs(recorded, { ...recorded, two: { params: [] } }).drifted).toEqual(["two"]);
+    expect(compareHandlerSpecs(recorded, {}).drifted).toEqual(["one"]);
+  });
+
+  it("is reported by project(get_status) only when there is some", () => {
+    const caps = (handlerSpecs: unknown): BridgeCapabilities =>
+      ({ actions: ["one"], actionCount: 1, handlerSpecs } as unknown as BridgeCapabilities);
+    const parity = checkBridgeParity([], caps(recorded));
+    expect(deployedPlugin(caps(recorded), parity, recorded)).toBeUndefined();
+    const drifted = deployedPlugin(caps({}), parity, recorded);
+    expect(drifted?.handlerSpecDrift).toEqual(["one"]);
+    expect(drifted?.handlerSpecWarning).toContain("specs:record");
+  });
+});

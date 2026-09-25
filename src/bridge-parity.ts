@@ -23,6 +23,8 @@
  */
 import type { BridgeCapabilities } from "./bridge.js";
 import type { ToolDef } from "./types.js";
+import { compareHandlerSpecs, type HandlerSpecs } from "./handler-spec.js";
+import { RECORDED_HANDLER_SPECS } from "./tools/specs/index.js";
 
 export interface BridgeParity {
   /** False when the plugin published no action list, so nothing was compared. */
@@ -111,17 +113,34 @@ function describe(missing: string[], advertised: number, registered: number): st
 export function deployedPlugin(
   capabilities: BridgeCapabilities | null | undefined,
   parity: BridgeParity,
-): { builtAt?: string; missingActions?: number; warning?: string } | undefined {
+  recordedSpecs: HandlerSpecs = RECORDED_HANDLER_SPECS,
+): { builtAt?: string; missingActions?: number; warning?: string; handlerSpecDrift?: string[]; handlerSpecWarning?: string } | undefined {
   if (!capabilities) return undefined;
   const missing = parity.missing.length > 0 ? parity.missing.length : undefined;
+  // #1057: the spec'd actions' parameters were generated from a recording of
+  // the plugin's own specs. A running plugin whose specs differ is one whose
+  // handlers read something other than what this server advertises.
+  const specs = compareHandlerSpecs(recordedSpecs, capabilities.handlerSpecs);
+  const drift = specs.drifted.length > 0 ? specs.drifted : undefined;
   // The build time is the half that catches a handler which is PRESENT and
   // old. #1002 was a DataTable resolution fix that shipped on 2026-08-28 and
   // was reported as broken three days later by a session whose deployed plugin
   // predated it, and nothing in reach said so: parity sees an absent method,
   // not a stale one.
   const builtAt = capabilities.builtAt;
-  if (!builtAt && missing === undefined) return undefined;
-  return { builtAt, missingActions: missing, warning: parity.message ?? undefined };
+  if (!builtAt && missing === undefined && drift === undefined) return undefined;
+  return {
+    builtAt,
+    missingActions: missing,
+    warning: parity.message ?? undefined,
+    handlerSpecDrift: drift,
+    handlerSpecWarning: drift
+      ? `${drift.length} handler parameter spec(s) differ between the running plugin and the recording this server `
+        + `advertises from: ${drift.slice(0, NAMED).join(", ")}${drift.length > NAMED ? `, and ${drift.length - NAMED} more` : ""}. `
+        + "Either the plugin is behind this package (rebuild it), or the specs changed and need "
+        + "npm run specs:record then npm run specs:generate."
+      : undefined,
+  };
 }
 
 /**

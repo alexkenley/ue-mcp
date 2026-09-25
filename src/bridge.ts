@@ -35,6 +35,12 @@ export interface BridgeCapabilities {
   features?: string[];
   actions?: string[];
   actionCount?: number;
+  /**
+   * Declared parameter contract of every handler registered with one (#1057),
+   * keyed by method. The surface is generated from a recording of this; the
+   * live answer is only compared against it.
+   */
+  handlerSpecs?: Record<string, unknown>;
   /** True when the bridge did not answer the handshake at all. */
   legacy: boolean;
 }

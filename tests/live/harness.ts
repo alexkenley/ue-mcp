@@ -58,6 +58,8 @@ export interface LiveCapabilities {
   actionCount?: number;
   /** True when the editor was launched with the parameter echo switched on. */
   paramEcho?: boolean;
+  /** Declared parameter contracts of the spec'd handlers (#1057). */
+  handlerSpecs?: Record<string, unknown>;
 }
 
 const HOST = process.env.UE_MCP_LIVE_HOST ?? process.env.UE_MCP_TEST_HOST ?? "127.0.0.1";
