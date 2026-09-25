@@ -3493,6 +3493,42 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteFolder(const TSharedPtr<FJsonObject
 		{
 			Entry->SetStringField(TEXT("status"), TEXT("deleted"));
 			if (Contained.Num() > 0) Entry->SetNumberField(TEXT("assetsDeleted"), Contained.Num());
+			// A World Partition map keeps its actors in __ExternalActors__/__ExternalObjects__
+			// beside the mount, not under the folder, so they outlive the delete unless removed here.
+			{
+				FString Mount, Rest;
+				if (Norm.RightChop(1).Split(TEXT("/"), &Mount, &Rest) && !Rest.IsEmpty())
+				{
+					int32 ExternalFiles = 0;
+					for (const TCHAR* Sub : { TEXT("__ExternalActors__"), TEXT("__ExternalObjects__") })
+					{
+						const FString ExtPackagePath = FString::Printf(TEXT("/%s/%s/%s"), *Mount, Sub, *Rest);
+						FString ExtDir;
+						if (!FPackageName::TryConvertLongPackageNameToFilename(ExtPackagePath + TEXT("/"), ExtDir)) continue;
+						if (!IFileManager::Get().DirectoryExists(*ExtDir)) continue;
+						TArray<FString> Files;
+						IFileManager::Get().FindFilesRecursive(Files, *ExtDir, TEXT("*.uasset"), true, false);
+						bool bLoaded = false;
+						for (const FString& File : Files)
+						{
+							FString PackageName;
+							if (FPackageName::TryConvertFilenameToLongPackageName(File, PackageName) && FindPackage(nullptr, *PackageName))
+							{
+								bLoaded = true;
+								break;
+							}
+						}
+						if (bLoaded)
+						{
+							Entry->SetStringField(TEXT("externalPackagesKept"), FString::Printf(
+								TEXT("%s holds packages that are still loaded; unload the map and delete again to remove them."), *ExtPackagePath));
+							continue;
+						}
+						if (IFileManager::Get().DeleteDirectory(*ExtDir, /*RequireExists=*/false, /*Tree=*/true)) ExternalFiles += Files.Num();
+					}
+					if (ExternalFiles > 0) Entry->SetNumberField(TEXT("externalPackagesDeleted"), ExternalFiles);
+				}
+			}
 			DeletedPaths.Add(MakeShared<FJsonValueString>(Norm));
 			AssetsDeleted += Contained.Num();
 			// Any contained asset sitting below Norm rather than directly in it
