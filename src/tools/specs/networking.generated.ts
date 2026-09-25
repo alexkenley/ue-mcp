@@ -145,6 +145,44 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "set_property_replicated": {
+    "category": "networking",
+    "params": [
+      {
+        "name": "blueprintPath",
+        "type": "string",
+        "required": true,
+        "description": "Actor Blueprint asset path"
+      },
+      {
+        "name": "variableName",
+        "type": "string",
+        "required": true,
+        "description": "Blueprint variable name",
+        "aliases": [
+          "propertyName"
+        ]
+      },
+      {
+        "name": "replicationType",
+        "type": "string",
+        "required": false,
+        "description": "None | Replicated | RepNotify (default None). Wins over replicated and repNotify"
+      },
+      {
+        "name": "replicated",
+        "type": "boolean",
+        "required": false,
+        "description": "Shorthand: true is Replicated, false is None"
+      },
+      {
+        "name": "repNotify",
+        "type": "boolean",
+        "required": false,
+        "description": "Shorthand: true is RepNotify, and wins over replicated"
+      }
+    ]
+  },
   "set_replicate_movement": {
     "category": "networking",
     "params": [
@@ -191,6 +229,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   set_net_load_on_client: "Params: blueprintPath, loadOnClient?",
   set_net_priority: "Params: blueprintPath, netPriority?",
   set_only_relevant_to_owner: "Params: blueprintPath, onlyRelevantToOwner?",
+  set_property_replicated: "Params: blueprintPath, variableName (or propertyName), replicationType?, replicated?, repNotify?",
   set_replicate_movement: "Params: blueprintPath, replicateMovement?",
   set_replicates: "Params: blueprintPath, replicates?",
 };
@@ -206,8 +245,13 @@ export const schema: Record<string, z.ZodType> = {
   netPriority: z.number().optional().describe("NetPriority (default 1.0)"),
   netUpdateFrequency: z.number().optional().describe("NetUpdateFrequency in updates per second (omit to leave it)"),
   onlyRelevantToOwner: z.boolean().optional().describe("bOnlyRelevantToOwner (default false)"),
+  propertyName: z.string().optional().describe("Alias for variableName"),
+  replicated: z.boolean().optional().describe("Shorthand: true is Replicated, false is None"),
   replicateMovement: z.boolean().optional().describe("Replicate movement (default false)"),
   replicates: z.boolean().optional().describe("Replicate the actor (default false)"),
+  replicationType: z.string().optional().describe("None | Replicated | RepNotify (default None). Wins over replicated and repNotify"),
+  repNotify: z.boolean().optional().describe("Shorthand: true is RepNotify, and wins over replicated"),
+  variableName: z.string().optional().describe("Blueprint variable name"),
 };
 
 /** Declare an action for a spec'd bridge method: effect, summary, method. */
