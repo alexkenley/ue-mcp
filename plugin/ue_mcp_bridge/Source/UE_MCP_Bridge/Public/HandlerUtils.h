@@ -167,7 +167,12 @@ public:
 	{
 		if (Root)
 		{
-			Root->Values.GetKeys(Arrived);
+			// The key type differs across engine versions; the pair conversion is the portable read.
+			for (const auto& JsonEntry : Root->Values)
+			{
+				const TPair<FString, TSharedPtr<FJsonValue>> Pair(JsonEntry.Key, JsonEntry.Value);
+				Arrived.Add(Pair.Key);
+			}
 		}
 		ActiveSlot() = this;
 	}
