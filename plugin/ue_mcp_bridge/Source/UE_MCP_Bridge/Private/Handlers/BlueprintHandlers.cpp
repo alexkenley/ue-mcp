@@ -2361,6 +2361,9 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListBlueprintVariables(const TSharedP
 		TSharedPtr<FJsonObject> VarObj = MakeShared<FJsonObject>();
 		VarObj->SetStringField(TEXT("name"), Var.VarName.ToString());
 		VarObj->SetStringField(TEXT("type"), Var.VarType.PinCategory.ToString());
+		// type stays the pin category; typeSpec is the full add_variable spelling, containers included.
+		bool bSpecRoundTrips = false;
+		VarObj->SetStringField(TEXT("typeSpec"), PinTypeSpec(Var.VarType, bSpecRoundTrips));
 		VarObj->SetStringField(TEXT("guid"), Var.VarGuid.ToString());
 
 		// Check metadata
