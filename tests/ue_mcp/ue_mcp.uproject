@@ -72,6 +72,10 @@
 		{
 			"Name": "DynamicMaterial",
 			"Enabled": true
+		},
+		{
+			"Name": "Mutable",
+			"Enabled": true
 		}
 	]
 }
