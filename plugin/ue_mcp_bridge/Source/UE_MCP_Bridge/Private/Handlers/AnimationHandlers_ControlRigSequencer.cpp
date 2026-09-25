@@ -281,14 +281,14 @@ namespace
 		FString& OutError)
 	{
 		OutRate = Default;
-		const TSharedPtr<FJsonValue>* Value = Params->Values.Find(Field);
-		if (!Value || !Value->IsValid() || (*Value)->IsNull())
+		const TSharedPtr<FJsonValue> Value = TryGetParam(Params, Field);
+		if (!Value.IsValid() || Value->IsNull())
 		{
 			return true;
 		}
-		if ((*Value)->Type == EJson::Number)
+		if (Value->Type == EJson::Number)
 		{
-			const double Number = (*Value)->AsNumber();
+			const double Number = Value->AsNumber();
 			if (!FMath::IsFinite(Number) || Number <= 0.0 || Number > static_cast<double>(MAX_int32))
 			{
 				OutError = FString::Printf(TEXT("'%s' must be a positive frame rate"), Field);
@@ -297,12 +297,12 @@ namespace
 			OutRate = FFrameRate(FMath::RoundToInt(Number), 1);
 			return OutRate.IsValid();
 		}
-		if ((*Value)->Type != EJson::Object)
+		if (Value->Type != EJson::Object)
 		{
 			OutError = FString::Printf(TEXT("'%s' must be a number or {numerator, denominator}"), Field);
 			return false;
 		}
-		const TSharedPtr<FJsonObject> Object = (*Value)->AsObject();
+		const TSharedPtr<FJsonObject> Object = Value->AsObject();
 		double Numerator = 0.0;
 		double Denominator = 1.0;
 		if (!Object.IsValid() || !Object->TryGetNumberField(TEXT("numerator"), Numerator))
@@ -773,7 +773,7 @@ namespace
 		FString& OutError)
 	{
 		double SingleFrame = 0.0;
-		if (Object->TryGetNumberField(TEXT("frame"), SingleFrame))
+		if (TryGetNumberParam(Object, TEXT("frame"), SingleFrame))
 		{
 			if (!FMath::IsFinite(SingleFrame)
 				|| !FMath::IsNearlyEqual(SingleFrame, FMath::RoundToDouble(SingleFrame))
@@ -786,7 +786,7 @@ namespace
 		}
 
 		const TArray<TSharedPtr<FJsonValue>>* Frames = nullptr;
-		if (Object->TryGetArrayField(TEXT("frames"), Frames) && Frames)
+		if (TryGetArrayParam(Object, TEXT("frames"), Frames) && Frames)
 		{
 			for (const TSharedPtr<FJsonValue>& FrameValue : *Frames)
 			{
@@ -852,12 +852,12 @@ namespace
 		FControlRigSequenceSession& OutSession,
 		FString& OutError)
 	{
-		if (!Params->TryGetStringField(TEXT("sequencePath"), OutSession.SequencePath) || OutSession.SequencePath.IsEmpty())
+		if (!TryGetStringParam(Params, TEXT("sequencePath"), OutSession.SequencePath) || OutSession.SequencePath.IsEmpty())
 		{
 			OutError = TEXT("Missing 'sequencePath' parameter");
 			return false;
 		}
-		if (!Params->TryGetStringField(TEXT("bindingTag"), OutSession.BindingTag) || OutSession.BindingTag.IsEmpty())
+		if (!TryGetStringParam(Params, TEXT("bindingTag"), OutSession.BindingTag) || OutSession.BindingTag.IsEmpty())
 		{
 			OutError = TEXT("Missing 'bindingTag' parameter");
 			return false;
@@ -1833,7 +1833,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BeginControlRigEdit(const TSharedPtr<
 		return MCPError(Error);
 	}
 	double StartNumber = 0.0;
-	Params->TryGetNumberField(TEXT("startFrame"), StartNumber);
+	TryGetNumberParam(Params, TEXT("startFrame"), StartNumber);
 	if (!FMath::IsFinite(StartNumber)
 		|| !FMath::IsNearlyEqual(StartNumber, FMath::RoundToDouble(StartNumber))
 		|| StartNumber < static_cast<double>(MIN_int32) || StartNumber > static_cast<double>(MAX_int32))
@@ -1843,7 +1843,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BeginControlRigEdit(const TSharedPtr<
 	const int32 StartFrame = static_cast<int32>(FMath::RoundToInt(StartNumber));
 	const int32 DefaultDuration = FMath::Max(1, static_cast<int32>(FMath::RoundToInt(SourceAnimation->GetPlayLength() * DisplayRate.AsDecimal())));
 	double EndNumber = static_cast<double>(StartFrame) + static_cast<double>(DefaultDuration);
-	Params->TryGetNumberField(TEXT("endFrame"), EndNumber);
+	TryGetNumberParam(Params, TEXT("endFrame"), EndNumber);
 	if (!FMath::IsFinite(EndNumber)
 		|| !FMath::IsNearlyEqual(EndNumber, FMath::RoundToDouble(EndNumber))
 		|| EndNumber < static_cast<double>(MIN_int32) || EndNumber > static_cast<double>(MAX_int32))
@@ -2088,7 +2088,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadControlRigEdit(const TSharedPtr<F
 	TArray<FName> FloatControlNames;
 	TArray<FName> IntControlNames;
 	const TArray<TSharedPtr<FJsonValue>>* RequestedNames = nullptr;
-	if (Params->TryGetArrayField(TEXT("controlNames"), RequestedNames) && RequestedNames)
+	if (TryGetArrayParam(Params, TEXT("controlNames"), RequestedNames) && RequestedNames)
 	{
 		for (const TSharedPtr<FJsonValue>& Value : *RequestedNames)
 		{
@@ -2159,7 +2159,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadControlRigEdit(const TSharedPtr<F
 	if (ControlNames.IsEmpty()) return MCPError(TEXT("No readable controls were requested or available"));
 
 	TArray<FFrameNumber> Frames;
-	if (Params->HasField(TEXT("frame")) || Params->HasField(TEXT("frames")))
+	if (HasParam(Params, TEXT("frame")) || HasParam(Params, TEXT("frames")))
 	{
 		if (!ControlRigSequencerReadFrames(Params, Frames, Error)) return MCPError(Error);
 	}
@@ -2302,7 +2302,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CaptureControlRigPose(const TSharedPt
 	SelectedControls.Sort(FNameLexicalLess());
 	TArray<FName> CaptureControls;
 	const TArray<TSharedPtr<FJsonValue>>* RequestedControls = nullptr;
-	if (Params->TryGetArrayField(TEXT("controlNames"), RequestedControls) && RequestedControls)
+	if (TryGetArrayParam(Params, TEXT("controlNames"), RequestedControls) && RequestedControls)
 	{
 		for (const TSharedPtr<FJsonValue>& Value : *RequestedControls)
 		{
@@ -2420,7 +2420,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ApplyControlRigEdits(const TSharedPtr
 	if (!ControlRigSequencerResolveSession(Params, Session, Error)) return MCPError(Error);
 	if (Session.Section->GetDoNotKey()) return MCPError(TEXT("The resolved Control Rig section is marked Do Not Key"));
 	const TArray<TSharedPtr<FJsonValue>>* Operations = nullptr;
-	if (!Params->TryGetArrayField(TEXT("operations"), Operations) || !Operations || Operations->IsEmpty())
+	if (!TryGetArrayParam(Params, TEXT("operations"), Operations) || !Operations || Operations->IsEmpty())
 	{
 		return MCPError(TEXT("'operations' must be a non-empty array"));
 	}

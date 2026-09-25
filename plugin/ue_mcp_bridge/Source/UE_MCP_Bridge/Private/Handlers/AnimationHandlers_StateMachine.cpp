@@ -217,11 +217,11 @@ static FPoseSearchClipFlags ParsePoseSearchClipFlags(const TSharedPtr<FJsonObjec
 {
 	FPoseSearchClipFlags Flags;
 	bool BoolVal = false;
-	if (Obj->TryGetBoolField(TEXT("enabled"), BoolVal)) Flags.bEnabled = BoolVal;
-	if (Obj->TryGetBoolField(TEXT("disableReselection"), BoolVal)) Flags.bDisableReselection = BoolVal;
+	if (TryGetBoolParam(Obj, TEXT("enabled"), BoolVal)) Flags.bEnabled = BoolVal;
+	if (TryGetBoolParam(Obj, TEXT("disableReselection"), BoolVal)) Flags.bDisableReselection = BoolVal;
 
 	FString Mirror;
-	if (Obj->TryGetStringField(TEXT("mirror"), Mirror))
+	if (TryGetStringParam(Obj, TEXT("mirror"), Mirror))
 	{
 		if (Mirror.Equals(TEXT("mirrored"), ESearchCase::IgnoreCase))
 			Flags.MirrorOption = EPoseSearchMirrorOption::MirroredOnly;
@@ -232,8 +232,8 @@ static FPoseSearchClipFlags ParsePoseSearchClipFlags(const TSharedPtr<FJsonObjec
 	}
 
 	double SampleStart = 0.0, SampleEnd = 0.0;
-	const bool bHasStart = Obj->TryGetNumberField(TEXT("sampleStart"), SampleStart);
-	const bool bHasEnd = Obj->TryGetNumberField(TEXT("sampleEnd"), SampleEnd);
+	const bool bHasStart = TryGetNumberParam(Obj, TEXT("sampleStart"), SampleStart);
+	const bool bHasEnd = TryGetNumberParam(Obj, TEXT("sampleEnd"), SampleEnd);
 	if (bHasStart || bHasEnd)
 	{
 		Flags.SamplingRange = FFloatInterval((float)SampleStart, (float)SampleEnd);
@@ -591,13 +591,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddTransition(const TSharedPtr<FJsonO
 
 	// Optional blend settings, written the same way set_transition_blend writes them.
 	double BlendDuration = 0.0;
-	const bool bHasBlendDuration = Params->TryGetNumberField(TEXT("blendDuration"), BlendDuration);
+	const bool bHasBlendDuration = TryGetNumberParam(Params, TEXT("blendDuration"), BlendDuration);
 	if (bHasBlendDuration && BlendDuration < 0.0)
 	{
 		return MCPError(FString::Printf(TEXT("blendDuration must be >= 0 (got %g)"), BlendDuration));
 	}
 	FString BlendLogic;
-	const bool bHasBlendLogic = Params->TryGetStringField(TEXT("blendLogic"), BlendLogic);
+	const bool bHasBlendLogic = TryGetStringParam(Params, TEXT("blendLogic"), BlendLogic);
 	const bool bInertialization = bHasBlendLogic && BlendLogic.Equals(TEXT("Inertialization"), ESearchCase::IgnoreCase);
 	if (bHasBlendLogic && !bInertialization && !BlendLogic.Equals(TEXT("Standard"), ESearchCase::IgnoreCase))
 	{
@@ -761,9 +761,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetStateAnimation(const TSharedPtr<FJ
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
 	FString SMName, StateName, AnimAssetPath;
-	if (!Params->TryGetStringField(TEXT("stateMachineName"), SMName) ||
-		!Params->TryGetStringField(TEXT("stateName"), StateName) ||
-		!Params->TryGetStringField(TEXT("animAssetPath"), AnimAssetPath))
+	if (!TryGetStringParam(Params, TEXT("stateMachineName"), SMName) ||
+		!TryGetStringParam(Params, TEXT("stateName"), StateName) ||
+		!TryGetStringParam(Params, TEXT("animAssetPath"), AnimAssetPath))
 	{
 		return MCPError(TEXT("Missing required params: stateMachineName, stateName, animAssetPath"));
 	}
@@ -915,9 +915,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetTransitionBlend(const TSharedPtr<F
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
 	FString SMName, FromState, ToState;
-	if (!Params->TryGetStringField(TEXT("stateMachineName"), SMName) ||
-		!Params->TryGetStringField(TEXT("fromState"), FromState) ||
-		!Params->TryGetStringField(TEXT("toState"), ToState))
+	if (!TryGetStringParam(Params, TEXT("stateMachineName"), SMName) ||
+		!TryGetStringParam(Params, TEXT("fromState"), FromState) ||
+		!TryGetStringParam(Params, TEXT("toState"), ToState))
 	{
 		return MCPError(TEXT("Missing required params: stateMachineName, fromState, toState"));
 	}
@@ -965,7 +965,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetTransitionBlend(const TSharedPtr<F
 
 	// Set blend duration
 	double BlendDuration = 0.2;
-	const bool bWroteDuration = Params->TryGetNumberField(TEXT("blendDuration"), BlendDuration);
+	const bool bWroteDuration = TryGetNumberParam(Params, TEXT("blendDuration"), BlendDuration);
 	if (bWroteDuration)
 	{
 		TransNode->CrossfadeDuration = static_cast<float>(BlendDuration);
@@ -973,7 +973,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetTransitionBlend(const TSharedPtr<F
 
 	// Set blend logic (Standard vs Inertialization)
 	FString BlendLogic;
-	const bool bWroteLogic = Params->TryGetStringField(TEXT("blendLogic"), BlendLogic);
+	const bool bWroteLogic = TryGetStringParam(Params, TEXT("blendLogic"), BlendLogic);
 	if (bWroteLogic)
 	{
 		if (BlendLogic.Equals(TEXT("Inertialization"), ESearchCase::IgnoreCase))
@@ -1528,7 +1528,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateIKRig(const TSharedPtr<FJsonObj
 	int32 ChainsAdded = 0;
 	TArray<FString> ChainErrors;
 	FString RetargetRoot;
-	Params->TryGetStringField(TEXT("retargetRoot"), RetargetRoot);
+	TryGetStringParam(Params, TEXT("retargetRoot"), RetargetRoot);
 
 	if (UIKRigController* Controller = UIKRigController::GetController(IKRig))
 	{
@@ -1540,7 +1540,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateIKRig(const TSharedPtr<FJsonObj
 		}
 
 		const TArray<TSharedPtr<FJsonValue>>* ChainsArr = nullptr;
-		if (Params->TryGetArrayField(TEXT("chains"), ChainsArr))
+		if (TryGetArrayParam(Params, TEXT("chains"), ChainsArr))
 		{
 			for (const TSharedPtr<FJsonValue>& V : *ChainsArr)
 			{
@@ -2390,7 +2390,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetPoseSearchClips(const TSharedPtr<F
 	if (!Database) return MCPError(FString::Printf(TEXT("PoseSearchDatabase not found: %s"), *AssetPath));
 
 	const TArray<TSharedPtr<FJsonValue>>* Clips = nullptr;
-	if (!Params->TryGetArrayField(TEXT("clips"), Clips) || !Clips)
+	if (!TryGetArrayParam(Params, TEXT("clips"), Clips) || !Clips)
 	{
 		return MCPError(TEXT("Missing required parameter 'clips' (array of {sequencePath, mirror?, disableReselection?, sampleStart?, sampleEnd?, enabled?})"));
 	}
@@ -3028,7 +3028,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BatchRetargetAnimations(const TShared
 	}
 
 	const TArray<TSharedPtr<FJsonValue>>* AnimArr = nullptr;
-	if (!Params->TryGetArrayField(TEXT("animPaths"), AnimArr) || !AnimArr || AnimArr->Num() == 0)
+	if (!TryGetArrayParam(Params, TEXT("animPaths"), AnimArr) || !AnimArr || AnimArr->Num() == 0)
 	{
 		return MCPError(TEXT("Missing 'animPaths' (array of AnimSequence paths to retarget)"));
 	}

@@ -184,7 +184,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ScanAnimationTracks(const TSharedPtr<
 
 	TArray<FString> AssetPaths;
 	const TArray<TSharedPtr<FJsonValue>>* PathsArray = nullptr;
-	if (Params->TryGetArrayField(TEXT("assetPaths"), PathsArray))
+	if (TryGetArrayParam(Params, TEXT("assetPaths"), PathsArray))
 	{
 		for (const TSharedPtr<FJsonValue>& PathValue : *PathsArray)
 		{
@@ -458,7 +458,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetBoneKeyframes(const TSharedPtr<FJs
 	if (auto Err = RequireString(Params, TEXT("boneName"), BoneName)) return Err;
 
 	const TArray<TSharedPtr<FJsonValue>>* KeyframesArray;
-	if (!Params->TryGetArrayField(TEXT("keyframes"), KeyframesArray))
+	if (!TryGetArrayParam(Params, TEXT("keyframes"), KeyframesArray))
 	{
 		return MCPError(TEXT("Missing 'keyframes' array parameter"));
 	}
@@ -622,7 +622,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BakeKeyframesBatch(const TSharedPtr<F
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
 	const TArray<TSharedPtr<FJsonValue>>* Tracks = nullptr;
-	if (!Params->TryGetArrayField(TEXT("tracks"), Tracks) || !Tracks)
+	if (!TryGetArrayParam(Params, TEXT("tracks"), Tracks) || !Tracks)
 	{
 		return MCPError(TEXT("Missing 'tracks' array parameter ([{bone, keyframes:[...]}, ...])"));
 	}
@@ -809,9 +809,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BakeKeyframesBatch(const TSharedPtr<F
 TSharedPtr<FJsonValue> FAnimationHandlers::GetBoneTransforms(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (!Params->TryGetStringField(TEXT("skeletonPath"), AssetPath)
-		&& !Params->TryGetStringField(TEXT("assetPath"), AssetPath)
-		&& !Params->TryGetStringField(TEXT("path"), AssetPath))
+	if (!TryGetStringParam(Params, TEXT("skeletonPath"), AssetPath)
+		&& !TryGetStringParam(Params, TEXT("assetPath"), AssetPath)
+		&& !TryGetStringParam(Params, TEXT("path"), AssetPath))
 	{
 		return MCPError(TEXT("Missing 'skeletonPath' parameter"));
 	}
@@ -854,7 +854,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetBoneTransforms(const TSharedPtr<FJ
 	// Optional bone name filter
 	TSet<FName> FilterBones;
 	const TArray<TSharedPtr<FJsonValue>>* BoneNamesArray;
-	if (Params->TryGetArrayField(TEXT("boneNames"), BoneNamesArray))
+	if (TryGetArrayParam(Params, TEXT("boneNames"), BoneNamesArray))
 	{
 		for (const TSharedPtr<FJsonValue>& Val : *BoneNamesArray)
 		{
@@ -998,7 +998,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetAnimCurveKeys(const TSharedPtr<FJs
 	if (auto Err = RequireString(Params, TEXT("curveName"), CurveName)) return Err;
 
 	const TArray<TSharedPtr<FJsonValue>>* KeysArr = nullptr;
-	if (!Params->TryGetArrayField(TEXT("keys"), KeysArr) || !KeysArr)
+	if (!TryGetArrayParam(Params, TEXT("keys"), KeysArr) || !KeysArr)
 	{
 		return MCPError(TEXT("Missing 'keys' array parameter (each entry: {time, value, interp?})"));
 	}
@@ -1256,7 +1256,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ApplyAnimationModifier(const TSharedP
 	// Apply caller-provided settings (CurveName, Axis, SampleRate, ...).
 	TArray<FString> AppliedProps;
 	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
-	if (Params->TryGetObjectField(TEXT("props"), PropsObj) && PropsObj && (*PropsObj).IsValid())
+	if (TryGetObjectParam(Params, TEXT("props"), PropsObj) && PropsObj && (*PropsObj).IsValid())
 	{
 		Instance->Modify();
 		for (const auto& Pair : (*PropsObj)->Values)
@@ -1401,7 +1401,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadBoneTrack(const TSharedPtr<FJsonO
 	// Frame selection
 	TArray<int32> FramesToSample;
 	const TArray<TSharedPtr<FJsonValue>>* FramesArr = nullptr;
-	if (Params->TryGetArrayField(TEXT("frames"), FramesArr))
+	if (TryGetArrayParam(Params, TEXT("frames"), FramesArr))
 	{
 		for (const auto& V : *FramesArr)
 		{
@@ -1470,13 +1470,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadBoneTrack(const TSharedPtr<FJsonO
 TSharedPtr<FJsonValue> FAnimationHandlers::SetSequenceProperties(const TSharedPtr<FJsonObject>& Params)
 {
 	const TArray<TSharedPtr<FJsonValue>>* PathsArr = nullptr;
-	if (!Params->TryGetArrayField(TEXT("assetPaths"), PathsArr))
+	if (!TryGetArrayParam(Params, TEXT("assetPaths"), PathsArr))
 	{
 		return MCPError(TEXT("Missing 'assetPaths' array parameter"));
 	}
 
 	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
-	if (!Params->TryGetObjectField(TEXT("properties"), PropsObj) || !PropsObj || !(*PropsObj).IsValid())
+	if (!TryGetObjectParam(Params, TEXT("properties"), PropsObj) || !PropsObj || !(*PropsObj).IsValid())
 	{
 		return MCPError(TEXT("Missing 'properties' object parameter"));
 	}
@@ -1652,7 +1652,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BakeRootMotionFromBone(const TSharedP
 
 	bool bBakeX = true, bBakeY = true, bBakeZ = false;
 	const TArray<TSharedPtr<FJsonValue>>* AxesArr = nullptr;
-	if (Params->TryGetArrayField(TEXT("axes"), AxesArr))
+	if (TryGetArrayParam(Params, TEXT("axes"), AxesArr))
 	{
 		bBakeX = bBakeY = bBakeZ = false;
 		for (const TSharedPtr<FJsonValue>& V : *AxesArr)
