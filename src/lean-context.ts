@@ -31,14 +31,18 @@ import { flatValidationMessage } from "./call-envelope.js";
 
 export type ContextStrategy = "full" | "lean" | "micro";
 
+/** The strategy a project gets when it names none (#1172). */
+export const DEFAULT_CONTEXT_STRATEGY: ContextStrategy = "micro";
+
 /**
  * Resolve the active strategy. Env var wins over config so a user can flip it
- * per-session without editing ue-mcp.yml. Anything other than "lean"/"micro"
- * (case insensitive) resolves to "full", the safe, unchanged default.
+ * per-session without editing ue-mcp.yml. Anything other than "full"/"lean"
+ * (case insensitive) resolves to "micro", the default since #1172: the full
+ * surface cost most of a context window before the first call.
  */
 export function resolveContextStrategy(configStrategy?: string): ContextStrategy {
-  const raw = (process.env.UE_MCP_CONTEXT_STRATEGY ?? configStrategy ?? "full").trim().toLowerCase();
-  return raw === "lean" ? "lean" : raw === "micro" ? "micro" : "full";
+  const raw = (process.env.UE_MCP_CONTEXT_STRATEGY ?? configStrategy ?? DEFAULT_CONTEXT_STRATEGY).trim().toLowerCase();
+  return raw === "full" ? "full" : raw === "lean" ? "lean" : "micro";
 }
 
 const ACTIONS_MARKER = "\n\nActions:\n";

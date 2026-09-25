@@ -106,11 +106,11 @@ export const UeMcpConfigSchema = z
         host: z.string().optional(),
       })
       .optional(),
-    // Context-seeding strategy. `full` (default) advertises every action inline
-    // in each category tool's description + trimmed server instructions. `lean`
-    // collapses tool descriptions to a one-line summary, trims the instructions,
-    // and moves the action catalog behind on-demand discovery (the `catalog`
-    // tool + per-category `describe` action). See lean-context.ts.
+    // Context-seeding strategy. `micro` (default) fronts everything with one
+    // gateway tool. `lean` advertises the category tools with a one-line
+    // summary and moves the signatures behind on-demand discovery (the
+    // `catalog` tool + per-category `describe` action). `full` lists one
+    // signature per action inline. See lean-context.ts.
     context: z
       .object({
         strategy: z.enum(["full", "lean", "micro"]).optional(),

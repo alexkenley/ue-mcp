@@ -39,14 +39,15 @@ describe("resolveContextStrategy", () => {
     else process.env.UE_MCP_CONTEXT_STRATEGY = saved;
   });
 
-  it("defaults to full", () => {
+  it("defaults to micro (#1172)", () => {
     delete process.env.UE_MCP_CONTEXT_STRATEGY;
-    expect(resolveContextStrategy()).toBe("full");
-    expect(resolveContextStrategy(undefined)).toBe("full");
+    expect(resolveContextStrategy()).toBe("micro");
+    expect(resolveContextStrategy(undefined)).toBe("micro");
   });
 
-  it("reads lean and micro from config", () => {
+  it("reads full, lean and micro from config", () => {
     delete process.env.UE_MCP_CONTEXT_STRATEGY;
+    expect(resolveContextStrategy("full")).toBe("full");
     expect(resolveContextStrategy("lean")).toBe("lean");
     expect(resolveContextStrategy("micro")).toBe("micro");
   });
@@ -58,9 +59,9 @@ describe("resolveContextStrategy", () => {
     expect(resolveContextStrategy("lean")).toBe("full");
   });
 
-  it("treats unknown values as full", () => {
+  it("treats unknown values as the default", () => {
     delete process.env.UE_MCP_CONTEXT_STRATEGY;
-    expect(resolveContextStrategy("verbose")).toBe("full");
+    expect(resolveContextStrategy("verbose")).toBe("micro");
   });
 });
 

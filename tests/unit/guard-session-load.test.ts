@@ -37,6 +37,8 @@ it("retries failed guard construction before publishing a runtime editor", async
     env.UE_MCP_HOST = "127.0.0.1";
     env.UE_MCP_STATE_DIR = path.join(dir, "state");
     env.UE_MCP_CONFIG_DIR = path.join(dir, "config");
+    // Calls the category tools directly, which micro (the default) does not advertise.
+    env.UE_MCP_CONTEXT_STRATEGY = "full";
     env.UE_MCP_GLOBAL_CONFIG = path.join(dir, "global.yml");
     fs.writeFileSync(env.UE_MCP_GLOBAL_CONFIG, "guards: [broken");
     await client.connect(new StdioClientTransport({

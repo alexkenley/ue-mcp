@@ -190,13 +190,13 @@ do the job, tell the user when done and offer to feedback(action="submit") the g
 routes the issue to the tracker that owns the surface (core, or the plugin that provides it)
 by checking the plugin registry; feedback(action="route") previews that without posting.
 
-Full mode (every signature listed inline) is the default. This lean surface is selected by
-context.strategy: lean in ue-mcp.yml or UE_MCP_CONTEXT_STRATEGY=lean.
+This lean surface is selected by context.strategy: lean in ue-mcp.yml or
+UE_MCP_CONTEXT_STRATEGY=lean. The default is micro; full lists every signature inline.
 `;
 
-// Smallest surface (context.strategy = "micro"). The entire ue-mcp API is
-// reached through one gateway tool, mirroring the native MCP toolset gateway
-// (list_toolsets / describe_toolset / call_tool). Nothing else is advertised.
+// Smallest surface (context.strategy = "micro", the default since #1172). The
+// entire ue-mcp API is reached through one gateway tool, mirroring the native
+// MCP toolset gateway (list_toolsets / describe_toolset / call_tool).
 export const SERVER_INSTRUCTIONS_MICRO = `UE-MCP (micro mode): Unreal Engine editor bridge (C++ plugin). The entire surface (${CATEGORY_COUNT} categories, ${ACTION_COUNT} actions) is reached through a single gateway tool to keep context tiny.
 
 ═══ HOW TO USE ═══
@@ -221,8 +221,8 @@ ${CATEGORIES}.
 flow(action="run", flowName="<name>") runs a named sequence; see the \`flows\` field
 from tools(action="call", category="project", method="get_status").
 
-Full mode (every signature listed inline) is the default. This micro surface is selected by
-context.strategy: micro in ue-mcp.yml or UE_MCP_CONTEXT_STRATEGY=micro.
+This micro surface is the default. context.strategy: lean or full in ue-mcp.yml (or
+UE_MCP_CONTEXT_STRATEGY) advertises the category tools directly instead.
 `;
 
 /**

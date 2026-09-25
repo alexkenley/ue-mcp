@@ -109,11 +109,12 @@ function writeProjectConfig(
     else delete block.nativeTools;
   }
 
-  // Context strategy is `full` by default, so only persist the block when the
-  // user picks `lean` or `micro` - keeps the scaffold clean for the common case.
-  if (contextStrategy === "lean" || contextStrategy === "micro") {
+  // Context strategy is `micro` by default (#1172), so only persist the block
+  // when the user picks `lean` or `full` - keeps the scaffold clean for the
+  // common case.
+  if (contextStrategy === "lean" || contextStrategy === "full") {
     block.context = { strategy: contextStrategy };
-  } else if (contextStrategy === "full") {
+  } else if (contextStrategy === "micro") {
     delete block.context;
   }
 
@@ -337,15 +338,15 @@ async function init() {
   // full: every action inline (largest, zero discovery calls). lean: action
   // names stay visible, descriptions/params on demand. micro: one gateway tool
   // fronts everything (smallest seed, most discovery calls).
-  const CONTEXT_TIERS = ["full", "lean", "micro"] as const;
-  const existingStrategy = project.config.context?.strategy ?? "full";
+  const CONTEXT_TIERS = ["micro", "lean", "full"] as const;
+  const existingStrategy = project.config.context?.strategy ?? "micro";
   const tierLabels = [
-    "full  - every action listed inline (largest seed, no discovery calls)",
-    "lean  - action names visible, descriptions on demand (~half the seed)",
-    "micro - one gateway tool fronts everything (smallest seed)",
+    "micro - one gateway tool fronts everything (smallest seed, default)",
+    "lean  - category tools and action names visible, signatures on demand",
+    "full  - every action's signature listed inline (largest seed, no discovery calls)",
   ].map((l, i) => (CONTEXT_TIERS[i] === existingStrategy ? `${l}   [current]` : l));
   const tierIndex = await singleSelect("Context strategy", tierLabels);
-  const contextStrategy = CONTEXT_TIERS[tierIndex] ?? "full";
+  const contextStrategy = CONTEXT_TIERS[tierIndex] ?? "micro";
 
   console.log("");
 

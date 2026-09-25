@@ -119,6 +119,12 @@ function recordingEnv(sandbox: string, host: string, port: number): NodeJS.Proce
   env.UE_MCP_AUTH_DIR = path.join(sandbox, "auth");
   env.UE_MCP_DISABLE_UPDATE_CHECK = "1";
   env.UE_MCP_LOG_LEVEL = "error";
+  // The full strategy, pinned. Micro is the default since #1172, and it
+  // advertises one gateway whose schema names no action at all; full is the
+  // surface every category tool, action enum and signature line is on, so it
+  // is the one a baseline can guard. Lean and micro are projections of it,
+  // covered by tests/unit/lean-context.test.ts and the context-tax gate.
+  env.UE_MCP_CONTEXT_STRATEGY = "full";
   return env;
 }
 

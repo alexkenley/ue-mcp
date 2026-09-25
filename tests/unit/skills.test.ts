@@ -11,6 +11,7 @@ import * as path from "node:path";
 import { ALL_TOOLS } from "../../src/tools.js";
 import { createFlowTool } from "../../src/flow/flow-tool.js";
 import { flowCategoryForCheck } from "../../src/flow/flow-surface.js";
+import { buildMicroGateway } from "../../src/lean-context.js";
 import type { FlowConfig } from "../../src/flow/schema.js";
 import {
   CORE_OWNER,
@@ -268,7 +269,7 @@ describe("the shipped skills teach calls that exist", () => {
 
   it("resolves every action referenced by every packaged skill", () => {
     const known = new Set<string>();
-    for (const tool of [...ALL_TOOLS, flowCategoryForCheck()]) {
+    for (const tool of [...ALL_TOOLS, flowCategoryForCheck(), buildMicroGateway(ALL_TOOLS)]) {
       for (const action of Object.keys(tool.actions)) known.add(`${tool.name}.${action}`);
     }
     const r = checkSkills(packagedSkillsRoot(), known);

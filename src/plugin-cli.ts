@@ -46,6 +46,7 @@ import { ALL_TOOLS } from "./tools.js";
 import { readPluginsList, type PluginEntry } from "./plugin/plugins-list.js";
 import { prefixedActionName } from "./plugin/manifest.js";
 import { flowCategoryForCheck } from "./flow/flow-surface.js";
+import { buildMicroGateway } from "./lean-context.js";
 import {
   checkSkills,
   conflictMessages,
@@ -461,7 +462,8 @@ function cmdCheckSkills(): void {
   if (listSkills(root).length === 0) fail(`no skills/<name>/SKILL.md under ${dir}`);
 
   const known = new Set<string>();
-  for (const tool of [...ALL_TOOLS, flowCategoryForCheck()]) {
+  // The micro gateway is advertised too (the default strategy), so a skill may teach it.
+  for (const tool of [...ALL_TOOLS, flowCategoryForCheck(), buildMicroGateway(ALL_TOOLS)]) {
     for (const action of Object.keys(tool.actions)) known.add(`${tool.name}.${action}`);
   }
   try {
