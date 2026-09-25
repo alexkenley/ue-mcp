@@ -92,6 +92,7 @@ public class UE_MCP_Bridge : ModuleRules
 	// Private/Tests/OpenAssetEditorTests.cpp (#1112): same reason.
 	// Private/Tests/LevelPlaceVolumeTests.cpp (#1119): same reason.
 	// Private/Tests/BlueprintTransactionalNodeTests.cpp (#1086): same reason.
+	// Private/Handlers/MaterialHandlers_Designer.cpp (#1131): same reason.
 	public UE_MCP_Bridge(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;

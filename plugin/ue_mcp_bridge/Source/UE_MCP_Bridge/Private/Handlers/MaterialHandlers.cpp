@@ -122,6 +122,12 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("add_rvt_sampler"), &AddRvtSampler);
 	Registry.RegisterHandler(TEXT("add_rvt_output"), &AddRvtOutput);
 	Registry.RegisterHandler(TEXT("assign_rvt_to_landscape"), &AssignRvtToLandscape);
+
+	// Material Designer layer stacks (#1131), in MaterialHandlers_Designer.cpp.
+	Registry.RegisterHandler(TEXT("read_material_designer"), &ReadMaterialDesigner);
+	Registry.RegisterHandler(TEXT("set_material_designer_value"), &SetMaterialDesignerValue);
+	Registry.RegisterHandler(TEXT("add_material_designer_layer"), &AddMaterialDesignerLayer);
+	Registry.RegisterHandler(TEXT("remove_material_designer_layer"), &RemoveMaterialDesignerLayer);
 }
 
 UMaterial* FMaterialHandlers::LoadMaterialFromPath(const FString& AssetPath)
