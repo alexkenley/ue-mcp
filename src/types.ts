@@ -5,7 +5,7 @@ import type { EditorSession, SessionRegistry } from "./session.js";
 import { McpError, ErrorCode } from "./errors.js";
 import { MAX_BRIDGE_TIMEOUT_MS } from "./bridge-timeouts.js";
 import { unknownActionMessage } from "./action-schema.js";
-import { prepareCall, finishCall } from "./call-pipeline.js";
+import { prepareCall, finishCall, forwardToBridge } from "./call-pipeline.js";
 
 /**
  * Re-exported from its home in `call-pipeline.ts`, where the whole inbound
@@ -657,9 +657,7 @@ export function categoryTool(
         // Stripped BEFORE mapParams, not instead of it: a mapParams that
         // forwards its whole bag would otherwise send the action's own name to
         // the bridge as an argument. Nothing here reads the key.
-        const mapped = spec.mapParams
-          ? spec.mapParams(stripAction(normalized))
-          : stripAction(normalized);
+        const mapped = forwardToBridge(pipeline, stripAction(normalized), spec.mapParams, `${name}.${action}`);
         // The caller's budget wins over the action's authored one: an action
         // that declares 120s is stating a floor it needs, not a ceiling the
         // caller may not raise.

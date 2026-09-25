@@ -899,8 +899,18 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetVariableDefault(const TSharedPtr<F
 			*VarName, *FString::Join(Names, TEXT(", "))));
 	}
 
-	// Capture previous value for rollback and idempotency
-	const FString PrevValue = FoundVar->DefaultValue;
+	// Capture previous value for rollback and idempotency. DefaultValue can be
+	// empty while the compiled default is not, so fall back to the CDO's value.
+	FString PrevValue = FoundVar->DefaultValue;
+	if (PrevValue.IsEmpty() && Blueprint->GeneratedClass)
+	{
+		FProperty* CurProp = Blueprint->GeneratedClass->FindPropertyByName(FName(*VarName));
+		UObject* CurCDO = Blueprint->GeneratedClass->GetDefaultObject();
+		if (CurProp && CurCDO)
+		{
+			CurProp->ExportTextItem_Direct(PrevValue, CurProp->ContainerPtrToValuePtr<void>(CurCDO), nullptr, nullptr, PPF_None);
+		}
+	}
 	if (PrevValue == Value)
 	{
 		auto Noop = MCPSuccess();
@@ -911,67 +921,103 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetVariableDefault(const TSharedPtr<F
 		return MCPResult(Noop);
 	}
 
-	// Set default value string on the variable description.
-	// This is the text representation that the BP serialization system uses.
-	FoundVar->DefaultValue = Value;
-
-	// Also try to set it on the CDO property if possible (for immediate reflection)
-	if (Blueprint->GeneratedClass)
+	// Validate the text against the variable's property before writing it. The
+	// compile imports DefaultValue with the engine importer, which drops what it
+	// cannot parse (an invalid map key, say) and still succeeds (#1142).
+	FString StoredValue = Value;
+	FString ExpectedText;
+	bool bCheckReadBack = false;
 	{
-		UObject* CDO = Blueprint->GeneratedClass->GetDefaultObject();
-		if (CDO)
+		UClass* GenClass = Blueprint->GeneratedClass;
+		FProperty* Prop = GenClass ? GenClass->FindPropertyByName(FName(*VarName)) : nullptr;
+		const bool bOnGenerated = Prop != nullptr;
+		if (!Prop && Blueprint->SkeletonGeneratedClass)
 		{
-			FProperty* Prop = Blueprint->GeneratedClass->FindPropertyByName(FName(*VarName));
-			if (Prop)
+			Prop = Blueprint->SkeletonGeneratedClass->FindPropertyByName(FName(*VarName));
+		}
+
+		// An empty value clears the default, which every type accepts.
+		if (Prop && !Value.TrimStartAndEnd().IsEmpty())
+		{
+			const bool bNoneValue = Value.Equals(TEXT("None"), ESearchCase::IgnoreCase);
+
+			// A short class name is resolved here; the importer needs a path.
+			if (CastField<FClassProperty>(Prop) && !bNoneValue && !Value.Contains(TEXT("/")))
 			{
-				void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(CDO);
-
-				if (FClassProperty* ClassProp = CastField<FClassProperty>(Prop))
+				if (UClass* ClassVal = FindClassByShortName(Value))
 				{
-					UClass* ClassVal = LoadObject<UClass>(nullptr, *Value);
-					if (!ClassVal) ClassVal = FindClassByShortName(Value);
-					if (ClassVal) ClassProp->SetObjectPropertyValue(ValuePtr, ClassVal);
+					StoredValue = ClassVal->GetPathName();
 				}
-				else if (FObjectPropertyBase* ObjProp = CastField<FObjectPropertyBase>(Prop))
-				{
-					UObject* LoadedObj = LoadObject<UObject>(nullptr, *Value);
-					if (LoadedObj) ObjProp->SetObjectPropertyValue(ValuePtr, LoadedObj);
-				}
-				else if (FArrayProperty* ArrayProp = CastField<FArrayProperty>(Prop))
-				{
-					// For arrays (including TArray<TSubclassOf<>>), use ImportText.
-					// A parse failure here just means the CDO mirror did not take;
-					// the authoritative string default set on FoundVar->DefaultValue
-					// above still applies on the next compile, so we do not reject
-					// the whole request, but the caller gets a warning.
-					if (!Prop->ImportText_Direct(*Value, ValuePtr, CDO, PPF_None))
-					{
-						UE_LOG(LogTemp, Warning, TEXT("set_blueprint_variable_default_value: ImportText_Direct failed for array property '%s' value '%s' - default string was still written and will take effect on recompile."), *VarName, *Value);
-					}
-				}
-				else
-				{
-					if (!Prop->ImportText_Direct(*Value, ValuePtr, CDO, PPF_None))
-					{
-						UE_LOG(LogTemp, Warning, TEXT("set_blueprint_variable_default_value: ImportText_Direct failed for property '%s' value '%s' - default string was still written and will take effect on recompile."), *VarName, *Value);
-					}
-				}
-
-				CDO->PostEditChange();
 			}
+
+			FDefaultConstructedPropertyElement Probe(Prop);
+			FString ImportError;
+			if (!MCPPropertyText::ImportTextIntoProperty(Prop, Probe.GetObjAddress(), StoredValue, nullptr, ImportError))
+			{
+				return MCPError(FString::Printf(
+					TEXT("Value '%s' is not a valid default for variable '%s' (%s): %s. Nothing was changed."),
+					*Value, *VarName, *Prop->GetCPPType(), *ImportError));
+			}
+
+			// A hard reference that parsed to null named an object that does not exist.
+			if (FObjectProperty* ObjProp = CastField<FObjectProperty>(Prop))
+			{
+				if (!bNoneValue && ObjProp->GetObjectPropertyValue(Probe.GetObjAddress()) == nullptr)
+				{
+					return MCPError(FString::Printf(
+						TEXT("Value '%s' for variable '%s' does not resolve to a %s. Nothing was changed."),
+						*Value, *VarName, *ObjProp->PropertyClass->GetName()));
+				}
+			}
+
+			// The compile below replaces Prop, so the probe must not outlive this
+			// block. Only the exported text is carried to the read-back.
+			Prop->ExportTextItem_Direct(ExpectedText, Probe.GetObjAddress(), nullptr, nullptr, PPF_None);
+			bCheckReadBack = bOnGenerated
+				&& !Prop->HasAnyPropertyFlags(CPF_InstancedReference | CPF_ContainsInstancedReference);
 		}
 	}
+
+	FoundVar->DefaultValue = StoredValue;
 
 	// Compile and save
 	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+	// Read back what the compile produced. A mismatch means the engine's own
+	// import of the stored text loses part of it, so the write is undone. The
+	// CDO is not pre-set by hand: that would mask a failed compile-time import.
+	if (bCheckReadBack && Blueprint->Status != EBlueprintStatus::BS_Error && Blueprint->GeneratedClass)
+	{
+		FProperty* NewProp = Blueprint->GeneratedClass->FindPropertyByName(FName(*VarName));
+		UObject* NewCDO = Blueprint->GeneratedClass->GetDefaultObject();
+		if (NewProp && NewCDO)
+		{
+			FString ActualText;
+			NewProp->ExportTextItem_Direct(ActualText, NewProp->ContainerPtrToValuePtr<void>(NewCDO), nullptr, nullptr, PPF_None);
+			if (ActualText != ExpectedText)
+			{
+				for (FBPVariableDescription& Var : Blueprint->NewVariables)
+				{
+					if (Var.VarName.ToString() == VarName) Var.DefaultValue = PrevValue;
+				}
+				FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+				FKismetEditorUtilities::CompileBlueprint(Blueprint);
+				return MCPError(FString::Printf(
+					TEXT("Variable '%s' compiled to '%s', not the requested '%s': the engine's import of that text loses part of it. "
+						"The previous default was restored and nothing was saved."),
+					*VarName, *ActualText, *ExpectedText));
+			}
+		}
+	}
+
 	SaveAssetPackage(Blueprint);
 
 	auto Result = MCPSuccess();
 	MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("path"), AssetPath);
 	Result->SetStringField(TEXT("variableName"), VarName);
-	Result->SetStringField(TEXT("value"), Value);
+	Result->SetStringField(TEXT("value"), StoredValue);
 
 	// Rollback: self-inverse with previous value
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();

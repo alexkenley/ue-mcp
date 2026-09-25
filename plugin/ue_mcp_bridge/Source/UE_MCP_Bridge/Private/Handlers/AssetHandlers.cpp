@@ -191,6 +191,12 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// create_asset_by_class cannot make because it always creates a package.
 	Registry.RegisterHandler(TEXT("create_subobject"), &CreateSubobject);
 	Registry.RegisterHandler(TEXT("read_asset_graph"), &ReadAssetGraph);
+	Registry.RegisterHandler(TEXT("connect_graph_pins"), &ConnectGraphPins);
+	Registry.RegisterHandler(TEXT("disconnect_graph_pins"), &DisconnectGraphPins);
+	Registry.RegisterHandler(TEXT("add_graph_node"), &AddGraphNode);
+	Registry.RegisterHandler(TEXT("remove_graph_node"), &RemoveGraphNode);
+	Registry.RegisterHandlerWithTimeout(TEXT("compile_customizable_object"), &CompileCustomizableObject, 600.0f);
+	Registry.RegisterHandler(TEXT("create_customizable_object"), &CreateCustomizableObject);
 	Registry.RegisterHandler(TEXT("save_asset"), &SaveAsset);
 	Registry.RegisterHandler(TEXT("save_all_dirty"), &SaveAllDirty);
 	Registry.RegisterHandler(TEXT("list_textures"), &ListTextures);
@@ -2136,7 +2142,11 @@ static TSharedPtr<FJsonValue> MCPRefuseSplitPackages(const TArray<FAssetRenameDa
 		if (!Package || UWorld::FindWorldInPackage(Package)) continue;
 
 		TArray<UObject*> TopLevel;
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
+		GetObjectsWithPackage(Package, TopLevel, EGetObjectsFlags::None);
+#else
 		GetObjectsWithPackage(Package, TopLevel, /*bIncludeNestedObjects=*/false);
+#endif
 		TArray<TSharedPtr<FJsonValue>> Left;
 		for (UObject* Obj : TopLevel)
 		{
@@ -3484,6 +3494,42 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteFolder(const TSharedPtr<FJsonObject
 		{
 			Entry->SetStringField(TEXT("status"), TEXT("deleted"));
 			if (Contained.Num() > 0) Entry->SetNumberField(TEXT("assetsDeleted"), Contained.Num());
+			// A World Partition map keeps its actors in __ExternalActors__/__ExternalObjects__
+			// beside the mount, not under the folder, so they outlive the delete unless removed here.
+			{
+				FString Mount, Rest;
+				if (Norm.RightChop(1).Split(TEXT("/"), &Mount, &Rest) && !Rest.IsEmpty())
+				{
+					int32 ExternalFiles = 0;
+					for (const TCHAR* Sub : { TEXT("__ExternalActors__"), TEXT("__ExternalObjects__") })
+					{
+						const FString ExtPackagePath = FString::Printf(TEXT("/%s/%s/%s"), *Mount, Sub, *Rest);
+						FString ExtDir;
+						if (!FPackageName::TryConvertLongPackageNameToFilename(ExtPackagePath + TEXT("/"), ExtDir)) continue;
+						if (!IFileManager::Get().DirectoryExists(*ExtDir)) continue;
+						TArray<FString> Files;
+						IFileManager::Get().FindFilesRecursive(Files, *ExtDir, TEXT("*.uasset"), true, false);
+						bool bLoaded = false;
+						for (const FString& File : Files)
+						{
+							FString PackageName;
+							if (FPackageName::TryConvertFilenameToLongPackageName(File, PackageName) && FindPackage(nullptr, *PackageName))
+							{
+								bLoaded = true;
+								break;
+							}
+						}
+						if (bLoaded)
+						{
+							Entry->SetStringField(TEXT("externalPackagesKept"), FString::Printf(
+								TEXT("%s holds packages that are still loaded; unload the map and delete again to remove them."), *ExtPackagePath));
+							continue;
+						}
+						if (IFileManager::Get().DeleteDirectory(*ExtDir, /*RequireExists=*/false, /*Tree=*/true)) ExternalFiles += Files.Num();
+					}
+					if (ExternalFiles > 0) Entry->SetNumberField(TEXT("externalPackagesDeleted"), ExternalFiles);
+				}
+			}
 			DeletedPaths.Add(MakeShared<FJsonValueString>(Norm));
 			AssetsDeleted += Contained.Num();
 			// Any contained asset sitting below Norm rather than directly in it
@@ -3896,8 +3942,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::AppendAssetArrayElements(const TSharedPtr
 				TEXT("array is not a working node. It has no pins, because only the graph's schema runs ")
 				TEXT("AllocateDefaultPins, so it can never be connected to anything, and its outer is wrong. The ")
 				TEXT("append would report success and leave the graph unable to open. Read the graph with ")
-				TEXT("asset(action=\"read_graph\"), and author nodes through the editor or an action that knows ")
-				TEXT("the schema for that graph type."),
+				TEXT("asset(action=\"read_graph\"), create nodes with asset(action=\"add_graph_node\") and wire them ")
+				TEXT("with asset(action=\"connect_graph_pins\"), which go through the graph's schema."),
 				*PropertyName));
 		}
 	}

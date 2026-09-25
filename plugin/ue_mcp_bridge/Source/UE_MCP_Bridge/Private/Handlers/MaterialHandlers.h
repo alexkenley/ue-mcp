@@ -165,4 +165,11 @@ private:
 	static TSharedPtr<FJsonValue> AddRvtSampler(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> AddRvtOutput(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> AssignRvtToLandscape(const TSharedPtr<FJsonObject>& Params);
+
+	// #1131: Material Designer (DynamicMaterial) layer stacks, in MaterialHandlers_Designer.cpp.
+	static TSharedPtr<FJsonValue> ReadMaterialDesigner(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> SetMaterialDesignerValue(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> AddMaterialDesignerLayer(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveMaterialDesignerLayer(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> CreateMaterialDesigner(const TSharedPtr<FJsonObject>& Params);
 };

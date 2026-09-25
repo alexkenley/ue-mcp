@@ -80,6 +80,15 @@ private:
 	// UPROPERTY and UEdGraphPin is not a UObject - so this is the only way to
 	// read a graph's topology. Lives in AssetHandlers_Graph.cpp.
 	static TSharedPtr<FJsonValue> ReadAssetGraph(const TSharedPtr<FJsonObject>& Params);
+	// #1059: graph authoring through the graph's own schema, and the Mutable
+	// compile. Live in AssetHandlers_Graph.cpp.
+	static TSharedPtr<FJsonValue> ConnectGraphPins(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> DisconnectGraphPins(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> AddGraphNode(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> RemoveGraphNode(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> CompileCustomizableObject(const TSharedPtr<FJsonObject>& Params);
+	// A CustomizableObject with its Source graph, through Mutable's factory.
+	static TSharedPtr<FJsonValue> CreateCustomizableObject(const TSharedPtr<FJsonObject>& Params);
 	// A named subobject inside an existing asset's package (#975). Lives in
 	// AssetHandlers_Subobject.cpp.
 	static TSharedPtr<FJsonValue> CreateSubobject(const TSharedPtr<FJsonObject>& Params);
