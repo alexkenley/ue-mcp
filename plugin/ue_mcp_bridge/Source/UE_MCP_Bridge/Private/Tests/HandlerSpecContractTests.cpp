@@ -31,6 +31,7 @@
 #include "Handlers/SequencerHandlers.h"
 #include "Handlers/PCGHandlers.h"
 #include "Handlers/NiagaraHandlers.h"
+#include "Handlers/MaterialHandlers.h"
 #include "Misc/AutomationTest.h"
 
 namespace MCPHandlerSpecTests
@@ -112,6 +113,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FDialogHandlers::RegisterHandlers(Registry);
 	FPCGHandlers::RegisterHandlers(Registry);
 	FNiagaraHandlers::RegisterHandlers(Registry);
+	FMaterialHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
 	TestTrue(TEXT("handlers register with a parameter spec"), Specs.Num() > 0);

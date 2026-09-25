@@ -1,5 +1,5 @@
 {
-  "handlerCount": 63,
+  "handlerCount": 99,
   "handlers": {
     "add_curve": {
       "category": "animation",
@@ -64,6 +64,118 @@
           "type": "string",
           "required": true,
           "description": "NiagaraEmitter asset to add"
+        }
+      ]
+    },
+    "add_expression_in_function": {
+      "category": "material",
+      "params": [
+        {
+          "name": "functionPath",
+          "type": "string",
+          "required": true,
+          "description": "MaterialFunction asset path (#463)",
+          "aliases": [
+            "materialFunctionPath"
+          ]
+        },
+        {
+          "name": "expressionType",
+          "type": "string",
+          "required": true,
+          "description": "Expression type, e.g. Constant3Vector, FunctionInput, FunctionOutput, If"
+        },
+        {
+          "name": "positionX",
+          "type": "number",
+          "required": false,
+          "description": "Graph editor X position for a new node"
+        },
+        {
+          "name": "positionY",
+          "type": "number",
+          "required": false,
+          "description": "Graph editor Y position for a new node"
+        },
+        {
+          "name": "inputName",
+          "type": "string",
+          "required": false,
+          "description": "FunctionInput name (#463)"
+        },
+        {
+          "name": "inputType",
+          "type": "string",
+          "required": false,
+          "description": "FunctionInput type: Scalar|Vector2|Vector3|Vector4|Texture2D|TextureCube|StaticBool|MaterialAttributes (#463)"
+        },
+        {
+          "name": "outputName",
+          "type": "string",
+          "required": false,
+          "description": "FunctionOutput name"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Fallback for inputName on a FunctionInput and outputName on a FunctionOutput"
+        }
+      ]
+    },
+    "add_material_function_expression": {
+      "category": "material",
+      "params": [
+        {
+          "name": "functionPath",
+          "type": "string",
+          "required": true,
+          "description": "MaterialFunction asset path (#463)",
+          "aliases": [
+            "materialFunctionPath"
+          ]
+        },
+        {
+          "name": "expressionType",
+          "type": "string",
+          "required": true,
+          "description": "Expression type, e.g. Constant3Vector, FunctionInput, FunctionOutput, If"
+        },
+        {
+          "name": "positionX",
+          "type": "number",
+          "required": false,
+          "description": "Graph editor X position for a new node"
+        },
+        {
+          "name": "positionY",
+          "type": "number",
+          "required": false,
+          "description": "Graph editor Y position for a new node"
+        },
+        {
+          "name": "inputName",
+          "type": "string",
+          "required": false,
+          "description": "FunctionInput name (#463)"
+        },
+        {
+          "name": "inputType",
+          "type": "string",
+          "required": false,
+          "description": "FunctionInput type: Scalar|Vector2|Vector3|Vector4|Texture2D|TextureCube|StaticBool|MaterialAttributes (#463)"
+        },
+        {
+          "name": "outputName",
+          "type": "string",
+          "required": false,
+          "description": "FunctionOutput name"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Fallback for inputName on a FunctionInput and outputName on a FunctionOutput"
         }
       ]
     },
@@ -210,6 +322,132 @@
         }
       ]
     },
+    "add_rvt_output": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "assetPath"
+          ]
+        },
+        {
+          "name": "expressionName",
+          "type": "string",
+          "required": false,
+          "description": "Node name; an existing node of that name is reused"
+        },
+        {
+          "name": "mirrorProperties",
+          "type": "boolean",
+          "required": false,
+          "description": "Mirror the material's own property connections into the RVT output node (default true)"
+        },
+        {
+          "name": "positionX",
+          "type": "number",
+          "required": false,
+          "description": "Graph editor X position for a new node"
+        },
+        {
+          "name": "positionY",
+          "type": "number",
+          "required": false,
+          "description": "Graph editor Y position for a new node"
+        },
+        {
+          "name": "recompile",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompile the material after the graph edit (default true)"
+        }
+      ]
+    },
+    "add_rvt_sampler": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "assetPath"
+          ]
+        },
+        {
+          "name": "rvtPath",
+          "type": "string",
+          "required": true,
+          "description": "RuntimeVirtualTexture asset path"
+        },
+        {
+          "name": "expressionName",
+          "type": "string",
+          "required": false,
+          "description": "Node name; an existing node of that name is reused"
+        },
+        {
+          "name": "connectOutputs",
+          "type": "boolean",
+          "required": false,
+          "description": "Connect each sample output to the material property of the same name (default true)"
+        },
+        {
+          "name": "positionX",
+          "type": "number",
+          "required": false,
+          "description": "Graph editor X position for a new node"
+        },
+        {
+          "name": "positionY",
+          "type": "number",
+          "required": false,
+          "description": "Graph editor Y position for a new node"
+        },
+        {
+          "name": "recompile",
+          "type": "boolean",
+          "required": false,
+          "description": "Recompile the material after the graph edit (default true)"
+        }
+      ]
+    },
+    "add_rvt_volume": {
+      "category": "material",
+      "params": [
+        {
+          "name": "rvtPath",
+          "type": "string",
+          "required": true,
+          "description": "RuntimeVirtualTexture asset path",
+          "aliases": [
+            "assetPath"
+          ]
+        },
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Editor label for the new volume (default RVTVolume_<rvt name>)"
+        },
+        {
+          "name": "boundsMode",
+          "type": "string",
+          "required": false,
+          "description": "writers (cover every primitive writing into this RVT) | alignActor (match one actor's box and rotation)"
+        },
+        {
+          "name": "boundsAlignActor",
+          "type": "string",
+          "required": false,
+          "description": "Actor label or object path whose rotation and bounds the volume aligns to, typically the landscape"
+        }
+      ]
+    },
     "add_virtual_bone": {
       "category": "animation",
       "params": [
@@ -233,6 +471,61 @@
         }
       ]
     },
+    "batch_set_material_instances": {
+      "category": "material",
+      "params": [
+        {
+          "name": "instances",
+          "type": "array",
+          "required": true,
+          "description": "[{assetPath, parentPath?, parameters?:[{name, type (scalar|vector|texture), value}]}]. value: number (scalar), {r,g,b,a} (vector), or texture path (texture) (#594)",
+          "items": "object"
+        }
+      ]
+    },
+    "build_material_graph": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "materialPath"
+          ]
+        },
+        {
+          "name": "nodes",
+          "type": "array",
+          "required": true,
+          "description": "Graph spec: [{name,class,posX,posY,...}]",
+          "items": "object"
+        },
+        {
+          "name": "propertyConnections",
+          "type": "array",
+          "required": false,
+          "description": "[{property,from,outputIndex}]",
+          "items": "object"
+        }
+      ]
+    },
+    "clear_material_instance_parameters": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "MaterialInstanceConstant asset path",
+          "aliases": [
+            "path",
+            "materialPath"
+          ]
+        }
+      ]
+    },
     "compile_niagara_system": {
       "category": "niagara",
       "params": [
@@ -253,6 +546,121 @@
           "type": "boolean",
           "required": false,
           "description": "Also wait for GPU shader compilation to finish (default false)"
+        }
+      ]
+    },
+    "connect_expressions_in_function": {
+      "category": "material",
+      "params": [
+        {
+          "name": "functionPath",
+          "type": "string",
+          "required": true,
+          "description": "MaterialFunction asset path (#463)",
+          "aliases": [
+            "materialFunctionPath"
+          ]
+        },
+        {
+          "name": "sourceExpression",
+          "type": "string",
+          "required": true,
+          "description": "Expression the wire leaves (name, or index inside a MaterialFunction)"
+        },
+        {
+          "name": "sourceOutput",
+          "type": "string",
+          "required": false,
+          "description": "Output of the source expression, by name or index (default: its first output)"
+        },
+        {
+          "name": "targetExpression",
+          "type": "string",
+          "required": true,
+          "description": "Expression the wire enters (name, or index inside a MaterialFunction)"
+        },
+        {
+          "name": "targetInput",
+          "type": "string",
+          "required": false,
+          "description": "Input of the target expression, by name or index (default: its first input)"
+        }
+      ]
+    },
+    "connect_material_expressions": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path",
+            "assetPath"
+          ]
+        },
+        {
+          "name": "sourceExpression",
+          "type": "string",
+          "required": true,
+          "description": "Expression the wire leaves (name, or index inside a MaterialFunction)"
+        },
+        {
+          "name": "sourceOutput",
+          "type": "string",
+          "required": false,
+          "description": "Output of the source expression, by name or index (default: its first output)"
+        },
+        {
+          "name": "targetExpression",
+          "type": "string",
+          "required": true,
+          "description": "Expression the wire enters (name, or index inside a MaterialFunction)"
+        },
+        {
+          "name": "targetInput",
+          "type": "string",
+          "required": false,
+          "description": "Input of the target expression, by name or index (default: its first input)"
+        }
+      ]
+    },
+    "connect_material_function_expressions": {
+      "category": "material",
+      "params": [
+        {
+          "name": "functionPath",
+          "type": "string",
+          "required": true,
+          "description": "MaterialFunction asset path (#463)",
+          "aliases": [
+            "materialFunctionPath"
+          ]
+        },
+        {
+          "name": "sourceExpression",
+          "type": "string",
+          "required": true,
+          "description": "Expression the wire leaves (name, or index inside a MaterialFunction)"
+        },
+        {
+          "name": "sourceOutput",
+          "type": "string",
+          "required": false,
+          "description": "Output of the source expression, by name or index (default: its first output)"
+        },
+        {
+          "name": "targetExpression",
+          "type": "string",
+          "required": true,
+          "description": "Expression the wire enters (name, or index inside a MaterialFunction)"
+        },
+        {
+          "name": "targetInput",
+          "type": "string",
+          "required": false,
+          "description": "Input of the target expression, by name or index (default: its first input)"
         }
       ]
     },
@@ -306,6 +714,89 @@
         }
       ]
     },
+    "connect_texture_to_material": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path",
+            "assetPath"
+          ]
+        },
+        {
+          "name": "texturePath",
+          "type": "string",
+          "required": true,
+          "description": "Texture asset path"
+        },
+        {
+          "name": "property",
+          "type": "string",
+          "required": false,
+          "description": "Material property: BaseColor, Normal, Roughness, Metallic, EmissiveColor, etc. (default BaseColor)",
+          "aliases": [
+            "materialProperty"
+          ]
+        }
+      ]
+    },
+    "connect_to_material_property": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path",
+            "assetPath"
+          ]
+        },
+        {
+          "name": "expressionName",
+          "type": "string",
+          "required": true,
+          "description": "Expression to wire"
+        },
+        {
+          "name": "outputName",
+          "type": "string",
+          "required": false,
+          "description": "Output of the expression, by name or index (default: its first output)"
+        },
+        {
+          "name": "property",
+          "type": "string",
+          "required": true,
+          "description": "Material property: BaseColor, Normal, Roughness, Metallic, EmissiveColor, etc."
+        }
+      ]
+    },
+    "disconnect_material_property": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "assetPath"
+          ]
+        },
+        {
+          "name": "property",
+          "type": "string",
+          "required": true,
+          "description": "Material property: BaseColor, Normal, Roughness, Metallic, EmissiveColor, etc."
+        }
+      ]
+    },
     "disconnect_pcg_nodes": {
       "category": "pcg",
       "params": [
@@ -356,6 +847,20 @@
         }
       ]
     },
+    "export_material_graph": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "materialPath"
+          ]
+        }
+      ]
+    },
     "export_pcg_graph": {
       "category": "pcg",
       "params": [
@@ -384,6 +889,34 @@
           "type": "string",
           "required": true,
           "description": "NiagaraEmitter asset path"
+        }
+      ]
+    },
+    "get_material_shader_stats": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "materialPath"
+          ]
+        }
+      ]
+    },
+    "get_material_usage": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material or MaterialInstance asset path",
+          "aliases": [
+            "path"
+          ]
         }
       ]
     },
@@ -453,6 +986,34 @@
           "aliases": [
             "path"
           ]
+        }
+      ]
+    },
+    "import_material_graph": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "materialPath"
+          ]
+        },
+        {
+          "name": "nodes",
+          "type": "array",
+          "required": true,
+          "description": "Graph spec: [{name,class,posX,posY,...}]",
+          "items": "object"
+        },
+        {
+          "name": "propertyConnections",
+          "type": "array",
+          "required": false,
+          "description": "[{property,from,outputIndex}]",
+          "items": "object"
         }
       ]
     },
@@ -560,6 +1121,114 @@
           "type": "string",
           "required": true,
           "description": "NiagaraSystem asset path"
+        }
+      ]
+    },
+    "list_expression_types": {
+      "category": "material",
+      "params": [
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Resume a paged read: pass back the 'nextCursor' from the previous page, unmodified"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Rows to return on this page"
+        }
+      ]
+    },
+    "list_expressions_in_function": {
+      "category": "material",
+      "params": [
+        {
+          "name": "functionPath",
+          "type": "string",
+          "required": true,
+          "description": "MaterialFunction asset path (#463)",
+          "aliases": [
+            "materialFunctionPath"
+          ]
+        }
+      ]
+    },
+    "list_material_expressions": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path",
+            "assetPath"
+          ]
+        },
+        {
+          "name": "includeInputs",
+          "type": "boolean",
+          "required": false,
+          "description": "Include each node's input pin wiring (default false)"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Resume a paged read: pass back the 'nextCursor' from the previous page, unmodified"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Rows to return on this page"
+        }
+      ]
+    },
+    "list_material_function_expressions": {
+      "category": "material",
+      "params": [
+        {
+          "name": "functionPath",
+          "type": "string",
+          "required": true,
+          "description": "MaterialFunction asset path (#463)",
+          "aliases": [
+            "materialFunctionPath"
+          ]
+        }
+      ]
+    },
+    "list_material_parameters": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material or MaterialInstance asset path",
+          "aliases": [
+            "path",
+            "materialPath"
+          ]
+        }
+      ]
+    },
+    "list_material_static_switches": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material or MaterialInstance asset path",
+          "aliases": [
+            "path",
+            "materialPath"
+          ]
         }
       ]
     },
@@ -822,6 +1491,80 @@
         }
       ]
     },
+    "read_material": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material or MaterialInstance asset path",
+          "aliases": [
+            "path",
+            "materialPath"
+          ]
+        }
+      ]
+    },
+    "read_material_graph": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path",
+            "assetPath"
+          ]
+        },
+        {
+          "name": "expressionIndex",
+          "type": "number",
+          "required": false,
+          "description": "Read just this node (a nodeId) and the source expressions its inputs link to, unpaged"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Resume a paged read: pass back the 'nextCursor' from the previous page, unmodified"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Rows to return on this page"
+        }
+      ]
+    },
+    "read_material_parameter_collection": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "MaterialParameterCollection asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World whose live collection instance to read: editor, pie or auto. Omit for the stored defaults only"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "Which PIE world when several run (0 = server/primary). See editor(list_pie_instances)"
+        }
+      ]
+    },
     "read_pcg_graph": {
       "category": "pcg",
       "params": [
@@ -856,6 +1599,20 @@
         }
       ]
     },
+    "read_runtime_virtual_texture": {
+      "category": "material",
+      "params": [
+        {
+          "name": "rvtPath",
+          "type": "string",
+          "required": true,
+          "description": "RuntimeVirtualTexture asset path",
+          "aliases": [
+            "assetPath"
+          ]
+        }
+      ]
+    },
     "read_state_machine": {
       "category": "animation",
       "params": [
@@ -873,6 +1630,27 @@
           "type": "string",
           "required": true,
           "description": "State machine to read"
+        }
+      ]
+    },
+    "recompile_material": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path",
+            "assetPath"
+          ]
+        },
+        {
+          "name": "recompileChildren",
+          "type": "boolean",
+          "required": false,
+          "description": "Cascade to every MaterialInstanceConstant whose parent chain reaches this material (#421)"
         }
       ]
     },
@@ -1151,6 +1929,38 @@
         }
       ]
     },
+    "render_material_preview": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "materialPath"
+          ]
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": true,
+          "description": "Absolute file path for the PNG output"
+        },
+        {
+          "name": "width",
+          "type": "number",
+          "required": false,
+          "description": "Image width in pixels (default 256)"
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "required": false,
+          "description": "Image height in pixels (default 256)"
+        }
+      ]
+    },
     "set_anim_blueprint_skeleton": {
       "category": "animation",
       "params": [
@@ -1197,6 +2007,132 @@
           "type": "any",
           "required": true,
           "description": "New value, as a string"
+        }
+      ]
+    },
+    "set_material_blend_mode": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "blendMode",
+          "type": "string",
+          "required": true,
+          "description": "Blend mode: Opaque, Masked, Translucent, Additive, Modulate, AlphaComposite, AlphaHoldout"
+        }
+      ]
+    },
+    "set_material_domain": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "materialDomain",
+          "type": "string",
+          "required": true,
+          "description": "Material domain: Surface, DeferredDecal, LightFunction, Volume, PostProcess, UI, RuntimeVirtualTexture",
+          "aliases": [
+            "domain"
+          ]
+        }
+      ]
+    },
+    "set_material_instance_parent": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "MaterialInstanceConstant asset path",
+          "aliases": [
+            "path",
+            "materialPath"
+          ]
+        },
+        {
+          "name": "newParentPath",
+          "type": "string",
+          "required": true,
+          "description": "New parent material or material instance path",
+          "aliases": [
+            "parentPath"
+          ]
+        }
+      ]
+    },
+    "set_material_shading_model": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "shadingModel",
+          "type": "string",
+          "required": true,
+          "description": "Shading model, e.g. DefaultLit, Unlit, Subsurface, ClearCoat"
+        }
+      ]
+    },
+    "set_material_static_switch": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "MaterialInstanceConstant asset path",
+          "aliases": [
+            "path",
+            "materialPath"
+          ]
+        },
+        {
+          "name": "parameterName",
+          "type": "string",
+          "required": true,
+          "description": "Material parameter name"
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": true,
+          "description": "Static switch value, a boolean"
+        },
+        {
+          "name": "association",
+          "type": "string",
+          "required": false,
+          "description": "Material parameter association: Global, Layer, or Blend"
+        },
+        {
+          "name": "parameterIndex",
+          "type": "number",
+          "required": false,
+          "description": "Material layer/blend parameter index"
         }
       ]
     },
@@ -1616,6 +2552,20 @@
           "type": "string",
           "required": false,
           "description": "Only this node (default: every node in the graph)"
+        }
+      ]
+    },
+    "validate_material": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "materialPath"
+          ]
         }
       ]
     },

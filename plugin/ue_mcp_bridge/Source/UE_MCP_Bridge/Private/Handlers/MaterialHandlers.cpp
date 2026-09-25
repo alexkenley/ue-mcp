@@ -58,45 +58,224 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("material"));
-	Registry.RegisterHandler(TEXT("list_expression_types"), &ListExpressionTypes);
+
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else; the TS surface is generated from a recording of these.
+	// Unspecified: the create actions, duplicate_material (it makes the
+	// destination folder before anything can fail), build_material and the
+	// transaction pair, which the contract test would see write; every action
+	// whose parameters are a required choice (materialPath OR functionPath,
+	// assetPath OR actorLabel/actorPath, usage OR usages), which a spec cannot
+	// express yet; and set_material_parameter, set_material_base_color and
+	// add_material_expression, whose value, color and defaultValue take shapes
+	// no spec type describes.
+	using EType = EMCPParamType;
+	auto SpecAssetPath = [](const TCHAR* Description)
+	{
+		return MCPParam::Required(TEXT("assetPath"), EType::String, Description).Alias(TEXT("path"));
+	};
+	// Actions whose TS surface also took materialPath for the asset.
+	auto SpecAnyAssetPath = [](const TCHAR* Description)
+	{
+		return MCPParam::Required(TEXT("assetPath"), EType::String, Description).Alias(TEXT("path")).Alias(TEXT("materialPath"));
+	};
+	auto SpecGraphAssetPath = []()
+	{
+		return MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Material asset path")).Alias(TEXT("materialPath"));
+	};
+	auto SpecMaterialPath = []()
+	{
+		return MCPParam::Required(TEXT("materialPath"), EType::String, TEXT("Material asset path")).Alias(TEXT("path")).Alias(TEXT("assetPath"));
+	};
+	auto SpecFunctionPath = []()
+	{
+		return MCPParam::Required(TEXT("functionPath"), EType::String, TEXT("MaterialFunction asset path (#463)")).Alias(TEXT("materialFunctionPath"));
+	};
+	auto SpecRvtPath = []()
+	{
+		return MCPParam::Required(TEXT("rvtPath"), EType::String, TEXT("RuntimeVirtualTexture asset path")).Alias(TEXT("assetPath"));
+	};
+	auto SpecCursor = []()
+	{
+		return MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the 'nextCursor' from the previous page, unmodified"));
+	};
+	auto SpecLimit = []()
+	{
+		return MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page"));
+	};
+	auto SpecParameterName = []()
+	{
+		return MCPParam::Required(TEXT("parameterName"), EType::String, TEXT("Material parameter name"));
+	};
+	auto SpecRecompile = []()
+	{
+		return MCPParam::Optional(TEXT("recompile"), EType::Boolean, TEXT("Recompile the material after the graph edit (default true)"));
+	};
+	auto SpecPositionX = []()
+	{
+		return MCPParam::Optional(TEXT("positionX"), EType::Number, TEXT("Graph editor X position for a new node"));
+	};
+	auto SpecPositionY = []()
+	{
+		return MCPParam::Optional(TEXT("positionY"), EType::Number, TEXT("Graph editor Y position for a new node"));
+	};
+	auto SpecExpressionName = []()
+	{
+		return MCPParam::Optional(TEXT("expressionName"), EType::String, TEXT("Node name; an existing node of that name is reused"));
+	};
+	auto SpecGraphNodes = []()
+	{
+		return MCPParam::Required(TEXT("nodes"), EType::Array, TEXT("Graph spec: [{name,class,posX,posY,...}]")).Items(EType::Object);
+	};
+	auto SpecPropertyConnections = []()
+	{
+		return MCPParam::Optional(TEXT("propertyConnections"), EType::Array, TEXT("[{property,from,outputIndex}]")).Items(EType::Object);
+	};
+	auto SpecSourceExpression = []()
+	{
+		return MCPParam::Required(TEXT("sourceExpression"), EType::String, TEXT("Expression the wire leaves (name, or index inside a MaterialFunction)"));
+	};
+	auto SpecSourceOutput = []()
+	{
+		return MCPParam::Optional(TEXT("sourceOutput"), EType::String, TEXT("Output of the source expression, by name or index (default: its first output)"));
+	};
+	auto SpecTargetExpression = []()
+	{
+		return MCPParam::Required(TEXT("targetExpression"), EType::String, TEXT("Expression the wire enters (name, or index inside a MaterialFunction)"));
+	};
+	auto SpecTargetInput = []()
+	{
+		return MCPParam::Optional(TEXT("targetInput"), EType::String, TEXT("Input of the target expression, by name or index (default: its first input)"));
+	};
+	auto SpecProperty = [](const TCHAR* Description)
+	{
+		return MCPParam::Required(TEXT("property"), EType::String, Description);
+	};
+
+	Registry.RegisterHandler(TEXT("list_expression_types"), &ListExpressionTypes, {
+		SpecCursor(),
+		SpecLimit(),
+	});
 	Registry.RegisterHandler(TEXT("create_material"), &CreateMaterial);
-	Registry.RegisterHandler(TEXT("read_material"), &ReadMaterial);
-	Registry.RegisterHandler(TEXT("set_material_shading_model"), &SetMaterialShadingModel);
-	Registry.RegisterHandler(TEXT("set_material_blend_mode"), &SetMaterialBlendMode);
-	Registry.RegisterHandler(TEXT("set_material_domain"), &SetMaterialDomain);
+	Registry.RegisterHandler(TEXT("read_material"), &ReadMaterial, {
+		SpecAnyAssetPath(TEXT("Material or MaterialInstance asset path")),
+	});
+	Registry.RegisterHandler(TEXT("set_material_shading_model"), &SetMaterialShadingModel, {
+		SpecAssetPath(TEXT("Material asset path")),
+		MCPParam::Required(TEXT("shadingModel"), EType::String, TEXT("Shading model, e.g. DefaultLit, Unlit, Subsurface, ClearCoat")),
+	});
+	Registry.RegisterHandler(TEXT("set_material_blend_mode"), &SetMaterialBlendMode, {
+		SpecAssetPath(TEXT("Material asset path")),
+		MCPParam::Required(TEXT("blendMode"), EType::String, TEXT("Blend mode: Opaque, Masked, Translucent, Additive, Modulate, AlphaComposite, AlphaHoldout")),
+	});
+	Registry.RegisterHandler(TEXT("set_material_domain"), &SetMaterialDomain, {
+		SpecAssetPath(TEXT("Material asset path")),
+		MCPParam::Required(TEXT("materialDomain"), EType::String, TEXT("Material domain: Surface, DeferredDecal, LightFunction, Volume, PostProcess, UI, RuntimeVirtualTexture")).Alias(TEXT("domain")),
+	});
 	Registry.RegisterHandler(TEXT("set_material_base_color"), &SetMaterialBaseColor);
 	Registry.RegisterHandler(TEXT("add_material_expression"), &AddMaterialExpression);
-	Registry.RegisterHandler(TEXT("list_material_expressions"), &ListMaterialExpressions);
-	Registry.RegisterHandler(TEXT("read_material_graph"), &ReadMaterialGraph);
-	Registry.RegisterHandler(TEXT("list_material_parameters"), &ListMaterialParameters);
-	Registry.RegisterHandler(TEXT("recompile_material"), &RecompileMaterial);
+	Registry.RegisterHandler(TEXT("list_material_expressions"), &ListMaterialExpressions, {
+		SpecMaterialPath(),
+		MCPParam::Optional(TEXT("includeInputs"), EType::Boolean, TEXT("Include each node's input pin wiring (default false)")),
+		SpecCursor(),
+		SpecLimit(),
+	});
+	Registry.RegisterHandler(TEXT("read_material_graph"), &ReadMaterialGraph, {
+		SpecMaterialPath(),
+		MCPParam::Optional(TEXT("expressionIndex"), EType::Number, TEXT("Read just this node (a nodeId) and the source expressions its inputs link to, unpaged")),
+		SpecCursor(),
+		SpecLimit(),
+	});
+	Registry.RegisterHandler(TEXT("list_material_parameters"), &ListMaterialParameters, {
+		SpecAnyAssetPath(TEXT("Material or MaterialInstance asset path")),
+	});
+	Registry.RegisterHandler(TEXT("recompile_material"), &RecompileMaterial, {
+		SpecMaterialPath(),
+		MCPParam::Optional(TEXT("recompileChildren"), EType::Boolean, TEXT("Cascade to every MaterialInstanceConstant whose parent chain reaches this material (#421)")),
+	});
 	Registry.RegisterHandler(TEXT("create_material_instance"), &CreateMaterialInstance);
 	Registry.RegisterHandler(TEXT("set_material_parameter"), &SetMaterialParameter);
 	Registry.RegisterHandler(TEXT("read_material_instance"), &ReadMaterialInstance);
-	Registry.RegisterHandler(TEXT("read_material_parameter_collection"), &ReadMaterialParameterCollection);
-	Registry.RegisterHandler(TEXT("set_material_instance_parent"), &SetMaterialInstanceParent);
-	Registry.RegisterHandler(TEXT("batch_set_material_instances"), &BatchSetInstances);
-	Registry.RegisterHandler(TEXT("clear_material_instance_parameters"), &ClearMaterialInstanceParameters);
-	Registry.RegisterHandler(TEXT("list_material_static_switches"), &ListMaterialStaticSwitches);
-	Registry.RegisterHandler(TEXT("set_material_static_switch"), &SetMaterialStaticSwitch);
+	Registry.RegisterHandler(TEXT("read_material_parameter_collection"), &ReadMaterialParameterCollection, {
+		SpecAssetPath(TEXT("MaterialParameterCollection asset path")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("World whose live collection instance to read: editor, pie or auto. Omit for the stored defaults only")),
+		MCPParam::Optional(TEXT("pieInstance"), EType::Number, TEXT("Which PIE world when several run (0 = server/primary). See editor(list_pie_instances)")),
+	});
+	Registry.RegisterHandler(TEXT("set_material_instance_parent"), &SetMaterialInstanceParent, {
+		SpecAnyAssetPath(TEXT("MaterialInstanceConstant asset path")),
+		MCPParam::Required(TEXT("newParentPath"), EType::String, TEXT("New parent material or material instance path")).Alias(TEXT("parentPath")),
+	});
+	Registry.RegisterHandler(TEXT("batch_set_material_instances"), &BatchSetInstances, {
+		MCPParam::Required(TEXT("instances"), EType::Array, TEXT("[{assetPath, parentPath?, parameters?:[{name, type (scalar|vector|texture), value}]}]. value: number (scalar), {r,g,b,a} (vector), or texture path (texture) (#594)")).Items(EType::Object),
+	});
+	Registry.RegisterHandler(TEXT("clear_material_instance_parameters"), &ClearMaterialInstanceParameters, {
+		SpecAnyAssetPath(TEXT("MaterialInstanceConstant asset path")),
+	});
+	Registry.RegisterHandler(TEXT("list_material_static_switches"), &ListMaterialStaticSwitches, {
+		SpecAnyAssetPath(TEXT("Material or MaterialInstance asset path")),
+	});
+	Registry.RegisterHandler(TEXT("set_material_static_switch"), &SetMaterialStaticSwitch, {
+		SpecAnyAssetPath(TEXT("MaterialInstanceConstant asset path")),
+		SpecParameterName(),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Static switch value, a boolean")),
+		MCPParam::Optional(TEXT("association"), EType::String, TEXT("Material parameter association: Global, Layer, or Blend")),
+		MCPParam::Optional(TEXT("parameterIndex"), EType::Number, TEXT("Material layer/blend parameter index")),
+	});
 	Registry.RegisterHandler(TEXT("set_expression_value"), &SetExpressionValue);
 	Registry.RegisterHandler(TEXT("set_custom_expression"), &SetCustomExpression);
 
 	// Expression graph operations
-	Registry.RegisterHandler(TEXT("connect_texture_to_material"), &ConnectTextureToMaterial);
-	Registry.RegisterHandler(TEXT("connect_material_expressions"), &ConnectMaterialExpressions);
-	Registry.RegisterHandler(TEXT("connect_to_material_property"), &ConnectToMaterialProperty);
+	Registry.RegisterHandler(TEXT("connect_texture_to_material"), &ConnectTextureToMaterial, {
+		SpecMaterialPath(),
+		MCPParam::Required(TEXT("texturePath"), EType::String, TEXT("Texture asset path")),
+		MCPParam::Optional(TEXT("property"), EType::String, TEXT("Material property: BaseColor, Normal, Roughness, Metallic, EmissiveColor, etc. (default BaseColor)")).Alias(TEXT("materialProperty")),
+	});
+	Registry.RegisterHandler(TEXT("connect_material_expressions"), &ConnectMaterialExpressions, {
+		SpecMaterialPath(),
+		SpecSourceExpression(),
+		SpecSourceOutput(),
+		SpecTargetExpression(),
+		SpecTargetInput(),
+	});
+	Registry.RegisterHandler(TEXT("connect_to_material_property"), &ConnectToMaterialProperty, {
+		SpecMaterialPath(),
+		MCPParam::Required(TEXT("expressionName"), EType::String, TEXT("Expression to wire")),
+		MCPParam::Optional(TEXT("outputName"), EType::String, TEXT("Output of the expression, by name or index (default: its first output)")),
+		SpecProperty(TEXT("Material property: BaseColor, Normal, Roughness, Metallic, EmissiveColor, etc.")),
+	});
 	Registry.RegisterHandler(TEXT("delete_material_expression"), &DeleteMaterialExpression);
-	Registry.RegisterHandler(TEXT("disconnect_material_property"), &DisconnectMaterialProperty);
+	Registry.RegisterHandler(TEXT("disconnect_material_property"), &DisconnectMaterialProperty, {
+		MCPParam::Required(TEXT("materialPath"), EType::String, TEXT("Material asset path")).Alias(TEXT("assetPath")),
+		SpecProperty(TEXT("Material property: BaseColor, Normal, Roughness, Metallic, EmissiveColor, etc.")),
+	});
 
 	// v0.7.9 - depth
 	Registry.RegisterHandler(TEXT("duplicate_material"), &DuplicateMaterial);
-	Registry.RegisterHandler(TEXT("validate_material"), &ValidateMaterial);
-	Registry.RegisterHandler(TEXT("get_material_shader_stats"), &GetMaterialShaderStats);
-	Registry.RegisterHandler(TEXT("export_material_graph"), &ExportMaterialGraph);
-	Registry.RegisterHandler(TEXT("import_material_graph"), &ImportMaterialGraph);
-	Registry.RegisterHandler(TEXT("build_material_graph"), &BuildMaterialGraph);
-	Registry.RegisterHandler(TEXT("render_material_preview"), &RenderMaterialPreview);
+	Registry.RegisterHandler(TEXT("validate_material"), &ValidateMaterial, {
+		SpecGraphAssetPath(),
+	});
+	Registry.RegisterHandler(TEXT("get_material_shader_stats"), &GetMaterialShaderStats, {
+		SpecGraphAssetPath(),
+	});
+	Registry.RegisterHandler(TEXT("export_material_graph"), &ExportMaterialGraph, {
+		SpecGraphAssetPath(),
+	});
+	Registry.RegisterHandler(TEXT("import_material_graph"), &ImportMaterialGraph, {
+		SpecGraphAssetPath(),
+		SpecGraphNodes(),
+		SpecPropertyConnections(),
+	});
+	Registry.RegisterHandler(TEXT("build_material_graph"), &BuildMaterialGraph, {
+		SpecGraphAssetPath(),
+		SpecGraphNodes(),
+		SpecPropertyConnections(),
+	});
+	Registry.RegisterHandler(TEXT("render_material_preview"), &RenderMaterialPreview, {
+		SpecGraphAssetPath(),
+		MCPParam::Required(TEXT("outputPath"), EType::String, TEXT("Absolute file path for the PNG output")),
+		MCPParam::Optional(TEXT("width"), EType::Number, TEXT("Image width in pixels (default 256)")),
+		MCPParam::Optional(TEXT("height"), EType::Number, TEXT("Image height in pixels (default 256)")),
+	});
 	Registry.RegisterHandler(TEXT("begin_material_transaction"), &BeginMaterialTransaction);
 	Registry.RegisterHandler(TEXT("end_material_transaction"), &EndMaterialTransaction);
 
@@ -105,24 +284,82 @@ void FMaterialHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 
 	Registry.RegisterHandler(TEXT("create_material_simple"), &CreateMaterialSimple);
 	Registry.RegisterHandler(TEXT("set_material_usage"), &SetMaterialUsage);
-	Registry.RegisterHandler(TEXT("get_material_usage"), &GetMaterialUsage);
+	Registry.RegisterHandler(TEXT("get_material_usage"), &GetMaterialUsage, {
+		SpecAssetPath(TEXT("Material or MaterialInstance asset path")),
+	});
 
 	// #463: MaterialFunction authoring.
 	Registry.RegisterHandler(TEXT("create_material_function"), &CreateMaterialFunction);
-	Registry.RegisterHandler(TEXT("add_material_function_expression"), &AddMaterialFunctionExpression);
-	Registry.RegisterHandler(TEXT("add_expression_in_function"), &AddMaterialFunctionExpression);
-	Registry.RegisterHandler(TEXT("connect_material_function_expressions"), &ConnectMaterialFunctionExpressions);
-	Registry.RegisterHandler(TEXT("connect_expressions_in_function"), &ConnectMaterialFunctionExpressions);
-	Registry.RegisterHandler(TEXT("list_material_function_expressions"), &ListMaterialFunctionExpressions);
-	Registry.RegisterHandler(TEXT("list_expressions_in_function"), &ListMaterialFunctionExpressions);
+	Registry.RegisterHandler(TEXT("add_material_function_expression"), &AddMaterialFunctionExpression, {
+		SpecFunctionPath(),
+		MCPParam::Required(TEXT("expressionType"), EType::String, TEXT("Expression type, e.g. Constant3Vector, FunctionInput, FunctionOutput, If")),
+		SpecPositionX(),
+		SpecPositionY(),
+		MCPParam::Optional(TEXT("inputName"), EType::String, TEXT("FunctionInput name (#463)")),
+		MCPParam::Optional(TEXT("inputType"), EType::String, TEXT("FunctionInput type: Scalar|Vector2|Vector3|Vector4|Texture2D|TextureCube|StaticBool|MaterialAttributes (#463)")),
+		MCPParam::Optional(TEXT("outputName"), EType::String, TEXT("FunctionOutput name")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Fallback for inputName on a FunctionInput and outputName on a FunctionOutput")),
+	});
+	Registry.RegisterHandler(TEXT("add_expression_in_function"), &AddMaterialFunctionExpression, {
+		SpecFunctionPath(),
+		MCPParam::Required(TEXT("expressionType"), EType::String, TEXT("Expression type, e.g. Constant3Vector, FunctionInput, FunctionOutput, If")),
+		SpecPositionX(),
+		SpecPositionY(),
+		MCPParam::Optional(TEXT("inputName"), EType::String, TEXT("FunctionInput name (#463)")),
+		MCPParam::Optional(TEXT("inputType"), EType::String, TEXT("FunctionInput type: Scalar|Vector2|Vector3|Vector4|Texture2D|TextureCube|StaticBool|MaterialAttributes (#463)")),
+		MCPParam::Optional(TEXT("outputName"), EType::String, TEXT("FunctionOutput name")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Fallback for inputName on a FunctionInput and outputName on a FunctionOutput")),
+	});
+	Registry.RegisterHandler(TEXT("connect_material_function_expressions"), &ConnectMaterialFunctionExpressions, {
+		SpecFunctionPath(),
+		SpecSourceExpression(),
+		SpecSourceOutput(),
+		SpecTargetExpression(),
+		SpecTargetInput(),
+	});
+	Registry.RegisterHandler(TEXT("connect_expressions_in_function"), &ConnectMaterialFunctionExpressions, {
+		SpecFunctionPath(),
+		SpecSourceExpression(),
+		SpecSourceOutput(),
+		SpecTargetExpression(),
+		SpecTargetInput(),
+	});
+	Registry.RegisterHandler(TEXT("list_material_function_expressions"), &ListMaterialFunctionExpressions, {
+		SpecFunctionPath(),
+	});
+	Registry.RegisterHandler(TEXT("list_expressions_in_function"), &ListMaterialFunctionExpressions, {
+		SpecFunctionPath(),
+	});
 
 	// Runtime Virtual Textures, in MaterialHandlers_RVT.cpp.
 	Registry.RegisterHandler(TEXT("create_runtime_virtual_texture"), &CreateRuntimeVirtualTexture);
-	Registry.RegisterHandler(TEXT("read_runtime_virtual_texture"), &ReadRuntimeVirtualTexture);
-	Registry.RegisterHandler(TEXT("add_rvt_volume"), &AddRvtVolume);
+	Registry.RegisterHandler(TEXT("read_runtime_virtual_texture"), &ReadRuntimeVirtualTexture, {
+		SpecRvtPath(),
+	});
+	Registry.RegisterHandler(TEXT("add_rvt_volume"), &AddRvtVolume, {
+		SpecRvtPath(),
+		MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Editor label for the new volume (default RVTVolume_<rvt name>)")),
+		MCPParam::Optional(TEXT("boundsMode"), EType::String, TEXT("writers (cover every primitive writing into this RVT) | alignActor (match one actor's box and rotation)")),
+		MCPParam::Optional(TEXT("boundsAlignActor"), EType::String, TEXT("Actor label or object path whose rotation and bounds the volume aligns to, typically the landscape")),
+	});
 	Registry.RegisterHandler(TEXT("set_rvt_volume_bounds"), &SetRvtVolumeBounds);
-	Registry.RegisterHandler(TEXT("add_rvt_sampler"), &AddRvtSampler);
-	Registry.RegisterHandler(TEXT("add_rvt_output"), &AddRvtOutput);
+	Registry.RegisterHandler(TEXT("add_rvt_sampler"), &AddRvtSampler, {
+		MCPParam::Required(TEXT("materialPath"), EType::String, TEXT("Material asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Required(TEXT("rvtPath"), EType::String, TEXT("RuntimeVirtualTexture asset path")),
+		SpecExpressionName(),
+		MCPParam::Optional(TEXT("connectOutputs"), EType::Boolean, TEXT("Connect each sample output to the material property of the same name (default true)")),
+		SpecPositionX(),
+		SpecPositionY(),
+		SpecRecompile(),
+	});
+	Registry.RegisterHandler(TEXT("add_rvt_output"), &AddRvtOutput, {
+		MCPParam::Required(TEXT("materialPath"), EType::String, TEXT("Material asset path")).Alias(TEXT("assetPath")),
+		SpecExpressionName(),
+		MCPParam::Optional(TEXT("mirrorProperties"), EType::Boolean, TEXT("Mirror the material's own property connections into the RVT output node (default true)")),
+		SpecPositionX(),
+		SpecPositionY(),
+		SpecRecompile(),
+	});
 	Registry.RegisterHandler(TEXT("assign_rvt_to_landscape"), &AssignRvtToLandscape);
 
 	// Material Designer layer stacks (#1131), in MaterialHandlers_Designer.cpp.
@@ -1043,7 +1280,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::CreateMaterial(const TSharedPtr<FJsonO
 TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterial(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UMaterial* Material = LoadMaterialFromPath(AssetPath);
 	if (!Material)
@@ -1190,7 +1427,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterial(const TSharedPtr<FJsonObj
 TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialShadingModel(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString ShadingModelStr;
 	if (auto Err = RequireString(Params, TEXT("shadingModel"), ShadingModelStr)) return Err;
@@ -1222,7 +1459,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialShadingModel(const TSharedP
 
 	MCPSetUpdated(Result);
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
-	Payload->SetStringField(TEXT("path"), Material->GetPathName());
+	Payload->SetStringField(TEXT("assetPath"), Material->GetPathName());
 	Payload->SetStringField(TEXT("shadingModel"), ShadingModelToString(PrevShadingModel));
 	MCPSetRollback(Result, TEXT("set_material_shading_model"), Payload);
 
@@ -1235,10 +1472,10 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialShadingModel(const TSharedP
 TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialDomain(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString DomainStr;
-	if (auto Err = RequireStringAlt(Params, TEXT("materialDomain"), TEXT("domain"), DomainStr)) return Err;
+	if (auto Err = RequireString(Params, TEXT("materialDomain"), DomainStr)) return Err;
 
 	UMaterial* Material = LoadMaterialFromPath(AssetPath);
 	if (!Material)
@@ -1297,7 +1534,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialDomain(const TSharedPtr<FJs
 
 	MCPSetUpdated(Result);
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
-	Payload->SetStringField(TEXT("path"), Material->GetPathName());
+	Payload->SetStringField(TEXT("assetPath"), Material->GetPathName());
 	Payload->SetStringField(TEXT("materialDomain"), DomainName(PrevDomain));
 	MCPSetRollback(Result, TEXT("set_material_domain"), Payload);
 
@@ -1307,7 +1544,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialDomain(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialBlendMode(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString BlendModeStr;
 	if (auto Err = RequireString(Params, TEXT("blendMode"), BlendModeStr)) return Err;
@@ -1363,7 +1600,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialBlendMode(const TSharedPtr<
 
 	MCPSetUpdated(Result);
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
-	Payload->SetStringField(TEXT("path"), Material->GetPathName());
+	Payload->SetStringField(TEXT("assetPath"), Material->GetPathName());
 	Payload->SetStringField(TEXT("blendMode"), PrevBlendModeStr);
 	MCPSetRollback(Result, TEXT("set_material_blend_mode"), Payload);
 
@@ -1717,20 +1954,9 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressionsInternal(
 	bool bIncludeInputs,
 	bool bIncludeRootConnections)
 {
+	// The registry resolves the path and assetPath aliases to materialPath.
 	FString MaterialPath;
-	if (Params.IsValid())
-	{
-		static const TCHAR* const PathKeys[] = { TEXT("materialPath"), TEXT("path"), TEXT("assetPath") };
-		for (const TCHAR* Key : PathKeys)
-		{
-			if (TryGetStringParam(Params, Key, MaterialPath) && !MaterialPath.IsEmpty()) break;
-			MaterialPath.Reset();
-		}
-	}
-	if (MaterialPath.IsEmpty())
-	{
-		return MCPError(TEXT("Missing required parameter 'materialPath' (or 'path' or 'assetPath')"));
-	}
+	if (auto Err = RequireString(Params, TEXT("materialPath"), MaterialPath)) return Err;
 
 	// read_graph only: one node and the sources it reads from, no paging.
 	int32 SingleIndex = INDEX_NONE;
@@ -1739,16 +1965,16 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressionsInternal(
 	// T3: paged. A production master material carries several hundred nodes.
 	// ActionName is the cursor identity, so list and read_graph cursors do not
 	// cross. includeInputs changes row payload, not rows, so it stays out of the key.
+	// The page is read even for a single node, so cursor and limit are always
+	// read (#1057); only a paged read can be refused for them.
 	MCPPagination::FPageRequest Page;
-	if (!bSingle)
+	TSharedPtr<FJsonValue> PageError = MCPPagination::ReadPageRequest(
+		Params,
+		FString::Printf(TEXT("%s|materialPath=%s"), ActionName, *MaterialPath),
+		/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page);
+	if (!bSingle && PageError.IsValid())
 	{
-		if (auto Err = MCPPagination::ReadPageRequest(
-				Params,
-				FString::Printf(TEXT("%s|materialPath=%s"), ActionName, *MaterialPath),
-				/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
-		{
-			return Err;
-		}
+		return PageError;
 	}
 
 	UMaterial* Material = LoadMaterialFromPath(MaterialPath);
@@ -1844,7 +2070,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialExpressionsInternal(
 TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialParameters(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UMaterial* Material = LoadMaterialFromPath(AssetPath);
 	if (!Material)
@@ -1919,15 +2145,10 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialParameters(const TSharedPt
 TSharedPtr<FJsonValue> FMaterialHandlers::RecompileMaterial(const TSharedPtr<FJsonObject>& Params)
 {
 	FString MaterialPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("materialPath"), TEXT("path"), MaterialPath)) return Err;
-	if (MaterialPath.IsEmpty())
-	{
-		TryGetStringParam(Params, TEXT("assetPath"), MaterialPath);
-		if (MaterialPath.IsEmpty())
-		{
-			return MCPError(TEXT("Missing required parameter 'materialPath' (or 'path')"));
-		}
-	}
+	if (auto Err = RequireString(Params, TEXT("materialPath"), MaterialPath)) return Err;
+	// Read before anything can fail (#1057).
+	bool bRecompileChildren = false;
+	TryGetBoolParam(Params, TEXT("recompileChildren"), bRecompileChildren);
 
 	UMaterial* Material = LoadMaterialFromPath(MaterialPath);
 	if (!Material)
@@ -1946,8 +2167,6 @@ TSharedPtr<FJsonValue> FMaterialHandlers::RecompileMaterial(const TSharedPtr<FJs
 
 	// #421 gap 8: cascade to MaterialInstances so existing instance instances
 	// pick up shader changes without the caller re-saving each one manually.
-	bool bRecompileChildren = false;
-	TryGetBoolParam(Params, TEXT("recompileChildren"), bRecompileChildren);
 	if (bRecompileChildren)
 	{
 		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
@@ -2422,15 +2641,23 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ReadComponentMaterial(const TSharedPtr
 TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterialParameterCollection(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Read before anything can fail (#1057).
+	const FString Scope = OptionalString(Params, TEXT("world"));
+	int32 PIEInstance = INDEX_NONE;
+	double RawPIEInstance = 0.0;
+	if (TryGetNumberParam(Params, TEXT("pieInstance"), RawPIEInstance))
+	{
+		PIEInstance = FMath::RoundToInt(RawPIEInstance);
+	}
+
 	UMaterialParameterCollection* Collection = LoadAssetByPath<UMaterialParameterCollection>(AssetPath);
 	if (!Collection) return MCPAssetLoadError(AssetPath, TEXT("MaterialParameterCollection"));
 
-	const FString Scope = OptionalString(Params, TEXT("world"));
 	UWorld* World = nullptr;
 	if (!Scope.IsEmpty())
 	{
-		World = ResolveWorldFromParams(Params, TEXT("editor"));
+		World = ResolveWorldScope(Scope, PIEInstance);
 		if (!World)
 		{
 			return MCPError(FString::Printf(TEXT("No %s world is available. Start PIE first, or pass world=editor."), *Scope));
@@ -2487,10 +2714,10 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ReadMaterialParameterCollection(const 
 TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialInstanceParent(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString NewParentPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("newParentPath"), TEXT("parentPath"), NewParentPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("newParentPath"), NewParentPath)) return Err;
 
 	UMaterialInstanceConstant* Instance = LoadMaterialInstanceFromPath(AssetPath);
 	if (!Instance)
@@ -2768,7 +2995,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::BatchSetInstances(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FMaterialHandlers::ClearMaterialInstanceParameters(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UMaterialInstanceConstant* Instance = LoadMaterialInstanceFromPath(AssetPath);
 	if (!Instance)
@@ -2860,7 +3087,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ClearMaterialInstanceParameters(const 
 TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialStaticSwitches(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UMaterialInterface* Material = LoadAssetByPath<UMaterialInterface>(AssetPath);
 	if (!Material)
@@ -2879,10 +3106,13 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialStaticSwitches(const TShar
 TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialStaticSwitch(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString ParameterName;
 	if (auto Err = RequireString(Params, TEXT("parameterName"), ParameterName)) return Err;
+
+	// Read before anything can fail (#1057).
+	const FMaterialParameterInfo ParameterInfo = MakeMaterialParameterInfoFromParams(Params, ParameterName);
 
 	bool bValue = false;
 	if (!TryGetBoolParam(Params, TEXT("value"), bValue))
@@ -2896,7 +3126,6 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetMaterialStaticSwitch(const TSharedP
 		return MCPError(FString::Printf(TEXT("Failed to load MaterialInstanceConstant at '%s'"), *AssetPath));
 	}
 
-	const FMaterialParameterInfo ParameterInfo = MakeMaterialParameterInfoFromParams(Params, ParameterName);
 	bool bPreviousValue = false;
 	FGuid PreviousGuid;
 	const bool bHadPrevious = Instance->GetStaticSwitchParameterValue(
@@ -3798,7 +4027,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::SetCustomExpression(const TSharedPtr<F
 TSharedPtr<FJsonValue> FMaterialHandlers::GetMaterialUsage(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UMaterialInterface* const Asset = LoadAssetByPath<UMaterialInterface>(AssetPath);
 	if (!Asset) return MCPError(FString::Printf(TEXT("Material not found: %s"), *AssetPath));

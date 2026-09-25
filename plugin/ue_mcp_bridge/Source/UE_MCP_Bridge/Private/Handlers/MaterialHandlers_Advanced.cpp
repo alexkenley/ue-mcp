@@ -87,7 +87,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::DuplicateMaterial(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FMaterialHandlers::ValidateMaterial(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("materialPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UMaterial* Material = LoadMaterialFromPath(AssetPath);
 	if (!Material) return MCPError(FString::Printf(TEXT("Material not found: %s"), *AssetPath));
@@ -203,7 +203,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ValidateMaterial(const TSharedPtr<FJso
 TSharedPtr<FJsonValue> FMaterialHandlers::GetMaterialShaderStats(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("materialPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UMaterial* Material = LoadMaterialFromPath(AssetPath);
 	if (!Material) return MCPError(FString::Printf(TEXT("Material not found: %s"), *AssetPath));
@@ -238,7 +238,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::GetMaterialShaderStats(const TSharedPt
 TSharedPtr<FJsonValue> FMaterialHandlers::ExportMaterialGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("materialPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UMaterial* Material = LoadMaterialFromPath(AssetPath);
 	if (!Material) return MCPError(FString::Printf(TEXT("Material not found: %s"), *AssetPath));
@@ -344,13 +344,16 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ImportMaterialGraph(const TSharedPtr<F
 TSharedPtr<FJsonValue> FMaterialHandlers::BuildMaterialGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("materialPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	const TArray<TSharedPtr<FJsonValue>>* NodesArr = nullptr;
 	if (!TryGetArrayParam(Params, TEXT("nodes"), NodesArr))
 	{
 		return MCPError(TEXT("Missing 'nodes' array"));
 	}
+	// Read before anything can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* PropArr = nullptr;
+	const bool bHasPropertyConnections = TryGetArrayParam(Params, TEXT("propertyConnections"), PropArr) && PropArr;
 
 	UMaterial* Material = LoadMaterialFromPath(AssetPath);
 	if (!Material) return MCPError(FString::Printf(TEXT("Material not found: %s"), *AssetPath));
@@ -400,10 +403,9 @@ TSharedPtr<FJsonValue> FMaterialHandlers::BuildMaterialGraph(const TSharedPtr<FJ
 	// Property connections. Each one overwrites whatever the property carried,
 	// so record the displaced binding: it is the half of the change that no
 	// single inverse call can put back.
-	const TArray<TSharedPtr<FJsonValue>>* PropArr = nullptr;
 	int32 Connections = 0;
 	TArray<TSharedPtr<FJsonValue>> OverwrittenProperties;
-	if (TryGetArrayParam(Params, TEXT("propertyConnections"), PropArr))
+	if (bHasPropertyConnections)
 	{
 		for (const TSharedPtr<FJsonValue>& V : *PropArr)
 		{
@@ -463,7 +465,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::BuildMaterialGraph(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FMaterialHandlers::RenderMaterialPreview(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("materialPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString OutputPath;
 	if (auto Err = RequireString(Params, TEXT("outputPath"), OutputPath)) return Err;
 	const int32 Width  = OptionalInt(Params, TEXT("width"), 256);
