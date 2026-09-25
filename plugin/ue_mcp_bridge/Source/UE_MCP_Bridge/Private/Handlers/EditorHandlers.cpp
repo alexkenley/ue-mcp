@@ -1,6 +1,7 @@
 #include "EditorHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerCommitSave.h"
 #include "HandlerPagination.h"
 #include "HandlerSkinnedAsset.h"
 #include "HandlerSceneCapture.h"
@@ -2606,6 +2607,13 @@ TSharedPtr<FJsonValue> FEditorHandlers::SaveDirty(const TSharedPtr<FJsonObject>&
 {
 	const bool bIncludeMaps = OptionalBool(Params, TEXT("includeMaps"), true);
 	const bool bIncludeContent = OptionalBool(Params, TEXT("includeContent"), true);
+
+	// #1156: a deleted World Partition actor's package cannot be written, only
+	// deleted; the editor's save path does that and reports it.
+	if (OptionalBool(Params, TEXT("commitDeletes"), false))
+	{
+		return MCPResult(MCPSaveDirtyCommittingDeletes(bIncludeMaps, bIncludeContent));
+	}
 
 	TArray<UPackage*> Dirty;
 	for (TObjectIterator<UPackage> It; It; ++It)
