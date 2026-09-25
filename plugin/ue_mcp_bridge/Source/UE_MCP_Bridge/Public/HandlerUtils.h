@@ -142,6 +142,116 @@ inline TSharedPtr<FJsonObject> MCPSuccess()
 	return Obj;
 }
 
+// ── Parameter read tracking (#1057) ──────────────────────────────────────────
+//
+// The registry opens a scope around each handler of a reporting category. The
+// parameter helpers below note every top-level key they read, and a key that
+// arrived and was never read comes back as `paramsNotRead`. Reads of nested
+// objects are not noted, and with no scope open nothing is.
+
+/** Names the dispatcher consumes. Mirrors ROUTING_PARAM_NAMES in src/routing-params.ts. */
+inline const TArray<FString>& MCPRoutingParamNames()
+{
+	static const TArray<FString> Names = {
+		TEXT("action"), TEXT("timeoutMs"), TEXT("select"), TEXT("omit"), TEXT("editor"), TEXT("toEditor"),
+	};
+	return Names;
+}
+
+class FMCPParamReadScope
+{
+public:
+	explicit FMCPParamReadScope(const TSharedPtr<FJsonObject>& InParams)
+		: Root(InParams.Get())
+		, Previous(ActiveSlot())
+	{
+		if (Root)
+		{
+			Root->Values.GetKeys(Arrived);
+		}
+		ActiveSlot() = this;
+	}
+
+	~FMCPParamReadScope()
+	{
+		ActiveSlot() = Previous;
+	}
+
+	FMCPParamReadScope(const FMCPParamReadScope&) = delete;
+	FMCPParamReadScope& operator=(const FMCPParamReadScope&) = delete;
+
+	/** The innermost open scope on this thread, or nullptr. */
+	static FMCPParamReadScope* Active()
+	{
+		return ActiveSlot();
+	}
+
+	void Note(const FJsonObject* Object, const TCHAR* Key)
+	{
+		if (Object != nullptr && Object == Root && Key != nullptr)
+		{
+			Read.Add(FString(Key));
+		}
+	}
+
+	/** Keys that arrived, were not read and are not routing names, sorted. */
+	TArray<FString> Unread() const
+	{
+		TArray<FString> Out;
+		for (const FString& Key : Arrived)
+		{
+			if (!Read.Contains(Key) && !MCPRoutingParamNames().Contains(Key))
+			{
+				Out.Add(Key);
+			}
+		}
+		Out.Sort();
+		return Out;
+	}
+
+private:
+	static FMCPParamReadScope*& ActiveSlot()
+	{
+		static thread_local FMCPParamReadScope* Slot = nullptr;
+		return Slot;
+	}
+
+	const FJsonObject* Root;
+	FMCPParamReadScope* Previous;
+	TArray<FString> Arrived;
+	TSet<FString> Read;
+};
+
+/** Note that a handler read `Key` off `Params`. A no-op unless `Params` is the dispatch's own object. */
+inline void MCPNoteParamRead(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key)
+{
+	if (FMCPParamReadScope* Scope = FMCPParamReadScope::Active())
+	{
+		Scope->Note(Params.Get(), Key);
+	}
+}
+
+/** Add `paramsNotRead` to a successful object result. Failures are left as they are. */
+inline void MCPAttachParamsNotRead(const TSharedPtr<FJsonValue>& Result, const TArray<FString>& Unread)
+{
+	if (Unread.Num() == 0 || !Result.IsValid() || Result->Type != EJson::Object)
+	{
+		return;
+	}
+	const TSharedPtr<FJsonObject> Object = Result->AsObject();
+	bool bSuccess = true;
+	if (!Object.IsValid() || (Object->TryGetBoolField(TEXT("success"), bSuccess) && !bSuccess))
+	{
+		return;
+	}
+	TArray<TSharedPtr<FJsonValue>> Names;
+	for (const FString& Key : Unread)
+	{
+		Names.Add(MakeShared<FJsonValueString>(Key));
+	}
+	Object->SetArrayField(TEXT("paramsNotRead"), Names);
+}
+
 /** Attach a rollback record to a result. The TS bridge lifts this onto
  *  TaskResult.rollback so FlowRunner can invoke it on failure. */
 inline void MCPSetRollback(
@@ -1007,10 +1117,13 @@ inline AActor* MCPResolveActor(
 	FString Token;
 	if (Params.IsValid())
 	{
+		MCPNoteParamRead(Params, Selector.PathKey);
+		MCPNoteParamRead(Params, Selector.LabelKey);
 		Params->TryGetStringField(Selector.PathKey, Path);
 		Params->TryGetStringField(Selector.LabelKey, Token);
 		if (Token.IsEmpty() && Selector.AltLabelKey)
 		{
+			MCPNoteParamRead(Params, Selector.AltLabelKey);
 			Params->TryGetStringField(Selector.AltLabelKey, Token);
 		}
 	}
@@ -1151,6 +1264,7 @@ inline TSharedPtr<FJsonValue> RequireString(
 	const TCHAR* Key,
 	FString& OutValue)
 {
+	MCPNoteParamRead(Params, Key);
 	if (Params.IsValid() && Params->TryGetStringField(Key, OutValue) && !OutValue.IsEmpty())
 		return nullptr;
 	return MCPError(FString::Printf(TEXT("Missing required parameter '%s'"), Key));
@@ -1163,6 +1277,8 @@ inline TSharedPtr<FJsonValue> RequireStringAlt(
 	const TCHAR* Key2,
 	FString& OutValue)
 {
+	MCPNoteParamRead(Params, Key1);
+	MCPNoteParamRead(Params, Key2);
 	if (Params.IsValid())
 	{
 		if (Params->TryGetStringField(Key1, OutValue) && !OutValue.IsEmpty())
@@ -1179,6 +1295,7 @@ inline FString OptionalString(
 	const TCHAR* Key,
 	const FString& DefaultValue = TEXT(""))
 {
+	MCPNoteParamRead(Params, Key);
 	FString Value;
 	return (Params.IsValid() && Params->TryGetStringField(Key, Value)) ? Value : DefaultValue;
 }
@@ -1189,6 +1306,7 @@ inline int32 OptionalInt(
 	const TCHAR* Key,
 	int32 DefaultValue = 0)
 {
+	MCPNoteParamRead(Params, Key);
 	int32 Value;
 	return (Params.IsValid() && Params->TryGetNumberField(Key, Value)) ? Value : DefaultValue;
 }
@@ -1199,6 +1317,7 @@ inline double OptionalNumber(
 	const TCHAR* Key,
 	double DefaultValue = 0.0)
 {
+	MCPNoteParamRead(Params, Key);
 	double Value;
 	return (Params.IsValid() && Params->TryGetNumberField(Key, Value)) ? Value : DefaultValue;
 }
@@ -1209,8 +1328,58 @@ inline bool OptionalBool(
 	const TCHAR* Key,
 	bool DefaultValue = false)
 {
+	MCPNoteParamRead(Params, Key);
 	bool Value;
 	return (Params.IsValid() && Params->TryGetBoolField(Key, Value)) ? Value : DefaultValue;
+}
+
+// Read-tracked forms of FJsonObject::HasField and TryGet*Field. A handler that
+// reads a parameter with these is seen by the #1057 read tracking; a direct
+// Params->TryGet*Field call is not, and scripts/audit-direct-param-reads.mjs
+// lists those.
+
+inline bool HasParam(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key)
+{
+	MCPNoteParamRead(Params, Key);
+	return Params.IsValid() && Params->HasField(Key);
+}
+
+inline TSharedPtr<FJsonValue> TryGetParam(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key)
+{
+	MCPNoteParamRead(Params, Key);
+	if (!Params.IsValid()) return nullptr;
+	return Params->TryGetField(Key);
+}
+
+inline bool TryGetStringParam(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, FString& Out)
+{
+	MCPNoteParamRead(Params, Key);
+	return Params.IsValid() && Params->TryGetStringField(Key, Out);
+}
+
+template <typename TNumber>
+inline bool TryGetNumberParam(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, TNumber& Out)
+{
+	MCPNoteParamRead(Params, Key);
+	return Params.IsValid() && Params->TryGetNumberField(Key, Out);
+}
+
+inline bool TryGetBoolParam(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, bool& Out)
+{
+	MCPNoteParamRead(Params, Key);
+	return Params.IsValid() && Params->TryGetBoolField(Key, Out);
+}
+
+inline bool TryGetArrayParam(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, const TArray<TSharedPtr<FJsonValue>>*& Out)
+{
+	MCPNoteParamRead(Params, Key);
+	return Params.IsValid() && Params->TryGetArrayField(Key, Out);
+}
+
+inline bool TryGetObjectParam(const TSharedPtr<FJsonObject>& Params, const TCHAR* Key, const TSharedPtr<FJsonObject>*& Out)
+{
+	MCPNoteParamRead(Params, Key);
+	return Params.IsValid() && Params->TryGetObjectField(Key, Out);
 }
 
 /**
@@ -1376,6 +1545,7 @@ inline FVector OptionalVec3(
 	const TCHAR* Key,
 	const FVector& DefaultValue = FVector::ZeroVector)
 {
+	MCPNoteParamRead(Params, Key);
 	const TSharedPtr<FJsonObject>* Obj = nullptr;
 	if (!Params.IsValid() || !Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid()) return DefaultValue;
 	FVector Out = DefaultValue;
@@ -1389,6 +1559,7 @@ inline TSharedPtr<FJsonValue> RequireVec3(
 	const TCHAR* Key,
 	FVector& Out)
 {
+	MCPNoteParamRead(Params, Key);
 	const TSharedPtr<FJsonObject>* Obj = nullptr;
 	if (!Params.IsValid() || !Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid())
 		return MCPError(FString::Printf(TEXT("Missing required vector parameter '%s' ({x,y,z})"), Key));
@@ -1403,6 +1574,7 @@ inline FRotator OptionalRotator(
 	const TCHAR* Key,
 	const FRotator& DefaultValue = FRotator::ZeroRotator)
 {
+	MCPNoteParamRead(Params, Key);
 	const TSharedPtr<FJsonObject>* Obj = nullptr;
 	if (!Params.IsValid() || !Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid()) return DefaultValue;
 	FRotator Out = DefaultValue;
@@ -1415,6 +1587,7 @@ inline TSharedPtr<FJsonValue> RequireRotator(
 	const TCHAR* Key,
 	FRotator& Out)
 {
+	MCPNoteParamRead(Params, Key);
 	const TSharedPtr<FJsonObject>* Obj = nullptr;
 	if (!Params.IsValid() || !Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid())
 		return MCPError(FString::Printf(TEXT("Missing required rotator parameter '%s' ({pitch,yaw,roll})"), Key));
@@ -1429,6 +1602,7 @@ inline FLinearColor OptionalLinearColor(
 	const TCHAR* Key,
 	const FLinearColor& DefaultValue = FLinearColor::White)
 {
+	MCPNoteParamRead(Params, Key);
 	const TSharedPtr<FJsonObject>* Obj = nullptr;
 	if (!Params.IsValid() || !Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid()) return DefaultValue;
 	FLinearColor Out = DefaultValue;
@@ -1472,6 +1646,7 @@ inline FTransform OptionalTransform(
 	const TSharedPtr<FJsonObject>& Params,
 	const TCHAR* Key)
 {
+	MCPNoteParamRead(Params, Key);
 	const TSharedPtr<FJsonObject>* Obj = nullptr;
 	if (!Params.IsValid() || !Params->TryGetObjectField(Key, Obj) || !Obj || !(*Obj).IsValid()) return FTransform::Identity;
 	FVector  Loc   = FVector::ZeroVector;
@@ -1991,6 +2166,7 @@ inline UWorld* ResolveWorldFromParams(const TSharedPtr<FJsonObject>& Params, con
 	const FString Scope = OptionalString(Params, TEXT("world"), DefaultScope);
 	int32 PIEInstance = INDEX_NONE;
 	double Raw = 0.0;
+	MCPNoteParamRead(Params, TEXT("pieInstance"));
 	if (Params.IsValid() && Params->TryGetNumberField(TEXT("pieInstance"), Raw))
 	{
 		PIEInstance = FMath::RoundToInt(Raw);
