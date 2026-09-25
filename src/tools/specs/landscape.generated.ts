@@ -269,6 +269,48 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "create_landscape_layer_info": {
+    "category": "landscape",
+    "params": [
+      {
+        "name": "layerName",
+        "type": "string",
+        "required": true,
+        "description": "Paint layer name"
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "required": false,
+        "description": "LayerInfo asset name (default LI_<layerName>)"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Content folder for the LayerInfo asset (default /Game/Landscape/LayerInfos)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "When the asset already exists: skip (default) | error"
+      },
+      {
+        "name": "physMaterial",
+        "type": "string",
+        "required": false,
+        "description": "PhysicalMaterial asset path"
+      },
+      {
+        "name": "hardness",
+        "type": "number",
+        "required": false,
+        "description": "Layer hardness"
+      }
+    ],
+    "contractExempt": "Contract values reach CreatePackage before anything is loaded"
+  },
   "export_landscape_heightmap": {
     "category": "landscape",
     "params": [
@@ -1243,6 +1285,58 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "refresh_landscape_physical_material_collision": {
+    "category": "landscape",
+    "params": [
+      {
+        "name": "actorLabels",
+        "type": "array",
+        "required": false,
+        "description": "Exact editor labels of loaded LandscapeStreamingProxy actors, 1 to 256",
+        "items": "string"
+      },
+      {
+        "name": "guids",
+        "type": "array",
+        "required": false,
+        "description": "Actor GUIDs of loaded LandscapeStreamingProxy actors, 1 to 256",
+        "items": "string"
+      },
+      {
+        "name": "bounds",
+        "type": "object",
+        "required": false,
+        "description": "World-space box; proxies intersecting it are refreshed",
+        "fields": [
+          {
+            "name": "min",
+            "type": "vec3",
+            "required": true,
+            "description": "Box minimum"
+          },
+          {
+            "name": "max",
+            "type": "vec3",
+            "required": true,
+            "description": "Box maximum"
+          }
+        ]
+      },
+      {
+        "name": "maxActors",
+        "type": "integer",
+        "required": false,
+        "description": "Refuse more matches than this, 1 to 1024 (default 256)"
+      },
+      {
+        "name": "save",
+        "type": "boolean",
+        "required": false,
+        "description": "Saving is not supported; the refresh is in memory only. Omit it or pass false",
+        "literal": false
+      }
+    ]
+  },
   "remove_landscape_layer": {
     "category": "landscape",
     "params": [
@@ -1874,6 +1968,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   analyze_landscape_terrain: "Params: actorLabel?, actorPath?, region?, space?, center?, radius?, maxVertices?, histogramBins?, slopeThresholdDegrees?",
   apply_landscape_erosion: "Params: actorLabel?, actorPath?, erosionType?, region?, space?, center?, radius?, maxVertices?, iterations?, maxWork?, talusAngle?, strength?, rainAmount?, evaporation?, sedimentCapacity?, erosionRate?, depositionRate?, editLayer?, editLayerIndex?, rollbackMaxVertices?",
   create_landscape: "Params: location?, scale?, componentCountX?, componentCountY?, subsectionSizeQuads?, numSubsections?, heightOffset?, label?",
+  create_landscape_layer_info: "Params: layerName, name?, packagePath?, onConflict?, physMaterial?, hardness?",
   export_landscape_heightmap: "Params: filePath (or outputPath), actorLabel?, actorPath?, format?, region?, space?, center?, radius?, maxVertices?, editLayer?, editLayerIndex?, overwrite?",
   find_landscape_proxy_at: "Params: worldX, worldY",
   get_landscape_component: "Params: componentIndex?",
@@ -1896,6 +1991,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   paint_landscape_layer: "Params: layerName, center, radius?, strength?, falloff?, actorLabel?, actorPath?, editLayer?, editLayerIndex?, maxVertices?, rollbackMaxVertices?",
   plan_real_world_landscape: "Params: minElevationMeters, maxElevationMeters, realWorldSizeMeters?, boundsLatLon?, sourcePath? (or filePath), format?, width?, height?, metersPerQuad?, elevationEncoding?, verticalExaggeration?, maxComponents?, location?",
   project_geo_coordinates: "Params: boundsLatLon, points, actorLabel?, actorPath?, northAt?, sampleHeight?",
+  refresh_landscape_physical_material_collision: "Params: actorLabels?, guids?, bounds?, maxActors?, save?",
   remove_landscape_layer: "Params: layerName, actorLabel?, actorPath?",
   sample_landscape: "Params: x?, y?, point?, worldX?, worldY?, actorLabel?, actorPath?, layerName?, includeLayers?",
   sculpt_landscape: "Params: center, radius?, mode?, amount?, falloff?, actorLabel?, actorPath?, editLayer?, editLayerIndex?, maxVertices?, rollbackMaxVertices?",
@@ -1909,10 +2005,12 @@ export const paramsClauses: Readonly<Record<string, string>> = {
 /** Every key the spec'd landscape handlers declare, aliases included. */
 export const schema: Record<string, z.ZodType> = {
   actorLabel: z.string().optional().describe("Landscape actor label, when the level has more than one"),
+  actorLabels: z.array(z.string()).optional().describe("Exact editor labels of loaded LandscapeStreamingProxy actors, 1 to 256"),
   actorPath: z.string().optional().describe("Landscape actor object path; wins over actorLabel, which is not unique"),
   amount: z.number().optional().describe("World centimetres to move at full brush strength (default 100) (sculpt_landscape). World centimetres at full strength (default 500) (sculpt_landscape_region)"),
   arrayEncodingLimit: z.number().int().optional().describe("Return the per-vertex array only up to this many values (default 16384)"),
   assetPath: z.string().optional().describe("Alias for materialPath"),
+  bounds: z.object({ min: z.object({ x: z.number(), y: z.number(), z: z.number() }).describe("Box minimum"), max: z.object({ x: z.number(), y: z.number(), z: z.number() }).describe("Box maximum") }).optional().describe("World-space box; proxies intersecting it are refreshed"),
   boundsLatLon: z.record(z.unknown()).optional().describe("Geographic box {minLat, minLon, maxLat, maxLon} in decimal degrees (plan_real_world_landscape). The geographic box the landscape was planned for {minLat, minLon, maxLat, maxLon} (project_geo_coordinates)"),
   center: z.record(z.unknown()).optional().describe("Brush centre {x, y} in world space"),
   componentCountX: z.number().int().optional().describe("Components along X (default 8)"),
@@ -1931,6 +2029,8 @@ export const schema: Record<string, z.ZodType> = {
   filePath: z.string().optional().describe("Where to write the heightmap; a relative path resolves under the project Saved directory (export_landscape_heightmap). Heightmap file to read; a relative path resolves under the project Saved directory (import_landscape_heightmap). Alias for sourcePath (plan_real_world_landscape)"),
   flattenTo: z.string().optional().describe("mean (default) | center | min | max, when flatten has no targetHeight"),
   format: z.string().optional().describe("png16 | raw16; inferred from the file extension when omitted"),
+  guids: z.array(z.string()).optional().describe("Actor GUIDs of loaded LandscapeStreamingProxy actors, 1 to 256"),
+  hardness: z.number().optional().describe("Layer hardness"),
   height: z.number().optional().describe("Source image height in pixels, required for raw16 (import_landscape_heightmap). Source image height in pixels (plan_real_world_landscape). One world Z to fill the region with (set_landscape_height_region)"),
   heightOffset: z.number().int().optional().describe("Flat uint16 height (default 32768, the actor's own Z)"),
   heights: z.array(z.number()).optional().describe("One height per vertex, row-major from (minX, minY)"),
@@ -1947,10 +2047,11 @@ export const schema: Record<string, z.ZodType> = {
   iterations: z.number().int().optional().describe("Passes to run (default 20) (apply_landscape_erosion). Smooth passes (default 1) (sculpt_landscape_region)"),
   label: z.string().optional().describe("Actor label; an existing landscape with this label is reported rather than duplicated"),
   landscapeName: z.string().optional().describe("Internal name of the landscape proxy, when the level has more than one"),
-  layerName: z.string().optional().describe("Paint layer name (add_landscape_layer_info, get_landscape_layer_weight_region, landscape_layer_exists, paint_landscape_layer, remove_landscape_layer, set_landscape_layer_weight_region). Report this paint layer only (sample_landscape)"),
+  layerName: z.string().optional().describe("Paint layer name (add_landscape_layer_info, create_landscape_layer_info, get_landscape_layer_weight_region, landscape_layer_exists, paint_landscape_layer, remove_landscape_layer, set_landscape_layer_weight_region). Report this paint layer only (sample_landscape)"),
   limit: z.number().int().optional().describe("Rows on this page (default 200, max 2000)"),
   location: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Actor location (create_landscape). Landscape origin; its Z is where elevation zero lands (plan_real_world_landscape)"),
   materialPath: z.string().optional().describe("Material or material instance asset path"),
+  maxActors: z.number().int().optional().describe("Refuse more matches than this, 1 to 1024 (default 256)"),
   maxComponents: z.number().int().optional().describe("Reject configurations needing more components than this (default 1024)"),
   maxElevationMeters: z.number().optional().describe("Real-world elevation the heightmap's high value stands for"),
   maxHeight: z.number().optional().describe("World Z the image value 65535 maps to"),
@@ -1960,13 +2061,16 @@ export const schema: Record<string, z.ZodType> = {
   minElevationMeters: z.number().optional().describe("Real-world elevation the heightmap's low value stands for"),
   minHeight: z.number().optional().describe("World Z the image value 0 maps to"),
   mode: z.string().optional().describe("raise (default) | lower | flatten"),
+  name: z.string().optional().describe("LayerInfo asset name (default LI_<layerName>)"),
   northAt: z.string().optional().describe("Which end of the Y axis is north: minY (default) | maxY"),
   numSubsections: z.number().int().optional().describe("1 | 2 (default 2)"),
+  onConflict: z.string().optional().describe("When the asset already exists: skip (default) | error"),
   operator: z.string().optional().describe("raise | lower | flatten | smooth | mountain | valley | ridge | plateau | crater | terrace"),
   outputPath: z.string().optional().describe("Alias for filePath"),
   overwrite: z.boolean().optional().describe("Allow replacing an existing file (default true)"),
   packagePath: z.string().optional().describe("Content folder for the LayerInfo asset (default /Game/Landscape/LayerInfos)"),
   path: z.string().optional().describe("Alias for materialPath"),
+  physMaterial: z.string().optional().describe("PhysicalMaterial asset path"),
   point: z.record(z.unknown()).optional().describe("World position {x, y}"),
   points: z.array(z.record(z.unknown())).optional().describe("Entries {lat, lon} to place, or {x, y} to convert back; an optional name is echoed"),
   radius: z.number().optional().describe("Brush radius in world centimetres (default 500)"),
@@ -1980,6 +2084,7 @@ export const schema: Record<string, z.ZodType> = {
   rimRatio: z.number().optional().describe("Crater rim height as a fraction of the bowl depth (default 0.35)"),
   rollbackMaxVertices: z.number().int().optional().describe("Carry the previous data as a rollback record only up to this many vertices (default 262144 for heights, 524288 for weights)"),
   sampleHeight: z.boolean().optional().describe("Read the surface height at each projected point (default true)"),
+  save: z.literal(false).optional().describe("Saving is not supported; the refresh is in memory only. Omit it or pass false"),
   scale: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Actor scale (default 100, 100, 100)"),
   sedimentCapacity: z.number().optional().describe("Hydraulic: sediment a unit of water can hold (default 0.6)"),
   shape: z.string().optional().describe("ellipse (radial falloff, default) | rect (falloff toward the region edges)"),

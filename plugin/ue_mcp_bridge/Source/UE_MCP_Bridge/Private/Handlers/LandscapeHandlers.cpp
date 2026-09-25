@@ -454,8 +454,14 @@ void FLandscapeHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("heightOffset"), EType::Integer, TEXT("Flat uint16 height (default 32768, the actor's own Z)")),
 		MCPParam::Optional(TEXT("label"), EType::String, TEXT("Actor label; an existing landscape with this label is reported rather than duplicated")),
 	});
-	// Contract values reach CreatePackage before anything is loaded, so this one stays unspecced.
-	Registry.RegisterHandler(TEXT("create_landscape_layer_info"), &CreateLandscapeLayerInfo);
+	Registry.RegisterHandler(TEXT("create_landscape_layer_info"), &CreateLandscapeLayerInfo, {
+		SpecLayerName,
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("LayerInfo asset name (default LI_<layerName>)")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Content folder for the LayerInfo asset (default /Game/Landscape/LayerInfos)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the asset already exists: skip (default) | error")),
+		MCPParam::Optional(TEXT("physMaterial"), EType::String, TEXT("PhysicalMaterial asset path")),
+		MCPParam::Optional(TEXT("hardness"), EType::Number, TEXT("Layer hardness")),
+	}, MCPSpec::ContractExempt(TEXT("Contract values reach CreatePackage before anything is loaded")));
 	Registry.RegisterHandler(TEXT("get_landscape_material_usage_summary"), &GetMaterialUsageSummary, {});
 	// #733: World Partition landscape streaming-proxy enumeration + spatial lookup.
 	Registry.RegisterHandler(TEXT("list_landscape_proxies"), &ListLandscapeProxies, {
@@ -466,8 +472,18 @@ void FLandscapeHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("worldX"), EType::Number, TEXT("World X of the position")),
 		MCPParam::Required(TEXT("worldY"), EType::Number, TEXT("World Y of the position")),
 	});
-	// Its TS entry withholds save, which the handler reads only to refuse it, so it stays unspecced.
-	Registry.RegisterHandlerWithTimeout(TEXT("refresh_landscape_physical_material_collision"), &RefreshPhysicalMaterialCollision, 600.0f);
+	// The contract's maxActors=0 is refused before any proxy is touched. save is
+	// read only to refuse it, so false is its one legal value.
+	Registry.RegisterHandlerWithTimeout(TEXT("refresh_landscape_physical_material_collision"), &RefreshPhysicalMaterialCollision, 600.0f, {
+		MCPParam::Optional(TEXT("actorLabels"), EType::Array, TEXT("Exact editor labels of loaded LandscapeStreamingProxy actors, 1 to 256")).Items(EType::String),
+		MCPParam::Optional(TEXT("guids"), EType::Array, TEXT("Actor GUIDs of loaded LandscapeStreamingProxy actors, 1 to 256")).Items(EType::String),
+		MCPParam::Optional(TEXT("bounds"), EType::Object, TEXT("World-space box; proxies intersecting it are refreshed")).WithFields({
+			MCPParam::RequiredField(TEXT("min"), EType::Vec3, TEXT("Box minimum")),
+			MCPParam::RequiredField(TEXT("max"), EType::Vec3, TEXT("Box maximum")),
+		}),
+		MCPParam::Optional(TEXT("maxActors"), EType::Integer, TEXT("Refuse more matches than this, 1 to 1024 (default 256)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Saving is not supported; the refresh is in memory only. Omit it or pass false")).Literal(false),
+	});
 	Registry.RegisterHandlerWithTimeout(TEXT("sculpt_landscape"), &Sculpt, 120.0f, {
 		MCPParam::Required(TEXT("center"), EType::Object, TEXT("Brush centre {x, y} in world space")),
 		SpecRadius,
@@ -1816,6 +1832,10 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::FindLandscapeProxyAt(const TSharedPtr
 // proxies can be acted on; unloaded World Partition actors do not exist here.
 TSharedPtr<FJsonValue> FLandscapeHandlers::RefreshPhysicalMaterialCollision(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabels"), TEXT("guids"), TEXT("bounds"), TEXT("maxActors"), TEXT("save"),
+	});
+
 #if !UE_MCP_HAS_5_8_API
 	return MCPError(TEXT("Landscape physical-material collision refresh requires Unreal Engine 5.8 or newer"));
 #else
