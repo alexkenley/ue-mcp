@@ -4,24 +4,16 @@ import { materialTool } from "../../src/tools/material.js";
 import { handlerSpecs } from "../../src/tools/specs/material.generated.js";
 
 describe("material runtime reads (#1114/#1116)", () => {
-  it("forwards the component selector through read_instance", () => {
-    expect(materialTool.actions.read_instance.mapParams?.({
-      actorLabel: "Cube",
-      componentName: "StaticMeshComponent0",
-      slotIndex: 0,
-      world: "pie",
-      pieInstance: 1,
-      ignored: true,
-    })).toMatchObject({
-      actorLabel: "Cube",
-      componentName: "StaticMeshComponent0",
-      slotIndex: 0,
-      world: "pie",
-      pieInstance: 1,
-    });
+  it("forwards the component selector through read_instance as sent (#1057)", () => {
+    expect(materialTool.actions.read_instance.mapParams).toBeUndefined();
+    const spec = handlerSpecs.read_material_instance;
+    expect(spec.params.map((p) => p.name)).toEqual(expect.arrayContaining([
+      "actorLabel", "actorPath", "componentName", "slotIndex", "slotName", "world", "pieInstance",
+    ]));
+    expect(spec.choices?.[0].branches).toEqual([["assetPath"], ["actorLabel"], ["actorPath"]]);
 
     // The asset form is unchanged, including the materialPath alias.
-    expect(materialTool.actions.read_instance.mapParams?.({ materialPath: "/Game/MI_Red" })?.assetPath).toBe("/Game/MI_Red");
+    expect(spec.params.find((p) => p.name === "assetPath")?.aliases).toEqual(["path", "materialPath"]);
   });
 
   it("routes read_mpc to the collection reader and documents world", () => {

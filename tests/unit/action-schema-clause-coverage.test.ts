@@ -66,22 +66,16 @@ function topLevelWords(clause: string): string[] {
 const ROUTING: ReadonlySet<string> = ROUTING_PARAMS;
 
 /**
- * The four places on the surface where the oracle's assumption breaks: a word
- * of ordinary English that some category also happens to declare as a key.
+ * The places on the surface where the oracle's assumption breaks: a word of
+ * ordinary English that some category also happens to declare as a key. None
+ * today; a generated clause names parameters only.
  *
  * Each is quoted with the prose it sits in, because that is the whole
  * justification. Adding a line here says "this word is not a parameter in this
  * sentence", and a line that cannot be justified that way is a real drop being
  * waved through.
  */
-const ENGLISH_NOT_A_PARAMETER: Record<string, string[]> = {
-  // "... onConflict? (skip | overwrite), override? ..." reads as prose here:
-  // the word is English in this clause and became a collision only once the
-  // wrapped engine tools declared `override` as a real material parameter.
-  // Declaring 549 new parameter names across the surface is bound to turn a
-  // few existing English words into collisions; this is the mechanism for it.
-  "material.build_material": ["override"],
-};
+const ENGLISH_NOT_A_PARAMETER: Record<string, string[]> = {};
 
 describe("the parser recovers what the clause names", () => {
   it("drops no declared parameter the clause names, and invents none", () => {

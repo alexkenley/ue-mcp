@@ -453,12 +453,14 @@ describe("actionSchema", () => {
   });
 
   it("reports a parameter the description names with an ordinary English word", () => {
-    // material(set_parameter) hard-requires `value` and the description says
-    // so. Reporting the schema without it had an agent call the action with
-    // no value at all.
+    // material(set_parameter) needs `value` (or color / texturePath in its
+    // place). Reporting the schema without it had an agent call the action
+    // with no value at all.
     const material = ALL_TOOLS.find((t) => t.name === "material")!;
-    const byName = new Map(actionSchema(material, "set_parameter").params.map((p) => [p.name, p]));
-    expect(byName.get("value")?.required).toBe(true);
+    const schema = actionSchema(material, "set_parameter");
+    const byName = new Map(schema.params.map((p) => [p.name, p]));
+    expect(byName.get("value")?.alternativeGroup).toBe(0);
+    expect(schema.alternatives?.[0]).toEqual({ branches: [["value"], ["color"], ["texturePath"]], required: true });
   });
 
   it("reports the paging parameters of an action that documents no others", () => {

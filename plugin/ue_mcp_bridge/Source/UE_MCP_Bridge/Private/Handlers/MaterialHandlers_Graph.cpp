@@ -409,12 +409,12 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ConnectToMaterialProperty(const TShare
 
 TSharedPtr<FJsonValue> FMaterialHandlers::DeleteMaterialExpression(const TSharedPtr<FJsonObject>& Params)
 {
+	FString ExpressionName;
+	if (auto Err = RequireString(Params, TEXT("expressionName"), ExpressionName)) return Err;
+
 	// #1138: functionPath deletes from a MaterialFunction graph instead.
 	FMaterialGraphTarget Target;
 	if (auto Err = ResolveMaterialGraphTarget(Params, Target)) return Err;
-
-	FString ExpressionName;
-	if (auto Err = RequireString(Params, TEXT("expressionName"), ExpressionName)) return Err;
 
 	UMaterialExpression* Expression = FindExpressionInList(Target.GetExpressions(), ExpressionName);
 	if (!Expression)

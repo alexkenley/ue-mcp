@@ -1,5 +1,5 @@
 {
-  "handlerCount": 855,
+  "handlerCount": 878,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -1152,6 +1152,177 @@
           "type": "string",
           "required": false,
           "description": "Runtime world scope: auto (default) | pie | editor"
+        }
+      ]
+    },
+    "add_material_designer_layer": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "A DynamicMaterialInstance, a DynamicMaterialModel, or an object path inside one"
+        },
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Label of the actor whose component material to read; a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full object path of that actor; the unambiguous selector"
+        },
+        {
+          "name": "componentName",
+          "type": "string",
+          "required": false,
+          "description": "Primitive component whose material slot to read (default: the first with material slots)"
+        },
+        {
+          "name": "slotIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Material slot index on the component (default 0)"
+        },
+        {
+          "name": "slotName",
+          "type": "string",
+          "required": false,
+          "description": "Material slot name, instead of slotIndex"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World holding the actor: editor (default) | pie | auto"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "Which PIE world when several run (0 = server/primary). See editor(list_pie_instances)"
+        },
+        {
+          "name": "designerSlot",
+          "type": "number",
+          "required": false,
+          "description": "Material Designer slot: index, or the material property it serves (BaseColor, or its short name Base)",
+          "orTypes": [
+            "string"
+          ]
+        },
+        {
+          "name": "materialProperty",
+          "type": "string",
+          "required": false,
+          "description": "EDMMaterialPropertyType of the new layer, and the slot when designerSlot is omitted (default BaseColor)"
+        },
+        {
+          "name": "layerName",
+          "type": "string",
+          "required": false,
+          "description": "Name for the new layer"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "assetPath"
+            ],
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ]
+    },
+    "add_material_expression": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path",
+            "assetPath"
+          ]
+        },
+        {
+          "name": "expressionType",
+          "type": "string",
+          "required": true,
+          "description": "Expression type: Constant, TextureSample, Multiply, Lerp, ScalarParameter, etc."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Node description",
+          "aliases": [
+            "expressionName"
+          ]
+        },
+        {
+          "name": "parameterName",
+          "type": "string",
+          "required": false,
+          "description": "Parameter name, on a parameter node"
+        },
+        {
+          "name": "group",
+          "type": "string",
+          "required": false,
+          "description": "Parameter Group, on a parameter node (#318)"
+        },
+        {
+          "name": "sortPriority",
+          "type": "number",
+          "required": false,
+          "description": "SortPriority within the parameter Group"
+        },
+        {
+          "name": "defaultValue",
+          "type": "number",
+          "required": false,
+          "description": "ScalarParameter default (a number) or VectorParameter default ({r,g,b,a})",
+          "orTypes": [
+            "object"
+          ]
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": false,
+          "description": "A number for Constant, {r,g,b} for Constant3Vector, {x,y} for Constant2Vector"
+        },
+        {
+          "name": "channels",
+          "type": "object",
+          "required": false,
+          "description": "ComponentMask channels {r,g,b,a} as bools"
+        },
+        {
+          "name": "positionX",
+          "type": "number",
+          "required": false,
+          "description": "Graph editor X position for a new node"
+        },
+        {
+          "name": "positionY",
+          "type": "number",
+          "required": false,
+          "description": "Graph editor Y position for a new node"
         }
       ]
     },
@@ -3490,6 +3661,55 @@
         }
       ]
     },
+    "assign_rvt_to_landscape": {
+      "category": "material",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Label of the landscape"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full object path of the landscape"
+        },
+        {
+          "name": "rvtPaths",
+          "type": "array",
+          "required": false,
+          "description": "RuntimeVirtualTexture asset paths",
+          "items": "string"
+        },
+        {
+          "name": "rvtPath",
+          "type": "string",
+          "required": false,
+          "description": "One RuntimeVirtualTexture asset path, instead of rvtPaths"
+        },
+        {
+          "name": "assignMode",
+          "type": "string",
+          "required": false,
+          "description": "set (default: replace the list) | add | remove"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ]
+    },
     "attach_actor": {
       "category": "level",
       "params": [
@@ -4117,6 +4337,18 @@
         }
       ]
     },
+    "begin_material_transaction": {
+      "category": "material",
+      "params": [
+        {
+          "name": "label",
+          "type": "string",
+          "required": false,
+          "description": "Transaction label (default MCP Material Edit)"
+        }
+      ],
+      "contractExempt": "Opens an editor transaction; nothing it reads fails first"
+    },
     "begin_skeleton_edit": {
       "category": "animation",
       "params": [
@@ -4280,6 +4512,78 @@
           "type": "string",
           "required": false,
           "description": "User tag scoping a Started binding"
+        }
+      ]
+    },
+    "build_material": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": false,
+          "description": "Existing material to build into",
+          "aliases": [
+            "assetPath"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Name of a new material to create and build"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for a new material (default /Game/Materials)"
+        },
+        {
+          "name": "textures",
+          "type": "object",
+          "required": true,
+          "description": "{materialProperty: textureAssetPath}: baseColor, normal, roughness, metallic, specular, emissive, opacity, opacityMask, ambientOcclusion, plus packed orm (R=AO,G=Roughness,B=Metallic) and rma (#946)"
+        },
+        {
+          "name": "samplerTypes",
+          "type": "object",
+          "required": false,
+          "description": "Per-texture EMaterialSamplerType override, e.g. {normal: 'VirtualNormal'}; omit to let the texture decide (#946)"
+        },
+        {
+          "name": "clearExisting",
+          "type": "boolean",
+          "required": false,
+          "description": "Delete every existing expression before building (#946)"
+        },
+        {
+          "name": "assignToMesh",
+          "type": "string",
+          "required": false,
+          "description": "StaticMesh or SkeletalMesh asset to put the finished material on (#946)",
+          "aliases": [
+            "meshPath"
+          ]
+        },
+        {
+          "name": "meshSlots",
+          "type": "array",
+          "required": false,
+          "description": "Mesh material slot names or indices to assign (default every slot) (#946)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "materialPath"
+            ],
+            [
+              "name"
+            ]
+          ]
         }
       ]
     },
@@ -6341,6 +6645,174 @@
         }
       ]
     },
+    "create_material": {
+      "category": "material",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Material asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new material (default /Game/Materials)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        }
+      ],
+      "contractExempt": "Creates and saves a material under the contract values; nothing it reads fails first"
+    },
+    "create_material_designer": {
+      "category": "material",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Material asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new material (default /Game/Materials)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        }
+      ],
+      "contractExempt": "Creates and saves a Material Designer material under the contract values; nothing it reads fails first"
+    },
+    "create_material_function": {
+      "category": "material",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "MaterialFunction asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new function (default /Game/Materials/Functions)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "MaterialFunction description (#463)"
+        }
+      ],
+      "contractExempt": "Creates and saves a MaterialFunction under the contract values; nothing it reads fails first"
+    },
+    "create_material_instance": {
+      "category": "material",
+      "params": [
+        {
+          "name": "parentPath",
+          "type": "string",
+          "required": true,
+          "description": "Parent material or material instance"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Material instance asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new instance (default /Game/Materials)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        }
+      ]
+    },
+    "create_material_simple": {
+      "category": "material",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Material asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new material (default /Game/Materials)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
+        },
+        {
+          "name": "baseColor",
+          "type": "color",
+          "required": false,
+          "description": "Base colour {r,g,b}"
+        },
+        {
+          "name": "metallic",
+          "type": "number",
+          "required": false,
+          "description": "Metallic constant"
+        },
+        {
+          "name": "specular",
+          "type": "number",
+          "required": false,
+          "description": "Specular constant"
+        },
+        {
+          "name": "roughness",
+          "type": "number",
+          "required": false,
+          "description": "Roughness constant"
+        },
+        {
+          "name": "emissive",
+          "type": "number",
+          "required": false,
+          "description": "Emissive strength"
+        },
+        {
+          "name": "usages",
+          "type": "array",
+          "required": false,
+          "description": "MATUSAGE flag names to turn on, e.g. InstancedStaticMeshes, Nanite, NiagaraSprites",
+          "items": "string"
+        }
+      ],
+      "contractExempt": "Creates and saves a material under the contract values; nothing it reads fails first"
+    },
     "create_niagara_emitter": {
       "category": "niagara",
       "params": [
@@ -6719,6 +7191,35 @@
           "type": "string",
           "required": false,
           "description": "skip (default) returns an existing asset; error refuses"
+        }
+      ]
+    },
+    "create_runtime_virtual_texture": {
+      "category": "material",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "RuntimeVirtualTexture asset name, with no '/' or '.'"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new RVT (default /Game/Textures/RVT)"
+        },
+        {
+          "name": "materialType",
+          "type": "string",
+          "required": false,
+          "description": "RVT content layout: BaseColor | BaseColor_Normal_Roughness | BaseColor_Normal_Specular | BaseColor_Normal_Specular_YCoCg | BaseColor_Normal_Specular_Mask_YCoCg | Mask4 | WorldHeight | Displacement; one this project disables is refused"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset exists: skip (default, report it) | error"
         }
       ]
     },
@@ -7209,6 +7710,49 @@
         }
       ]
     },
+    "delete_material_expression": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": false,
+          "description": "Material asset path",
+          "aliases": [
+            "path",
+            "assetPath"
+          ]
+        },
+        {
+          "name": "functionPath",
+          "type": "string",
+          "required": false,
+          "description": "MaterialFunction asset path, instead of materialPath (#1138)",
+          "aliases": [
+            "materialFunctionPath"
+          ]
+        },
+        {
+          "name": "expressionName",
+          "type": "string",
+          "required": true,
+          "description": "A description, class, parameter name, FunctionInput/FunctionOutput name, index or engine name"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "materialPath"
+            ],
+            [
+              "functionPath"
+            ]
+          ]
+        }
+      ]
+    },
     "delete_node": {
       "category": "blueprint",
       "params": [
@@ -7671,6 +8215,24 @@
         }
       ]
     },
+    "duplicate_material": {
+      "category": "material",
+      "params": [
+        {
+          "name": "sourcePath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset to copy"
+        },
+        {
+          "name": "destinationPath",
+          "type": "string",
+          "required": true,
+          "description": "Package path of the copy, including its name; a missing folder is created"
+        }
+      ],
+      "contractExempt": "Makes the destination folder under the contract values before the copy can fail"
+    },
     "edit_graph_parameters": {
       "category": "blueprint",
       "params": [
@@ -7892,6 +8454,11 @@
           "description": "Enumerator index for rename_value and remove_value"
         }
       ]
+    },
+    "end_material_transaction": {
+      "category": "material",
+      "params": [],
+      "contractExempt": "Commits whatever editor transaction is open"
     },
     "end_profile_region": {
       "category": "editor",
@@ -16353,6 +16920,96 @@
         }
       ]
     },
+    "read_material_designer": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "A DynamicMaterialInstance, a DynamicMaterialModel, or an object path inside one"
+        },
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Label of the actor whose component material to read; a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full object path of that actor; the unambiguous selector"
+        },
+        {
+          "name": "componentName",
+          "type": "string",
+          "required": false,
+          "description": "Primitive component whose material slot to read (default: the first with material slots)"
+        },
+        {
+          "name": "slotIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Material slot index on the component (default 0)"
+        },
+        {
+          "name": "slotName",
+          "type": "string",
+          "required": false,
+          "description": "Material slot name, instead of slotIndex"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World holding the actor: editor (default) | pie | auto"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "Which PIE world when several run (0 = server/primary). See editor(list_pie_instances)"
+        },
+        {
+          "name": "designerSlot",
+          "type": "number",
+          "required": false,
+          "description": "Material Designer slot: index, or the material property it serves (BaseColor, or its short name Base)",
+          "orTypes": [
+            "string"
+          ]
+        },
+        {
+          "name": "layerIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Only this layer of the slot"
+        },
+        {
+          "name": "maxDepth",
+          "type": "integer",
+          "required": false,
+          "description": "How deep to describe nested stages and values (default 10)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "assetPath"
+            ],
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ]
+    },
     "read_material_graph": {
       "category": "material",
       "params": [
@@ -16383,6 +17040,79 @@
           "type": "integer",
           "required": false,
           "description": "Rows to return on this page"
+        }
+      ]
+    },
+    "read_material_instance": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "MaterialInstance asset path",
+          "aliases": [
+            "path",
+            "materialPath"
+          ]
+        },
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Label of the actor whose component material to read; a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full object path of that actor; the unambiguous selector"
+        },
+        {
+          "name": "componentName",
+          "type": "string",
+          "required": false,
+          "description": "Primitive component whose material slot to read (default: the first with material slots)"
+        },
+        {
+          "name": "slotIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Material slot index on the component (default 0)"
+        },
+        {
+          "name": "slotName",
+          "type": "string",
+          "required": false,
+          "description": "Material slot name, instead of slotIndex"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World holding the actor: editor | pie | auto (default auto: PIE when running, else editor)"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "Which PIE world when several run (0 = server/primary). See editor(list_pie_instances)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "assetPath"
+            ],
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
         }
       ]
     },
@@ -17958,6 +18688,105 @@
           "type": "number",
           "required": false,
           "description": "Positional index into Config.Traits, as read_mass_entity_config reports it"
+        }
+      ]
+    },
+    "remove_material_designer_layer": {
+      "category": "material",
+      "params": [
+        {
+          "name": "objectPath",
+          "type": "string",
+          "required": false,
+          "description": "Full object path of the layer, as read_material_designer reports it"
+        },
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "A DynamicMaterialInstance, a DynamicMaterialModel, or an object path inside one"
+        },
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Label of the actor whose component material to read; a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full object path of that actor; the unambiguous selector"
+        },
+        {
+          "name": "componentName",
+          "type": "string",
+          "required": false,
+          "description": "Primitive component whose material slot to read (default: the first with material slots)"
+        },
+        {
+          "name": "slotIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Material slot index on the component (default 0)"
+        },
+        {
+          "name": "slotName",
+          "type": "string",
+          "required": false,
+          "description": "Material slot name, instead of slotIndex"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World holding the actor: editor (default) | pie | auto"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "Which PIE world when several run (0 = server/primary). See editor(list_pie_instances)"
+        },
+        {
+          "name": "designerSlot",
+          "type": "number",
+          "required": false,
+          "description": "Material Designer slot: index, or the material property it serves (BaseColor, or its short name Base)",
+          "orTypes": [
+            "string"
+          ]
+        },
+        {
+          "name": "layerIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Material Designer layer index within the slot"
+        },
+        {
+          "name": "layerName",
+          "type": "string",
+          "required": false,
+          "description": "Material Designer layer name"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "objectPath"
+            ],
+            [
+              "assetPath"
+            ],
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
         }
       ]
     },
@@ -21253,6 +22082,74 @@
         }
       ]
     },
+    "set_custom_expression": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": false,
+          "description": "Material asset path",
+          "aliases": [
+            "path",
+            "assetPath"
+          ]
+        },
+        {
+          "name": "functionPath",
+          "type": "string",
+          "required": false,
+          "description": "MaterialFunction asset path, instead of materialPath (#1138)",
+          "aliases": [
+            "materialFunctionPath"
+          ]
+        },
+        {
+          "name": "expressionIndex",
+          "type": "number",
+          "required": true,
+          "description": "Node position in the graph's expression list, as list_expressions reports it"
+        },
+        {
+          "name": "code",
+          "type": "string",
+          "required": false,
+          "description": "HLSL code body (#617)"
+        },
+        {
+          "name": "inputs",
+          "type": "array",
+          "required": false,
+          "description": "Named input pins; rebuilds the node's inputs (#617)",
+          "items": "string"
+        },
+        {
+          "name": "outputType",
+          "type": "string",
+          "required": false,
+          "description": "float1 | float2 | float3 | float4 | materialAttributes (#617)"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "Node description"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "materialPath"
+            ],
+            [
+              "functionPath"
+            ]
+          ]
+        }
+      ]
+    },
     "set_datatable_cell": {
       "category": "asset",
       "params": [
@@ -21441,6 +22338,112 @@
           "required": false,
           "description": "[{name or index, tooltip}] per-enumerator tooltips",
           "items": "object"
+        }
+      ]
+    },
+    "set_expression_value": {
+      "category": "material",
+      "params": [
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": false,
+          "description": "Material asset path",
+          "aliases": [
+            "path",
+            "assetPath"
+          ]
+        },
+        {
+          "name": "functionPath",
+          "type": "string",
+          "required": false,
+          "description": "MaterialFunction asset path, instead of materialPath (#1138)",
+          "aliases": [
+            "materialFunctionPath"
+          ]
+        },
+        {
+          "name": "expressionIndex",
+          "type": "number",
+          "required": true,
+          "description": "Node position in the graph's expression list, as list_expressions reports it"
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": false,
+          "description": "Constant or parameter default: a number, or a colour/vector {r,g,b,a}, {x,y,z,w}, [r,g,b,a] or '(R=..,G=..)'; with propertyName, the property's value"
+        },
+        {
+          "name": "color",
+          "type": "color",
+          "required": false,
+          "description": "A colour or vector value, instead of value",
+          "aliases": [
+            "colour"
+          ]
+        },
+        {
+          "name": "x",
+          "type": "number",
+          "required": false,
+          "description": "A vector component passed at the top level instead of inside value (#979)"
+        },
+        {
+          "name": "y",
+          "type": "number",
+          "required": false,
+          "description": "A vector component passed at the top level instead of inside value (#979)"
+        },
+        {
+          "name": "parameterName",
+          "type": "string",
+          "required": false,
+          "description": "Rename a scalar or vector parameter node"
+        },
+        {
+          "name": "texturePath",
+          "type": "string",
+          "required": false,
+          "description": "Default texture of a TextureSample node"
+        },
+        {
+          "name": "uTiling",
+          "type": "number",
+          "required": false,
+          "description": "U tiling multiplier of a TextureCoordinate node"
+        },
+        {
+          "name": "vTiling",
+          "type": "number",
+          "required": false,
+          "description": "V tiling multiplier of a TextureCoordinate node"
+        },
+        {
+          "name": "coordinateIndex",
+          "type": "integer",
+          "required": false,
+          "description": "UV channel a TextureCoordinate node reads"
+        },
+        {
+          "name": "propertyName",
+          "type": "string",
+          "required": false,
+          "description": "Any other UPROPERTY on the node, set from value by reflection, e.g. SamplerType (#663)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "materialPath"
+            ],
+            [
+              "functionPath"
+            ]
+          ]
         }
       ]
     },
@@ -22430,6 +23433,135 @@
         }
       ]
     },
+    "set_material_designer_value": {
+      "category": "material",
+      "params": [
+        {
+          "name": "propertyName",
+          "type": "string",
+          "required": true,
+          "description": "Component property to write, e.g. Value, Offset, Tiling, Rotation, Text, bEnabled, LayerName"
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": true,
+          "description": "The value to write"
+        },
+        {
+          "name": "objectPath",
+          "type": "string",
+          "required": false,
+          "description": "Full object path of the component, as read_material_designer reports it"
+        },
+        {
+          "name": "componentPath",
+          "type": "string",
+          "required": false,
+          "description": "Component path inside the target's model, as read_material_designer reports it"
+        },
+        {
+          "name": "layerIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Material Designer layer index within the slot"
+        },
+        {
+          "name": "layerName",
+          "type": "string",
+          "required": false,
+          "description": "Material Designer layer name"
+        },
+        {
+          "name": "stage",
+          "type": "string",
+          "required": false,
+          "description": "Stage of the addressed layer: base | mask | index"
+        },
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "A DynamicMaterialInstance, a DynamicMaterialModel, or an object path inside one"
+        },
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Label of the actor whose component material to read; a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full object path of that actor; the unambiguous selector"
+        },
+        {
+          "name": "componentName",
+          "type": "string",
+          "required": false,
+          "description": "Primitive component whose material slot to read (default: the first with material slots)"
+        },
+        {
+          "name": "slotIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Material slot index on the component (default 0)"
+        },
+        {
+          "name": "slotName",
+          "type": "string",
+          "required": false,
+          "description": "Material slot name, instead of slotIndex"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World holding the actor: editor (default) | pie | auto"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "Which PIE world when several run (0 = server/primary). See editor(list_pie_instances)"
+        },
+        {
+          "name": "designerSlot",
+          "type": "number",
+          "required": false,
+          "description": "Material Designer slot: index, or the material property it serves (BaseColor, or its short name Base)",
+          "orTypes": [
+            "string"
+          ]
+        },
+        {
+          "name": "rebuild",
+          "type": "boolean",
+          "required": false,
+          "description": "Request a material build after the write (default true when no setter ran)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "objectPath"
+            ],
+            [
+              "componentPath"
+            ],
+            [
+              "layerIndex"
+            ],
+            [
+              "layerName"
+            ]
+          ]
+        }
+      ]
+    },
     "set_material_domain": {
       "category": "material",
       "params": [
@@ -22473,6 +23605,75 @@
           "description": "New parent material or material instance path",
           "aliases": [
             "parentPath"
+          ]
+        }
+      ]
+    },
+    "set_material_parameter": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "MaterialInstanceConstant asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "parameterName",
+          "type": "string",
+          "required": true,
+          "description": "Material parameter name"
+        },
+        {
+          "name": "parameterType",
+          "type": "string",
+          "required": false,
+          "description": "scalar | vector (alias color) | texture; detected from the instance when omitted"
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": false,
+          "description": "A number (scalar), a colour {r,g,b,a}, [r,g,b,a] or '(R=..,G=..,B=..,A=..)' (vector), or a texture asset path (texture)"
+        },
+        {
+          "name": "color",
+          "type": "color",
+          "required": false,
+          "description": "A colour or vector value, instead of value",
+          "aliases": [
+            "colour"
+          ]
+        },
+        {
+          "name": "texturePath",
+          "type": "string",
+          "required": false,
+          "description": "Texture asset path, instead of value, for a texture parameter"
+        },
+        {
+          "name": "association",
+          "type": "string",
+          "required": false,
+          "description": "Material parameter association: Global (default), Layer, or Blend"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "value"
+            ],
+            [
+              "color"
+            ],
+            [
+              "texturePath"
+            ]
           ]
         }
       ]
@@ -22533,6 +23734,47 @@
           "type": "number",
           "required": false,
           "description": "Material layer/blend parameter index"
+        }
+      ]
+    },
+    "set_material_usage": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path",
+            "materialPath"
+          ]
+        },
+        {
+          "name": "usages",
+          "type": "array",
+          "required": false,
+          "description": "MATUSAGE flag names (InstancedStaticMeshes, Nanite, VolumetricCloud, ...); get_usage lists every name this engine accepts",
+          "items": "string"
+        },
+        {
+          "name": "usage",
+          "type": "string",
+          "required": false,
+          "description": "One MATUSAGE flag name"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "usages"
+            ],
+            [
+              "usage"
+            ]
+          ]
         }
       ]
     },
@@ -23756,6 +24998,60 @@
           "type": "string",
           "required": false,
           "description": "Widget class name that locates the live host widget"
+        }
+      ]
+    },
+    "set_rvt_volume_bounds": {
+      "category": "material",
+      "params": [
+        {
+          "name": "rvtPath",
+          "type": "string",
+          "required": false,
+          "description": "RuntimeVirtualTexture whose one bound volume to refit",
+          "aliases": [
+            "assetPath"
+          ]
+        },
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Label of the RuntimeVirtualTextureVolume"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full object path of the RuntimeVirtualTextureVolume"
+        },
+        {
+          "name": "boundsMode",
+          "type": "string",
+          "required": false,
+          "description": "writers (default: cover every primitive writing into this RVT) | alignActor (match one actor's box and rotation)"
+        },
+        {
+          "name": "boundsAlignActor",
+          "type": "string",
+          "required": false,
+          "description": "Actor label or object path whose rotation and bounds the volume aligns to, typically the landscape"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "rvtPath"
+            ],
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
         }
       ]
     },

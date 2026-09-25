@@ -426,6 +426,8 @@ TSharedPtr<FJsonValue> FMaterialHandlers::CreateRuntimeVirtualTexture(const TSha
 
 	FString Name;
 	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
+	// Validated below in this order; read here so a refused name still reads them.
+	MCPReadParamsAhead(Params, { TEXT("packagePath"), TEXT("onConflict"), TEXT("materialType") });
 	Name.TrimStartAndEndInline();
 	if (Name.IsEmpty() || Name.Contains(TEXT("/")) || Name.Contains(TEXT(".")))
 	{
@@ -778,6 +780,8 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddRvtVolume(const TSharedPtr<FJsonObj
 TSharedPtr<FJsonValue> FMaterialHandlers::SetRvtVolumeBounds(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	// Read after the volume resolves, and rvtPath only when no actor was named.
+	MCPReadParamsAhead(Params, { TEXT("rvtPath"), TEXT("boundsMode"), TEXT("boundsAlignActor") });
 
 	REQUIRE_EDITOR_WORLD(World);
 
@@ -1334,6 +1338,8 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddRvtOutput(const TSharedPtr<FJsonObj
 TSharedPtr<FJsonValue> FMaterialHandlers::AssignRvtToLandscape(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	// Read after the landscape resolves.
+	MCPReadParamsAhead(Params, { TEXT("assignMode"), TEXT("rvtPaths"), TEXT("rvtPath") });
 
 	REQUIRE_EDITOR_WORLD(World);
 

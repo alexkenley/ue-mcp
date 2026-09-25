@@ -156,6 +156,10 @@ namespace
 
 TSharedPtr<FJsonValue> FMaterialHandlers::BuildMaterial(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read after the texture set is validated, and on the path each one selects.
+	MCPReadParamsAhead(Params, { TEXT("samplerTypes"), TEXT("materialPath"), TEXT("name"), TEXT("packagePath"),
+		TEXT("clearExisting"), TEXT("assignToMesh"), TEXT("meshSlots") });
+
 	// ── Texture set ──────────────────────────────────────────────────────────
 	const TSharedPtr<FJsonObject>* TexturesObj = nullptr;
 	if (!TryGetObjectParam(Params, TEXT("textures"), TexturesObj) || !TexturesObj || !(*TexturesObj).IsValid())
@@ -209,8 +213,8 @@ TSharedPtr<FJsonValue> FMaterialHandlers::BuildMaterial(const TSharedPtr<FJsonOb
 	}
 
 	// ── Resolve or create the material ───────────────────────────────────────
-	FString MaterialPath = OptionalString(Params, TEXT("materialPath"));
-	if (MaterialPath.IsEmpty()) MaterialPath = OptionalString(Params, TEXT("assetPath"));
+	// 'assetPath' is the spec's alias, renamed to materialPath before this runs.
+	const FString MaterialPath = OptionalString(Params, TEXT("materialPath"));
 
 	UMaterial* Material = nullptr;
 	bool bCreated = false;
@@ -530,8 +534,8 @@ TSharedPtr<FJsonValue> FMaterialHandlers::BuildMaterial(const TSharedPtr<FJsonOb
 #endif
 
 	// ── Optional: put the finished material on a mesh's slots ────────────────
-	FString MeshPath = OptionalString(Params, TEXT("assignToMesh"));
-	if (MeshPath.IsEmpty()) MeshPath = OptionalString(Params, TEXT("meshPath"));
+	// 'meshPath' is the spec's alias, renamed to assignToMesh before this runs.
+	const FString MeshPath = OptionalString(Params, TEXT("assignToMesh"));
 	if (!MeshPath.IsEmpty())
 	{
 		// Slots may be named or indexed; an empty list means every slot.
