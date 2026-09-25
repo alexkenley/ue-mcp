@@ -479,6 +479,27 @@ describe("bridge capability handshake", () => {
     }
   });
 
+  it("points at ue-mcp update when a same-protocol plugin lacks an advertised method (#1167)", async () => {
+    const server = await withBridgeServer((request, socket) => {
+      socket.send(JSON.stringify({ id: request.id, error: { code: -32601, message: "Unknown method: delete_macro" } }));
+    });
+
+    const { EditorBridge, PLUGIN_UPGRADE_POINTER } = await import("../../src/bridge.js");
+    const bridge = new EditorBridge("127.0.0.1", server.port);
+
+    try {
+      const failure = await bridge.call("delete_macro", {}, 1000).catch((e: Error) => e.message);
+      expect(bridge.capabilities?.legacy).toBe(false);
+      expect(failure).toContain("Unknown method: delete_macro");
+      expect(failure).toContain("not registered by the running plugin");
+      expect(failure).toContain(PLUGIN_UPGRADE_POINTER);
+      expect(failure).not.toContain("protocol version");
+    } finally {
+      bridge.disconnect();
+      await server.close();
+    }
+  });
+
   it("tells the user to update the package when the plugin is newer", async () => {
     const { describeProtocolMismatch, CLIENT_PROTOCOL_VERSION } = await import("../../src/bridge.js");
     const message = describeProtocolMismatch({
