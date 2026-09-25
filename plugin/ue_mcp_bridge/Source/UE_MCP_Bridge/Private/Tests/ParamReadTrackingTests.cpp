@@ -76,7 +76,7 @@ bool FMCPParamReadTrackingTest::RunTest(const FString& Parameters)
 	using namespace MCPParamReadTests;
 
 	TestTrue(TEXT("animation is a reporting category"), FMCPHandlerRegistry::ReportsUnreadParams(TEXT("animation")));
-	TestFalse(TEXT("level is not"), FMCPHandlerRegistry::ReportsUnreadParams(TEXT("level")));
+	TestFalse(TEXT("an unlisted category is not"), FMCPHandlerRegistry::ReportsUnreadParams(TEXT("unlisted_probe")));
 
 	FMCPHandlerRegistry Registry;
 	{
@@ -85,8 +85,8 @@ bool FMCPParamReadTrackingTest::RunTest(const FString& Parameters)
 		Registry.RegisterHandler(TEXT("mcp_test_anim_failing_probe"), &FailingProbeHandler);
 	}
 	{
-		FMCPHandlerRegistry::FCategoryScope Scope(Registry, TEXT("level"));
-		Registry.RegisterHandler(TEXT("mcp_test_level_probe"), &ProbeHandler);
+		FMCPHandlerRegistry::FCategoryScope Scope(Registry, TEXT("unlisted_probe"));
+		Registry.RegisterHandler(TEXT("mcp_test_unlisted_probe"), &ProbeHandler);
 	}
 	Registry.RegisterHandler(TEXT("mcp_test_untagged_probe"), &ProbeHandler);
 
@@ -128,7 +128,7 @@ bool FMCPParamReadTrackingTest::RunTest(const FString& Parameters)
 	// Outside the pilot, the same handler reports nothing.
 	{
 		bool bPresent = true;
-		NotReadOf(Registry.ExecuteHandler(TEXT("mcp_test_level_probe"), MakeProbeParams()), bPresent);
+		NotReadOf(Registry.ExecuteHandler(TEXT("mcp_test_unlisted_probe"), MakeProbeParams()), bPresent);
 		TestFalse(TEXT("a non-pilot category reports nothing"), bPresent);
 		bPresent = true;
 		NotReadOf(Registry.ExecuteHandler(TEXT("mcp_test_untagged_probe"), MakeProbeParams()), bPresent);
