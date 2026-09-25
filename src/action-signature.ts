@@ -118,10 +118,19 @@ function epicType(prop: EpicProp | undefined): string {
 
 function epicItems(schema: EpicInputSchema): SigItem[] {
   const required = new Set(schema.required ?? []);
-  return Object.entries(schema.properties ?? {}).map(([name, prop]) => ({
-    kind: "param",
-    param: { label: name, type: epicType(prop as EpicProp), required: required.has(name) },
-  }));
+  const items: SigItem[] = [];
+  let nested = false;
+  for (const [name, prop] of Object.entries(schema.properties ?? {})) {
+    // A tool argument named like a dispatcher key (`action`) cannot be sent at
+    // the top level; it travels inside `input`, which the category declares.
+    if (ROUTING_PARAMS.has(name)) {
+      nested = true;
+      continue;
+    }
+    items.push({ kind: "param", param: { label: name, type: epicType(prop as EpicProp), required: required.has(name) } });
+  }
+  if (nested) items.push({ kind: "param", param: { label: "input", type: "o", required: false } });
+  return items;
 }
 
 /** describe_action's reading of a declared type, as a signature code. */

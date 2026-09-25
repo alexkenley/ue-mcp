@@ -99,6 +99,17 @@ describe("signatures from an Epic input schema", () => {
   });
 });
 
+describe("signatures from an Epic input schema, continued", () => {
+  it("sends an argument named like a dispatcher key through input, never at the top level", () => {
+    const action: ActionSpec = {
+      ...bp("read", "[Epic X] Windows. Params: index?, input?", "epic_call_tool"),
+      epicSchema: { properties: { action: { type: "string" }, index: { type: "integer" } } },
+    };
+    const tool = categoryTool("widget", "W.", { epic_windows: action });
+    expect(actionSignature(tool, "epic_windows")).toBe("epic_windows(index?:i, input?:o)");
+  });
+});
+
 describe("signatures from the declared shape", () => {
   it("covers an in-process action with no spec from describe_action's reading", () => {
     const tool = categoryTool("demo", "Demo.", {
