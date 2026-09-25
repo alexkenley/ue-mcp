@@ -1,5 +1,5 @@
 {
-  "handlerCount": 29,
+  "handlerCount": 32,
   "handlers": {
     "add_curve": {
       "category": "animation",
@@ -83,6 +83,18 @@
           "description": "MinNetUpdateFrequency in updates per second (omit to leave it)"
         }
       ]
+    },
+    "fab_cache_info": {
+      "category": "fab",
+      "params": []
+    },
+    "fab_list_cached": {
+      "category": "fab",
+      "params": []
+    },
+    "fab_status": {
+      "category": "fab",
+      "params": []
     },
     "get_networking_info": {
       "category": "networking",
