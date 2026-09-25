@@ -1,5 +1,5 @@
 {
-  "handlerCount": 838,
+  "handlerCount": 839,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -4544,6 +4544,30 @@
           "description": "Cell values keyed by column index (as string) or column name; same value format as cells"
         }
       ]
+    },
+    "chooser_create": {
+      "category": "chooser",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "New ChooserTable asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the table exists: skip (default, report it) | error"
+        }
+      ],
+      "contractExempt": "Creates and saves a ChooserTable under the contract values; nothing it reads fails first"
     },
     "chooser_delete_row": {
       "category": "chooser",

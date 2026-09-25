@@ -85,6 +85,30 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "chooser_create": {
+    "category": "chooser",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "New ChooserTable asset name"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Destination folder (default /Game)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "When the table exists: skip (default, report it) | error"
+      }
+    ],
+    "contractExempt": "Creates and saves a ChooserTable under the contract values; nothing it reads fails first"
+  },
   "chooser_delete_row": {
     "category": "chooser",
     "params": [
@@ -265,6 +289,7 @@ export const handlerSpecs: HandlerSpecs = {
 export const paramsClauses: Readonly<Record<string, string>> = {
   chooser_add_column: "Params: table (or assetPath), columnType, inputStruct?, boundProperty?, enumPath?",
   chooser_add_row: "Params: table (or assetPath), output?, outputType?, cells?, inputs?",
+  chooser_create: "Params: name, packagePath?, onConflict?",
   chooser_delete_row: "Params: table (or assetPath), index",
   chooser_describe: "Params: table (or assetPath)",
   chooser_list_object_references: "Params: assetPath (or path), classFilter?, pathFilter?",
@@ -289,8 +314,11 @@ export const schema: Record<string, z.ZodType> = {
   index: z.number().int().optional().describe("Row index, 0-based"),
   inputs: z.record(z.unknown()).optional().describe("Cell values keyed by column index (as string) or column name; same value format as cells"),
   inputStruct: z.string().optional().describe("Parameter struct to bind the column input (e.g. EnumContextProperty, BoolContextProperty)"),
+  name: z.string().optional().describe("New ChooserTable asset name"),
+  onConflict: z.string().optional().describe("When the table exists: skip (default, report it) | error"),
   output: z.string().optional().describe("Output asset path for the row (a PoseSearchDatabase, a nested ChooserTable, etc.)"),
   outputType: z.string().optional().describe("Output wrapper: 'asset' (hard ref, default) | 'soft_asset' | 'evaluate' (nested ChooserTable reference)"),
+  packagePath: z.string().optional().describe("Destination folder (default /Game)"),
   path: z.string().optional().describe("Alias for assetPath"),
   pathFilter: z.string().optional().describe("Substring filter on the referenced object path"),
   table: z.string().optional().describe("ChooserTable asset path, e.g. /Game/Path/CT_Locomotion"),
