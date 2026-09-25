@@ -255,61 +255,312 @@ void FWidgetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("widget"));
-	Registry.RegisterHandler(TEXT("list_widget_blueprints"), &ListWidgetBlueprints);
+
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else; the TS surface is generated from a recording of these. The
+	// TS normalizer still folds the legacy spellings into assetPath, widgetName
+	// and parentWidgetName first, and mirrors assetPath into path, so the
+	// aliases below matter to direct bridge callers.
+	// Unspecified: the three create actions, which the contract test would see
+	// create an asset, and every action whose clause is a choice (className OR
+	// assetPath, widgetName | className, rules[] OR widgetName), which a spec
+	// cannot express yet.
+	using EType = EMCPParamType;
+	auto AssetPath = []()
+	{
+		return MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Widget Blueprint or Editor Utility asset path, e.g. /Game/UI/WBP_Example (#798)")).Alias(TEXT("path"));
+	};
+	auto WidgetName = []()
+	{
+		return MCPParam::Required(TEXT("widgetName"), EType::String, TEXT("Name of a widget inside the tree (#798)"));
+	};
+	auto AnimationName = []()
+	{
+		return MCPParam::Required(TEXT("animationName"), EType::String, TEXT("The UWidgetAnimation's object name or display label"));
+	};
+	auto PropertyName = []()
+	{
+		return MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Reflected property name on the widget"));
+	};
+	auto Cursor = []()
+	{
+		return MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the 'nextCursor' from the previous page, unmodified"));
+	};
+	auto Limit = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("limit"), EType::Integer, Description);
+	};
+	auto EventTime = []()
+	{
+		return MCPParam::Optional(TEXT("time"), EType::Number, TEXT("Key time in SECONDS, converted to frames on the animation's tick resolution"));
+	};
+	auto TrackName = []()
+	{
+		return MCPParam::Optional(TEXT("trackName"), EType::String, TEXT("Event track display name (default Events)"));
+	};
+	auto AnimEvent = []()
+	{
+		return MCPParam::Optional(TEXT("event"), EType::String, TEXT("Animation lifecycle event: Finished (default) or Started"));
+	};
+	auto UserTag = []()
+	{
+		return MCPParam::Optional(TEXT("userTag"), EType::String, TEXT("User tag scoping a Started binding"));
+	};
+	auto Channel = []()
+	{
+		return MCPParam::Optional(TEXT("channel"), EType::String, TEXT("Channel by name (R/G/B/A, Left/Top/Right/Bottom, Translation.X); a miss lists the section's real channels"));
+	};
+	auto ChannelIndex = []()
+	{
+		return MCPParam::Optional(TEXT("channelIndex"), EType::Integer, TEXT("Channel by index, used when channel is not given (default 0)"));
+	};
+	auto UserIndex = []()
+	{
+		return MCPParam::Optional(TEXT("userIndex"), EType::Integer, TEXT("Local player user index (default 0)"));
+	};
+	auto ClassName = []()
+	{
+		return MCPParam::Optional(TEXT("className"), EType::String, TEXT("Widget class name that locates the live host widget"));
+	};
+
+	Registry.RegisterHandler(TEXT("list_widget_blueprints"), &ListWidgetBlueprints, {
+		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include sub-paths (default true)")),
+		Cursor(),
+		Limit(TEXT("Rows to return on this page (default 200, max 2000)")),
+	});
 	Registry.RegisterHandler(TEXT("create_widget_blueprint"), &CreateWidgetBlueprint);
-	Registry.RegisterHandler(TEXT("read_widget_tree"), &ReadWidgetTree);
-	Registry.RegisterHandler(TEXT("extract_widget_subtree"), &ExtractWidgetSubtree);
+	Registry.RegisterHandler(TEXT("read_widget_tree"), &ReadWidgetTree, {
+		AssetPath(),
+	});
+	Registry.RegisterHandler(TEXT("extract_widget_subtree"), &ExtractWidgetSubtree, {
+		MCPParam::Required(TEXT("sourceAssetPath"), EType::String, TEXT("WidgetBlueprint the subtree is read from")).Alias(TEXT("sourcePath")),
+		MCPParam::Required(TEXT("sourceWidgetName"), EType::String, TEXT("Widget in the source that becomes the extracted root")).Alias(TEXT("widgetName")),
+		MCPParam::Required(TEXT("destinationAssetPath"), EType::String, TEXT("Destination package path, including the new asset name")).Alias(TEXT("destinationPath")),
+		MCPParam::Optional(TEXT("destinationParentClass"), EType::String, TEXT("UUserWidget subclass for the destination (default UserWidget)")),
+		MCPParam::Optional(TEXT("destinationRootName"), EType::String, TEXT("Name override for the extracted root; descendants keep their names")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Plan only, no asset is created or saved (default true)")),
+	});
 	Registry.RegisterHandler(TEXT("create_editor_utility_widget"), &CreateEditorUtilityWidget);
 	Registry.RegisterHandler(TEXT("create_editor_utility_blueprint"), &CreateEditorUtilityBlueprint);
-	Registry.RegisterHandler(TEXT("get_widget_details"), &GetWidgetProperties);
-	Registry.RegisterHandler(TEXT("get_widget_properties"), &GetWidgetFullProperties);
-	Registry.RegisterHandler(TEXT("list_widget_bindings"), &ListWidgetBindings);
-	Registry.RegisterHandler(TEXT("clear_widget_binding"), &ClearWidgetBinding);
-	Registry.RegisterHandler(TEXT("set_widget_property"), &SetWidgetProperty);
-	Registry.RegisterHandler(TEXT("set_widget_style"), &SetWidgetStyle);
-	Registry.RegisterHandler(TEXT("bulk_set_widget_properties"), &BulkSetWidgetProperties);
-	Registry.RegisterHandler(TEXT("reorder_child"), &ReorderChild);
-	Registry.RegisterHandler(TEXT("read_widget_animations"), &ReadWidgetAnimations);
-	Registry.RegisterHandler(TEXT("run_editor_utility_widget"), &RunEditorUtilityWidget);
-	Registry.RegisterHandler(TEXT("run_editor_utility_blueprint"), &RunEditorUtilityBlueprint);
-	Registry.RegisterHandler(TEXT("add_widget"), &AddWidget);
-	Registry.RegisterHandler(TEXT("remove_widget"), &RemoveWidget);
-	Registry.RegisterHandler(TEXT("move_widget"), &MoveWidget);
-	Registry.RegisterHandler(TEXT("set_root_widget"), &SetRoot);
-	Registry.RegisterHandler(TEXT("wrap_root_widget"), &WrapRoot);
-	Registry.RegisterHandler(TEXT("list_widget_classes"), &ListWidgetClasses);
-	Registry.RegisterHandler(TEXT("list_runtime_widgets"), &ListRuntimeWidgets);
+	Registry.RegisterHandler(TEXT("get_widget_details"), &GetWidgetProperties, {
+		AssetPath(),
+		WidgetName(),
+	});
+	Registry.RegisterHandler(TEXT("get_widget_properties"), &GetWidgetFullProperties, {
+		AssetPath(),
+		WidgetName(),
+		MCPParam::Optional(TEXT("includeSubtree"), EType::Boolean, TEXT("Also dump descendant widgets (#547)")),
+	});
+	Registry.RegisterHandler(TEXT("list_widget_bindings"), &ListWidgetBindings, {
+		AssetPath(),
+		MCPParam::Optional(TEXT("filterWidgetName"), EType::String, TEXT("Only bindings on this widget (#530)")),
+		MCPParam::Optional(TEXT("filterProperty"), EType::String, TEXT("Only bindings of this property (#530)")),
+	});
+	Registry.RegisterHandler(TEXT("clear_widget_binding"), &ClearWidgetBinding, {
+		AssetPath(),
+		WidgetName(),
+		MCPParam::Optional(TEXT("propertyName"), EType::String, TEXT("Reflected property name on the widget")),
+	});
+	Registry.RegisterHandler(TEXT("set_widget_property"), &SetWidgetProperty, {
+		AssetPath(),
+		WidgetName(),
+		PropertyName(),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("New value as UE export text, e.g. (Left=8,Top=8,Right=8,Bottom=8)")).Alias(TEXT("propertyValue")),
+	});
+	Registry.RegisterHandler(TEXT("set_widget_style"), &SetWidgetStyle, {
+		AssetPath(),
+		WidgetName(),
+		PropertyName(),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("JSON object mirroring the style struct, or a scalar")),
+	});
+	Registry.RegisterHandler(TEXT("bulk_set_widget_properties"), &BulkSetWidgetProperties, {
+		AssetPath(),
+		MCPParam::Required(TEXT("properties"), EType::Array, TEXT("[{widgetName, propertyName, value}] (#563)")).Items(EType::Object),
+	});
+	Registry.RegisterHandler(TEXT("reorder_child"), &ReorderChild, {
+		AssetPath(),
+		WidgetName(),
+		MCPParam::Required(TEXT("index"), EType::Number, TEXT("Target sibling index within the parent panel (#635)")),
+	});
+	Registry.RegisterHandler(TEXT("read_widget_animations"), &ReadWidgetAnimations, {
+		AssetPath(),
+	});
+	Registry.RegisterHandler(TEXT("run_editor_utility_widget"), &RunEditorUtilityWidget, {
+		AssetPath(),
+	});
+	Registry.RegisterHandler(TEXT("run_editor_utility_blueprint"), &RunEditorUtilityBlueprint, {
+		AssetPath(),
+	});
+	Registry.RegisterHandler(TEXT("add_widget"), &AddWidget, {
+		AssetPath(),
+		MCPParam::Required(TEXT("widgetClass"), EType::String, TEXT("Widget class: a short name (TextBlock, CanvasPanel), a full path, or a Widget Blueprint path")).Alias(TEXT("typeName")),
+		MCPParam::Optional(TEXT("widgetName"), EType::String, TEXT("Name of a widget inside the tree (#798)")).Alias(TEXT("name")),
+		MCPParam::Optional(TEXT("parentWidgetName"), EType::String, TEXT("Name of the parent panel widget (#798)")),
+	});
+	Registry.RegisterHandler(TEXT("remove_widget"), &RemoveWidget, {
+		AssetPath(),
+		WidgetName(),
+	});
+	Registry.RegisterHandler(TEXT("move_widget"), &MoveWidget, {
+		AssetPath(),
+		WidgetName(),
+		MCPParam::Required(TEXT("newParentWidgetName"), EType::String, TEXT("Panel widget to reparent into")).Alias(TEXT("parentWidgetName")),
+	});
+	Registry.RegisterHandler(TEXT("set_root_widget"), &SetRoot, {
+		AssetPath(),
+		WidgetName(),
+	});
+	Registry.RegisterHandler(TEXT("wrap_root_widget"), &WrapRoot, {
+		AssetPath(),
+		MCPParam::Required(TEXT("wrapperClass"), EType::String, TEXT("Panel widget class (CanvasPanel, VerticalBox, Overlay, etc.); must be a UPanelWidget subclass")).Alias(TEXT("widgetClass")),
+		MCPParam::Optional(TEXT("wrapperName"), EType::String, TEXT("Name for the new wrapper widget")),
+	});
+	Registry.RegisterHandler(TEXT("list_widget_classes"), &ListWidgetClasses, {
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring of the class name")),
+		MCPParam::Optional(TEXT("module"), EType::String, TEXT("Case-insensitive substring of the defining module, e.g. UMG or CommonUI")),
+		MCPParam::Optional(TEXT("includeAbstract"), EType::Boolean, TEXT("Include abstract base classes, which cannot be added to a tree (default false)")),
+		MCPParam::Optional(TEXT("includeBlueprint"), EType::Boolean, TEXT("Include loaded Widget Blueprint generated classes as well as native ones (default false)")),
+		Cursor(),
+		Limit(TEXT("Rows to return on this page (default 300, max 5000)")),
+	});
+	Registry.RegisterHandler(TEXT("list_runtime_widgets"), &ListRuntimeWidgets, {
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Class name substring filter")),
+		MCPParam::Optional(TEXT("namePrefix"), EType::String, TEXT("Instance name prefix filter")),
+		MCPParam::Optional(TEXT("viewportOnly"), EType::Boolean, TEXT("Only widgets currently added to the viewport")),
+		Cursor(),
+		Limit(TEXT("Rows to return on this page (default 200, max 2000)")),
+	});
 	Registry.RegisterHandler(TEXT("get_runtime_widget"), &GetRuntimeWidget);
-	Registry.RegisterHandler(TEXT("inspect_runtime_instances"), &InspectRuntimeInstances);
+	Registry.RegisterHandler(TEXT("inspect_runtime_instances"), &InspectRuntimeInstances, {
+		MCPParam::Optional(TEXT("widgetName"), EType::String, TEXT("Exact live instance name. Provide this or classFilter")),
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Class name substring filter")),
+		MCPParam::Optional(TEXT("propertyNames"), EType::Array, TEXT("Exact reflected property names to serialize")).Items(EType::String),
+		MCPParam::Optional(TEXT("includeSubtree"), EType::Boolean, TEXT("Also dump descendant widgets (#547)")),
+		MCPParam::Optional(TEXT("childName"), EType::String, TEXT("Named child inside the UserWidget (#559)")),
+		MCPParam::Optional(TEXT("childClassFilter"), EType::String, TEXT("Class substring filter for subtree nodes (implies includeSubtree)")),
+		MCPParam::Optional(TEXT("viewportOnly"), EType::Boolean, TEXT("Only widgets currently added to the viewport")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("Runtime world scope: pie (default) | game | auto. The editor world is never a valid target")),
+		MCPParam::Optional(TEXT("pieInstance"), EType::Integer, TEXT("PIE instance id for multi-client sessions")),
+		MCPParam::Optional(TEXT("maxInstances"), EType::Integer, TEXT("Maximum matching widget instances returned (1 to 500, default 100)")),
+		MCPParam::Optional(TEXT("maxNodesPerInstance"), EType::Integer, TEXT("Maximum root/subtree nodes per instance (1 to 2000, default 250)")),
+	});
 	// #161: Runtime delegate inspection
-	Registry.RegisterHandler(TEXT("get_runtime_delegates"), &GetRuntimeDelegates);
-	Registry.RegisterHandler(TEXT("add_to_viewport"), &AddWidgetToViewport);
+	Registry.RegisterHandler(TEXT("get_runtime_delegates"), &GetRuntimeDelegates, {
+		MCPParam::Optional(TEXT("widgetName"), EType::String, TEXT("Exact live instance name. Provide this or className")),
+		ClassName(),
+	});
+	Registry.RegisterHandler(TEXT("add_to_viewport"), &AddWidgetToViewport, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Widget Blueprint or Editor Utility asset path, e.g. /Game/UI/WBP_Example (#798)")).Alias(TEXT("path")).Alias(TEXT("widgetBlueprintPath")),
+		MCPParam::Optional(TEXT("zOrder"), EType::Number, TEXT("Viewport Z-order (#602)")),
+	});
 	Registry.RegisterHandler(TEXT("invoke_runtime_function"), &InvokeRuntimeWidgetFunction);
 
 	// UMG animation authoring, navigation rules, focus and accessibility.
 	// Bodies live in WidgetHandlers_Animation.cpp.
-	Registry.RegisterHandler(TEXT("create_widget_animation"), &CreateWidgetAnimation);
-	Registry.RegisterHandler(TEXT("delete_widget_animation"), &DeleteWidgetAnimation);
-	Registry.RegisterHandler(TEXT("get_widget_animation"), &GetWidgetAnimation);
-	Registry.RegisterHandler(TEXT("add_widget_animation_track"), &AddWidgetAnimationTrack);
-	Registry.RegisterHandler(TEXT("remove_widget_animation_track"), &RemoveWidgetAnimationTrack);
-	Registry.RegisterHandler(TEXT("add_widget_animation_key"), &AddWidgetAnimationKey);
-	Registry.RegisterHandler(TEXT("remove_widget_animation_key"), &RemoveWidgetAnimationKey);
-	Registry.RegisterHandler(TEXT("add_widget_animation_event_key"), &AddWidgetAnimationEventKey);
-	Registry.RegisterHandler(TEXT("remove_widget_animation_event_key"), &RemoveWidgetAnimationEventKey);
-	Registry.RegisterHandler(TEXT("bind_widget_animation_event"), &BindWidgetAnimationEvent);
-	Registry.RegisterHandler(TEXT("unbind_widget_animation_event"), &UnbindWidgetAnimationEvent);
+	Registry.RegisterHandler(TEXT("create_widget_animation"), &CreateWidgetAnimation, {
+		AssetPath(),
+		AnimationName(),
+		MCPParam::Optional(TEXT("durationSeconds"), EType::Number, TEXT("Playback range length in seconds (default 1)")),
+		MCPParam::Optional(TEXT("displayRate"), EType::Number, TEXT("Timeline display rate in fps (default 60)")),
+		MCPParam::Optional(TEXT("displayLabel"), EType::String, TEXT("Designer-facing label (defaults to animationName)")),
+	});
+	Registry.RegisterHandler(TEXT("delete_widget_animation"), &DeleteWidgetAnimation, {
+		AssetPath(),
+		AnimationName(),
+	});
+	Registry.RegisterHandler(TEXT("get_widget_animation"), &GetWidgetAnimation, {
+		AssetPath(),
+		AnimationName(),
+	});
+	Registry.RegisterHandler(TEXT("add_widget_animation_track"), &AddWidgetAnimationTrack, {
+		AssetPath(),
+		AnimationName(),
+		WidgetName(),
+		PropertyName(),
+	});
+	Registry.RegisterHandler(TEXT("remove_widget_animation_track"), &RemoveWidgetAnimationTrack, {
+		AssetPath(),
+		AnimationName(),
+		WidgetName(),
+		PropertyName(),
+	});
+	Registry.RegisterHandler(TEXT("add_widget_animation_key"), &AddWidgetAnimationKey, {
+		AssetPath(),
+		AnimationName(),
+		WidgetName(),
+		PropertyName(),
+		MCPParam::Required(TEXT("time"), EType::Number, TEXT("Key time in SECONDS, converted to frames on the animation's tick resolution")),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("The keyed number")),
+		Channel(),
+		ChannelIndex(),
+		MCPParam::Optional(TEXT("interpolation"), EType::String, TEXT("cubic (default), linear or constant")),
+	});
+	Registry.RegisterHandler(TEXT("remove_widget_animation_key"), &RemoveWidgetAnimationKey, {
+		AssetPath(),
+		AnimationName(),
+		WidgetName(),
+		PropertyName(),
+		MCPParam::Required(TEXT("time"), EType::Number, TEXT("Key time in SECONDS, converted to frames on the animation's tick resolution")),
+		Channel(),
+		ChannelIndex(),
+	});
+	Registry.RegisterHandler(TEXT("add_widget_animation_event_key"), &AddWidgetAnimationEventKey, {
+		AssetPath(),
+		AnimationName(),
+		MCPParam::Required(TEXT("functionName"), EType::String, TEXT("Widget Blueprint function the event key calls")),
+		EventTime(),
+		TrackName(),
+	});
+	Registry.RegisterHandler(TEXT("remove_widget_animation_event_key"), &RemoveWidgetAnimationEventKey, {
+		AssetPath(),
+		AnimationName(),
+		EventTime(),
+		TrackName(),
+	});
+	Registry.RegisterHandler(TEXT("bind_widget_animation_event"), &BindWidgetAnimationEvent, {
+		AssetPath(),
+		AnimationName(),
+		AnimEvent(),
+		UserTag(),
+	});
+	Registry.RegisterHandler(TEXT("unbind_widget_animation_event"), &UnbindWidgetAnimationEvent, {
+		AssetPath(),
+		AnimationName(),
+		AnimEvent(),
+		UserTag(),
+	});
 	Registry.RegisterHandler(TEXT("set_widget_navigation"), &SetWidgetNavigation);
-	Registry.RegisterHandler(TEXT("clear_widget_navigation"), &ClearWidgetNavigation);
-	Registry.RegisterHandler(TEXT("restore_widget_navigation"), &RestoreWidgetNavigation);
-	Registry.RegisterHandler(TEXT("audit_widget_focus_chain"), &AuditWidgetFocusChain);
-	Registry.RegisterHandler(TEXT("audit_widget_accessibility"), &AuditWidgetAccessibility);
-	Registry.RegisterHandler(TEXT("get_runtime_focus_path"), &GetRuntimeFocusPath);
-	Registry.RegisterHandler(TEXT("set_runtime_focus"), &SetRuntimeFocus);
+	Registry.RegisterHandler(TEXT("clear_widget_navigation"), &ClearWidgetNavigation, {
+		AssetPath(),
+		WidgetName(),
+		MCPParam::Optional(TEXT("direction"), EType::String, TEXT("Up, Down, Left, Right, Next or Previous; omit to clear all six")),
+	});
+	Registry.RegisterHandler(TEXT("restore_widget_navigation"), &RestoreWidgetNavigation, {
+		AssetPath(),
+		MCPParam::Required(TEXT("previous"), EType::Array, TEXT("The captured navigation snapshot set_navigation / clear_navigation return in their rollback payload")).Items(EType::Object),
+	});
+	Registry.RegisterHandler(TEXT("audit_widget_focus_chain"), &AuditWidgetFocusChain, {
+		AssetPath(),
+	});
+	Registry.RegisterHandler(TEXT("audit_widget_accessibility"), &AuditWidgetAccessibility, {
+		AssetPath(),
+		MCPParam::Optional(TEXT("minFontSize"), EType::Number, TEXT("Smallest acceptable font size in points (default 12)")),
+		MCPParam::Optional(TEXT("minHitSize"), EType::Number, TEXT("Smallest acceptable interactive hit area in slate units (default 40)")),
+	});
+	Registry.RegisterHandler(TEXT("get_runtime_focus_path"), &GetRuntimeFocusPath, {
+		UserIndex(),
+	});
+	Registry.RegisterHandler(TEXT("set_runtime_focus"), &SetRuntimeFocus, {
+		MCPParam::Required(TEXT("widgetName"), EType::String, TEXT("Named child of a live PIE widget, or the live UserWidget's own name")),
+		UserIndex(),
+		ClassName(),
+	});
 
 	// CommonUI. Bodies live in WidgetHandlers_CommonUI.cpp.
 	Registry.RegisterHandler(TEXT("get_bind_widget_contract"), &GetBindWidgetContract);
-	Registry.RegisterHandler(TEXT("audit_commonui"), &AuditCommonUI);
+	Registry.RegisterHandler(TEXT("audit_commonui"), &AuditCommonUI, {
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("Widget Blueprint whose CommonUI wiring to check as well")).Alias(TEXT("path")),
+	});
 }
 
 UWidget* FWidgetHandlers::FindWidgetByNameRecursive(UWidget* Root, const FString& WidgetName)
@@ -434,7 +685,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::CreateWidgetBlueprint(const TSharedPtr<F
 TSharedPtr<FJsonValue> FWidgetHandlers::ReadWidgetTree(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	TSharedPtr<FJsonValue> ResolveError;
 	UWidgetBlueprint* WidgetBP = MCPWidget::ResolveWidgetBlueprintOrError(AssetPath, ResolveError);
@@ -572,7 +823,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::CreateEditorUtilityBlueprint(const TShar
 TSharedPtr<FJsonValue> FWidgetHandlers::RunEditorUtilityWidget(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	// UEditorUtilityWidgetBlueprint derives from UWidgetBlueprint, so it goes
 	// through the same revalidating resolver and gets the same stale-handle
@@ -612,7 +863,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::RunEditorUtilityWidget(const TSharedPtr<
 TSharedPtr<FJsonValue> FWidgetHandlers::RunEditorUtilityBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
 	UEditorUtilityBlueprint* EUBlueprint = Cast<UEditorUtilityBlueprint>(LoadedAsset);
@@ -789,15 +1040,15 @@ TSharedPtr<FJsonValue> FWidgetHandlers::AddWidget(const TSharedPtr<FJsonObject>&
 {
 	// ── Required: assetPath ──
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	// ── Required: widgetClass (e.g. "TextBlock", "CanvasPanel") ──
 	FString WidgetClassName;
-	if (auto Err = RequireStringAlt(Params, TEXT("widgetClass"), TEXT("typeName"), WidgetClassName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("widgetClass"), WidgetClassName)) return Err;
 
 	// ── Optional: widgetName, parentWidgetName ──
+	// `name` and `typeName` are spec aliases, resolved by the registry (#1057).
 	FString WidgetName = OptionalString(Params, TEXT("widgetName"));
-	if (WidgetName.IsEmpty()) WidgetName = OptionalString(Params, TEXT("name"));
 
 	FString ParentWidgetName = OptionalString(Params, TEXT("parentWidgetName"));
 
@@ -977,7 +1228,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::AddWidget(const TSharedPtr<FJsonObject>&
 TSharedPtr<FJsonValue> FWidgetHandlers::RemoveWidget(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString WidgetName;
 	if (auto Err = RequireString(Params, TEXT("widgetName"), WidgetName)) return Err;
@@ -1157,13 +1408,13 @@ TSharedPtr<FJsonValue> FWidgetHandlers::RemoveWidget(const TSharedPtr<FJsonObjec
 TSharedPtr<FJsonValue> FWidgetHandlers::MoveWidget(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString WidgetName;
 	if (auto Err = RequireString(Params, TEXT("widgetName"), WidgetName)) return Err;
 
 	FString NewParentName;
-	if (auto Err = RequireStringAlt(Params, TEXT("newParentWidgetName"), TEXT("parentWidgetName"), NewParentName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("newParentWidgetName"), NewParentName)) return Err;
 
 	TSharedPtr<FJsonValue> ResolveError;
 	UWidgetBlueprint* WidgetBP = MCPWidget::ResolveWidgetBlueprintOrError(AssetPath, ResolveError);
@@ -1290,7 +1541,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::MoveWidget(const TSharedPtr<FJsonObject>
 TSharedPtr<FJsonValue> FWidgetHandlers::SetRoot(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString WidgetName;
 	if (auto Err = RequireString(Params, TEXT("widgetName"), WidgetName)) return Err;
@@ -1390,10 +1641,13 @@ TSharedPtr<FJsonValue> FWidgetHandlers::SetRoot(const TSharedPtr<FJsonObject>& P
 TSharedPtr<FJsonValue> FWidgetHandlers::WrapRoot(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString WrapperClassName;
-	if (auto Err = RequireStringAlt(Params, TEXT("wrapperClass"), TEXT("widgetClass"), WrapperClassName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("wrapperClass"), WrapperClassName)) return Err;
+
+	// Read before anything can fail (#1057).
+	const FString NewName = OptionalString(Params, TEXT("wrapperName"));
 
 	TSharedPtr<FJsonValue> ResolveError;
 	UWidgetBlueprint* WidgetBP = MCPWidget::ResolveWidgetBlueprintOrError(AssetPath, ResolveError);
@@ -1416,8 +1670,6 @@ TSharedPtr<FJsonValue> FWidgetHandlers::WrapRoot(const TSharedPtr<FJsonObject>& 
 		return MCPError(FString::Printf(
 			TEXT("Wrapper class '%s' is not a UPanelWidget - cannot host children"), *WrapperClassName));
 	}
-
-	const FString NewName = OptionalString(Params, TEXT("wrapperName"));
 
 	WidgetBP->Modify();
 	WidgetBP->WidgetTree->Modify();
@@ -2339,12 +2591,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ListRuntimeWidgets(const TSharedPtr<FJso
 {
 	using namespace WidgetRuntime_Internal;
 
-	UWorld* World = ResolveWidgetRuntimeWorld();
-	if (!World)
-	{
-		return MCPError(TEXT("No PIE world available. Is Play-In-Editor running?"));
-	}
-
+	// Every parameter is read before anything can fail (#1057).
 	// Optional filter: class name (contains) / name prefix
 	const FString ClassFilter = OptionalString(Params, TEXT("classFilter"), TEXT(""));
 	const FString NamePrefix  = OptionalString(Params, TEXT("namePrefix"), TEXT(""));
@@ -2359,6 +2606,12 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ListRuntimeWidgets(const TSharedPtr<FJso
 			/*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
 	{
 		return Err;
+	}
+
+	UWorld* World = ResolveWidgetRuntimeWorld();
+	if (!World)
+	{
+		return MCPError(TEXT("No PIE world available. Is Play-In-Editor running?"));
 	}
 
 	TArray<MCPPagination::FPageRow> Rows;
@@ -2605,14 +2858,17 @@ TSharedPtr<FJsonValue> FWidgetHandlers::GetRuntimeWidget(const TSharedPtr<FJsonO
 TSharedPtr<FJsonValue> FWidgetHandlers::AddWidgetToViewport(const TSharedPtr<FJsonObject>& Params)
 {
 	using namespace WidgetRuntime_Internal;
+
+	// Every parameter is read before anything can fail (#1057).
+	FString AssetPath;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const int32 ZOrder = OptionalInt(Params, TEXT("zOrder"), 0);
+
 	UWorld* World = ResolveWidgetRuntimeWorld();
 	if (!World)
 	{
 		return MCPError(TEXT("No PIE world available. Start Play-In-Editor first (editor pie_control action=play)."));
 	}
-
-	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("widgetBlueprintPath"), AssetPath)) return Err;
 
 	// Resolve the WidgetBlueprint's generated UUserWidget class.
 	UClass* WidgetClass = LoadClass<UUserWidget>(nullptr, *AssetPath);
@@ -2640,7 +2896,6 @@ TSharedPtr<FJsonValue> FWidgetHandlers::AddWidgetToViewport(const TSharedPtr<FJs
 	{
 		return MCPError(TEXT("CreateWidget returned null"));
 	}
-	const int32 ZOrder = OptionalInt(Params, TEXT("zOrder"), 0);
 	Widget->AddToViewport(ZOrder);
 
 	auto Result = MCPSuccess();
@@ -2817,16 +3072,18 @@ TSharedPtr<FJsonValue> FWidgetHandlers::GetRuntimeDelegates(const TSharedPtr<FJs
 {
 	using namespace WidgetRuntime_Internal;
 
+	// Read before anything can fail (#1057).
+	FString WidgetName;
+	TryGetStringParam(Params, TEXT("widgetName"), WidgetName);
+	FString ClassFilter;
+	TryGetStringParam(Params, TEXT("className"), ClassFilter);
+
 	UWorld* World = ResolveWidgetRuntimeWorld();
 	if (!World)
 	{
 		return MCPError(TEXT("No PIE world available. Is Play-In-Editor running?"));
 	}
 
-	FString WidgetName;
-	TryGetStringParam(Params, TEXT("widgetName"), WidgetName);
-	FString ClassFilter;
-	TryGetStringParam(Params, TEXT("className"), ClassFilter);
 	if (WidgetName.IsEmpty() && ClassFilter.IsEmpty())
 	{
 		return MCPError(TEXT("Provide 'widgetName' (exact instance name) or 'className' (first match)."));

@@ -492,18 +492,19 @@ using namespace MCPWidgetAnim;
 TSharedPtr<FJsonValue> FWidgetHandlers::CreateWidgetAnimation(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimationName;
 	if (auto Err = RequireString(Params, TEXT("animationName"), AnimationName)) return Err;
 
-	TSharedPtr<FJsonValue> ResolveError;
-	UWidgetBlueprint* WidgetBP = MCPWidget::ResolveWidgetBlueprintOrError(AssetPath, ResolveError);
-	if (!WidgetBP) return ResolveError;
-
+	// Every parameter is read before anything can fail (#1057).
 	const double DurationSeconds = OptionalNumber(Params, TEXT("durationSeconds"), 1.0);
 	const double DisplayRateFps  = OptionalNumber(Params, TEXT("displayRate"), 60.0);
 	const FString DisplayLabel   = OptionalString(Params, TEXT("displayLabel"), AnimationName);
+
+	TSharedPtr<FJsonValue> ResolveError;
+	UWidgetBlueprint* WidgetBP = MCPWidget::ResolveWidgetBlueprintOrError(AssetPath, ResolveError);
+	if (!WidgetBP) return ResolveError;
 
 	if (DurationSeconds <= 0.0)
 	{
@@ -571,7 +572,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::CreateWidgetAnimation(const TSharedPtr<F
 TSharedPtr<FJsonValue> FWidgetHandlers::DeleteWidgetAnimation(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimationName;
 	if (auto Err = RequireString(Params, TEXT("animationName"), AnimationName)) return Err;
@@ -643,7 +644,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::DeleteWidgetAnimation(const TSharedPtr<F
 TSharedPtr<FJsonValue> FWidgetHandlers::GetWidgetAnimation(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimationName;
 	if (auto Err = RequireString(Params, TEXT("animationName"), AnimationName)) return Err;
@@ -796,7 +797,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::GetWidgetAnimation(const TSharedPtr<FJso
 TSharedPtr<FJsonValue> FWidgetHandlers::AddWidgetAnimationTrack(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimationName;
 	if (auto Err = RequireString(Params, TEXT("animationName"), AnimationName)) return Err;
@@ -946,7 +947,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::AddWidgetAnimationTrack(const TSharedPtr
 TSharedPtr<FJsonValue> FWidgetHandlers::RemoveWidgetAnimationTrack(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimationName;
 	if (auto Err = RequireString(Params, TEXT("animationName"), AnimationName)) return Err;
@@ -1041,7 +1042,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::RemoveWidgetAnimationTrack(const TShared
 TSharedPtr<FJsonValue> FWidgetHandlers::AddWidgetAnimationKey(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimationName;
 	if (auto Err = RequireString(Params, TEXT("animationName"), AnimationName)) return Err;
@@ -1180,7 +1181,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::AddWidgetAnimationKey(const TSharedPtr<F
 TSharedPtr<FJsonValue> FWidgetHandlers::RemoveWidgetAnimationKey(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimationName;
 	if (auto Err = RequireString(Params, TEXT("animationName"), AnimationName)) return Err;
@@ -1301,7 +1302,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::RemoveWidgetAnimationKey(const TSharedPt
 TSharedPtr<FJsonValue> FWidgetHandlers::AddWidgetAnimationEventKey(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimationName;
 	if (auto Err = RequireString(Params, TEXT("animationName"), AnimationName)) return Err;
@@ -1456,7 +1457,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::AddWidgetAnimationEventKey(const TShared
 TSharedPtr<FJsonValue> FWidgetHandlers::RemoveWidgetAnimationEventKey(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimationName;
 	if (auto Err = RequireString(Params, TEXT("animationName"), AnimationName)) return Err;
@@ -1547,7 +1548,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::RemoveWidgetAnimationEventKey(const TSha
 TSharedPtr<FJsonValue> FWidgetHandlers::BindWidgetAnimationEvent(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimationName;
 	if (auto Err = RequireString(Params, TEXT("animationName"), AnimationName)) return Err;
@@ -1662,7 +1663,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::BindWidgetAnimationEvent(const TSharedPt
 TSharedPtr<FJsonValue> FWidgetHandlers::UnbindWidgetAnimationEvent(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString AnimationName;
 	if (auto Err = RequireString(Params, TEXT("animationName"), AnimationName)) return Err;
@@ -1934,7 +1935,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::SetWidgetNavigation(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FWidgetHandlers::ClearWidgetNavigation(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString WidgetName;
 	if (auto Err = RequireString(Params, TEXT("widgetName"), WidgetName)) return Err;
@@ -2016,7 +2017,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ClearWidgetNavigation(const TSharedPtr<F
 TSharedPtr<FJsonValue> FWidgetHandlers::RestoreWidgetNavigation(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	const TArray<TSharedPtr<FJsonValue>>* Previous = nullptr;
 	if (!TryGetArrayParam(Params, TEXT("previous"), Previous) || !Previous)
@@ -2109,7 +2110,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::RestoreWidgetNavigation(const TSharedPtr
 TSharedPtr<FJsonValue> FWidgetHandlers::AuditWidgetFocusChain(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	TSharedPtr<FJsonValue> ResolveError;
 	UWidgetBlueprint* WidgetBP = MCPWidget::ResolveWidgetBlueprintOrError(AssetPath, ResolveError);
@@ -2343,7 +2344,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::AuditWidgetFocusChain(const TSharedPtr<F
 TSharedPtr<FJsonValue> FWidgetHandlers::AuditWidgetAccessibility(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	const int32 MinFontSize = OptionalInt(Params, TEXT("minFontSize"), 12);
 	const double MinHitSize = OptionalNumber(Params, TEXT("minHitSize"), 40.0);
