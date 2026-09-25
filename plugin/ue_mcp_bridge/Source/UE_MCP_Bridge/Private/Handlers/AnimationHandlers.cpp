@@ -78,6 +78,16 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057 pilot).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("animation"));
+
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else. The TS surface for it is generated from a recording of these
+	// (npm run specs:record, then npm run specs:generate), and `path` is resolved
+	// to `assetPath` by the registry before the handler runs.
+	using EType = EMCPParamType;
+	auto AssetPath = [](const TCHAR* Description)
+	{
+		return MCPParam::Required(TEXT("assetPath"), EType::String, Description).Alias(TEXT("path"));
+	};
 	Registry.RegisterHandler(TEXT("list_anim_assets"), &ListAnimAssets);
 	Registry.RegisterHandler(TEXT("create_skeleton"), &CreateSkeleton);
 	Registry.RegisterHandler(TEXT("begin_skeleton_edit"), &BeginSkeletonEdit);
@@ -89,11 +99,22 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("edit_curve_metadata"), &EditCurveMetadata);
 	Registry.RegisterHandler(TEXT("register_compatible_skeleton"), &RegisterCompatibleSkeleton);
 	Registry.RegisterHandler(TEXT("list_skeletal_meshes"), &ListSkeletalMeshes);
-	Registry.RegisterHandler(TEXT("get_skeleton_info"), &GetSkeletonInfo);
-	Registry.RegisterHandler(TEXT("list_animation_sockets"), &ListSockets);
-	Registry.RegisterHandler(TEXT("get_physics_asset_info"), &GetPhysicsAssetInfo);
-	Registry.RegisterHandler(TEXT("read_anim_blueprint"), &ReadAnimBlueprint);
-	Registry.RegisterHandler(TEXT("read_anim_montage"), &ReadAnimMontage);
+	Registry.RegisterHandler(TEXT("get_skeleton_info"), &GetSkeletonInfo, {
+		AssetPath(TEXT("SkeletalMesh asset path")),
+	});
+	Registry.RegisterHandler(TEXT("list_animation_sockets"), &ListSockets, {
+		AssetPath(TEXT("SkeletalMesh asset path")),
+	});
+	Registry.RegisterHandler(TEXT("get_physics_asset_info"), &GetPhysicsAssetInfo, {
+		AssetPath(TEXT("SkeletalMesh asset path")),
+	});
+	Registry.RegisterHandler(TEXT("read_anim_blueprint"), &ReadAnimBlueprint, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+	});
+	Registry.RegisterHandler(TEXT("read_anim_montage"), &ReadAnimMontage, {
+		AssetPath(TEXT("AnimMontage asset path")),
+	});
+	// Batch form (assetPaths, directory, fields) is not in the spec yet, so this one stays hand-authored.
 	Registry.RegisterHandler(TEXT("read_anim_sequence"), &ReadAnimSequence);
 	Registry.RegisterHandler(TEXT("scan_animation_tracks"), &ScanAnimationTracks);
 	Registry.RegisterHandler(TEXT("create_anim_blueprint"), &CreateAnimBlueprint);
@@ -103,13 +124,23 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("create_blendspace_1d"), &CreateBlendspace1D);
 	Registry.RegisterHandler(TEXT("add_blend_sample"), &AddBlendSample);
 	Registry.RegisterHandler(TEXT("set_blend_sample"), &SetBlendSample);
-	Registry.RegisterHandler(TEXT("read_blendspace"), &ReadBlendspace);
+	Registry.RegisterHandler(TEXT("read_blendspace"), &ReadBlendspace, {
+		AssetPath(TEXT("BlendSpace or BlendSpace1D asset path")),
+	});
 	// #459: configure axis params + bulk-add samples in one call.
 	Registry.RegisterHandler(TEXT("populate_blendspace"), &PopulateBlendspace);
 	Registry.RegisterHandler(TEXT("populate_blendspace_1d"), &PopulateBlendspace);
 	Registry.RegisterHandler(TEXT("add_anim_notify"), &AddAnimNotify);
-	Registry.RegisterHandler(TEXT("remove_anim_notify"), &RemoveAnimNotify);
-	Registry.RegisterHandler(TEXT("remove_animation_notify"), &RemoveAnimNotify);
+	Registry.RegisterHandler(TEXT("remove_anim_notify"), &RemoveAnimNotify, {
+		AssetPath(TEXT("AnimSequence or AnimMontage asset path")),
+		MCPParam::Optional(TEXT("notifyName"), EType::String, TEXT("Notify name to match")),
+		MCPParam::Optional(TEXT("notifyClass"), EType::String, TEXT("Notify class to match. Pass at least one of notifyName and notifyClass; both filters apply together")),
+	});
+	Registry.RegisterHandler(TEXT("remove_animation_notify"), &RemoveAnimNotify, {
+		AssetPath(TEXT("AnimSequence or AnimMontage asset path")),
+		MCPParam::Optional(TEXT("notifyName"), EType::String, TEXT("Notify name to match")),
+		MCPParam::Optional(TEXT("notifyClass"), EType::String, TEXT("Notify class to match. Pass at least one of notifyName and notifyClass; both filters apply together")),
+	});
 	Registry.RegisterHandler(TEXT("create_sequence"), &CreateSequence);
 	Registry.RegisterHandler(TEXT("set_bone_keyframes"), &SetBoneKeyframes);
 	Registry.RegisterHandler(TEXT("bake_keyframes_batch"), &BakeKeyframesBatch);
@@ -118,7 +149,13 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// #656: curve vs morph-target comparison.
 	Registry.RegisterHandler(TEXT("compare_curves_to_morph_targets"), &CompareCurvesToMorphTargets);
 	Registry.RegisterHandler(TEXT("set_montage_sequence"), &SetMontageSequence);
-	Registry.RegisterHandler(TEXT("set_montage_properties"), &SetMontageProperties);
+	Registry.RegisterHandler(TEXT("set_montage_properties"), &SetMontageProperties, {
+		AssetPath(TEXT("AnimMontage asset path")),
+		MCPParam::Optional(TEXT("sequenceLength"), EType::Number, TEXT("Montage length in seconds")),
+		MCPParam::Optional(TEXT("rateScale"), EType::Number, TEXT("Playback rate scale")),
+		MCPParam::Optional(TEXT("blendIn"), EType::Number, TEXT("Blend-in time in seconds")),
+		MCPParam::Optional(TEXT("blendOut"), EType::Number, TEXT("Blend-out time in seconds")),
+	});
 
 	// State machine authoring
 	Registry.RegisterHandler(TEXT("create_state_machine"), &CreateStateMachine);
@@ -127,20 +164,33 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("set_state_animation"), &SetStateAnimation);
 	Registry.RegisterHandler(TEXT("set_transition_blend"), &SetTransitionBlend);
 	Registry.RegisterHandler(TEXT("set_transition_condition"), &SetTransitionCondition);
-	Registry.RegisterHandler(TEXT("read_state_machine"), &ReadStateMachine);
+	Registry.RegisterHandler(TEXT("read_state_machine"), &ReadStateMachine, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		MCPParam::Required(TEXT("stateMachineName"), EType::String, TEXT("State machine to read")),
+	});
 
 	// AnimGraph inspection (#23 / #91)
-	Registry.RegisterHandler(TEXT("read_anim_graph"), &ReadAnimGraph);
+	Registry.RegisterHandler(TEXT("read_anim_graph"), &ReadAnimGraph, {
+		AssetPath(TEXT("AnimBlueprint asset path")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph to read (default AnimGraph)")),
+	});
 	// #657: deep anim-node struct inspection (PoseDriver, RBF, etc.).
 	Registry.RegisterHandler(TEXT("inspect_anim_nodes"), &InspectAnimNodes);
 
 	// Float curve authoring (#79 / #24)
-	Registry.RegisterHandler(TEXT("add_curve"), &AddCurve);
+	Registry.RegisterHandler(TEXT("add_curve"), &AddCurve, {
+		AssetPath(TEXT("AnimSequence asset path")),
+		MCPParam::Required(TEXT("curveName"), EType::String, TEXT("Float curve to add")),
+	});
 	Registry.RegisterHandler(TEXT("set_anim_curve_keys"), &SetAnimCurveKeys);
 	Registry.RegisterHandler(TEXT("apply_animation_modifier"), &ApplyAnimationModifier);
 
 	// Montage slot & section editing (#78, #27)
-	Registry.RegisterHandler(TEXT("set_montage_slot"), &SetMontageSlot);
+	Registry.RegisterHandler(TEXT("set_montage_slot"), &SetMontageSlot, {
+		AssetPath(TEXT("AnimMontage asset path")),
+		MCPParam::Required(TEXT("slotName"), EType::String, TEXT("Slot name to write onto the track")),
+		MCPParam::Optional(TEXT("trackIndex"), EType::Integer, TEXT("Slot track index (default 0)")),
+	});
 	Registry.RegisterHandler(TEXT("add_montage_section"), &AddMontageSection);
 
 	// Montage segment authoring (#826)
@@ -172,18 +222,40 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("analyze_animation"), &AnalyzeAnimation);
 
 	// v0.7.11 - depth
-	Registry.RegisterHandler(TEXT("set_root_motion_settings"), &SetRootMotionSettings);
-	Registry.RegisterHandler(TEXT("add_virtual_bone"), &AddVirtualBone);
-	Registry.RegisterHandler(TEXT("remove_virtual_bone"), &RemoveVirtualBone);
+	Registry.RegisterHandler(TEXT("set_root_motion_settings"), &SetRootMotionSettings, {
+		AssetPath(TEXT("AnimSequence asset path")),
+		MCPParam::Optional(TEXT("enableRootMotion"), EType::Boolean, TEXT("Extract root motion from the root bone")),
+		MCPParam::Optional(TEXT("forceRootLock"), EType::Boolean, TEXT("Lock the root bone even without root motion")),
+		MCPParam::Optional(TEXT("useNormalizedRootMotionScale"), EType::Boolean, TEXT("Normalize root motion scale")),
+		MCPParam::Optional(TEXT("rootMotionRootLock"), EType::String, TEXT("Root lock mode: RefPose | AnimFirstFrame | Zero")),
+	});
+	Registry.RegisterHandler(TEXT("add_virtual_bone"), &AddVirtualBone, {
+		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("USkeleton asset path")),
+		MCPParam::Required(TEXT("sourceBone"), EType::String, TEXT("Bone the virtual bone starts from")),
+		MCPParam::Required(TEXT("targetBone"), EType::String, TEXT("Bone the virtual bone points at")),
+	});
+	Registry.RegisterHandler(TEXT("remove_virtual_bone"), &RemoveVirtualBone, {
+		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("USkeleton asset path")),
+		MCPParam::Required(TEXT("virtualBoneName"), EType::String, TEXT("Virtual bone to remove")),
+	});
 	Registry.RegisterHandler(TEXT("create_anim_composite"), &CreateAnimComposite);
-	Registry.RegisterHandler(TEXT("list_anim_modifiers"), &ListAnimModifiers);
+	Registry.RegisterHandler(TEXT("list_anim_modifiers"), &ListAnimModifiers, {
+		AssetPath(TEXT("AnimSequence asset path")),
+	});
 
 	// v0.7.11 - issue fixes
 	Registry.RegisterHandler(TEXT("create_ik_retargeter"), &CreateIKRetargeter);
 	Registry.RegisterHandler(TEXT("read_ik_retargeter"), &ReadIKRetargeter);
 	Registry.RegisterHandler(TEXT("configure_ik_retargeter"), &ConfigureIKRetargeter);
-	Registry.RegisterHandler(TEXT("set_anim_blueprint_skeleton"), &SetAnimBlueprintSkeleton);
-	Registry.RegisterHandler(TEXT("read_bone_track"), &ReadBoneTrack);
+	Registry.RegisterHandler(TEXT("set_anim_blueprint_skeleton"), &SetAnimBlueprintSkeleton, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("AnimBlueprint asset path")),
+		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("USkeleton to target")),
+	});
+	Registry.RegisterHandler(TEXT("read_bone_track"), &ReadBoneTrack, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("AnimSequence asset path")),
+		MCPParam::Required(TEXT("boneName"), EType::String, TEXT("Bone whose track to sample")),
+		MCPParam::Optional(TEXT("frames"), EType::Array, TEXT("Frames to sample (default: first, middle and last)")).Items(EType::Number),
+	});
 
 	// v1.0.0-rc.2 - animation authoring gaps (#153, #154)
 	Registry.RegisterHandler(TEXT("set_sequence_properties"), &SetSequenceProperties);
@@ -364,7 +436,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListSkeletalMeshes(const TSharedPtr<F
 TSharedPtr<FJsonValue> FAnimationHandlers::GetSkeletonInfo(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(LoadedAsset);
@@ -623,7 +695,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateSkeleton(const TSharedPtr<FJson
 TSharedPtr<FJsonValue> FAnimationHandlers::ListSockets(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(LoadedAsset);
@@ -690,7 +762,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListSockets(const TSharedPtr<FJsonObj
 TSharedPtr<FJsonValue> FAnimationHandlers::GetPhysicsAssetInfo(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(LoadedAsset);
@@ -732,7 +804,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetPhysicsAssetInfo(const TSharedPtr<
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UAnimBlueprint* AnimBP = Cast<UAnimBlueprint>(LoadedAsset);
@@ -817,7 +889,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimBlueprint(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimMontage(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
@@ -1259,7 +1331,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AuthorMontagesBatch(const TSharedPtr<
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadBlendspace(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UBlendSpace* BlendSpace = Cast<UBlendSpace>(LoadedAsset);
@@ -1561,7 +1633,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddAnimNotify(const TSharedPtr<FJsonO
 TSharedPtr<FJsonValue> FAnimationHandlers::RemoveAnimNotify(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString NotifyName = OptionalString(Params, TEXT("notifyName"));
 	FString NotifyClassName = OptionalString(Params, TEXT("notifyClass"));
@@ -2467,7 +2539,17 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageSequence(const TSharedPtr<F
 TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageProperties(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+
+	// Every parameter is read before anything can fail (#1057).
+	double SeqLen = 0.0;
+	const bool bHasSeqLen = TryGetNumberParam(Params, TEXT("sequenceLength"), SeqLen);
+	double RateScale = 0.0;
+	const bool bHasRate = TryGetNumberParam(Params, TEXT("rateScale"), RateScale);
+	double BlendIn = 0.0;
+	const bool bHasBlendIn = TryGetNumberParam(Params, TEXT("blendIn"), BlendIn);
+	double BlendOut = 0.0;
+	const bool bHasBlendOut = TryGetNumberParam(Params, TEXT("blendOut"), BlendOut);
 
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
@@ -2485,8 +2567,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageProperties(const TSharedPtr
 	bool bAnyChanged = false;
 
 	// sequenceLength - update via property reflection (SequenceLength is protected)
-	double SeqLen;
-	const bool bHasSeqLen = TryGetNumberParam(Params, TEXT("sequenceLength"), SeqLen);
 	if (bHasSeqLen)
 	{
 		float NewLength = static_cast<float>(SeqLen);
@@ -2503,8 +2583,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageProperties(const TSharedPtr
 	}
 
 	// rateScale
-	double RateScale;
-	const bool bHasRate = TryGetNumberParam(Params, TEXT("rateScale"), RateScale);
 	if (bHasRate)
 	{
 		float NewRate = static_cast<float>(RateScale);
@@ -2517,8 +2595,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageProperties(const TSharedPtr
 	}
 
 	// blendIn
-	double BlendIn;
-	const bool bHasBlendIn = TryGetNumberParam(Params, TEXT("blendIn"), BlendIn);
 	if (bHasBlendIn)
 	{
 		float NewIn = static_cast<float>(BlendIn);
@@ -2531,8 +2607,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageProperties(const TSharedPtr
 	}
 
 	// blendOut
-	double BlendOut;
-	const bool bHasBlendOut = TryGetNumberParam(Params, TEXT("blendOut"), BlendOut);
 	if (bHasBlendOut)
 	{
 		float NewOut = static_cast<float>(BlendOut);
@@ -2591,7 +2665,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageProperties(const TSharedPtr
 TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageSlot(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SlotName;
 	if (auto Err = RequireString(Params, TEXT("slotName"), SlotName)) return Err;
@@ -3325,7 +3399,18 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadControlRigHierarchy(const TShared
 TSharedPtr<FJsonValue> FAnimationHandlers::SetRootMotionSettings(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+
+	// Every parameter is read before anything can fail, so the spec contract
+	// test sees the handler read each one it declares (#1057).
+	bool EnableRootMotion = false;
+	const bool bHasEnableRootMotion = TryGetBoolParam(Params, TEXT("enableRootMotion"), EnableRootMotion);
+	bool ForceRootLock = false;
+	const bool bHasForceRootLock = TryGetBoolParam(Params, TEXT("forceRootLock"), ForceRootLock);
+	bool UseNormalizedRootMotionScale = false;
+	const bool bHasUseNormalizedRootMotionScale = TryGetBoolParam(Params, TEXT("useNormalizedRootMotionScale"), UseNormalizedRootMotionScale);
+	FString RootMotionMode;
+	const bool bHasRootMotionMode = TryGetStringParam(Params, TEXT("rootMotionRootLock"), RootMotionMode);
 
 	UAnimSequence* Seq = LoadAssetByPath<UAnimSequence>(AssetPath);
 	if (!Seq) return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *AssetPath));
@@ -3342,23 +3427,19 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetRootMotionSettings(const TSharedPt
 		: (PrevRootLock == ERootMotionRootLock::AnimFirstFrame ? TEXT("AnimFirstFrame") : TEXT("Zero"));
 
 	Seq->Modify();
-	bool EnableRootMotion;
-	if (TryGetBoolParam(Params, TEXT("enableRootMotion"), EnableRootMotion))
+	if (bHasEnableRootMotion)
 	{
 		Seq->bEnableRootMotion = EnableRootMotion;
 	}
-	bool ForceRootLock;
-	if (TryGetBoolParam(Params, TEXT("forceRootLock"), ForceRootLock))
+	if (bHasForceRootLock)
 	{
 		Seq->bForceRootLock = ForceRootLock;
 	}
-	bool UseNormalizedRootMotionScale;
-	if (TryGetBoolParam(Params, TEXT("useNormalizedRootMotionScale"), UseNormalizedRootMotionScale))
+	if (bHasUseNormalizedRootMotionScale)
 	{
 		Seq->bUseNormalizedRootMotionScale = UseNormalizedRootMotionScale;
 	}
-	FString RootMotionMode;
-	if (TryGetStringParam(Params, TEXT("rootMotionRootLock"), RootMotionMode))
+	if (bHasRootMotionMode)
 	{
 		if      (RootMotionMode.Equals(TEXT("RefPose"),       ESearchCase::IgnoreCase)) Seq->RootMotionRootLock = ERootMotionRootLock::RefPose;
 		else if (RootMotionMode.Equals(TEXT("AnimFirstFrame"), ESearchCase::IgnoreCase)) Seq->RootMotionRootLock = ERootMotionRootLock::AnimFirstFrame;

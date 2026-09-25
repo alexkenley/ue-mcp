@@ -1312,7 +1312,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetTransitionCondition(const TSharedP
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadStateMachine(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SMName;
 	if (auto Err = RequireString(Params, TEXT("stateMachineName"), SMName)) return Err;
@@ -1407,7 +1407,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadStateMachine(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("AnimGraph"));
 

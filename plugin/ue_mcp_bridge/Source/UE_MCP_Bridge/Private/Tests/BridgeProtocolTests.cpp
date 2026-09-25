@@ -621,6 +621,18 @@ bool FMCPBridgeCapabilitiesTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("instance records are advertised"), Named.Contains(TEXT("instance-records")));
 		TestTrue(TEXT("the requested-port file is advertised"), Named.Contains(TEXT("requested-port-file")));
 		TestTrue(TEXT("the parameter echo is advertised"), Named.Contains(TEXT("param-echo")));
+		TestTrue(TEXT("handler parameter specs are advertised"), Named.Contains(TEXT("handler-specs")));
+	}
+
+	// #1057: the declared parameter contracts, which the server's generated
+	// surface is recorded from.
+	const TSharedPtr<FJsonObject>* HandlerSpecs = nullptr;
+	TestTrue(TEXT("handler parameter specs are reported"), Payload->TryGetObjectField(TEXT("handlerSpecs"), HandlerSpecs));
+	if (HandlerSpecs && HandlerSpecs->IsValid())
+	{
+		const TSharedPtr<FJsonObject>* Spec = nullptr;
+		TestTrue(TEXT("a spec'd animation handler is among them"),
+			(*HandlerSpecs)->TryGetObjectField(TEXT("read_blendspace"), Spec));
 	}
 
 	// The action list from the running binary is the only answer to "does the
