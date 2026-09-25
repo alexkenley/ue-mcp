@@ -477,6 +477,17 @@ namespace
 		FStateTreeInstanceData* InstanceData = nullptr;
 	};
 
+	/** Every parameter StateTreeDepthResolveRuntime reads, read up front so a
+	 *  runtime handler reads them all before anything can fail (#1057). */
+	void StateTreeDepthReadRuntimeParams(const TSharedPtr<FJsonObject>& Params)
+	{
+		OptionalString(Params, TEXT("world"));
+		HasParam(Params, TEXT("pieInstance"));
+		OptionalString(Params, TEXT("actorLabel"));
+		OptionalString(Params, TEXT("actorPath"));
+		OptionalString(Params, TEXT("componentName"));
+	}
+
 	TSharedPtr<FJsonValue> StateTreeDepthResolveRuntime(
 		const TSharedPtr<FJsonObject>& Params, FStateTreeDepthRuntime& Out, FString& OutActorLabel)
 	{
@@ -585,15 +596,15 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListStateTreeNodeTypes(const TSharedP
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
-	UStateTree* ST = LoadStateTree(AssetPath);
-	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
-	UStateTreeEditorData* EditorData = GetEditorData(ST);
-	if (!EditorData) return MCPError(TEXT("EditorData not found on StateTree"));
-
+	// Every parameter is read before the asset load (#1057).
 	const FString NodeTypeParam = OptionalString(Params, TEXT("nodeType"), TEXT("all"));
 	const FString Filter = OptionalString(Params, TEXT("filter"));
 	const bool bIncludeInstanceProperties = OptionalBool(Params, TEXT("includeInstanceProperties"), true);
 	const bool bSchemaAllowedOnly = OptionalBool(Params, TEXT("schemaAllowedOnly"), true);
+	UStateTree* ST = LoadStateTree(AssetPath);
+	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
+	UStateTreeEditorData* EditorData = GetEditorData(ST);
+	if (!EditorData) return MCPError(TEXT("EditorData not found on StateTree"));
 
 	static const TCHAR* AllKinds[] = { TEXT("task"), TEXT("condition"), TEXT("evaluator"), TEXT("consideration") };
 	TArray<FString> Kinds;
@@ -745,12 +756,13 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ReadState(const TSharedPtr<FJsonObjec
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found on StateTree"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State)
 	{
 		return MCPError(TEXT("State not found. Pass stateId (a GUID from statetree(list_states)) or statePath (the dot-path that action also returns)."));
@@ -920,28 +932,30 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddConsideration(const TSharedPtr<FJs
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FStateRef StateRef = ReadStateRef(Params);
+	FString StructType;
+	if (auto Err = RequireString(Params, TEXT("structType"), StructType)) return Err;
+	TSharedPtr<FJsonObject> InstanceProps;
+	if (HasParam(Params, TEXT("instanceProperties")))
+	{
+		InstanceProps = TryGetParam(Params, TEXT("instanceProperties"))->AsObject();
+	}
+	const bool bHasOperand = HasParam(Params, TEXT("operand"));
+	const FString Operand = OptionalString(Params, TEXT("operand"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found on StateTree"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found. Pass stateId or statePath."));
-
-	FString StructType;
-	if (auto Err = RequireString(Params, TEXT("structType"), StructType)) return Err;
 
 	if (EditorData->Schema && !EditorData->Schema->AllowUtilityConsiderations())
 	{
 		return MCPError(FString::Printf(
 			TEXT("Schema '%s' does not allow utility considerations, so this tree cannot score its states. statetree(list_node_types) reports allowUtilityConsiderations for the schema in use."),
 			*EditorData->Schema->GetClass()->GetName()));
-	}
-
-	TSharedPtr<FJsonObject> InstanceProps;
-	if (HasParam(Params, TEXT("instanceProperties")))
-	{
-		InstanceProps = TryGetParam(Params, TEXT("instanceProperties"))->AsObject();
 	}
 
 	State->Modify();
@@ -954,9 +968,9 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddConsideration(const TSharedPtr<FJs
 		return MCPError(Error);
 	}
 
-	if (HasParam(Params, TEXT("operand")))
+	if (bHasOperand)
 	{
-		const FString Op = OptionalString(Params, TEXT("operand"));
+		const FString& Op = Operand;
 		NewNode->ExpressionOperand = Op.Equals(TEXT("Or"), ESearchCase::IgnoreCase)
 			? EStateTreeExpressionOperand::Or
 			: EStateTreeExpressionOperand::And;
@@ -999,12 +1013,15 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveConsideration(const TSharedPtr<
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const int32 Index = static_cast<int32>(OptionalNumber(Params, TEXT("considerationIndex")));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found on StateTree"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found. Pass stateId or statePath."));
 
 	if (!HasParam(Params, TEXT("considerationIndex")))
@@ -1013,7 +1030,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveConsideration(const TSharedPtr<
 			TEXT("Missing required parameter 'considerationIndex'. This state has %d consideration(s); statetree(read_state) lists each one with its index."),
 			State->Considerations.Num()));
 	}
-	const int32 Index = static_cast<int32>(OptionalNumber(Params, TEXT("considerationIndex")));
 	if (!State->Considerations.IsValidIndex(Index))
 	{
 		return MCPError(FString::Printf(
@@ -1073,12 +1089,16 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveTransitionCondition(const TShar
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const int32 TransIndex = static_cast<int32>(OptionalNumber(Params, TEXT("transitionIndex")));
+	const int32 CondIndex = static_cast<int32>(OptionalNumber(Params, TEXT("conditionIndex")));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found on StateTree"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found. Pass stateId or statePath."));
 
 	if (!HasParam(Params, TEXT("transitionIndex")))
@@ -1087,7 +1107,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveTransitionCondition(const TShar
 			TEXT("Missing required parameter 'transitionIndex'. This state has %d transition(s); statetree(read_state) lists each with its index and conditions."),
 			State->Transitions.Num()));
 	}
-	const int32 TransIndex = static_cast<int32>(OptionalNumber(Params, TEXT("transitionIndex")));
 	if (!State->Transitions.IsValidIndex(TransIndex))
 	{
 		return MCPError(FString::Printf(
@@ -1105,7 +1124,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveTransitionCondition(const TShar
 			TEXT("Missing required parameter 'conditionIndex'. Transition %d has %d condition(s)."),
 			TransIndex, Transition.Conditions.Num()));
 	}
-	const int32 CondIndex = static_cast<int32>(OptionalNumber(Params, TEXT("conditionIndex")));
 	if (!Transition.Conditions.IsValidIndex(CondIndex))
 	{
 		return MCPError(FString::Printf(
@@ -1163,16 +1181,23 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetStateLink(const TSharedPtr<FJsonOb
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FStateRef StateRef = ReadStateRef(Params);
+	FString LinkType;
+	if (auto Err = RequireString(Params, TEXT("linkType"), LinkType)) return Err;
+	const bool bHasTargetStateId = HasParam(Params, TEXT("targetStateId"));
+	const FString TargetStateIdStr = OptionalString(Params, TEXT("targetStateId"));
+	const bool bHasTargetStatePath = HasParam(Params, TEXT("targetStatePath"));
+	const FString TargetStatePathStr = OptionalString(Params, TEXT("targetStatePath"));
+	const FString LinkedAssetPath = OptionalString(Params, TEXT("linkedAsset"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found on StateTree"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found. Pass stateId or statePath."));
 
-	FString LinkType;
-	if (auto Err = RequireString(Params, TEXT("linkType"), LinkType)) return Err;
 	const bool bSubtree = LinkType.Equals(TEXT("subtree"), ESearchCase::IgnoreCase);
 	const bool bAsset = LinkType.Equals(TEXT("asset"), ESearchCase::IgnoreCase);
 	const bool bNone = LinkType.Equals(TEXT("none"), ESearchCase::IgnoreCase);
@@ -1197,13 +1222,13 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetStateLink(const TSharedPtr<FJsonOb
 	if (bSubtree)
 	{
 		UStateTreeState* Target = nullptr;
-		if (HasParam(Params, TEXT("targetStateId")))
+		if (bHasTargetStateId)
 		{
-			Target = FindStateByID(EditorData, StateTreeDepthParseGuid(OptionalString(Params, TEXT("targetStateId"))));
+			Target = FindStateByID(EditorData, StateTreeDepthParseGuid(TargetStateIdStr));
 		}
-		else if (HasParam(Params, TEXT("targetStatePath")))
+		else if (bHasTargetStatePath)
 		{
-			Target = FindStateByPath(EditorData, OptionalString(Params, TEXT("targetStatePath")));
+			Target = FindStateByPath(EditorData, TargetStatePathStr);
 		}
 		if (!Target)
 		{
@@ -1244,8 +1269,7 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetStateLink(const TSharedPtr<FJsonOb
 	}
 	else if (bAsset)
 	{
-		FString LinkedAssetPath;
-		if (auto Err = RequireString(Params, TEXT("linkedAsset"), LinkedAssetPath)) return Err;
+		if (LinkedAssetPath.IsEmpty()) return MCPError(TEXT("Missing required parameter 'linkedAsset'"));
 		UStateTree* Linked = LoadAssetByPath<UStateTree>(LinkedAssetPath);
 		if (!Linked)
 		{
@@ -1321,12 +1345,21 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::MoveState(const TSharedPtr<FJsonObjec
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const bool bToRoot = OptionalBool(Params, TEXT("toRoot"), false);
+	const bool bHasNewParentId = HasParam(Params, TEXT("newParentStateId"));
+	const FString NewParentIdStr = OptionalString(Params, TEXT("newParentStateId"));
+	const bool bHasNewParentPath = HasParam(Params, TEXT("newParentStatePath"));
+	const FString NewParentPathStr = OptionalString(Params, TEXT("newParentStatePath"));
+	const bool bHasInsertIndex = HasParam(Params, TEXT("insertIndex"));
+	const int32 RequestedInsertIndex = static_cast<int32>(OptionalNumber(Params, TEXT("insertIndex")));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found on StateTree"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found. Pass stateId or statePath."));
 
 	// Where it is now, for the inverse and for the idempotency answer.
@@ -1343,9 +1376,7 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::MoveState(const TSharedPtr<FJsonObjec
 	// The new parent: named explicitly, or the root when toRoot is set. Absent
 	// both, the state keeps its parent and only its position changes.
 	UStateTreeState* NewParent = OldParent;
-	const bool bToRoot = OptionalBool(Params, TEXT("toRoot"), false);
-	const bool bHasParentSelector =
-		HasParam(Params, TEXT("newParentStateId")) || HasParam(Params, TEXT("newParentStatePath"));
+	const bool bHasParentSelector = bHasNewParentId || bHasNewParentPath;
 	if (bToRoot && bHasParentSelector)
 	{
 		return MCPError(TEXT("toRoot=true and newParentStateId / newParentStatePath ask for two different destinations. Pass exactly one: toRoot for the top level, or a parent selector for a state to go under."));
@@ -1356,13 +1387,13 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::MoveState(const TSharedPtr<FJsonObjec
 	}
 	else if (bHasParentSelector)
 	{
-		if (HasParam(Params, TEXT("newParentStateId")))
+		if (bHasNewParentId)
 		{
-			NewParent = FindStateByID(EditorData, StateTreeDepthParseGuid(OptionalString(Params, TEXT("newParentStateId"))));
+			NewParent = FindStateByID(EditorData, StateTreeDepthParseGuid(NewParentIdStr));
 		}
 		else
 		{
-			NewParent = FindStateByPath(EditorData, OptionalString(Params, TEXT("newParentStatePath")));
+			NewParent = FindStateByPath(EditorData, NewParentPathStr);
 		}
 		if (!NewParent)
 		{
@@ -1384,9 +1415,9 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::MoveState(const TSharedPtr<FJsonObjec
 	TArray<TObjectPtr<UStateTreeState>>& NewArray = NewParent ? NewParent->Children : EditorData->SubTrees;
 	const int32 TargetMax = (&NewArray == &OldArray) ? NewArray.Num() - 1 : NewArray.Num();
 	int32 InsertIndex = TargetMax;
-	if (HasParam(Params, TEXT("insertIndex")))
+	if (bHasInsertIndex)
 	{
-		InsertIndex = static_cast<int32>(OptionalNumber(Params, TEXT("insertIndex")));
+		InsertIndex = RequestedInsertIndex;
 		if (InsertIndex < 0 || InsertIndex > TargetMax)
 		{
 			return MCPError(FString::Printf(
@@ -1458,13 +1489,16 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetNodeClass(const TSharedPtr<FJsonOb
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	FString NodeIdStr;
+	if (auto Err = RequireString(Params, TEXT("nodeId"), NodeIdStr)) return Err;
+	FString ClassSpec;
+	if (auto Err = RequireString(Params, TEXT("nodeClass"), ClassSpec)) return Err;
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found on StateTree"));
 
-	FString NodeIdStr;
-	if (auto Err = RequireString(Params, TEXT("nodeId"), NodeIdStr)) return Err;
 	FGuid NodeId;
 	if (!FGuid::Parse(NodeIdStr, NodeId))
 	{
@@ -1504,8 +1538,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetNodeClass(const TSharedPtr<FJsonOb
 			*NodeStruct->GetName()));
 	}
 
-	FString ClassSpec;
-	if (auto Err = RequireString(Params, TEXT("nodeClass"), ClassSpec)) return Err;
 	UClass* Resolved = MCPResolveClass(ClassSpec, /*bAllowLoad=*/ true);
 	if (!Resolved)
 	{
@@ -1578,6 +1610,10 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetNodeClass(const TSharedPtr<FJsonOb
 
 TSharedPtr<FJsonValue> FStateTreeHandlers::ReadRuntime(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
+	StateTreeDepthReadRuntimeParams(Params);
+	const bool bIncludeDebugStrings = OptionalBool(Params, TEXT("includeDebugStrings"), false);
+
 	FStateTreeDepthRuntime RT;
 	FString ActorLabel;
 	if (auto Err = StateTreeDepthResolveRuntime(Params, RT, ActorLabel)) return Err;
@@ -1604,7 +1640,7 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ReadRuntime(const TSharedPtr<FJsonObj
 	}
 	Result->SetArrayField(TEXT("frames"), Frames);
 
-	if (OptionalBool(Params, TEXT("includeDebugStrings"), false))
+	if (bIncludeDebugStrings)
 	{
 		Result->SetStringField(TEXT("debugInfo"), Context.GetDebugInfoString());
 	}
@@ -1616,6 +1652,9 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SendEvent(const TSharedPtr<FJsonObjec
 {
 	FString EventTagStr;
 	if (auto Err = RequireString(Params, TEXT("eventTag"), EventTagStr)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	StateTreeDepthReadRuntimeParams(Params);
+	const FName Origin(*OptionalString(Params, TEXT("origin"), TEXT("ue-mcp")));
 
 	FGameplayTag EventTag = FGameplayTag::RequestGameplayTag(FName(*EventTagStr), /*ErrorIfNotFound=*/ false);
 	if (!EventTag.IsValid())
@@ -1628,8 +1667,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SendEvent(const TSharedPtr<FJsonObjec
 	FStateTreeDepthRuntime RT;
 	FString ActorLabel;
 	if (auto Err = StateTreeDepthResolveRuntime(Params, RT, ActorLabel)) return Err;
-
-	const FName Origin(*OptionalString(Params, TEXT("origin"), TEXT("ue-mcp")));
 
 	FStateTreeExecutionContext Context(*RT.Component, *RT.StateTree, *RT.InstanceData);
 	const int32 ChangesBefore = Context.GetStateChangeCount();
@@ -1665,15 +1702,23 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SendEvent(const TSharedPtr<FJsonObjec
 
 TSharedPtr<FJsonValue> FStateTreeHandlers::RequestTransition(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
+	StateTreeDepthReadRuntimeParams(Params);
+	const bool bHasTargetStateId = HasParam(Params, TEXT("targetStateId"));
+	const FString IdStr = OptionalString(Params, TEXT("targetStateId"));
+	const bool bHasTargetStateTag = HasParam(Params, TEXT("targetStateTag"));
+	const FString TagStr = OptionalString(Params, TEXT("targetStateTag"));
+	const FString PriorityStr = OptionalString(Params, TEXT("priority"), TEXT("Normal"));
+	const FString FallbackStr = OptionalString(Params, TEXT("fallback"), TEXT("None"));
+
 	FStateTreeDepthRuntime RT;
 	FString ActorLabel;
 	if (auto Err = StateTreeDepthResolveRuntime(Params, RT, ActorLabel)) return Err;
 
 	FStateTreeStateHandle Target;
 	FString TargetDescription;
-	if (HasParam(Params, TEXT("targetStateId")))
+	if (bHasTargetStateId)
 	{
-		const FString IdStr = OptionalString(Params, TEXT("targetStateId"));
 		FGuid Id;
 		if (!FGuid::Parse(IdStr, Id))
 		{
@@ -1682,10 +1727,9 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RequestTransition(const TSharedPtr<FJ
 		Target = RT.StateTree->GetStateHandleFromId(Id);
 		TargetDescription = IdStr;
 	}
-	else if (HasParam(Params, TEXT("targetStateTag")))
+	else if (bHasTargetStateTag)
 	{
 #if UE_MCP_HAS_STATETREE_TAG_STATE_LOOKUP
-		const FString TagStr = OptionalString(Params, TEXT("targetStateTag"));
 		FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*TagStr), /*ErrorIfNotFound=*/ false);
 		if (!Tag.IsValid())
 		{
@@ -1710,7 +1754,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RequestTransition(const TSharedPtr<FJ
 			*TargetDescription, *RT.StateTree->GetPathName()));
 	}
 
-	const FString PriorityStr = OptionalString(Params, TEXT("priority"), TEXT("Normal"));
 	EStateTreeTransitionPriority Priority = EStateTreeTransitionPriority::Normal;
 	if (PriorityStr.Equals(TEXT("Low"), ESearchCase::IgnoreCase)) Priority = EStateTreeTransitionPriority::Low;
 	else if (PriorityStr.Equals(TEXT("Normal"), ESearchCase::IgnoreCase)) Priority = EStateTreeTransitionPriority::Normal;
@@ -1723,7 +1766,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RequestTransition(const TSharedPtr<FJ
 			TEXT("Unknown priority '%s'. Valid values: Low, Normal (default), Medium, High, Critical."), *PriorityStr));
 	}
 
-	const FString FallbackStr = OptionalString(Params, TEXT("fallback"), TEXT("None"));
 	EStateTreeSelectionFallback Fallback = EStateTreeSelectionFallback::None;
 	if (FallbackStr.Equals(TEXT("None"), ESearchCase::IgnoreCase)) Fallback = EStateTreeSelectionFallback::None;
 	else if (FallbackStr.Equals(TEXT("NextSelectableSibling"), ESearchCase::IgnoreCase)) Fallback = EStateTreeSelectionFallback::NextSelectableSibling;

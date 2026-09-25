@@ -10,6 +10,7 @@ import { handlerSpecs as audio } from "./audio.generated.js";
 import { handlerSpecs as fab } from "./fab.generated.js";
 import { handlerSpecs as networking } from "./networking.generated.js";
 import { handlerSpecs as project } from "./project.generated.js";
+import { handlerSpecs as statetree } from "./statetree.generated.js";
 
 /** Every recorded handler spec, across categories. */
 export const RECORDED_HANDLER_SPECS: HandlerSpecs = {
@@ -18,4 +19,5 @@ export const RECORDED_HANDLER_SPECS: HandlerSpecs = {
   ...fab,
   ...networking,
   ...project,
+  ...statetree,
 };

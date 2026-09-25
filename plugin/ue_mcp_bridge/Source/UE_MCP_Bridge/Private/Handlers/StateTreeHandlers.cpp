@@ -58,57 +58,313 @@ void FStateTreeHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	UE_LOG(LogTemp, Warning, TEXT("[UE_MCP_Bridge] StateTree handlers require UE 5.5+; skipped on this engine version."));
 	return;
 #else
-	Registry.RegisterHandler(TEXT("read_state_tree"), &ReadStateTree);
-	Registry.RegisterHandler(TEXT("list_state_tree_states"), &ListStates);
-	Registry.RegisterHandler(TEXT("add_state_tree_state"), &AddState);
-	Registry.RegisterHandler(TEXT("remove_state_tree_state"), &RemoveState);
-	Registry.RegisterHandler(TEXT("set_state_tree_state_property"), &SetStateProperty);
-	Registry.RegisterHandler(TEXT("clear_state_tree_state_nodes"), &ClearStateNodes);
-	Registry.RegisterHandler(TEXT("add_state_tree_task"), &AddTask);
-	Registry.RegisterHandler(TEXT("add_state_tree_enter_condition"), &AddEnterCondition);
-	Registry.RegisterHandler(TEXT("remove_state_tree_enter_condition"), &RemoveEnterCondition);
-	Registry.RegisterHandler(TEXT("remove_state_tree_task"), &RemoveTask);
-	Registry.RegisterHandler(TEXT("set_state_tree_task_instance_property"), &SetTaskInstanceProperty);
-	Registry.RegisterHandler(TEXT("set_state_tree_task_property"), &SetTaskProperty);
-	Registry.RegisterHandler(TEXT("add_state_tree_transition"), &AddTransition);
-	Registry.RegisterHandler(TEXT("add_state_tree_transition_condition"), &AddTransitionCondition);
-	Registry.RegisterHandler(TEXT("remove_state_tree_transition"), &RemoveTransition);
-	Registry.RegisterHandler(TEXT("add_state_tree_binding"), &AddBinding);
-	Registry.RegisterHandler(TEXT("remove_state_tree_binding"), &RemoveBinding);
-	Registry.RegisterHandler(TEXT("list_state_tree_bindings"), &ListBindings);
-	Registry.RegisterHandler(TEXT("list_state_tree_bindable_sources"), &ListBindableSources);
-	Registry.RegisterHandler(TEXT("add_state_tree_evaluator"), &AddEvaluator);
-	Registry.RegisterHandler(TEXT("remove_state_tree_evaluator"), &RemoveEvaluator);
-	Registry.RegisterHandler(TEXT("set_state_tree_evaluator_instance_property"), &SetEvaluatorInstanceProperty);
-	Registry.RegisterHandler(TEXT("set_state_tree_evaluator_property"), &SetEvaluatorProperty);
-	Registry.RegisterHandler(TEXT("add_state_tree_global_task"), &AddGlobalTask);
-	Registry.RegisterHandler(TEXT("remove_state_tree_global_task"), &RemoveGlobalTask);
-	Registry.RegisterHandler(TEXT("set_state_tree_global_task_instance_property"), &SetGlobalTaskInstanceProperty);
-	Registry.RegisterHandler(TEXT("set_state_tree_global_task_property"), &SetGlobalTaskProperty);
-	Registry.RegisterHandler(TEXT("list_state_tree_colors"), &ListColors);
-	Registry.RegisterHandler(TEXT("add_state_tree_color"), &AddColor);
-	Registry.RegisterHandler(TEXT("list_state_tree_state_parameters"), &ListStateParameters);
-	Registry.RegisterHandler(TEXT("add_state_tree_state_parameter"), &AddStateParameter);
-	Registry.RegisterHandler(TEXT("remove_state_tree_state_parameter"), &RemoveStateParameter);
-	Registry.RegisterHandler(TEXT("set_state_tree_state_parameter"), &SetStateParameter);
-	Registry.RegisterHandler(TEXT("set_state_tree_root_parameters"), &SetRootParameters);
-	Registry.RegisterHandler(TEXT("set_state_tree_schema"), &SetSchema);
-	Registry.RegisterHandler(TEXT("compile_state_tree"), &CompileStateTree);
-	Registry.RegisterHandler(TEXT("validate_state_tree"), &ValidateStateTree);
+	// #1057: every handler declares its parameters here and nowhere else. The TS
+	// surface is generated from a recording of these (npm run specs:record, then
+	// npm run specs:generate). Each handler reads all of them before loading.
+	using EType = EMCPParamType;
+	Registry.RegisterHandler(TEXT("read_state_tree"), &ReadStateTree, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+	});
+	Registry.RegisterHandler(TEXT("list_state_tree_states"), &ListStates, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the nextCursor from the previous page, unmodified")),
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 200, max 2000)")),
+	});
+	Registry.RegisterHandler(TEXT("add_state_tree_state"), &AddState, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("Parent state GUID (omit both parent selectors for a root state)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Parent state dot-path, as an alternative to stateId")),
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Name for the new state")),
+		MCPParam::Optional(TEXT("stateType"), EType::String, TEXT("State type: State, Group, LinkedAsset, Subtree")),
+		MCPParam::Optional(TEXT("selectionBehavior"), EType::String, TEXT("Selection behavior: TryEnterState, TrySelectChildrenInOrder, TrySelectChildrenAtRandom, etc.")),
+		MCPParam::Optional(TEXT("insertIndex"), EType::Integer, TEXT("Position among the new state's siblings (default: append)")),
+		MCPParam::Optional(TEXT("linkedSubtree"), EType::String, TEXT("StateTree ASSET path assigned to LinkedAsset. To link a Subtree state inside this asset, use set_state_link with linkType=subtree")),
+	});
+	Registry.RegisterHandler(TEXT("remove_state_tree_state"), &RemoveState, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+	});
+	Registry.RegisterHandler(TEXT("set_state_tree_state_property"), &SetStateProperty, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Property to set: name, type, selectionBehavior, bEnabled, weight, linkedAsset, description, tag, customTickRate or color")),
+		MCPParam::Required(TEXT("value"), EType::String, TEXT("Property value as a string. tag: gameplay tag or empty to clear. customTickRate: seconds or empty to disable. color: palette display name, GUID, or empty to clear")),
+	});
+	Registry.RegisterHandler(TEXT("clear_state_tree_state_nodes"), &ClearStateNodes, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+	});
+	Registry.RegisterHandler(TEXT("add_state_tree_task"), &AddTask, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("structType"), EType::String, TEXT("C++ struct name, e.g. FMyStateTreeTask or an engine task like FStateTreeRunParallelStateTreesTask")),
+		MCPParam::Optional(TEXT("instanceProperties"), EType::Object, TEXT("Key-value map of instance data properties to set on the new node")),
+	});
+	Registry.RegisterHandler(TEXT("add_state_tree_enter_condition"), &AddEnterCondition, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("structType"), EType::String, TEXT("C++ struct name of the condition")),
+		MCPParam::Optional(TEXT("instanceProperties"), EType::Object, TEXT("Key-value map of instance data properties to set on the new node")),
+		MCPParam::Optional(TEXT("operand"), EType::String, TEXT("Expression operand for conditions: And or Or")),
+	});
+	Registry.RegisterHandler(TEXT("remove_state_tree_enter_condition"), &RemoveEnterCondition, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("conditionIndex"), EType::Integer, TEXT("Condition index within the list, as read_state reports it")),
+	});
+	Registry.RegisterHandler(TEXT("remove_state_tree_task"), &RemoveTask, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("taskIndex"), EType::Integer, TEXT("Task index within the state")),
+	});
+	Registry.RegisterHandler(TEXT("set_state_tree_task_instance_property"), &SetTaskInstanceProperty, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("taskIndex"), EType::Integer, TEXT("Task index within the state")),
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Property to set")),
+		MCPParam::Required(TEXT("value"), EType::String, TEXT("Property value as a string")),
+	});
+	Registry.RegisterHandler(TEXT("set_state_tree_task_property"), &SetTaskProperty, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("taskIndex"), EType::Integer, TEXT("Task index within the state")),
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Property to set")),
+		MCPParam::Required(TEXT("value"), EType::String, TEXT("Property value as a string")),
+	});
+	Registry.RegisterHandler(TEXT("add_state_tree_transition"), &AddTransition, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("trigger"), EType::String, TEXT("OnStateCompleted, OnStateSucceeded, OnStateFailed, OnTick or OnEvent; combine with | e.g. OnStateSucceeded|OnStateFailed")),
+		MCPParam::Required(TEXT("transitionType"), EType::String, TEXT("GotoState, NextState, NextSelectableState, Succeeded or Failed")),
+		MCPParam::Optional(TEXT("eventTag"), EType::String, TEXT("Gameplay tag for OnEvent transitions, e.g. MyGame.SomeEvent")),
+		MCPParam::Optional(TEXT("targetStateId"), EType::String, TEXT("Target state GUID for GotoState transitions")),
+		MCPParam::Optional(TEXT("targetStatePath"), EType::String, TEXT("Target state dot-path for GotoState transitions")),
+		MCPParam::Optional(TEXT("priority"), EType::String, TEXT("Low, Normal, Medium, High or Critical")),
+		MCPParam::Optional(TEXT("delayDuration"), EType::Number, TEXT("Transition delay in seconds")),
+		MCPParam::Optional(TEXT("bDelayTransition"), EType::Boolean, TEXT("Enable transition delay")),
+	});
+	Registry.RegisterHandler(TEXT("add_state_tree_transition_condition"), &AddTransitionCondition, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("transitionIndex"), EType::Integer, TEXT("Transition index within the state")),
+		MCPParam::Required(TEXT("structType"), EType::String, TEXT("C++ struct name of the condition")),
+		MCPParam::Optional(TEXT("instanceProperties"), EType::Object, TEXT("Key-value map of instance data properties to set on the new node")),
+		MCPParam::Optional(TEXT("operand"), EType::String, TEXT("Expression operand for conditions: And or Or")),
+	});
+	Registry.RegisterHandler(TEXT("remove_state_tree_transition"), &RemoveTransition, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("transitionIndex"), EType::Integer, TEXT("Transition index within the state")),
+	});
+	Registry.RegisterHandler(TEXT("add_state_tree_binding"), &AddBinding, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("sourceStructId"), EType::String, TEXT("Source struct GUID, as list_bindable_sources reports it")),
+		MCPParam::Required(TEXT("sourcePath"), EType::String, TEXT("Source property path")),
+		MCPParam::Required(TEXT("targetStructId"), EType::String, TEXT("Target struct GUID")),
+		MCPParam::Required(TEXT("targetPath"), EType::String, TEXT("Target property path")),
+	});
+	Registry.RegisterHandler(TEXT("remove_state_tree_binding"), &RemoveBinding, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("targetStructId"), EType::String, TEXT("Target struct GUID")),
+		MCPParam::Required(TEXT("targetPath"), EType::String, TEXT("Target property path")),
+	});
+	Registry.RegisterHandler(TEXT("list_state_tree_bindings"), &ListBindings, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("structId"), EType::String, TEXT("Only bindings whose source or target is this struct GUID")),
+	});
+	Registry.RegisterHandler(TEXT("list_state_tree_bindable_sources"), &ListBindableSources, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the nextCursor from the previous page, unmodified")),
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 200, max 2000)")),
+	});
+	Registry.RegisterHandler(TEXT("add_state_tree_evaluator"), &AddEvaluator, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("structType"), EType::String, TEXT("C++ struct name deriving from FStateTreeEvaluatorBase")),
+		MCPParam::Optional(TEXT("instanceProperties"), EType::Object, TEXT("Key-value map of instance data properties to set on the new node")),
+	});
+	Registry.RegisterHandler(TEXT("remove_state_tree_evaluator"), &RemoveEvaluator, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("nodeId"), EType::String, TEXT("GUID of the evaluator node")),
+	});
+	Registry.RegisterHandler(TEXT("set_state_tree_evaluator_instance_property"), &SetEvaluatorInstanceProperty, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("nodeId"), EType::String, TEXT("GUID of the evaluator node")),
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Property to set")),
+		MCPParam::Required(TEXT("value"), EType::String, TEXT("Property value as a string")),
+	});
+	Registry.RegisterHandler(TEXT("set_state_tree_evaluator_property"), &SetEvaluatorProperty, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("nodeId"), EType::String, TEXT("GUID of the evaluator node")),
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Property to set")),
+		MCPParam::Required(TEXT("value"), EType::String, TEXT("Property value as a string")),
+	});
+	Registry.RegisterHandler(TEXT("add_state_tree_global_task"), &AddGlobalTask, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("structType"), EType::String, TEXT("C++ struct name deriving from FStateTreeTaskBase")),
+		MCPParam::Optional(TEXT("instanceProperties"), EType::Object, TEXT("Key-value map of instance data properties to set on the new node")),
+	});
+	Registry.RegisterHandler(TEXT("remove_state_tree_global_task"), &RemoveGlobalTask, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("nodeId"), EType::String, TEXT("GUID of the global task node")),
+	});
+	Registry.RegisterHandler(TEXT("set_state_tree_global_task_instance_property"), &SetGlobalTaskInstanceProperty, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("nodeId"), EType::String, TEXT("GUID of the global task node")),
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Property to set")),
+		MCPParam::Required(TEXT("value"), EType::String, TEXT("Property value as a string")),
+	});
+	Registry.RegisterHandler(TEXT("set_state_tree_global_task_property"), &SetGlobalTaskProperty, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("nodeId"), EType::String, TEXT("GUID of the global task node")),
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Property to set")),
+		MCPParam::Required(TEXT("value"), EType::String, TEXT("Property value as a string")),
+	});
+	Registry.RegisterHandler(TEXT("list_state_tree_colors"), &ListColors, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+	});
+	Registry.RegisterHandler(TEXT("add_state_tree_color"), &AddColor, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("displayName"), EType::String, TEXT("Display name for the new palette entry")),
+		MCPParam::Optional(TEXT("color"), EType::String, TEXT("FLinearColor string, e.g. (R=1.0,G=0.0,B=0.0,A=1.0)")),
+	});
+	Registry.RegisterHandler(TEXT("list_state_tree_state_parameters"), &ListStateParameters, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+	});
+	Registry.RegisterHandler(TEXT("add_state_tree_state_parameter"), &AddStateParameter, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("paramName"), EType::String, TEXT("Parameter name")),
+		MCPParam::Required(TEXT("paramType"), EType::String, TEXT("Bool, Int32, Int64, Float, Double, Name, String or Text")),
+	});
+	Registry.RegisterHandler(TEXT("remove_state_tree_state_parameter"), &RemoveStateParameter, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("paramName"), EType::String, TEXT("Parameter name")),
+	});
+	Registry.RegisterHandler(TEXT("set_state_tree_state_parameter"), &SetStateParameter, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("paramName"), EType::String, TEXT("Parameter name")),
+		MCPParam::Required(TEXT("value"), EType::String, TEXT("Property value as a string")),
+	});
+	Registry.RegisterHandler(TEXT("set_state_tree_root_parameters"), &SetRootParameters, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("parameters"), EType::Array, TEXT("Root parameter definitions [{name, type}] where type is float, int32, bool, string, name or double")).Items(EType::Object),
+	});
+	Registry.RegisterHandler(TEXT("set_state_tree_schema"), &SetSchema, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("schema"), EType::String, TEXT("Schema class path, e.g. /Script/GameplayStateTreeModule.StateTreeComponentSchema (default: the first concrete schema this editor has)")),
+	});
+	Registry.RegisterHandler(TEXT("compile_state_tree"), &CompileStateTree, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+	});
+	Registry.RegisterHandler(TEXT("validate_state_tree"), &ValidateStateTree, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+	});
 
 	// V8 depth (StateTreeHandlers_Depth.cpp). Everything above could author a
 	// tree; these close the parts of it that had no route at all.
-	Registry.RegisterHandler(TEXT("list_state_tree_node_types"), &ListStateTreeNodeTypes);
-	Registry.RegisterHandler(TEXT("read_state_tree_state"), &ReadState);
-	Registry.RegisterHandler(TEXT("add_state_tree_consideration"), &AddConsideration);
-	Registry.RegisterHandler(TEXT("remove_state_tree_consideration"), &RemoveConsideration);
-	Registry.RegisterHandler(TEXT("remove_state_tree_transition_condition"), &RemoveTransitionCondition);
-	Registry.RegisterHandler(TEXT("set_state_tree_state_link"), &SetStateLink);
-	Registry.RegisterHandler(TEXT("move_state_tree_state"), &MoveState);
-	Registry.RegisterHandler(TEXT("set_state_tree_node_class"), &SetNodeClass);
-	Registry.RegisterHandler(TEXT("read_state_tree_runtime"), &ReadRuntime);
-	Registry.RegisterHandler(TEXT("send_state_tree_event"), &SendEvent);
-	Registry.RegisterHandler(TEXT("request_state_tree_transition"), &RequestTransition);
+	Registry.RegisterHandler(TEXT("list_state_tree_node_types"), &ListStateTreeNodeTypes, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("nodeType"), EType::String, TEXT("task, condition, evaluator, consideration, or all (default)")),
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Only structs and classes whose name contains this substring")),
+		MCPParam::Optional(TEXT("includeInstanceProperties"), EType::Boolean, TEXT("Include each node type's instance-data property list (default true)")),
+		MCPParam::Optional(TEXT("schemaAllowedOnly"), EType::Boolean, TEXT("Only node types this tree's schema permits (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("read_state_tree_state"), &ReadState, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+	});
+	Registry.RegisterHandler(TEXT("add_state_tree_consideration"), &AddConsideration, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("structType"), EType::String, TEXT("C++ struct name of the consideration")),
+		MCPParam::Optional(TEXT("instanceProperties"), EType::Object, TEXT("Key-value map of instance data properties to set on the new node")),
+		MCPParam::Optional(TEXT("operand"), EType::String, TEXT("Expression operand for conditions: And or Or")),
+	});
+	Registry.RegisterHandler(TEXT("remove_state_tree_consideration"), &RemoveConsideration, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("considerationIndex"), EType::Integer, TEXT("Index of the consideration within the state, as read_state reports it")),
+	});
+	Registry.RegisterHandler(TEXT("remove_state_tree_transition_condition"), &RemoveTransitionCondition, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("transitionIndex"), EType::Integer, TEXT("Transition index within the state")),
+		MCPParam::Required(TEXT("conditionIndex"), EType::Integer, TEXT("Condition index within the list, as read_state reports it")),
+	});
+	Registry.RegisterHandler(TEXT("set_state_tree_state_link"), &SetStateLink, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Required(TEXT("linkType"), EType::String, TEXT("subtree (a Subtree state in this asset), asset (another StateTree asset), or none (clear both)")),
+		MCPParam::Optional(TEXT("targetStateId"), EType::String, TEXT("linkType=subtree: GUID of the Subtree state to link to")),
+		MCPParam::Optional(TEXT("targetStatePath"), EType::String, TEXT("linkType=subtree: dot-path of the Subtree state to link to")),
+		MCPParam::Optional(TEXT("linkedAsset"), EType::String, TEXT("linkType=asset: the StateTree asset this state runs")),
+	});
+	Registry.RegisterHandler(TEXT("move_state_tree_state"), &MoveState, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Optional(TEXT("stateId"), EType::String, TEXT("GUID of the target state (or pass statePath)")),
+		MCPParam::Optional(TEXT("statePath"), EType::String, TEXT("Dot-path to the target state, as an alternative to stateId")),
+		MCPParam::Optional(TEXT("newParentStateId"), EType::String, TEXT("GUID of the state to move under")),
+		MCPParam::Optional(TEXT("newParentStatePath"), EType::String, TEXT("Dot-path of the state to move under, as an alternative to newParentStateId")),
+		MCPParam::Optional(TEXT("toRoot"), EType::Boolean, TEXT("Move the state to the top level of the asset instead of under a parent")),
+		MCPParam::Optional(TEXT("insertIndex"), EType::Integer, TEXT("Position among the new state's siblings (default: append)")),
+	});
+	Registry.RegisterHandler(TEXT("set_state_tree_node_class"), &SetNodeClass, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StateTree asset path, e.g. /Game/Path/To/ST_Asset")),
+		MCPParam::Required(TEXT("nodeId"), EType::String, TEXT("GUID of the Blueprint node wrapper, as every add_* action returns it")),
+		MCPParam::Required(TEXT("nodeClass"), EType::String, TEXT("The Blueprint class this node runs, as a class path or a loaded class name")),
+	});
+	Registry.RegisterHandler(TEXT("read_state_tree_runtime"), &ReadRuntime, {
+		MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Label of the actor carrying the running StateTree component (or pass actorPath)")),
+		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full object path of that actor; unambiguous where a label is not")),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Which StateTree component, when the actor has more than one")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("pie (default), auto, or editor")),
+		MCPParam::Optional(TEXT("pieInstance"), EType::Integer, TEXT("Which PIE instance, when several are running")),
+		MCPParam::Optional(TEXT("includeDebugStrings"), EType::Boolean, TEXT("Include the engine's own debug dump of the execution state")),
+	});
+	Registry.RegisterHandler(TEXT("send_state_tree_event"), &SendEvent, {
+		MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Label of the actor carrying the running StateTree component (or pass actorPath)")),
+		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full object path of that actor; unambiguous where a label is not")),
+		MCPParam::Required(TEXT("eventTag"), EType::String, TEXT("Registered gameplay tag of the event")),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Which StateTree component, when the actor has more than one")),
+		MCPParam::Optional(TEXT("origin"), EType::String, TEXT("Who the event says it came from (default ue-mcp)")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("pie (default), auto, or editor")),
+		MCPParam::Optional(TEXT("pieInstance"), EType::Integer, TEXT("Which PIE instance, when several are running")),
+	});
+	Registry.RegisterHandler(TEXT("request_state_tree_transition"), &RequestTransition, {
+		MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Label of the actor carrying the running StateTree component (or pass actorPath)")),
+		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full object path of that actor; unambiguous where a label is not")),
+		MCPParam::Optional(TEXT("targetStateId"), EType::String, TEXT("GUID of the state to transition to (or pass targetStateTag)")),
+		MCPParam::Optional(TEXT("targetStateTag"), EType::String, TEXT("Tag of the state to transition to, UE 5.8 and later")),
+		MCPParam::Optional(TEXT("priority"), EType::String, TEXT("Low, Normal, Medium, High or Critical")),
+		MCPParam::Optional(TEXT("fallback"), EType::String, TEXT("None (default) or NextSelectableSibling")),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Which StateTree component, when the actor has more than one")),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("pie (default), auto, or editor")),
+		MCPParam::Optional(TEXT("pieInstance"), EType::Integer, TEXT("Which PIE instance, when several are running")),
+	});
 #endif // UE_MCP_HAS_5_5_API
 }
 
@@ -214,21 +470,36 @@ UStateTreeState* FStateTreeHandlers::FindStateByPath(UStateTreeEditorData* Edito
 	return Current;
 }
 
-UStateTreeState* FStateTreeHandlers::ResolveState(UStateTreeEditorData* EditorData, const TSharedPtr<FJsonObject>& Params)
+FStateTreeHandlers::FStateRef FStateTreeHandlers::ReadStateRef(const TSharedPtr<FJsonObject>& Params)
 {
-	if (HasParam(Params, TEXT("stateId")))
+	FStateRef Ref;
+	Ref.bHasId = HasParam(Params, TEXT("stateId"));
+	Ref.Id = OptionalString(Params, TEXT("stateId"));
+	Ref.bHasPath = HasParam(Params, TEXT("statePath"));
+	Ref.Path = OptionalString(Params, TEXT("statePath"));
+	return Ref;
+}
+
+UStateTreeState* FStateTreeHandlers::ResolveState(UStateTreeEditorData* EditorData, const FStateRef& Ref)
+{
+	if (Ref.bHasId)
 	{
 		FGuid StateID;
-		if (FGuid::Parse(OptionalString(Params, TEXT("stateId")), StateID))
+		if (FGuid::Parse(Ref.Id, StateID))
 		{
 			return FindStateByID(EditorData, StateID);
 		}
 	}
-	if (HasParam(Params, TEXT("statePath")))
+	if (Ref.bHasPath)
 	{
-		return FindStateByPath(EditorData, OptionalString(Params, TEXT("statePath")));
+		return FindStateByPath(EditorData, Ref.Path);
 	}
 	return nullptr;
+}
+
+UStateTreeState* FStateTreeHandlers::ResolveState(UStateTreeEditorData* EditorData, const TSharedPtr<FJsonObject>& Params)
+{
+	return ResolveState(EditorData, ReadStateRef(Params));
 }
 
 static FString GuidToString(const FGuid& Guid)
@@ -869,13 +1140,10 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListStates(const TSharedPtr<FJsonObje
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
-	UStateTree* ST = LoadStateTree(AssetPath);
-	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
-	UStateTreeEditorData* EditorData = GetEditorData(ST);
-	if (!EditorData) return MCPError(TEXT("EditorData not found"));
-
-	// T3: paged.
+	// T3: paged. The page request is read before the load, and cursor before
+	// a bad limit can refuse, so every declared parameter is read (#1057).
+	HasParam(Params, TEXT("cursor"));
 	MCPPagination::FPageRequest Page;
 	if (auto Err = MCPPagination::ReadPageRequest(
 			Params,
@@ -884,6 +1152,12 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListStates(const TSharedPtr<FJsonObje
 	{
 		return Err;
 	}
+
+	UStateTree* ST = LoadStateTree(AssetPath);
+	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
+
+	UStateTreeEditorData* EditorData = GetEditorData(ST);
+	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
 	auto Result = MCPSuccess();
 	TArray<MCPPagination::FPageRow> Rows;
@@ -924,28 +1198,39 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddState(const TSharedPtr<FJsonObject
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FString Name = OptionalString(Params, TEXT("name"));
+	const FString StateTypeStr = OptionalString(Params, TEXT("stateType"));
+	const FString SelectionBehaviorStr = OptionalString(Params, TEXT("selectionBehavior"));
+	const int32 InsertIndex = static_cast<int32>(OptionalNumber(Params, TEXT("insertIndex")));
+	const FString SubtreePath = OptionalString(Params, TEXT("linkedSubtree"));
+	const bool bHasStateType = HasParam(Params, TEXT("stateType"));
+	const bool bHasSelectionBehavior = HasParam(Params, TEXT("selectionBehavior"));
+	const FStateRef ParentRef = ReadStateRef(Params);
+	const bool bHasInsertIndex = HasParam(Params, TEXT("insertIndex"));
+	const bool bHasLinkedSubtree = HasParam(Params, TEXT("linkedSubtree"));
+
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	const FString Name = OptionalString(Params, TEXT("name"));
 	if (Name.IsEmpty()) return MCPError(TEXT("name is required"));
 
 	EStateTreeStateType StateType = EStateTreeStateType::State;
-	if (HasParam(Params, TEXT("stateType")))
+	if (bHasStateType)
 	{
-		StateType = ParseStateType(OptionalString(Params, TEXT("stateType")));
+		StateType = ParseStateType(StateTypeStr);
 	}
 
 	EStateTreeStateSelectionBehavior SelectionBehavior = EStateTreeStateSelectionBehavior::TrySelectChildrenInOrder;
-	if (HasParam(Params, TEXT("selectionBehavior")))
+	if (bHasSelectionBehavior)
 	{
-		SelectionBehavior = ParseSelectionBehavior(OptionalString(Params, TEXT("selectionBehavior")));
+		SelectionBehavior = ParseSelectionBehavior(SelectionBehaviorStr);
 	}
 
-	UStateTreeState* ParentState = ResolveState(EditorData, Params);
+	UStateTreeState* ParentState = ResolveState(EditorData, ParentRef);
 
 	UStateTreeState* NewState = nullptr;
 
@@ -956,9 +1241,9 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddState(const TSharedPtr<FJsonObject
 		Ref.SelectionBehavior = SelectionBehavior;
 		NewState = &Ref;
 
-		if (HasParam(Params, TEXT("insertIndex")))
+		if (bHasInsertIndex)
 		{
-			const int32 Idx = static_cast<int32>(OptionalNumber(Params, TEXT("insertIndex")));
+			const int32 Idx = InsertIndex;
 			const int32 LastIdx = ParentState->Children.Num() - 1;
 			if (Idx >= 0 && Idx < LastIdx)
 			{
@@ -977,9 +1262,8 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddState(const TSharedPtr<FJsonObject
 		NewState = &Ref;
 	}
 
-	if (HasParam(Params, TEXT("linkedSubtree")))
+	if (bHasLinkedSubtree)
 	{
-		const FString SubtreePath = OptionalString(Params, TEXT("linkedSubtree"));
 		UStateTree* LinkedST = LoadObject<UStateTree>(nullptr, *SubtreePath);
 		if (LinkedST)
 		{
@@ -1008,13 +1292,14 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveState(const TSharedPtr<FJsonObj
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
 	UStateTreeState* Parent = State->Parent;
@@ -1118,19 +1403,20 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetStateProperty(const TSharedPtr<FJs
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const FString PropName = OptionalString(Params, TEXT("propertyName"));
+	const FString Value = OptionalString(Params, TEXT("value"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
 	State->Modify();
-
-	const FString PropName = OptionalString(Params, TEXT("propertyName"));
-	const FString Value = OptionalString(Params, TEXT("value"));
 
 	// Read before the write, so the inverse replays what was actually there.
 	FString PriorValue;
@@ -1284,13 +1570,14 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ClearStateNodes(const TSharedPtr<FJso
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
 	const int32 ClearedTasks = State->Tasks.Num();
@@ -1346,23 +1633,24 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddTask(const TSharedPtr<FJsonObject>
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const FString StructType = OptionalString(Params, TEXT("structType"));
+	TSharedPtr<FJsonObject> InstanceProps;
+	if (HasParam(Params, TEXT("instanceProperties")))
+	{
+		InstanceProps = TryGetParam(Params, TEXT("instanceProperties"))->AsObject();
+	}
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
-	const FString StructType = OptionalString(Params, TEXT("structType"));
 	if (StructType.IsEmpty()) return MCPError(TEXT("structType is required"));
-
-	TSharedPtr<FJsonObject> InstanceProps;
-	if (HasParam(Params, TEXT("instanceProperties")))
-	{
-		InstanceProps = TryGetParam(Params, TEXT("instanceProperties"))->AsObject();
-	}
 
 	State->Modify();
 
@@ -1398,23 +1686,26 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddEnterCondition(const TSharedPtr<FJ
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const FString StructType = OptionalString(Params, TEXT("structType"));
+	TSharedPtr<FJsonObject> InstanceProps;
+	if (HasParam(Params, TEXT("instanceProperties")))
+	{
+		InstanceProps = TryGetParam(Params, TEXT("instanceProperties"))->AsObject();
+	}
+	const bool bHasOperand = HasParam(Params, TEXT("operand"));
+	const FString Operand = OptionalString(Params, TEXT("operand"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
-	const FString StructType = OptionalString(Params, TEXT("structType"));
 	if (StructType.IsEmpty()) return MCPError(TEXT("structType is required"));
-
-	TSharedPtr<FJsonObject> InstanceProps;
-	if (HasParam(Params, TEXT("instanceProperties")))
-	{
-		InstanceProps = TryGetParam(Params, TEXT("instanceProperties"))->AsObject();
-	}
 
 	State->Modify();
 
@@ -1425,9 +1716,9 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddEnterCondition(const TSharedPtr<FJ
 		return MCPError(Error);
 	}
 
-	if (HasParam(Params, TEXT("operand")))
+	if (bHasOperand)
 	{
-		const FString Op = OptionalString(Params, TEXT("operand"));
+		const FString& Op = Operand;
 		if (Op == TEXT("Or")) NewNode->ExpressionOperand = EStateTreeExpressionOperand::Or;
 		else NewNode->ExpressionOperand = EStateTreeExpressionOperand::And;
 	}
@@ -1485,16 +1776,18 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveEnterCondition(const TSharedPtr
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const int32 ConditionIndex = static_cast<int32>(OptionalNumber(Params, TEXT("conditionIndex")));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
-	const int32 ConditionIndex = static_cast<int32>(OptionalNumber(Params, TEXT("conditionIndex")));
 	if (!State->EnterConditions.IsValidIndex(ConditionIndex))
 	{
 		return MCPError(FString::Printf(TEXT("Invalid conditionIndex: %d (state has %d enter conditions)"),
@@ -1546,16 +1839,18 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveTask(const TSharedPtr<FJsonObje
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const int32 TaskIndex = static_cast<int32>(OptionalNumber(Params, TEXT("taskIndex")));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
-	const int32 TaskIndex = static_cast<int32>(OptionalNumber(Params, TEXT("taskIndex")));
 	if (!State->Tasks.IsValidIndex(TaskIndex))
 	{
 		return MCPError(FString::Printf(TEXT("Invalid taskIndex: %d (state has %d tasks)"), TaskIndex, State->Tasks.Num()));
@@ -1604,16 +1899,20 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetTaskInstanceProperty(const TShared
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const int32 TaskIndex = static_cast<int32>(OptionalNumber(Params, TEXT("taskIndex")));
+	const FString PropName = OptionalString(Params, TEXT("propertyName"));
+	const FString Value = OptionalString(Params, TEXT("value"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
-	const int32 TaskIndex = static_cast<int32>(OptionalNumber(Params, TEXT("taskIndex")));
 	if (!State->Tasks.IsValidIndex(TaskIndex))
 	{
 		return MCPError(FString::Printf(TEXT("Invalid taskIndex: %d"), TaskIndex));
@@ -1626,9 +1925,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetTaskInstanceProperty(const TShared
 	}
 
 	State->Modify();
-
-	const FString PropName = OptionalString(Params, TEXT("propertyName"));
-	const FString Value = OptionalString(Params, TEXT("value"));
 
 	const UScriptStruct* InstStruct = TaskNode.Instance.GetScriptStruct();
 	uint8* InstMem = TaskNode.Instance.GetMutableMemory();
@@ -1662,16 +1958,20 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetTaskProperty(const TSharedPtr<FJso
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const int32 TaskIndex = static_cast<int32>(OptionalNumber(Params, TEXT("taskIndex")));
+	const FString PropName = OptionalString(Params, TEXT("propertyName"));
+	const FString Value = OptionalString(Params, TEXT("value"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
-	const int32 TaskIndex = static_cast<int32>(OptionalNumber(Params, TEXT("taskIndex")));
 	if (!State->Tasks.IsValidIndex(TaskIndex))
 	{
 		return MCPError(FString::Printf(TEXT("Invalid taskIndex: %d (state has %d tasks)"), TaskIndex, State->Tasks.Num()));
@@ -1689,9 +1989,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetTaskProperty(const TSharedPtr<FJso
 	{
 		return MCPError(TEXT("Task node struct/memory unavailable"));
 	}
-
-	const FString PropName = OptionalString(Params, TEXT("propertyName"));
-	const FString Value = OptionalString(Params, TEXT("value"));
 
 	FProperty* Prop = NodeStruct->FindPropertyByName(*PropName);
 	if (!Prop)
@@ -1737,13 +2034,19 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddEvaluator(const TSharedPtr<FJsonOb
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FString StructType = OptionalString(Params, TEXT("structType"));
+	TSharedPtr<FJsonObject> InstanceProps;
+	if (HasParam(Params, TEXT("instanceProperties")))
+	{
+		InstanceProps = TryGetParam(Params, TEXT("instanceProperties"))->AsObject();
+	}
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	const FString StructType = OptionalString(Params, TEXT("structType"));
 	if (StructType.IsEmpty()) return MCPError(TEXT("structType is required"));
 
 	UScriptStruct* NodeStruct = ResolveStructType(StructType);
@@ -1754,12 +2057,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddEvaluator(const TSharedPtr<FJsonOb
 	if (!IsStructDerivedFrom(NodeStruct, FStateTreeEvaluatorBase::StaticStruct()))
 	{
 		return MCPError(FString::Printf(TEXT("Struct '%s' does not derive from FStateTreeEvaluatorBase"), *StructType));
-	}
-
-	TSharedPtr<FJsonObject> InstanceProps;
-	if (HasParam(Params, TEXT("instanceProperties")))
-	{
-		InstanceProps = TryGetParam(Params, TEXT("instanceProperties"))->AsObject();
 	}
 
 	EditorData->Modify();
@@ -1790,13 +2087,14 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveEvaluator(const TSharedPtr<FJso
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FString NodeIdStr = OptionalString(Params, TEXT("nodeId"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	const FString NodeIdStr = OptionalString(Params, TEXT("nodeId"));
 	FGuid NodeId;
 	if (!FGuid::Parse(NodeIdStr, NodeId))
 	{
@@ -1853,13 +2151,16 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetEvaluatorInstanceProperty(const TS
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FString NodeIdStr = OptionalString(Params, TEXT("nodeId"));
+	const FString PropName = OptionalString(Params, TEXT("propertyName"));
+	const FString Value = OptionalString(Params, TEXT("value"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	const FString NodeIdStr = OptionalString(Params, TEXT("nodeId"));
 	FGuid NodeId;
 	if (!FGuid::Parse(NodeIdStr, NodeId))
 	{
@@ -1876,9 +2177,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetEvaluatorInstanceProperty(const TS
 	{
 		return MCPError(TEXT("Evaluator has no instance data"));
 	}
-
-	const FString PropName = OptionalString(Params, TEXT("propertyName"));
-	const FString Value = OptionalString(Params, TEXT("value"));
 
 	const UScriptStruct* InstStruct = FoundNode->Instance.GetScriptStruct();
 	uint8* InstMem = FoundNode->Instance.GetMutableMemory();
@@ -1912,13 +2210,16 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetEvaluatorProperty(const TSharedPtr
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FString NodeIdStr = OptionalString(Params, TEXT("nodeId"));
+	const FString PropName = OptionalString(Params, TEXT("propertyName"));
+	const FString Value = OptionalString(Params, TEXT("value"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	const FString NodeIdStr = OptionalString(Params, TEXT("nodeId"));
 	FGuid NodeId;
 	if (!FGuid::Parse(NodeIdStr, NodeId))
 	{
@@ -1942,9 +2243,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetEvaluatorProperty(const TSharedPtr
 	{
 		return MCPError(TEXT("Evaluator node struct/memory unavailable"));
 	}
-
-	const FString PropName = OptionalString(Params, TEXT("propertyName"));
-	const FString Value = OptionalString(Params, TEXT("value"));
 
 	FProperty* Prop = NodeStruct->FindPropertyByName(*PropName);
 	if (!Prop)
@@ -1981,13 +2279,19 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddGlobalTask(const TSharedPtr<FJsonO
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FString StructType = OptionalString(Params, TEXT("structType"));
+	TSharedPtr<FJsonObject> InstanceProps;
+	if (HasParam(Params, TEXT("instanceProperties")))
+	{
+		InstanceProps = TryGetParam(Params, TEXT("instanceProperties"))->AsObject();
+	}
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	const FString StructType = OptionalString(Params, TEXT("structType"));
 	if (StructType.IsEmpty()) return MCPError(TEXT("structType is required"));
 
 	UScriptStruct* NodeStruct = ResolveStructType(StructType);
@@ -1998,12 +2302,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddGlobalTask(const TSharedPtr<FJsonO
 	if (!IsStructDerivedFrom(NodeStruct, FStateTreeTaskBase::StaticStruct()))
 	{
 		return MCPError(FString::Printf(TEXT("Struct '%s' does not derive from FStateTreeTaskBase"), *StructType));
-	}
-
-	TSharedPtr<FJsonObject> InstanceProps;
-	if (HasParam(Params, TEXT("instanceProperties")))
-	{
-		InstanceProps = TryGetParam(Params, TEXT("instanceProperties"))->AsObject();
 	}
 
 	EditorData->Modify();
@@ -2034,13 +2332,14 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveGlobalTask(const TSharedPtr<FJs
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FString NodeIdStr = OptionalString(Params, TEXT("nodeId"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	const FString NodeIdStr = OptionalString(Params, TEXT("nodeId"));
 	FGuid NodeId;
 	if (!FGuid::Parse(NodeIdStr, NodeId))
 	{
@@ -2097,13 +2396,16 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetGlobalTaskInstanceProperty(const T
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FString NodeIdStr = OptionalString(Params, TEXT("nodeId"));
+	const FString PropName = OptionalString(Params, TEXT("propertyName"));
+	const FString Value = OptionalString(Params, TEXT("value"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	const FString NodeIdStr = OptionalString(Params, TEXT("nodeId"));
 	FGuid NodeId;
 	if (!FGuid::Parse(NodeIdStr, NodeId))
 	{
@@ -2120,9 +2422,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetGlobalTaskInstanceProperty(const T
 	{
 		return MCPError(TEXT("Global task has no instance data"));
 	}
-
-	const FString PropName = OptionalString(Params, TEXT("propertyName"));
-	const FString Value = OptionalString(Params, TEXT("value"));
 
 	const UScriptStruct* InstStruct = FoundNode->Instance.GetScriptStruct();
 	uint8* InstMem = FoundNode->Instance.GetMutableMemory();
@@ -2156,13 +2455,16 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetGlobalTaskProperty(const TSharedPt
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FString NodeIdStr = OptionalString(Params, TEXT("nodeId"));
+	const FString PropName = OptionalString(Params, TEXT("propertyName"));
+	const FString Value = OptionalString(Params, TEXT("value"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	const FString NodeIdStr = OptionalString(Params, TEXT("nodeId"));
 	FGuid NodeId;
 	if (!FGuid::Parse(NodeIdStr, NodeId))
 	{
@@ -2186,9 +2488,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetGlobalTaskProperty(const TSharedPt
 	{
 		return MCPError(TEXT("Global task node struct/memory unavailable"));
 	}
-
-	const FString PropName = OptionalString(Params, TEXT("propertyName"));
-	const FString Value = OptionalString(Params, TEXT("value"));
 
 	FProperty* Prop = NodeStruct->FindPropertyByName(*PropName);
 	if (!Prop)
@@ -2225,28 +2524,42 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddTransition(const TSharedPtr<FJsonO
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const FString TriggerStr = OptionalString(Params, TEXT("trigger"));
+	const FString TypeStr = OptionalString(Params, TEXT("transitionType"));
+	const bool bHasEventTag = HasParam(Params, TEXT("eventTag"));
+	const FString EventTagStr = OptionalString(Params, TEXT("eventTag"));
+	const bool bHasTargetStateId = HasParam(Params, TEXT("targetStateId"));
+	const FString TargetStateIdStr = OptionalString(Params, TEXT("targetStateId"));
+	const bool bHasTargetStatePath = HasParam(Params, TEXT("targetStatePath"));
+	const FString TargetStatePathStr = OptionalString(Params, TEXT("targetStatePath"));
+	const bool bHasPriority = HasParam(Params, TEXT("priority"));
+	const FString PriorityStr = OptionalString(Params, TEXT("priority"));
+	const bool bHasDelayTransition = HasParam(Params, TEXT("bDelayTransition"));
+	const bool bDelayTransition = OptionalBool(Params, TEXT("bDelayTransition"));
+	const bool bHasDelayDuration = HasParam(Params, TEXT("delayDuration"));
+	const double DelayDuration = OptionalNumber(Params, TEXT("delayDuration"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
-	const FString TriggerStr = OptionalString(Params, TEXT("trigger"));
 	const EStateTreeTransitionTrigger Trigger = ParseTransitionTrigger(TriggerStr);
 
-	const FString TypeStr = OptionalString(Params, TEXT("transitionType"));
 	const EStateTreeTransitionType TransType = ParseTransitionType(TypeStr);
 
 	State->Modify();
 
 	FStateTreeTransition* Trans = nullptr;
 
-	if (HasParam(Params, TEXT("eventTag")) && EnumHasAnyFlags(Trigger, EStateTreeTransitionTrigger::OnEvent))
+	if (bHasEventTag && EnumHasAnyFlags(Trigger, EStateTreeTransitionTrigger::OnEvent))
 	{
-		FGameplayTag EventTag = FGameplayTag::RequestGameplayTag(FName(*OptionalString(Params, TEXT("eventTag"))));
+		FGameplayTag EventTag = FGameplayTag::RequestGameplayTag(FName(*EventTagStr));
 		Trans = &State->AddTransition(Trigger, EventTag, TransType, nullptr);
 	}
 	else
@@ -2258,14 +2571,14 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddTransition(const TSharedPtr<FJsonO
 	if (TransType == EStateTreeTransitionType::GotoState)
 	{
 		UStateTreeState* TargetState = nullptr;
-		if (HasParam(Params, TEXT("targetStateId")))
+		if (bHasTargetStateId)
 		{
-			FGuid TargetId = ParseGuid(OptionalString(Params, TEXT("targetStateId")));
+			FGuid TargetId = ParseGuid(TargetStateIdStr);
 			TargetState = FindStateByID(EditorData, TargetId);
 		}
-		else if (HasParam(Params, TEXT("targetStatePath")))
+		else if (bHasTargetStatePath)
 		{
-			TargetState = FindStateByPath(EditorData, OptionalString(Params, TEXT("targetStatePath")));
+			TargetState = FindStateByPath(EditorData, TargetStatePathStr);
 		}
 
 		if (TargetState)
@@ -2274,18 +2587,18 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddTransition(const TSharedPtr<FJsonO
 		}
 	}
 
-	if (HasParam(Params, TEXT("priority")))
+	if (bHasPriority)
 	{
-		Trans->Priority = ParseTransitionPriority(OptionalString(Params, TEXT("priority")));
+		Trans->Priority = ParseTransitionPriority(PriorityStr);
 	}
 
-	if (HasParam(Params, TEXT("bDelayTransition")))
+	if (bHasDelayTransition)
 	{
-		Trans->bDelayTransition = OptionalBool(Params, TEXT("bDelayTransition"));
+		Trans->bDelayTransition = bDelayTransition;
 	}
-	if (HasParam(Params, TEXT("delayDuration")))
+	if (bHasDelayDuration)
 	{
-		Trans->DelayDuration = static_cast<float>(OptionalNumber(Params, TEXT("delayDuration")));
+		Trans->DelayDuration = static_cast<float>(DelayDuration);
 	}
 
 	auto Result = MCPSuccess();
@@ -2311,29 +2624,32 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddTransitionCondition(const TSharedP
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const int32 TransIndex = static_cast<int32>(OptionalNumber(Params, TEXT("transitionIndex")));
+	const FString StructType = OptionalString(Params, TEXT("structType"));
+	TSharedPtr<FJsonObject> InstanceProps;
+	if (HasParam(Params, TEXT("instanceProperties")))
+	{
+		InstanceProps = TryGetParam(Params, TEXT("instanceProperties"))->AsObject();
+	}
+	const bool bHasOperand = HasParam(Params, TEXT("operand"));
+	const FString Operand = OptionalString(Params, TEXT("operand"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
-	const int32 TransIndex = static_cast<int32>(OptionalNumber(Params, TEXT("transitionIndex")));
 	if (!State->Transitions.IsValidIndex(TransIndex))
 	{
 		return MCPError(FString::Printf(TEXT("Invalid transitionIndex: %d"), TransIndex));
 	}
 
-	const FString StructType = OptionalString(Params, TEXT("structType"));
 	if (StructType.IsEmpty()) return MCPError(TEXT("structType is required"));
-
-	TSharedPtr<FJsonObject> InstanceProps;
-	if (HasParam(Params, TEXT("instanceProperties")))
-	{
-		InstanceProps = TryGetParam(Params, TEXT("instanceProperties"))->AsObject();
-	}
 
 	State->Modify();
 
@@ -2344,9 +2660,9 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddTransitionCondition(const TSharedP
 		return MCPError(Error);
 	}
 
-	if (HasParam(Params, TEXT("operand")))
+	if (bHasOperand)
 	{
-		const FString Op = OptionalString(Params, TEXT("operand"));
+		const FString& Op = Operand;
 		if (Op == TEXT("Or")) NewNode->ExpressionOperand = EStateTreeExpressionOperand::Or;
 		else NewNode->ExpressionOperand = EStateTreeExpressionOperand::And;
 	}
@@ -2375,16 +2691,18 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveTransition(const TSharedPtr<FJs
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const int32 TransIndex = static_cast<int32>(OptionalNumber(Params, TEXT("transitionIndex")));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
-	const int32 TransIndex = static_cast<int32>(OptionalNumber(Params, TEXT("transitionIndex")));
 	if (!State->Transitions.IsValidIndex(TransIndex))
 	{
 		return MCPError(FString::Printf(TEXT("Invalid transitionIndex: %d"), TransIndex));
@@ -2469,16 +2787,16 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddBinding(const TSharedPtr<FJsonObje
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FString SourceStructIdStr = OptionalString(Params, TEXT("sourceStructId"));
+	const FString SourcePathStr = OptionalString(Params, TEXT("sourcePath"));
+	const FString TargetStructIdStr = OptionalString(Params, TEXT("targetStructId"));
+	const FString TargetPathStr = OptionalString(Params, TEXT("targetPath"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
-
-	const FString SourceStructIdStr = OptionalString(Params, TEXT("sourceStructId"));
-	const FString SourcePathStr = OptionalString(Params, TEXT("sourcePath"));
-	const FString TargetStructIdStr = OptionalString(Params, TEXT("targetStructId"));
-	const FString TargetPathStr = OptionalString(Params, TEXT("targetPath"));
 
 	FUE_MCPStateTreePropertyPath SourcePath;
 	SourcePath.SetStructID(ParseGuid(SourceStructIdStr));
@@ -2593,12 +2911,9 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListBindableSources(const TSharedPtr<
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
-	UStateTree* ST = LoadStateTree(AssetPath);
-	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
-	UStateTreeEditorData* EditorData = GetEditorData(ST);
-	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	// T3: paged.
+	// T3: paged. Read before the load, cursor first, as list_state_tree_states (#1057).
+	HasParam(Params, TEXT("cursor"));
 	MCPPagination::FPageRequest Page;
 	if (auto Err = MCPPagination::ReadPageRequest(
 			Params,
@@ -2607,6 +2922,11 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListBindableSources(const TSharedPtr<
 	{
 		return Err;
 	}
+
+	UStateTree* ST = LoadStateTree(AssetPath);
+	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
+	UStateTreeEditorData* EditorData = GetEditorData(ST);
+	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
 	TMap<FGuid, const FStateTreeDataView> AllValues;
 	EditorData->GetAllStructValues(AllValues);
@@ -2639,14 +2959,14 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveBinding(const TSharedPtr<FJsonO
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FString TargetStructIdStr = OptionalString(Params, TEXT("targetStructId"));
+	const FString TargetPathStr = OptionalString(Params, TEXT("targetPath"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
-
-	const FString TargetStructIdStr = OptionalString(Params, TEXT("targetStructId"));
-	const FString TargetPathStr = OptionalString(Params, TEXT("targetPath"));
 
 	FUE_MCPStateTreePropertyPath TargetPath;
 	TargetPath.SetStructID(ParseGuid(TargetStructIdStr));
@@ -2731,6 +3051,9 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListBindings(const TSharedPtr<FJsonOb
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const bool bHasStructId = HasParam(Params, TEXT("structId"));
+	const FString StructIdStr = OptionalString(Params, TEXT("structId"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
@@ -2744,9 +3067,9 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListBindings(const TSharedPtr<FJsonOb
 	if (Bindings)
 	{
 		FGuid FilterStructId;
-		if (HasParam(Params, TEXT("structId")))
+		if (bHasStructId)
 		{
-			FilterStructId = ParseGuid(OptionalString(Params, TEXT("structId")));
+			FilterStructId = ParseGuid(StructIdStr);
 		}
 
 		for (const FStateTreePropertyPathBinding& B : Bindings->GetBindings())
@@ -2802,13 +3125,16 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddColor(const TSharedPtr<FJsonObject
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const FString DisplayName = OptionalString(Params, TEXT("displayName"));
+	const bool bHasColor = HasParam(Params, TEXT("color"));
+	const FString ColorStr = OptionalString(Params, TEXT("color"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	const FString DisplayName = OptionalString(Params, TEXT("displayName"));
 	if (DisplayName.IsEmpty()) return MCPError(TEXT("displayName is required"));
 
 	for (const FStateTreeEditorColor& C : EditorData->Colors)
@@ -2822,9 +3148,8 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddColor(const TSharedPtr<FJsonObject
 	FStateTreeEditorColor NewColor;
 	NewColor.DisplayName = DisplayName;
 
-	if (HasParam(Params, TEXT("color")))
+	if (bHasColor)
 	{
-		const FString ColorStr = OptionalString(Params, TEXT("color"));
 		NewColor.Color.InitFromString(ColorStr);
 	}
 
@@ -2848,13 +3173,14 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::ListStateParameters(const TSharedPtr<
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
 	const FInstancedPropertyBag& Bag = State->Parameters.Parameters;
@@ -2912,13 +3238,17 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddStateParameter(const TSharedPtr<FJ
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const FString ParamName = OptionalString(Params, TEXT("paramName"));
+	const FString ParamType = OptionalString(Params, TEXT("paramType"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
 	if (State->Parameters.bFixedLayout)
@@ -2926,10 +3256,8 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::AddStateParameter(const TSharedPtr<FJ
 		return MCPError(TEXT("Cannot add parameters to a state with fixed layout (linked state). Use set_state_parameter to override values instead."));
 	}
 
-	const FString ParamName = OptionalString(Params, TEXT("paramName"));
 	if (ParamName.IsEmpty()) return MCPError(TEXT("paramName is required"));
 
-	const FString ParamType = OptionalString(Params, TEXT("paramType"));
 	if (ParamType.IsEmpty()) return MCPError(TEXT("paramType is required"));
 
 	EPropertyBagPropertyType BagType;
@@ -2976,13 +3304,16 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveStateParameter(const TSharedPtr
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const FString ParamName = OptionalString(Params, TEXT("paramName"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
 	if (State->Parameters.bFixedLayout)
@@ -2990,7 +3321,6 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::RemoveStateParameter(const TSharedPtr
 		return MCPError(TEXT("Cannot remove parameters from a state with fixed layout (linked state)."));
 	}
 
-	const FString ParamName = OptionalString(Params, TEXT("paramName"));
 	if (ParamName.IsEmpty()) return MCPError(TEXT("paramName is required"));
 
 	// Read the descriptor and the current value before the removal: the inverse
@@ -3080,19 +3410,20 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetStateParameter(const TSharedPtr<FJ
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FStateRef StateRef = ReadStateRef(Params);
+	// Every parameter is read before the asset load (#1057).
+	const FString ParamName = OptionalString(Params, TEXT("paramName"));
+	const FString Value = OptionalString(Params, TEXT("value"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	UStateTreeState* State = ResolveState(EditorData, Params);
+	UStateTreeState* State = ResolveState(EditorData, StateRef);
 	if (!State) return MCPError(TEXT("State not found"));
 
-	const FString ParamName = OptionalString(Params, TEXT("paramName"));
 	if (ParamName.IsEmpty()) return MCPError(TEXT("paramName is required"));
-
-	const FString Value = OptionalString(Params, TEXT("value"));
 
 	FInstancedPropertyBag& Bag = State->Parameters.Parameters;
 	const UPropertyBag* BagStruct = Bag.GetPropertyBagStruct();
@@ -3150,18 +3481,20 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetRootParameters(const TSharedPtr<FJ
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before the asset load (#1057).
+	const TSharedPtr<FJsonValue> ParametersValue = TryGetParam(Params, TEXT("parameters"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
 	UStateTreeEditorData* EditorData = GetEditorData(ST);
 	if (!EditorData) return MCPError(TEXT("EditorData not found"));
 
-	if (!HasParam(Params, TEXT("parameters")))
+	if (!ParametersValue.IsValid())
 	{
 		return MCPError(TEXT("parameters array is required"));
 	}
 
-	const TArray<TSharedPtr<FJsonValue>>& ParamsArr = TryGetParam(Params, TEXT("parameters"))->AsArray();
+	const TArray<TSharedPtr<FJsonValue>>& ParamsArr = ParametersValue->AsArray();
 
 	TArray<FUE_MCPStateTreePropertyCreationDesc> Descs;
 	for (const TSharedPtr<FJsonValue>& PVal : ParamsArr)
@@ -3270,11 +3603,12 @@ TSharedPtr<FJsonValue> FStateTreeHandlers::SetSchema(const TSharedPtr<FJsonObjec
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Read before the asset load (#1057).
+	const FString SchemaSpec = OptionalString(Params, TEXT("schema"));
 	UStateTree* ST = LoadStateTree(AssetPath);
 	if (!ST) return MCPError(FString::Printf(TEXT("StateTree not found: %s"), *AssetPath));
 
-	MCPStateTreeSchema::FResolution Schema = MCPStateTreeSchema::Resolve(
-		OptionalString(Params, TEXT("schema")));
+	MCPStateTreeSchema::FResolution Schema = MCPStateTreeSchema::Resolve(SchemaSpec);
 	if (!Schema.SchemaClass)
 	{
 		return MCPStateTreeSchema::UnresolvedError(Schema);

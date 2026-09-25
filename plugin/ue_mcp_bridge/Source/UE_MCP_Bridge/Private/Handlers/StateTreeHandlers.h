@@ -20,6 +20,18 @@ private:
 	static UStateTreeState* FindStateByID(UStateTreeEditorData* EditorData, const FGuid& StateID);
 	static UStateTreeState* FindStateByPath(UStateTreeEditorData* EditorData, const FString& Path);
 	static UStateTreeState* ResolveState(UStateTreeEditorData* EditorData, const TSharedPtr<FJsonObject>& Params);
+
+	/** stateId / statePath read off Params before the asset loads, so a spec'd
+	 *  handler reads both even when the load fails (#1057). */
+	struct FStateRef
+	{
+		FString Id;
+		FString Path;
+		bool bHasId = false;
+		bool bHasPath = false;
+	};
+	static FStateRef ReadStateRef(const TSharedPtr<FJsonObject>& Params);
+	static UStateTreeState* ResolveState(UStateTreeEditorData* EditorData, const FStateRef& Ref);
 	static bool CompileAndSave(UStateTree* StateTree, TSharedPtr<FJsonObject>& OutResult);
 	static FString MissingEditorDataMessage(const FString& AssetPath);
 	static TSharedPtr<FJsonValue> RequireSchema(UStateTree* StateTree, const FString& AssetPath);
