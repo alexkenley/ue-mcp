@@ -3,6 +3,7 @@ import type { IBridge } from "./bridge.js";
 import type { ProjectContext } from "./project.js";
 import type { EditorSession, SessionRegistry } from "./session.js";
 import type { ParamChoice, ParamSpec } from "./handler-spec.js";
+import type { EpicInputSchema } from "./epic-input.js";
 import { McpError, ErrorCode } from "./errors.js";
 import { MAX_BRIDGE_TIMEOUT_MS } from "./bridge-timeouts.js";
 import { unknownActionMessage } from "./action-schema.js";
@@ -335,6 +336,11 @@ export interface BridgeActionSpec extends ActionSpecBase {
    * checks them before the call is sent.
    */
   paramChoices?: readonly ParamChoice[];
+  /**
+   * The wrapped engine tool's input schema, set on generated `epic_*` actions.
+   * The structured source their compact signatures are built from (#1172).
+   */
+  epicSchema?: EpicInputSchema;
   handler?: never;
 }
 
@@ -504,6 +510,12 @@ export interface CategoryOptions {
    * `{category, method, args}` envelope, where none of them are present.
    */
   nestedParamsKey?: string;
+  /**
+   * Advertise this tool's declared shape as-is rather than as `action` +
+   * `args` (#1172). Set by the lean `catalog` discovery tool, whose handful of
+   * parameters are already compact.
+   */
+  flatSurface?: boolean;
 }
 
 /**

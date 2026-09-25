@@ -4,6 +4,8 @@ import { McpError, ErrorCode } from "./errors.js";
 import { actionSchema } from "./action-schema.js";
 import { searchToolGraph } from "./tool-search.js";
 import { takeFieldSelection } from "./field-select.js";
+import { actionSignature } from "./action-signature.js";
+import { flatValidationMessage } from "./call-envelope.js";
 
 /**
  * Lean context strategy.
@@ -29,14 +31,18 @@ import { takeFieldSelection } from "./field-select.js";
 
 export type ContextStrategy = "full" | "lean" | "micro";
 
+/** The strategy a project gets when it names none (#1172). */
+export const DEFAULT_CONTEXT_STRATEGY: ContextStrategy = "micro";
+
 /**
  * Resolve the active strategy. Env var wins over config so a user can flip it
- * per-session without editing ue-mcp.yml. Anything other than "lean"/"micro"
- * (case insensitive) resolves to "full", the safe, unchanged default.
+ * per-session without editing ue-mcp.yml. Anything other than "full"/"lean"
+ * (case insensitive) resolves to "micro", the default since #1172: the full
+ * surface cost most of a context window before the first call.
  */
 export function resolveContextStrategy(configStrategy?: string): ContextStrategy {
-  const raw = (process.env.UE_MCP_CONTEXT_STRATEGY ?? configStrategy ?? "full").trim().toLowerCase();
-  return raw === "lean" ? "lean" : raw === "micro" ? "micro" : "full";
+  const raw = (process.env.UE_MCP_CONTEXT_STRATEGY ?? configStrategy ?? DEFAULT_CONTEXT_STRATEGY).trim().toLowerCase();
+  return raw === "full" ? "full" : raw === "lean" ? "lean" : "micro";
 }
 
 const ACTIONS_MARKER = "\n\nActions:\n";
@@ -51,11 +57,52 @@ export function splitDescription(description: string): { summary: string; catalo
   };
 }
 
-/** One "- action: description" line per action in a tool. */
-function actionLines(tool: ToolDef): string[] {
-  return Object.entries(tool.actions).map(([name, spec]) =>
-    spec.description ? `- ${name}: ${spec.description}` : `- ${name}`,
-  );
+/**
+ * The full-mode description of a category tool (#1172): its summary, how to
+ * call it, and one signature line per action. No per-action prose: a first
+ * sentence per native action cost about 9k tokens and pushed the seed to its
+ * 60k budget, and describe_action carries every description on demand.
+ */
+export function fullSurfaceDescription(tool: ToolDef): string {
+  const { summary } = splitDescription(tool.description);
+  const lines = Object.keys(tool.actions).map((name) => actionSignature(tool, name));
+  return `${summary}\n\nCall ${tool.name}(action, args={...}). Actions:\n${lines.join("\n")}`;
+}
+
+/** Characters of signatures one describe page holds, about 1.5k tokens. */
+export const DESCRIBE_PAGE_CHARS = 5600;
+
+/** Longest signature a search hit carries; optional params past it become +N. */
+export const SEARCH_SIGNATURE_CHARS = 140;
+
+/**
+ * One page of a category's signatures. A category can hold hundreds of
+ * actions (animation wraps 341 engine tools), so the page is bounded by size
+ * and `nextOffset` names where the next one starts.
+ */
+export function describeCategory(tool: ToolDef, offset = 0): Record<string, unknown> {
+  const names = Object.keys(tool.actions);
+  const start = Math.max(0, Math.min(Math.floor(offset), names.length));
+  const signatures: string[] = [];
+  let used = 0;
+  let i = start;
+  for (; i < names.length; i++) {
+    const line = actionSignature(tool, names[i]);
+    if (signatures.length > 0 && used + line.length > DESCRIBE_PAGE_CHARS) break;
+    signatures.push(line);
+    used += line.length;
+  }
+  return {
+    category: tool.name,
+    count: names.length,
+    ...(start > 0 ? { offset: start } : {}),
+    signatures,
+    ...(i < names.length ? { nextOffset: i } : {}),
+  };
+}
+
+function readOffset(p: Record<string, unknown>): number {
+  return typeof p.offset === "number" && p.offset > 0 ? p.offset : 0;
 }
 
 /** Produce the lean variant of a single category tool (non-mutating). */
@@ -65,20 +112,19 @@ function leanTool(tool: ToolDef): ToolDef {
   // Preserve any pre-existing describe action rather than clobber it.
   const actions: Record<string, ActionSpec> = { ...tool.actions };
   if (!actions.describe) {
-    const lines = actionLines(tool);
     actions.describe = {
       kind: "handler",
       effect: "read",
-      description: `List every action in the ${tool.name} category with its description (lean-mode discovery).`,
-      handler: async () => ({ category: tool.name, count: lines.length, actions: lines }),
+      description: `Signatures of the ${tool.name} category's actions, a page at a time. Params: offset?`,
+      handler: async (_ctx, p) => describeCategory(tool, readOffset(p)),
     };
   }
 
   const actionNames = Object.keys(actions) as [string, ...string[]];
   const description =
-    `${summary}\n\nLean mode: actions are hidden to save context. ` +
-    `Call ${tool.name}(action="describe") to list this category's actions, or ` +
-    `catalog(action="search", query="...") to find actions across all categories.`;
+    `${summary}\n\nCall ${tool.name}(action, args={...}). ` +
+    `${tool.name}(action="describe") lists signatures; ` +
+    `catalog(action="search", query="...") searches every category.`;
 
   return {
     ...tool,
@@ -91,10 +137,13 @@ function leanTool(tool: ToolDef): ToolDef {
   };
 }
 
-function discoveryResults(tools: ToolDef[], query: string, limit: number) {
-  return searchToolGraph(tools, query, limit).map(({ tool, action, description }) =>
-    ({ category: tool, action, description }),
-  );
+/** Search hits as `category.signature` lines, the whole of what search returns (#1172). */
+function discoveryResults(tools: ToolDef[], query: string, limit: number): string[] {
+  const byName = new Map(tools.map((t) => [t.name, t] as const));
+  return searchToolGraph(tools, query, limit).map(({ tool, action }) => {
+    const def = byName.get(tool);
+    return `${tool}.${def ? actionSignature(def, action, { maxLength: SEARCH_SIGNATURE_CHARS }) : `${action}()`}`;
+  });
 }
 
 /**
@@ -110,7 +159,7 @@ export function buildCatalogTool(tools: ToolDef[]): ToolDef {
     search: {
       kind: "handler",
       effect: "read",
-      description: 'Rank actions across every category by keyword. Params: query (string), limit (default 20).',
+      description: "Rank actions across every category by keyword; returns signatures. Params: query, limit? (default 20)",
       handler: async (_ctx, p) => {
         const query = typeof p.query === "string" ? p.query : "";
         const limit = typeof p.limit === "number" && p.limit > 0 ? Math.min(p.limit, 100) : 20;
@@ -124,7 +173,7 @@ export function buildCatalogTool(tools: ToolDef[]): ToolDef {
     describe: {
       kind: "handler",
       effect: "read",
-      description: "List a category, or return one action's parameter schema. Params: category (string), method? (action name).",
+      description: "A category's action signatures a page at a time, or one action's parameter schema. Params: category, method?, offset?",
       handler: async (_ctx, p) => {
         const category = typeof p.category === "string" ? p.category : "";
         const tool = byName.get(category);
@@ -132,8 +181,7 @@ export function buildCatalogTool(tools: ToolDef[]): ToolDef {
           return { error: `Unknown category "${category}". Use catalog(action="list_categories").`, categories: summaries.map((s) => s.category) };
         }
         if (typeof p.method === "string" && p.method) return actionSchema(tool, p.method);
-        const lines = actionLines(tool);
-        return { category, count: lines.length, actions: lines };
+        return describeCategory(tool, readOffset(p));
       },
     },
     list_categories: {
@@ -153,8 +201,10 @@ export function buildCatalogTool(tools: ToolDef[]): ToolDef {
       query: z.string().optional().describe("Keyword query for action=search"),
       category: z.string().optional().describe("Category name for action=describe"),
       method: z.string().optional().describe("describe: return only this action's parameter schema"),
+      offset: z.number().int().min(0).optional().describe("describe: first signature of the page (nextOffset)"),
       limit: z.number().int().min(1).max(100).optional().describe("Max results for action=search (default 20)"),
     },
+    { flatSurface: true },
   );
 }
 
@@ -224,7 +274,23 @@ export function resolveMicroCall(tools: ToolDef[], params: Record<string, unknow
   if (!Object.hasOwn(tool.actions, method)) {
     throw new McpError(ErrorCode.UNKNOWN_ACTION, `Unknown action "${method}" on ${category}. Use tools(action="describe", category="${category}").`);
   }
-  return { taskName: `${category}.${method}`, params: microCallParams(params) };
+  return { taskName: `${category}.${method}`, params: validatedMicroParams(tool, method, microCallParams(params)) };
+}
+
+/**
+ * A gateway call is checked against the same contract as a direct call to the
+ * category (#1172): the category's declared shape, parsed with the same zod
+ * object, refused with the same message. Before, a micro call's `args` reached
+ * the task unchecked, and micro is now the default route.
+ *
+ * Only the refusal is shared. The parameters go on as the caller sent them,
+ * which is what this route has always forwarded, so a key the shape does not
+ * declare still reaches the target and is reported there as not read.
+ */
+function validatedMicroParams(tool: ToolDef, method: string, params: Record<string, unknown>): Record<string, unknown> {
+  const { message } = flatValidationMessage(tool, { ...params, action: method });
+  if (message !== undefined) throw new McpError(ErrorCode.INVALID_PARAMS, message);
+  return params;
 }
 
 /** The categories each gateway was built to reach: the enabled set, never a
@@ -244,7 +310,7 @@ export function buildMicroGateway(tools: ToolDef[]): ToolDef {
     search: {
       kind: "handler",
       effect: "read",
-      description: "Find actions by keyword or intent without listing whole categories. Params: query, limit? (default 20).",
+      description: "Find actions by keyword or intent; returns category.signature lines. Params: query, limit? (default 20)",
       handler: async (_ctx, p) => {
         const query = typeof p.query === "string" ? p.query : "";
         if (!query.trim()) throw new Error("Provide a query to search for actions.");
@@ -266,7 +332,7 @@ export function buildMicroGateway(tools: ToolDef[]): ToolDef {
     describe: {
       kind: "handler",
       effect: "read",
-      description: "List a category's actions, or return one action's parameter schema. Params: category, method? (action name).",
+      description: "A category's action signatures a page at a time, or one action's parameter schema. Params: category, method?, offset?",
       handler: async (_ctx, p) => {
         const category = typeof p.category === "string" ? p.category : "";
         const tool = byName.get(category);
@@ -274,11 +340,7 @@ export function buildMicroGateway(tools: ToolDef[]): ToolDef {
           return { error: `Unknown category "${category}".`, categories: summaries.map((s) => s.category) };
         }
         if (typeof p.method === "string" && p.method) return actionSchema(tool, p.method);
-        return {
-          category,
-          actions: Object.entries(tool.actions).map(([name, s]) => (s.description ? `${name}: ${s.description}` : name)),
-          call: `tools(action="call", category="${category}", method="<action>", args={ ... })`,
-        };
+        return describeCategory(tool, readOffset(p));
       },
     },
     call: {
@@ -317,6 +379,7 @@ export function buildMicroGateway(tools: ToolDef[]): ToolDef {
       method: z.string().optional().describe('Action name for call or a single-action describe, e.g. "create"'),
       args: z.record(z.unknown()).optional().describe("Params object passed to the called action"),
       query: z.string().optional().describe("Keyword or intent for search"),
+      offset: z.number().int().min(0).optional().describe("describe: first signature of the page (nextOffset)"),
       limit: z.number().int().min(1).max(100).optional().describe("Max search results (default 20)"),
     },
     // Every real parameter of a gateway call is one level down, so the path

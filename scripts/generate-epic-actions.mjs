@@ -306,6 +306,7 @@ function emitCategory(category, bucket) {
 // These are ordinary actions. They carry a declared effect, real parameters and
 // a Params: clause, they are in ALL_TOOLS, and they dispatch through the same
 // task factory, guards and locks as every hand-written action in this package.
+// Each also carries its input schema, which the compact signatures read (#1172).
 import { z } from "zod";
 import { bp, type ActionSpec } from "../../types.js";
 import { epicToolCall } from "../../epic-input.js";
@@ -340,12 +341,12 @@ import { epicToolCall } from "../../epic-input.js";
     .map((a) => {
       const schemaConst = `const ${constName(a.key)} = ${JSON.stringify(minifySchema(a.input))} as const;`;
       return { schemaConst, entry:
-`  ${safeKey(a.key)}: bp(
+`  ${safeKey(a.key)}: { epicSchema: ${constName(a.key)}, ...bp(
     ${q(a.effect)},
     ${q(a.description)},
     "epic_call_tool",
     (p) => epicToolCall(${q(a.toolset)}, ${q(a.tool)}, ${constName(a.key)}, p),
-  ),` };
+  ) },` };
     });
 
   return header

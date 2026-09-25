@@ -8,9 +8,9 @@ import { takeEditorTarget, EditorFlagError } from "./editor-flag.js";
 /**
  * `ue-mcp context [full|lean|micro|status] [project]` - read or set the context
  * seeding strategy in the project's ue-mcp.yml.
- *   full  (default) advertises every action inline
- *   lean  keeps action names, serves descriptions on demand
- *   micro collapses everything behind one gateway tool
+ *   micro (default) collapses everything behind one gateway tool
+ *   lean  keeps the category tools and action names, signatures on demand
+ *   full  advertises every action's signature inline
  * Restart the MCP client to apply.
  */
 
@@ -31,9 +31,9 @@ function printHelp(): void {
   ${BOLD}Usage:${RESET}
     ue-mcp context                 show the current strategy
     ue-mcp context status          show the current strategy
-    ue-mcp context full            every action inline (largest seed, default)
-    ue-mcp context lean            action names visible, descriptions on demand
-    ue-mcp context micro           one gateway tool fronts everything (smallest)
+    ue-mcp context micro           one gateway tool fronts everything (smallest, default)
+    ue-mcp context lean            action names visible, signatures on demand
+    ue-mcp context full            every action's signature inline (largest seed)
 
   A project path may be passed as the last argument, or an editor named with
   --editor <name-or-path>; otherwise the .uproject in the current directory is
@@ -97,7 +97,7 @@ function loadYaml(configPath: string): Record<string, unknown> {
 function currentStrategy(existing: Record<string, unknown>): "full" | "lean" | "micro" {
   const block = existing["ue-mcp"] as { context?: { strategy?: string } } | undefined;
   const s = block?.context?.strategy;
-  return s === "lean" ? "lean" : s === "micro" ? "micro" : "full";
+  return s === "lean" ? "lean" : s === "full" ? "full" : "micro";
 }
 
 function main(): void {
@@ -120,21 +120,21 @@ function main(): void {
   const want = action;
 
   if (want === "status") {
-    const color = before === "full" ? YELLOW : GREEN;
+    const color = before === "micro" ? YELLOW : GREEN;
     console.log("");
     console.log(`  ${BOLD}${CYAN}Context strategy${RESET}: ${color}${before}${RESET}`);
     console.log(`  ${DIM}${configPath}${RESET}`);
-    console.log(`  ${DIM}Options: full (default) | lean | micro   -> ue-mcp context <strategy>${RESET}`);
+    console.log(`  ${DIM}Options: micro (default) | lean | full   -> ue-mcp context <strategy>${RESET}`);
     console.log("");
     return;
   }
 
   const block = (existing["ue-mcp"] as Record<string, unknown>) ?? {};
   if (typeof block.version !== "number") block.version = 1;
-  if (want === "lean" || want === "micro") {
+  if (want === "lean" || want === "full") {
     block.context = { strategy: want };
   } else {
-    // full is the default, so drop the key rather than persist it.
+    // micro is the default, so drop the key rather than persist it.
     delete block.context;
   }
   existing["ue-mcp"] = block;

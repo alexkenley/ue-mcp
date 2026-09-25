@@ -68,6 +68,10 @@ export class LiveServer {
     env.UE_MCP_AUTH_DIR = path.join(sandbox, "auth");
     env.UE_MCP_DISABLE_UPDATE_CHECK = "1";
     env.UE_MCP_LOG_LEVEL = "error";
+    // The live cases address the category tools by name, which the full
+    // strategy advertises and micro, the default since #1172, does not. A
+    // case that is about another strategy says so in options.env.
+    env.UE_MCP_CONTEXT_STRATEGY = "full";
     Object.assign(env, options.env ?? {});
 
     const client = new Client({ name: "ue-mcp-live-tests", version: "1.0.0" }, { capabilities: {} });

@@ -105,7 +105,7 @@ ue-mcp:
   disable: [gas]
   nativeTools: { enabled: true }
   http: { enabled: false }
-  context: { strategy: full }
+  context: { strategy: micro }
 tasks: {}
 flows: {}
 plugins: []
@@ -196,31 +196,38 @@ For example, a plugin that declares `uePluginDependency: SomePlugin` will report
 
 ## Context strategy (full, lean, micro)
 
-Everything the server injects at session start - the `initialize` instructions plus the whole `tools/list` payload (names, descriptions, and parameter schemas) - is the "context tax". Three strategies trade that seed cost against how many discovery round-trips an agent makes. Measure the tax on your own project with `npm run context-tax` (set `ANTHROPIC_API_KEY` for exact token counts).
+Everything the server injects at session start - the `initialize` instructions plus the whole `tools/list` payload (names, descriptions, and parameter schemas) - is the "context tax". Three strategies trade that seed cost against how many discovery round-trips an agent makes.
 
-| Strategy | Seed (test project) | What's advertised | Cost to use |
-|----------|--------------------|-------------------|-------------|
-| **`full`** (default) | ~45k tokens | all <!-- count:tools -->26<!-- /count --> category tools, every action + parameter inline | zero discovery calls |
-| **`lean`** | ~23k tokens | the same <!-- count:tools -->26<!-- /count --> tools with their validated `action` enums, but descriptions collapsed to a summary; a `catalog` tool (`search` / `describe` / `list_categories`) and a per-category `describe` action serve the details on demand | ~1 round-trip to learn a category |
-| **`micro`** | ~1k tokens | a single `tools` gateway - `search`, `list_categories`, `describe`, and `call` - fronting every category | discovery for everything |
+| Strategy | Seed | What's advertised | Cost to use |
+|----------|------|-------------------|-------------|
+| **`micro`** (default) | <!-- tax:micro -->~2.1k<!-- /tax --> tokens | a single `tools` gateway - `search`, `list_categories`, `describe`, and `call` - fronting every category | discovery for everything |
+| **`lean`** | <!-- tax:lean -->~19k<!-- /tax --> tokens | the <!-- count:tools -->26<!-- /count --> category tools with their `action` enums and a one-line summary each; a `catalog` tool (`search` / `describe` / `list_categories`) and a per-category `describe` action serve the signatures on demand | ~1 round-trip to learn a category |
+| **`full`** | <!-- tax:full -->~51k<!-- /tax --> tokens | the <!-- count:tools -->26<!-- /count --> category tools, each with one signature line per action inline | zero discovery calls |
 
-- **full** is best when the agent should see the entire surface up front and you are not token-constrained.
-- **lean** keeps action names visible (so the model can often call directly, and unknown actions are still rejected up front) while dropping the prose. A solid middle ground.
-- **micro** mirrors the native MCP toolset gateway (`list_toolsets` / `describe_toolset` / `call_tool`): the agent calls `tools(action="search", query="rotate clockwise")`, then `tools(action="describe", category="level", method="nudge_component")`, then `tools(action="call", category="level", method="nudge_component", args={ ... })`. Omit `method` from describe to list a whole category. Smallest possible seed, most discovery traffic.
-- Lean reaches the same search and single-action describe through `catalog`. Both compact modes rank with the full-mode intent search and read nested argument fields off the declared schemas, so a narrow lookup never costs a whole category dump.
+On demand, micro's `describe` of the largest category (a page of signatures) costs <!-- tax:describe -->~1.6k<!-- /tax --> tokens and a default `search` <!-- tax:search -->~560<!-- /tax -->.
 
-The seed figures are measured on this repo's test project and move with the
-plugins and Epic toolsets you have enabled - `npm run context-tax` reports
-yours. A smaller seed is not automatically a cheaper session: count the
-discovery round-trips as well. All three modes carry the same short spatial
-interpretation and verification guidance.
+The figures include the <!-- count:nativeToolActions -->830<!-- /count --> wrapped Epic tools, which are declared in the package, and are measured hermetically (throwaway project, no editor) by `npm run context-tax`, which stamps them into these docs. Set `ANTHROPIC_API_KEY` for exact token counts instead of the chars/4 estimate. The `context-tax` release gate (`node scripts/check-release-gates.mjs context-tax`) fails the build when a seed exceeds its budget: micro <!-- tax:microBudget -->~5.0k<!-- /tax -->, lean <!-- tax:leanBudget -->~30k<!-- /tax -->, full <!-- tax:fullBudget -->~60k<!-- /tax -->, a category describe <!-- tax:describeBudget -->~2.0k<!-- /tax --> and a search <!-- tax:searchBudget -->~1.0k<!-- /tax -->.
+
+### Calls, signatures and validation
+
+Every category tool takes `action` and `args`: `level(action="place_actor", args={actorClass: "PointLight", location: {x: 0, y: 0, z: 100}})`. Parameters sent flat beside `action`, as before, are still accepted. A call is read as flat as soon as anything other than `args` and the routing parameters (`timeoutMs`, `select`, `omit`, `editor`, `toEditor`) sits at the top level, which keeps a category's own `args` parameter (`editor(invoke_function)`'s function arguments) meaning what it always did.
+
+Actions are described by one-line signatures such as `set_property(assetPath|path, propertyName, value:*, save?:b)`. The notation is explained once, in the server instructions: `?` optional, `a|b` an alias, `one(a; b+c)` exactly one group, `any(a; b)` at least one, and a type code after a colon (none means a string). Signatures come from each action's recorded C++ spec or Epic input schema, never from prose. `project(action="describe_action")` (or `describe` with a `method` in lean and micro) returns one action's full schema: every parameter's description, nested fields, allowed values and defaults.
+
+Validation did not move: every call, on every strategy, is checked against the category's full parameter schema in the server, and a wrong type is refused with the same `Input validation error` text as before.
+
+- **micro** mirrors the native MCP toolset gateway (`list_toolsets` / `describe_toolset` / `call_tool`): the agent calls `tools(action="search", query="rotate clockwise")`, then `tools(action="describe", category="level", method="nudge_component")`, then `tools(action="call", category="level", method="nudge_component", args={ ... })`. Omit `method` from describe for a page of the category's signatures, and pass `offset` (the `nextOffset` it returns) for the next page. Smallest seed, most discovery traffic.
+- **lean** keeps the category tools and action names visible, so the model can often call directly, and unknown actions are still refused with the closest names. `catalog` and each category's `describe` serve the signatures.
+- **full** is best when the agent should see every signature up front and the seed is affordable.
+
+A smaller seed is not automatically a cheaper session: count the discovery round-trips as well. All three modes carry the same short spatial interpretation and verification guidance.
 
 Set the strategy with the standalone command (writes `ue-mcp.yml` for you):
 
 ```
-npx ue-mcp context full      # every action inline (default)
-npx ue-mcp context lean      # names visible, descriptions on demand
-npx ue-mcp context micro     # one gateway tool fronts everything
+npx ue-mcp context micro     # one gateway tool fronts everything (default)
+npx ue-mcp context lean      # names visible, signatures on demand
+npx ue-mcp context full      # every signature inline
 npx ue-mcp context           # show the current strategy
 ```
 
@@ -229,10 +236,10 @@ npx ue-mcp context           # show the current strategy
 ```yaml
 ue-mcp:
   context:
-    strategy: micro
+    strategy: lean
 ```
 
-Or per session, without editing the file: `UE_MCP_CONTEXT_STRATEGY=micro` (the env var wins over the config value). Anything other than `lean` or `micro` resolves to `full`. Restart your MCP client (`/mcp` in Claude Code) after changing the strategy.
+Or per session, without editing the file: `UE_MCP_CONTEXT_STRATEGY=full` (the env var wins over the config value). Anything other than `full` or `lean` resolves to `micro`. Restart your MCP client (`/mcp` in Claude Code) after changing the strategy.
 
 ## Bridge Connection
 

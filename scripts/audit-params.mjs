@@ -41,7 +41,9 @@ function docSection(section) {
 
 function extractDocRow(chunk, action) {
   if (!chunk) return null;
-  const re = new RegExp(`^\\|\\s+\`${action}\`\\s+\\|\\s+(.+?)\\s+\\|`, "m");
+  // The first cell is the action's signature, `name(params)` (#1172); the
+  // prose Params clause this compares is in the second.
+  const re = new RegExp(`^\\|\\s+\`${action}(?:\\(.*?\\))?\`\\s+\\|\\s+(.+?)\\s+\\|\\s*$`, "m");
   const m = chunk.match(re);
   return m ? m[1] : null;
 }

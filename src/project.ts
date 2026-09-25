@@ -58,9 +58,10 @@ export interface UeMcpConfig {
     /** Override bind host. Defaults to 127.0.0.1 - do not expose externally. */
     host?: string;
   };
-  /** Context-seeding strategy. `full` (default) lists every action inline;
-   *  `lean` keeps action names but serves descriptions on demand; `micro`
-   *  collapses everything behind one gateway tool. See lean-context.ts. */
+  /** Context-seeding strategy. `micro` (default) collapses everything behind
+   *  one gateway tool; `lean` keeps the category tools and action names with
+   *  signatures on demand; `full` lists every action's signature inline. See
+   *  lean-context.ts. */
   context?: {
     strategy?: "full" | "lean" | "micro";
   };

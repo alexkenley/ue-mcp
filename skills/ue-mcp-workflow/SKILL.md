@@ -7,6 +7,11 @@ description: Use when driving Unreal Engine editor via the ue-mcp MCP server. Co
 
 The `ue-mcp` MCP exposes 26 category tools (action-dispatch style) that drive a live Unreal Engine editor via a C++ bridge plugin. Every tool takes an `action` parameter.
 
+How a call is spelled depends on the project's context strategy. These skills write `level(action="get_outliner", limit=5)`; send it as:
+
+- **micro** (the default): `tools(action="call", category="level", method="get_outliner", args={limit: 5})`. `tools(action="search")` and `tools(action="describe")` return one-line signatures.
+- **lean** or **full**: `level(action="get_outliner", args={limit: 5})`. Flat parameters beside `action` are still accepted.
+
 ## Start every session with a status check
 
 **Always** call `project(action="get_status")` before anything else. It tells you:

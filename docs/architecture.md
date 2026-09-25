@@ -29,7 +29,10 @@ The server creates an `McpServer` instance (from `@modelcontextprotocol/sdk`), r
 | `errors.ts` | `McpError` class with `ErrorCode` enum for structured error handling |
 | `deployer.ts` | First-run deployment: copy plugin, mutate `.uproject` |
 | `editor-control.ts` | Start/stop/restart the Unreal Editor process |
-| `instructions.ts` | AI-facing server instructions (embedded documentation) |
+| `instructions.ts` | AI-facing server instructions (embedded documentation), one variant per context strategy |
+| `lean-context.ts` | The context strategies: the micro `tools` gateway, the lean `catalog` tool, paged `describe` and signature `search` |
+| `action-signature.ts` | One-line action signatures and the legend that explains them |
+| `call-envelope.ts` | The `action` + `args` call shape and the server-side validation behind it |
 | `auth.ts` | GitHub OAuth device flow + `~/.ue-mcp/auth.json` token cache (default authorship path for feedback issues) |
 | `github-app.ts` | GitHub App auth used as the bot fallback when OAuth isn't authorized |
 | `flow/` | Flow engine (registry, loader, task factory, HTTP server) - see [Flows](flows.md) |
@@ -55,6 +58,14 @@ export const levelTool: ToolDef = categoryTool(
 
 - **Bridge actions** (`bp()`) - forwarded to the C++ plugin over WebSocket. An action whose handler declares a [parameter spec](#parameter-specs) uses `specBp()` instead, and its parameters are generated rather than written here
 - **Local actions** - handled in Node.js (filesystem operations like INI parsing, C++ header reading)
+
+### Advertised surface and context strategy
+
+What a client is handed at startup is decided by the [context strategy](configuration.md#context-strategy-full-lean-micro). `micro`, the default, advertises one `tools` gateway (<!-- tax:micro -->~2.1k<!-- /tax --> tokens with the instructions); `lean` advertises the category tools with a summary each (<!-- tax:lean -->~19k<!-- /tax -->); `full` adds one signature line per action (<!-- tax:full -->~51k<!-- /tax -->). `scripts/context-tax.mjs` measures these and the release gate holds each to its budget.
+
+A category tool is advertised as `action` (the enum of its actions) plus `args` (an object). The flat zod shape `categoryTool()` builds is not advertised any more, but it is still the contract: `index.ts` unwraps `args` and validates the result against that shape with the same zod object the MCP SDK used to build from it, so a refusal carries the SDK's text. The micro gateway checks `call` against the target category's shape the same way.
+
+Action signatures (`set_property(assetPath|path, propertyName, value:*, save?:b)`) are generated from structured data: a spec'd bridge action's recorded C++ spec, an `epic_*` action's generated input schema, and otherwise the declared shape `describe_action` reports. The notation is written once, in the instructions.
 
 ### Bridge Communication
 
