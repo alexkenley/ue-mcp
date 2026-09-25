@@ -1008,7 +1008,7 @@ export const projectTool: ToolDef = categoryTool(
         return { directory: base, extensions: exts, recursive, count: results.length, files: results };
       },
     },
-    set_config: bp("mutate", "Write to INI. Params: configName, section, key, value", "set_config"),
+    set_config: specBp("mutate", "Write to INI.", "set_config"),
     build: {
       kind: "handler",
       effect: "mutate",
@@ -1032,7 +1032,7 @@ export const projectTool: ToolDef = categoryTool(
         return { ...result, output: lines.join("") };
       },
     },
-    generate_project_files: bp("mutate", "Generate IDE project files (Visual Studio, Xcode, etc.). Params: none", "generate_project_files"),
+    generate_project_files: specBp("mutate", "Generate IDE project files (Visual Studio, Xcode, etc.).", "generate_project_files"),
 
     // v0.7.13 - native C++ authoring. Bridge handlers wrap
     // GameProjectUtils / ILiveCodingModule (same APIs used by the editor's
@@ -1669,9 +1669,6 @@ export const projectTool: ToolDef = categoryTool(
     extensions: z.union([z.string(), z.array(z.string())]).optional().describe("For list_files: extension filter (#608)"),
     recursive: z.boolean().optional().describe("For list_files / list_content_assets: recurse into subdirectories (#608)"),
     directory: z.string().optional().describe("For search_cpp: subdirectory"),
-    section: z.string().optional().describe("For set_config: INI section"),
-    key: z.string().optional().describe("For set_config: INI key"),
-    value: z.string().optional().describe("For set_config: INI value"),
     configuration: z.string().optional().describe("Build configuration: Development, Debug, Shipping"),
     platform: z.string().optional().describe("Target platform: Win64, Linux, Mac"),
     clean: z.boolean().optional().describe("Clean build"),

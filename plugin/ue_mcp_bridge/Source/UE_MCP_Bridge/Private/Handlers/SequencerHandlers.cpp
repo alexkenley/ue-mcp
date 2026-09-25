@@ -69,7 +69,11 @@ void FSequencerHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		return MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path, the unambiguous selector. Wins over actorLabel"));
 	};
 
-	Registry.RegisterHandler(TEXT("create_level_sequence"), &CreateLevelSequence);
+	Registry.RegisterHandler(TEXT("create_level_sequence"), &CreateLevelSequence, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Name of the new Level Sequence asset")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Cinematics)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns an existing asset untouched, error refuses")),
+	}, MCPSpec::ContractExempt(TEXT("creates a Level Sequence asset")));
 	Registry.RegisterHandler(TEXT("get_sequence_info"), &ReadSequenceInfo, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Level Sequence asset path")).Alias(TEXT("path")),
 		MCPParam::Optional(TEXT("includeSectionDetails"), EType::Boolean, TEXT("Include attach sockets and first-key transform values per track")),
@@ -80,7 +84,10 @@ void FSequencerHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		ActorLabelParam(),
 		ActorPathParam(),
 	});
-	Registry.RegisterHandler(TEXT("play_sequence"), &SequenceControl);
+	Registry.RegisterHandler(TEXT("play_sequence"), &SequenceControl, {
+		SequencePathParam(TEXT("Level Sequence to open and drive; omit to drive the one already open"), false),
+		MCPParam::Optional(TEXT("sequenceAction"), EType::String, TEXT("play (default) | pause | stop")),
+	}, MCPSpec::ContractExempt(TEXT("opens a sequence in Sequencer and drives its transport")));
 	Registry.RegisterHandler(TEXT("scrub_sequence"), &ScrubSequence, {
 		SequencePathParam(TEXT("Level Sequence to open and scrub; omit to scrub the one already open"), false),
 		MCPParam::Optional(TEXT("seconds"), EType::Number, TEXT("Playhead position in seconds. Pass exactly one of seconds and frame")),
@@ -88,7 +95,25 @@ void FSequencerHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("timeUnit"), EType::String, TEXT("How to read frame: display (default, the frame numbers Sequencer shows) | tick (the units get_sequence_info's playbackRange reports)")),
 	});
 	// #1098: a whole frame range in one call, so it gets the long timeout.
-	Registry.RegisterHandlerWithTimeout(TEXT("render_sequence_frames"), &RenderSequenceFrames, 600.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("render_sequence_frames"), &RenderSequenceFrames, 600.0f, {
+		SequencePathParam(TEXT("Level Sequence to render"), true),
+		MCPParam::Optional(TEXT("startFrame"), EType::Number, TEXT("First display frame to render. Not with startSeconds")),
+		MCPParam::Optional(TEXT("endFrame"), EType::Number, TEXT("Last display frame to render, inclusive. Not with endSeconds")),
+		MCPParam::Optional(TEXT("startSeconds"), EType::Number, TEXT("Range start in seconds (default the playback range)")),
+		MCPParam::Optional(TEXT("endSeconds"), EType::Number, TEXT("Range end in seconds, exclusive")),
+		MCPParam::Optional(TEXT("frameStep"), EType::Number, TEXT("Render every Nth frame (default 1)")),
+		MCPParam::Optional(TEXT("maxFrames"), EType::Number, TEXT("Refuse a range with more frames than this (default 300, max 5000)")),
+		MCPParam::Optional(TEXT("width"), EType::Number, TEXT("Frame width in pixels (default 1280)")),
+		MCPParam::Optional(TEXT("height"), EType::Number, TEXT("Frame height in pixels (default 720)")),
+		MCPParam::Optional(TEXT("outputDir"), EType::String, TEXT("Absolute or project-relative directory for the frames (default Saved/SequenceFrames/<sequence>)")),
+		MCPParam::Optional(TEXT("format"), EType::String, TEXT("Image format; only png")),
+		MCPParam::Optional(TEXT("cameraActorLabel"), EType::String, TEXT("Camera actor to render through instead of the camera cuts")),
+		MCPParam::Optional(TEXT("cameraActorPath"), EType::String, TEXT("Full object path of that camera actor. Wins over cameraActorLabel")),
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("Fixed camera location, when no camera actor is given")),
+		MCPParam::Optional(TEXT("rotation"), EType::Rotator, TEXT("Fixed camera rotation")),
+		MCPParam::Optional(TEXT("fov"), EType::Number, TEXT("Fixed camera FOV in degrees (default 90)")),
+		MCPParam::Optional(TEXT("fullyLoadTextures"), EType::Boolean, TEXT("Stream textures in before each capture (default true)")),
+	}, MCPSpec::ContractExempt(TEXT("writes image files")));
 	Registry.RegisterHandler(TEXT("set_sequence_playback_range"), &SetPlaybackRange, {
 		SequencePathParam(TEXT("Level Sequence asset path"), true),
 		MCPParam::Required(TEXT("startSeconds"), EType::Number, TEXT("Range start in seconds")),
@@ -737,21 +762,23 @@ TSharedPtr<FJsonValue> FSequencerHandlers::AddTrack(const TSharedPtr<FJsonObject
 // one the editor's own Python/Blueprint automation uses.
 TSharedPtr<FJsonValue> FSequencerHandlers::SequenceControl(const TSharedPtr<FJsonObject>& Params)
 {
-	FString Action;
-	if (auto Err = RequireString(Params, TEXT("action"), Action)) return Err;
+	// sequenceAction, not action: that name is the category tool's dispatch
+	// field, and a routing name no spec may declare (#1057).
+	const FString Action = OptionalString(Params, TEXT("sequenceAction"), TEXT("play"));
 
 	const bool bPlay  = Action.Equals(TEXT("play"), ESearchCase::IgnoreCase);
 	const bool bPause = Action.Equals(TEXT("pause"), ESearchCase::IgnoreCase);
 	const bool bStop  = Action.Equals(TEXT("stop"), ESearchCase::IgnoreCase);
 	if (!bPlay && !bPause && !bStop)
 	{
-		return MCPError(FString::Printf(TEXT("Unknown action: '%s'. Use play, pause, or stop."), *Action));
+		return MCPError(FString::Printf(TEXT("Unknown sequenceAction: '%s'. Use play, pause, or stop."), *Action));
 	}
 
 	// Open the requested sequence first: the transport acts on whatever
 	// Sequencer currently has open, so naming one and not opening it would
-	// drive a different sequence.
-	FString RequestedPath = OptionalString(Params, TEXT("sequencePath"), OptionalString(Params, TEXT("assetPath")));
+	// drive a different sequence. assetPath and path reach it as sequencePath,
+	// renamed by the registry.
+	FString RequestedPath = OptionalString(Params, TEXT("sequencePath"));
 	if (!RequestedPath.IsEmpty())
 	{
 		ULevelSequence* Sequence = LoadAssetByPath<ULevelSequence>(RequestedPath);
@@ -807,13 +834,11 @@ TSharedPtr<FJsonValue> FSequencerHandlers::SequenceControl(const TSharedPtr<FJso
 	// already paused, moved nothing.
 	Result->SetBoolField(TEXT("unchanged"), (bPlay && bWasPlaying) || (bPause && !bWasPlaying));
 
-	// The transport verb that was in force before. `action` is this handler's
-	// own parameter name, which is what the payload has to carry: a rollback
-	// payload goes straight to the bridge rather than through an action's
-	// parameter mapping.
+	// The transport verb that was in force before, under this handler's own
+	// parameter name: a rollback payload goes straight to the bridge.
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetStringField(TEXT("sequencePath"), Current->GetPathName());
-	Payload->SetStringField(TEXT("action"), bWasPlaying ? TEXT("play") : TEXT("pause"));
+	Payload->SetStringField(TEXT("sequenceAction"), bWasPlaying ? TEXT("play") : TEXT("pause"));
 	MCPSetRollback(Result, TEXT("play_sequence"), Payload);
 	Result->SetBoolField(TEXT("rollbackLossy"), true);
 	Result->SetStringField(TEXT("rollbackNote"),

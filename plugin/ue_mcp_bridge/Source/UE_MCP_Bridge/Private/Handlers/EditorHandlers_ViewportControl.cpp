@@ -909,8 +909,8 @@ TSharedPtr<FJsonValue> FEditorHandlers::BeginEditorTransaction(const TSharedPtr<
 	UTransactor* Trans = MCPViewportCtlRequireTransactor(Error);
 	if (!Trans) return Error;
 
+	// label reaches it as description, renamed by the registry (#1057).
 	FString Description = OptionalString(Params, TEXT("description"));
-	if (Description.IsEmpty()) Description = OptionalString(Params, TEXT("label"));
 	if (Description.IsEmpty()) Description = TEXT("MCP Edit");
 
 	const bool bWasActive = Trans->IsActive();

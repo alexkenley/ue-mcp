@@ -172,16 +172,36 @@ void FDialogHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// through, so their parameter specs generate into its module.
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("editor"));
 
-	// #1057: arming a policy and pressing a button act on whatever the contract
-	// test sends, so set_dialog_policy and respond_to_dialog stay unspecified.
+	// #1057: arming a policy and pressing a button would act on whatever the
+	// contract test sends, so both are ContractExempt and their sources are held
+	// to their specs instead.
+	using EType = EMCPParamType;
 	const TArray<FMCPParamSpec> NoParams;
-	Registry.RegisterHandler(TEXT("set_dialog_policy"), &SetDialogPolicy);
+	// buttonLabel and response combine: the label answers a Slate modal, the
+	// response keyword a message dialog.
+	Registry.RegisterHandler(TEXT("set_dialog_policy"), &SetDialogPolicy, {
+		MCPParam::Required(TEXT("pattern"), EType::String, TEXT("Substring matched case-insensitively against the dialog title and message")),
+		MCPParam::Optional(TEXT("response"), EType::String, TEXT("yes | no | ok | cancel | retry | continue | yesall | noall. On a Slate modal it presses whichever button carries that meaning; an unknown keyword is refused")),
+		MCPParam::Optional(TEXT("buttonLabel"), EType::String, TEXT("Button a matched dialog gets pressed for it, matched exactly first, then as a substring. Reaches buttons no response names, such as Don't Save")),
+	}, MCPSpec::AtLeastOne({ { TEXT("response") }, { TEXT("buttonLabel") } })
+		.ContractExempt(TEXT("arms a policy that answers dialogs unattended")));
 	Registry.RegisterHandler(TEXT("clear_dialog_policy"), &ClearDialogPolicy, {
 		MCPParam::Optional(TEXT("pattern"), EMCPParamType::String, TEXT("Exact pattern of the policy to clear; omit to clear every policy")),
 	});
 	Registry.RegisterHandler(TEXT("get_dialog_policy"), &GetDialogPolicy, NoParams);
 	Registry.RegisterHandler(TEXT("list_dialogs"), &ListDialogs, NoParams);
-	Registry.RegisterHandler(TEXT("respond_to_dialog"), &RespondToDialog);
+	// buttonLabel wins over buttonIndex, and dialogAction applies only when no
+	// button was named.
+	Registry.RegisterHandler(TEXT("respond_to_dialog"), &RespondToDialog, {
+		MCPParam::Optional(TEXT("buttonLabel"), EType::String, TEXT("Label of the button to press, matched exactly first, then as a substring")),
+		MCPParam::Optional(TEXT("buttonIndex"), EType::Number, TEXT("Index of the button to press, in the order list_dialogs reports")),
+		MCPParam::Optional(TEXT("dialogAction"), EType::String, TEXT("escape | close: dismiss the dialog without pressing a button, for a modal offering none that fits")),
+		MCPParam::Optional(TEXT("items"), EType::Array, TEXT("The dialog's own tickable rows to set before the button is pressed; indices come from list_dialogs, and rows left out keep their state")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("index"), EType::Number, TEXT("Row index from list_dialogs")),
+			MCPParam::RequiredField(TEXT("checked"), EType::Boolean, TEXT("Whether the row ends up ticked")),
+		}),
+	}, MCPSpec::AtLeastOne({ { TEXT("buttonLabel") }, { TEXT("buttonIndex") }, { TEXT("dialogAction") } })
+		.ContractExempt(TEXT("presses a button on the active modal dialog")));
 }
 
 void FDialogHandlers::InstallDialogHook()
@@ -1196,10 +1216,9 @@ TSharedPtr<FJsonValue> FDialogHandlers::RespondToDialog(const TSharedPtr<FJsonOb
 		// itself, which ends the modal loop and releases the game thread. A
 		// synthetic Escape keypress alone does not reach a modal window that
 		// never took keyboard focus, so send both.
-		// dialogAction on the wire: "action" is the category tool's dispatch
-		// field (#1078). The old name is still read for direct bridge clients.
-		FString Action = OptionalString(Params, TEXT("dialogAction"));
-		if (Action.IsEmpty()) Action = OptionalString(Params, TEXT("action"));
+		// dialogAction, never "action": that is the category tool's dispatch
+		// field (#1078) and a routing name no spec may declare (#1057).
+		const FString Action = OptionalString(Params, TEXT("dialogAction"));
 		if (Action == TEXT("escape") || Action == TEXT("close"))
 		{
 			FSlateApplication::Get().ProcessKeyDownEvent(FKeyEvent(EKeys::Escape, FModifierKeysState(), 0, false, 0, 0));

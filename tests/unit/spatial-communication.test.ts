@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { levelTool } from "../../src/tools/level.js";
@@ -8,11 +9,18 @@ import { editorTool } from "../../src/tools/editor.js";
 import { projectTool } from "../../src/tools/project.js";
 
 describe("spatial request contract", () => {
-  it("rejects invalid capture margins at the wire boundary", () => {
+  it("rejects invalid capture margins: a non-number at the wire, a non-positive one in the handler", () => {
+    // The C++ spec declares focusMargin a number (#1057); the range is the handler's to refuse.
     const wire = z.object(editorTool.schema);
-    for (const focusMargin of [-1, 0, Infinity, NaN]) {
+    for (const focusMargin of [NaN, "1.5"]) {
       expect(wire.safeParse({ action: "capture_scene_png", outputPath: "capture.png", focusMargin }).success).toBe(false);
     }
+    const source = fs.readFileSync(
+      new URL("../../plugin/ue_mcp_bridge/Source/UE_MCP_Bridge/Private/Handlers/EditorHandlers.cpp", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("if (!FMath::IsFinite(FocusMargin) || FocusMargin <= 0.0)");
+    expect(source).toContain("focusMargin must be finite and greater than zero");
   });
 
   it("uses the addressed graph for project search and schemas, including an empty graph", async () => {

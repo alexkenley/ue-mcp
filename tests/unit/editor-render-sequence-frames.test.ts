@@ -8,7 +8,7 @@ import type { ToolContext } from "../../src/types.js";
  * timeout and every parameter the handler reads, under the same name.
  */
 describe("editor.render_sequence_frames", () => {
-  it("forwards every parameter by the handler's names, with the long timeout", async () => {
+  it("forwards every parameter as sent, with the long timeout", async () => {
     const call = vi.fn().mockResolvedValue({ success: true });
     const ctx = { bridge: { call } } as unknown as ToolContext;
 
@@ -26,12 +26,12 @@ describe("editor.render_sequence_frames", () => {
       cameraActorLabel: "Cam",
     });
 
+    // Forwarded as sent: the spec declares assetPath an alias of sequencePath,
+    // and the registry renames it before the handler runs (#1057).
     expect(call).toHaveBeenCalledWith("render_sequence_frames", {
-      sequencePath: "/Game/Cinematics/LS_Cycle",
+      assetPath: "/Game/Cinematics/LS_Cycle",
       startFrame: 0,
       endFrame: 41,
-      startSeconds: undefined,
-      endSeconds: undefined,
       frameStep: 1,
       maxFrames: 100,
       width: 960,
@@ -39,11 +39,6 @@ describe("editor.render_sequence_frames", () => {
       outputDir: "Saved/Renders/Cycle",
       format: "png",
       cameraActorLabel: "Cam",
-      cameraActorPath: undefined,
-      location: undefined,
-      rotation: undefined,
-      fov: undefined,
-      fullyLoadTextures: undefined,
     }, 600_000);
   });
 

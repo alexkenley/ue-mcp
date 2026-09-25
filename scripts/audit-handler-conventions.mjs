@@ -443,8 +443,12 @@ export function auditHandlers(classify) {
     const rollbackVia = found && !rollbackDirect
       ? markerViaLocalHelper(found, text, ROLLBACK_MARKERS) : null;
     // Only meaningful when no rollback is emitted, but recorded either way so
-    // a handler that emits both can be spotted as the contradiction it is.
-    const declaresNoRollback = found ? has(found.body, NO_ROLLBACK_MARKERS) : false;
+    // a handler that emits both can be spotted as the contradiction it is. A
+    // handler that delegates its whole body to a file-local helper declares it
+    // there, the same one level the markers above are followed.
+    const declaresNoRollback = found
+      ? has(found.body, NO_ROLLBACK_MARKERS) || Boolean(markerViaLocalHelper(found, text, NO_ROLLBACK_MARKERS))
+      : false;
     const declaresNoIdempotency = found ? has(found.body, NO_IDEMPOTENCY_MARKERS) : false;
 
     rows.push({

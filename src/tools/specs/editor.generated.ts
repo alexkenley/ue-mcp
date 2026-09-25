@@ -98,6 +98,210 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "add_trace_bookmark": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "bookmarkName",
+        "type": "string",
+        "required": true,
+        "description": "Label for the timeline marker"
+      }
+    ],
+    "contractExempt": "writes a bookmark into the running trace"
+  },
+  "begin_editor_transaction": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "description",
+        "type": "string",
+        "required": false,
+        "description": "Undo-stack label for the transaction (default MCP Edit)",
+        "aliases": [
+          "label"
+        ]
+      }
+    ],
+    "contractExempt": "opens an undo transaction"
+  },
+  "begin_profile_region": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "regionName",
+        "type": "string",
+        "required": true,
+        "description": "Name the bracket is keyed by; end_profile_region closes it"
+      },
+      {
+        "name": "regionCategory",
+        "type": "string",
+        "required": false,
+        "description": "Category shown alongside the region in Unreal Insights"
+      }
+    ],
+    "contractExempt": "opens a profiling region"
+  },
+  "build_all": {
+    "category": "editor",
+    "params": [],
+    "contractExempt": "builds geometry, lighting, paths and HLODs"
+  },
+  "build_geometry": {
+    "category": "editor",
+    "params": [],
+    "contractExempt": "rebuilds BSP geometry"
+  },
+  "build_hlod": {
+    "category": "editor",
+    "params": [],
+    "contractExempt": "builds HLODs"
+  },
+  "build_lighting": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "quality",
+        "type": "string",
+        "required": false,
+        "description": "Preview (default) | Medium | High | Production"
+      }
+    ],
+    "contractExempt": "builds lighting for the open level"
+  },
+  "cancel_editor_transaction": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "index",
+        "type": "number",
+        "required": false,
+        "description": "Which open transaction to cancel (default 0)"
+      }
+    ],
+    "contractExempt": "cancels the open undo transaction and restores what it touched"
+  },
+  "capture_scene_png": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "outputPath",
+        "type": "string",
+        "required": true,
+        "description": "Absolute or project-relative PNG path to write, e.g. Saved/Screenshots/cap.png",
+        "aliases": [
+          "filename"
+        ]
+      },
+      {
+        "name": "location",
+        "type": "vec3",
+        "required": false,
+        "description": "Camera location"
+      },
+      {
+        "name": "rotation",
+        "type": "rotator",
+        "required": false,
+        "description": "Camera rotation"
+      },
+      {
+        "name": "focusActorLabel",
+        "type": "string",
+        "required": false,
+        "description": "Frame the camera on this actor's bounds"
+      },
+      {
+        "name": "focusActorPath",
+        "type": "string",
+        "required": false,
+        "description": "Full object path of the actor to frame. Wins over focusActorLabel"
+      },
+      {
+        "name": "focusDirection",
+        "type": "vec3",
+        "required": false,
+        "description": "Framing direction from the focus actor (default front and above)"
+      },
+      {
+        "name": "focusMargin",
+        "type": "number",
+        "required": false,
+        "description": "Positive bounds fill margin; higher pulls back (default 1.5)"
+      },
+      {
+        "name": "world",
+        "type": "string",
+        "required": false,
+        "description": "World scope: editor (default) | pie"
+      },
+      {
+        "name": "pieInstance",
+        "type": "number",
+        "required": false,
+        "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+      },
+      {
+        "name": "width",
+        "type": "number",
+        "required": false,
+        "description": "Capture width in pixels (default 1280)"
+      },
+      {
+        "name": "height",
+        "type": "number",
+        "required": false,
+        "description": "Capture height in pixels (default 720)"
+      },
+      {
+        "name": "fov",
+        "type": "number",
+        "required": false,
+        "description": "Capture FOV in degrees, greater than 0 and less than 180 (default 90)"
+      },
+      {
+        "name": "fullyLoadTextures",
+        "type": "boolean",
+        "required": false,
+        "description": "Stream textures in and flush the render thread before the capture (default true)"
+      }
+    ],
+    "contractExempt": "spawns a capture actor and writes an image file"
+  },
+  "capture_screenshot": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "filename",
+        "type": "string",
+        "required": true,
+        "description": "Image path to write; .png is appended without an image extension",
+        "aliases": [
+          "outputPath"
+        ]
+      },
+      {
+        "name": "target",
+        "type": "string",
+        "required": false,
+        "description": "auto (default) | pie | editor | window"
+      },
+      {
+        "name": "pieInstance",
+        "type": "number",
+        "required": false,
+        "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+      },
+      {
+        "name": "worldPath",
+        "type": "string",
+        "required": false,
+        "description": "Exact PIE UWorld path or name to capture"
+      }
+    ],
+    "contractExempt": "writes an image file"
+  },
   "check_for_crashes": {
     "category": "editor",
     "params": []
@@ -112,6 +316,113 @@ export const handlerSpecs: HandlerSpecs = {
         "description": "Exact pattern of the policy to clear; omit to clear every policy"
       }
     ]
+  },
+  "close_sequence": {
+    "category": "editor",
+    "params": [],
+    "contractExempt": "closes the open Sequencer"
+  },
+  "configure_pie": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "numClients",
+        "type": "number",
+        "required": false,
+        "description": "Number of PIE clients"
+      },
+      {
+        "name": "netMode",
+        "type": "string",
+        "required": false,
+        "description": "standalone | listen | client"
+      },
+      {
+        "name": "runUnderOneProcess",
+        "type": "boolean",
+        "required": false,
+        "description": "Run every client in the editor process"
+      },
+      {
+        "name": "launchSeparateServer",
+        "type": "boolean",
+        "required": false,
+        "description": "Launch a separate dedicated server"
+      },
+      {
+        "name": "newWindowWidth",
+        "type": "number",
+        "required": false,
+        "description": "Play-in-New-Window width"
+      },
+      {
+        "name": "newWindowHeight",
+        "type": "number",
+        "required": false,
+        "description": "Play-in-New-Window height"
+      }
+    ],
+    "contractExempt": "writes the editor's Play settings"
+  },
+  "cook_content": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "platform",
+        "type": "string",
+        "required": false,
+        "description": "Target platform (default Windows)"
+      }
+    ],
+    "contractExempt": "starts a content cook"
+  },
+  "create_level_sequence": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Name of the new Level Sequence asset"
+      },
+      {
+        "name": "packagePath",
+        "type": "string",
+        "required": false,
+        "description": "Destination folder (default /Game/Cinematics)"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "skip (default) returns an existing asset untouched, error refuses"
+      }
+    ],
+    "contractExempt": "creates a Level Sequence asset"
+  },
+  "create_new_level": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "levelPath",
+        "type": "string",
+        "required": true,
+        "description": "Long package path of the new level, e.g. /Game/Maps/MyLevel. Validated before the engine is asked"
+      },
+      {
+        "name": "templateLevel",
+        "type": "string",
+        "required": false,
+        "description": "Level to copy; omit, Empty or None for a blank level"
+      },
+      {
+        "name": "onConflict",
+        "type": "string",
+        "required": false,
+        "description": "When the level exists: skip (default) returns it untouched, error refuses"
+      }
+    ],
+    "contractExempt": "creates and opens a level"
   },
   "describe_object": {
     "category": "editor",
@@ -147,6 +458,11 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "end_editor_transaction": {
+    "category": "editor",
+    "params": [],
+    "contractExempt": "commits the open undo transaction"
+  },
   "end_profile_region": {
     "category": "editor",
     "params": [
@@ -155,6 +471,99 @@ export const handlerSpecs: HandlerSpecs = {
         "type": "string",
         "required": true,
         "description": "Name the region was opened under"
+      }
+    ]
+  },
+  "execute_command": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "command",
+        "type": "string",
+        "required": true,
+        "description": "Console command to run in the editor world"
+      }
+    ],
+    "contractExempt": "runs a console command"
+  },
+  "find_object": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "objectPath",
+        "type": "string",
+        "required": false,
+        "description": "Check one path: reports found and isValid rather than failing when it is gone. Wins over the search filters"
+      },
+      {
+        "name": "className",
+        "type": "string",
+        "required": false,
+        "description": "Class to search for: a short name, a /Script path, a generated class name (WBP_Hud_C) or a Blueprint asset path"
+      },
+      {
+        "name": "nameContains",
+        "type": "string",
+        "required": false,
+        "description": "Case-insensitive substring of the object name"
+      },
+      {
+        "name": "outerPath",
+        "type": "string",
+        "required": false,
+        "description": "Only objects somewhere under this outer, such as one level or world"
+      },
+      {
+        "name": "exactClass",
+        "type": "boolean",
+        "required": false,
+        "description": "Match className exactly instead of including subclasses (default false)"
+      },
+      {
+        "name": "includeDefaults",
+        "type": "boolean",
+        "required": false,
+        "description": "Include class default objects and archetypes (default false)"
+      },
+      {
+        "name": "world",
+        "type": "string",
+        "required": false,
+        "description": "World scope: any (default) | editor | pie"
+      },
+      {
+        "name": "pieInstance",
+        "type": "number",
+        "required": false,
+        "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+      },
+      {
+        "name": "cursor",
+        "type": "string",
+        "required": false,
+        "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
+      },
+      {
+        "name": "limit",
+        "type": "number",
+        "required": false,
+        "description": "Objects on this page (default 50, max 1000)"
+      }
+    ],
+    "choices": [
+      {
+        "mode": "atLeastOne",
+        "branches": [
+          [
+            "objectPath"
+          ],
+          [
+            "className"
+          ],
+          [
+            "nameContains"
+          ]
+        ]
       }
     ]
   },
@@ -572,6 +981,63 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "hot_reload": {
+    "category": "editor",
+    "params": [],
+    "contractExempt": "recompiles and reloads C++ modules"
+  },
+  "launch_standalone_game": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "mapName",
+        "type": "string",
+        "required": false,
+        "description": "Map to open in the standalone process"
+      },
+      {
+        "name": "channels",
+        "type": "array",
+        "required": false,
+        "description": "Trace channels or a preset, as an array or a comma-separated string. Passing it (or traceFile) adds -trace and -tracefile",
+        "items": "string",
+        "orTypes": [
+          "string"
+        ]
+      },
+      {
+        "name": "traceFile",
+        "type": "string",
+        "required": false,
+        "description": ".utrace path for the standalone process to write"
+      },
+      {
+        "name": "windowed",
+        "type": "boolean",
+        "required": false,
+        "description": "Run windowed rather than fullscreen (default true)"
+      },
+      {
+        "name": "resX",
+        "type": "number",
+        "required": false,
+        "description": "Window width (default 1280)"
+      },
+      {
+        "name": "resY",
+        "type": "number",
+        "required": false,
+        "description": "Window height (default 720)"
+      },
+      {
+        "name": "extraArgs",
+        "type": "string",
+        "required": false,
+        "description": "Extra command-line arguments, appended verbatim"
+      }
+    ],
+    "contractExempt": "launches a game process"
+  },
   "list_crashes": {
     "category": "editor",
     "params": [
@@ -649,6 +1115,136 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "open_settings": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "container",
+        "type": "string",
+        "required": false,
+        "description": "Project (default) | Editor"
+      },
+      {
+        "name": "category",
+        "type": "string",
+        "required": false,
+        "description": "Settings category, e.g. Engine"
+      },
+      {
+        "name": "section",
+        "type": "string",
+        "required": false,
+        "description": "Settings section, e.g. Physics, or a combined Engine.Physics"
+      }
+    ],
+    "contractExempt": "opens a settings viewer"
+  },
+  "open_tab": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "tabId",
+        "type": "string",
+        "required": true,
+        "description": "Registered editor tab id, e.g. ProjectSettings, OutputLog or ContentBrowserTab1"
+      }
+    ],
+    "contractExempt": "opens an editor tab"
+  },
+  "pause_insights_trace": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "paused",
+        "type": "boolean",
+        "required": false,
+        "description": "true pauses the running trace, false resumes it (default true)"
+      }
+    ],
+    "contractExempt": "pauses or resumes the running Insights trace"
+  },
+  "pie_control": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "pieAction",
+        "type": "string",
+        "required": false,
+        "description": "start | stop | status (default status)"
+      },
+      {
+        "name": "waitForAssetRegistry",
+        "type": "boolean",
+        "required": false,
+        "description": "start only: block until the AssetRegistry initial scan completes, since PIE silently no-ops during it on a cold editor (default true)"
+      },
+      {
+        "name": "assetRegistryTimeoutSeconds",
+        "type": "number",
+        "required": false,
+        "description": "start only: how long to wait for that scan (default 180)"
+      }
+    ],
+    "contractExempt": "starts and stops Play In Editor"
+  },
+  "pie_set_player_view": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "pitch",
+        "type": "number",
+        "required": false,
+        "description": "Control-rotation pitch"
+      },
+      {
+        "name": "yaw",
+        "type": "number",
+        "required": false,
+        "description": "Control-rotation yaw"
+      },
+      {
+        "name": "roll",
+        "type": "number",
+        "required": false,
+        "description": "Control-rotation roll"
+      }
+    ],
+    "contractExempt": "rotates the running PIE player's view"
+  },
+  "play_sequence": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "sequencePath",
+        "type": "string",
+        "required": false,
+        "description": "Level Sequence to open and drive; omit to drive the one already open",
+        "aliases": [
+          "assetPath",
+          "path"
+        ]
+      },
+      {
+        "name": "sequenceAction",
+        "type": "string",
+        "required": false,
+        "description": "play (default) | pause | stop"
+      }
+    ],
+    "contractExempt": "opens a sequence in Sequencer and drives its transport"
+  },
+  "purge_python_modules": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "prefix",
+        "type": "string",
+        "required": true,
+        "description": "Purge sys.modules entries starting with this prefix; must be non-empty"
+      }
+    ],
+    "contractExempt": "purges loaded Python modules"
+  },
   "read_bone_transforms": {
     "category": "editor",
     "params": [
@@ -709,6 +1305,11 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "redo": {
+    "category": "editor",
+    "params": [],
+    "contractExempt": "redoes the last undone editor transaction"
+  },
   "redraw_viewport": {
     "category": "editor",
     "params": [
@@ -732,6 +1333,184 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "reload_handlers": {
+    "category": "editor",
+    "params": [],
+    "contractExempt": "reloads the Python bridge handlers from disk"
+  },
+  "render_sequence_frames": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "sequencePath",
+        "type": "string",
+        "required": true,
+        "description": "Level Sequence to render",
+        "aliases": [
+          "assetPath",
+          "path"
+        ]
+      },
+      {
+        "name": "startFrame",
+        "type": "number",
+        "required": false,
+        "description": "First display frame to render. Not with startSeconds"
+      },
+      {
+        "name": "endFrame",
+        "type": "number",
+        "required": false,
+        "description": "Last display frame to render, inclusive. Not with endSeconds"
+      },
+      {
+        "name": "startSeconds",
+        "type": "number",
+        "required": false,
+        "description": "Range start in seconds (default the playback range)"
+      },
+      {
+        "name": "endSeconds",
+        "type": "number",
+        "required": false,
+        "description": "Range end in seconds, exclusive"
+      },
+      {
+        "name": "frameStep",
+        "type": "number",
+        "required": false,
+        "description": "Render every Nth frame (default 1)"
+      },
+      {
+        "name": "maxFrames",
+        "type": "number",
+        "required": false,
+        "description": "Refuse a range with more frames than this (default 300, max 5000)"
+      },
+      {
+        "name": "width",
+        "type": "number",
+        "required": false,
+        "description": "Frame width in pixels (default 1280)"
+      },
+      {
+        "name": "height",
+        "type": "number",
+        "required": false,
+        "description": "Frame height in pixels (default 720)"
+      },
+      {
+        "name": "outputDir",
+        "type": "string",
+        "required": false,
+        "description": "Absolute or project-relative directory for the frames (default Saved/SequenceFrames/<sequence>)"
+      },
+      {
+        "name": "format",
+        "type": "string",
+        "required": false,
+        "description": "Image format; only png"
+      },
+      {
+        "name": "cameraActorLabel",
+        "type": "string",
+        "required": false,
+        "description": "Camera actor to render through instead of the camera cuts"
+      },
+      {
+        "name": "cameraActorPath",
+        "type": "string",
+        "required": false,
+        "description": "Full object path of that camera actor. Wins over cameraActorLabel"
+      },
+      {
+        "name": "location",
+        "type": "vec3",
+        "required": false,
+        "description": "Fixed camera location, when no camera actor is given"
+      },
+      {
+        "name": "rotation",
+        "type": "rotator",
+        "required": false,
+        "description": "Fixed camera rotation"
+      },
+      {
+        "name": "fov",
+        "type": "number",
+        "required": false,
+        "description": "Fixed camera FOV in degrees (default 90)"
+      },
+      {
+        "name": "fullyLoadTextures",
+        "type": "boolean",
+        "required": false,
+        "description": "Stream textures in before each capture (default true)"
+      }
+    ],
+    "contractExempt": "writes image files"
+  },
+  "respond_to_dialog": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "buttonLabel",
+        "type": "string",
+        "required": false,
+        "description": "Label of the button to press, matched exactly first, then as a substring"
+      },
+      {
+        "name": "buttonIndex",
+        "type": "number",
+        "required": false,
+        "description": "Index of the button to press, in the order list_dialogs reports"
+      },
+      {
+        "name": "dialogAction",
+        "type": "string",
+        "required": false,
+        "description": "escape | close: dismiss the dialog without pressing a button, for a modal offering none that fits"
+      },
+      {
+        "name": "items",
+        "type": "array",
+        "required": false,
+        "description": "The dialog's own tickable rows to set before the button is pressed; indices come from list_dialogs, and rows left out keep their state",
+        "items": "object",
+        "fields": [
+          {
+            "name": "index",
+            "type": "number",
+            "required": true,
+            "description": "Row index from list_dialogs"
+          },
+          {
+            "name": "checked",
+            "type": "boolean",
+            "required": true,
+            "description": "Whether the row ends up ticked"
+          }
+        ]
+      }
+    ],
+    "choices": [
+      {
+        "mode": "atLeastOne",
+        "branches": [
+          [
+            "buttonLabel"
+          ],
+          [
+            "buttonIndex"
+          ],
+          [
+            "dialogAction"
+          ]
+        ]
+      }
+    ],
+    "contractExempt": "presses a button on the active modal dialog"
+  },
   "restore_runtime_visibility": {
     "category": "editor",
     "params": [
@@ -754,6 +1533,72 @@ export const handlerSpecs: HandlerSpecs = {
         "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
       }
     ]
+  },
+  "run_automation_tests": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "filter",
+        "type": "string",
+        "required": false,
+        "description": "Substring of the test names to run"
+      },
+      {
+        "name": "maxTests",
+        "type": "number",
+        "required": false,
+        "description": "Cap on tests to run (default 50)"
+      },
+      {
+        "name": "latentTimeoutSeconds",
+        "type": "number",
+        "required": false,
+        "description": "How long one test's latent command queue may take before it is reported abandoned (default 5, max 120)"
+      }
+    ],
+    "contractExempt": "runs automation tests"
+  },
+  "run_stat_command": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "command",
+        "type": "string",
+        "required": false,
+        "description": "Full console command; wins over name"
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "required": false,
+        "description": "Bare stat name such as unit, fps, game or gpu, prefixed with 'stat ' (default fps)"
+      }
+    ],
+    "contractExempt": "runs a stat console command"
+  },
+  "save_dirty": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "includeMaps",
+        "type": "boolean",
+        "required": false,
+        "description": "Include map packages (default true)"
+      },
+      {
+        "name": "includeContent",
+        "type": "boolean",
+        "required": false,
+        "description": "Include content packages (default true)"
+      },
+      {
+        "name": "commitDeletes",
+        "type": "boolean",
+        "required": false,
+        "description": "Use the editor's dirty-package save, which deletes the packages of deleted World Partition actors and reports written and deleted files (default false)"
+      }
+    ],
+    "contractExempt": "saves every dirty package"
   },
   "scrub_sequence": {
     "category": "editor",
@@ -816,6 +1661,91 @@ export const handlerSpecs: HandlerSpecs = {
         "description": "Matches on this page (default 100, max 4096)"
       }
     ]
+  },
+  "set_cvars": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "cvars",
+        "type": "array",
+        "required": true,
+        "description": "Console variables to set, as [{name, value}] or a {name: value} object",
+        "items": "object",
+        "orTypes": [
+          "object"
+        ],
+        "fields": [
+          {
+            "name": "name",
+            "type": "string",
+            "required": true,
+            "description": "Console variable name"
+          },
+          {
+            "name": "value",
+            "type": "any",
+            "required": true,
+            "description": "Value to set; numbers and booleans are written as text"
+          }
+        ]
+      }
+    ],
+    "contractExempt": "writes console variables"
+  },
+  "set_dialog_policy": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "pattern",
+        "type": "string",
+        "required": true,
+        "description": "Substring matched case-insensitively against the dialog title and message"
+      },
+      {
+        "name": "response",
+        "type": "string",
+        "required": false,
+        "description": "yes | no | ok | cancel | retry | continue | yesall | noall. On a Slate modal it presses whichever button carries that meaning; an unknown keyword is refused"
+      },
+      {
+        "name": "buttonLabel",
+        "type": "string",
+        "required": false,
+        "description": "Button a matched dialog gets pressed for it, matched exactly first, then as a substring. Reaches buttons no response names, such as Don't Save"
+      }
+    ],
+    "choices": [
+      {
+        "mode": "atLeastOne",
+        "branches": [
+          [
+            "response"
+          ],
+          [
+            "buttonLabel"
+          ]
+        ]
+      }
+    ],
+    "contractExempt": "arms a policy that answers dialogs unattended"
+  },
+  "set_game_view": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "enabled",
+        "type": "boolean",
+        "required": false,
+        "description": "Hide editor-only overlays (default true); false shows them again"
+      },
+      {
+        "name": "viewportIndex",
+        "type": "number",
+        "required": false,
+        "description": "Level viewport to act on (default the active one)"
+      }
+    ],
+    "contractExempt": "toggles game view on a live level viewport"
   },
   "set_movement_mode": {
     "category": "editor",
@@ -967,6 +1897,128 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "set_realtime": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "enabled",
+        "type": "boolean",
+        "required": false,
+        "description": "Realtime update on every level viewport (default true)"
+      }
+    ],
+    "contractExempt": "toggles realtime on every level viewport"
+  },
+  "set_runtime_visibility": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "hidden",
+        "type": "boolean",
+        "required": true,
+        "description": "true hides the target, false shows it"
+      },
+      {
+        "name": "actorLabels",
+        "type": "array",
+        "required": false,
+        "description": "Explicit actor labels; a label matching several actors is refused",
+        "items": "string"
+      },
+      {
+        "name": "actorPaths",
+        "type": "array",
+        "required": false,
+        "description": "Explicit actor object paths, the unambiguous selector",
+        "items": "string"
+      },
+      {
+        "name": "actorClass",
+        "type": "string",
+        "required": false,
+        "description": "Every actor of this class in the PIE world, bounded by maxTargets"
+      },
+      {
+        "name": "componentNames",
+        "type": "array",
+        "required": false,
+        "description": "Only SceneComponents with these names; implies affectComponents",
+        "items": "string"
+      },
+      {
+        "name": "componentClasses",
+        "type": "array",
+        "required": false,
+        "description": "Only SceneComponents of these classes; implies affectComponents",
+        "items": "string"
+      },
+      {
+        "name": "affectActor",
+        "type": "boolean",
+        "required": false,
+        "description": "Hide or show the actor itself (default true only without a component filter)"
+      },
+      {
+        "name": "affectComponents",
+        "type": "boolean",
+        "required": false,
+        "description": "Hide or show matched components (default true with a component filter)"
+      },
+      {
+        "name": "propagateToChildren",
+        "type": "boolean",
+        "required": false,
+        "description": "Also take each matched component's descendants (default true)"
+      },
+      {
+        "name": "matchSubclasses",
+        "type": "boolean",
+        "required": false,
+        "description": "Match subclasses of actorClass and componentClasses (default true)"
+      },
+      {
+        "name": "maxTargets",
+        "type": "integer",
+        "required": false,
+        "description": "Upper bound on resolved actor and component targets; a larger set is refused rather than truncated"
+      },
+      {
+        "name": "dryRun",
+        "type": "boolean",
+        "required": false,
+        "description": "Report the targets without touching them (default TRUE; pass false to apply)"
+      },
+      {
+        "name": "world",
+        "type": "string",
+        "required": false,
+        "description": "World scope: editor | pie | auto. Each action names its own default"
+      },
+      {
+        "name": "pieInstance",
+        "type": "number",
+        "required": false,
+        "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+      }
+    ],
+    "choices": [
+      {
+        "mode": "exactlyOne",
+        "branches": [
+          [
+            "actorLabels"
+          ],
+          [
+            "actorPaths"
+          ],
+          [
+            "actorClass"
+          ]
+        ]
+      }
+    ],
+    "contractExempt": "hides and shows live PIE actors"
+  },
   "set_scalability": {
     "category": "editor",
     "params": [
@@ -1062,6 +2114,32 @@ export const handlerSpecs: HandlerSpecs = {
         "description": "Range end in seconds"
       }
     ]
+  },
+  "set_trace_channels": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "enable",
+        "type": "array",
+        "required": false,
+        "description": "Channels to turn on, as an array or a comma-separated string",
+        "items": "string",
+        "orTypes": [
+          "string"
+        ]
+      },
+      {
+        "name": "disable",
+        "type": "array",
+        "required": false,
+        "description": "Channels to turn off, as an array or a comma-separated string",
+        "items": "string",
+        "orTypes": [
+          "string"
+        ]
+      }
+    ],
+    "contractExempt": "switches trace channels on and off"
   },
   "set_view_mode": {
     "category": "editor",
@@ -1185,6 +2263,80 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "stage_game_input": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "inputMode",
+        "type": "string",
+        "required": false,
+        "description": "gameOnly (default) | gameAndUI | uiOnly"
+      },
+      {
+        "name": "showMouseCursor",
+        "type": "boolean",
+        "required": false,
+        "description": "Show the mouse cursor (default false for gameOnly, true otherwise)"
+      }
+    ],
+    "contractExempt": "sets the running PIE player's input mode"
+  },
+  "start_insights_trace": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "channels",
+        "type": "array",
+        "required": false,
+        "description": "Trace channels or a preset, as an array or a comma-separated string (default 'default'). list_trace_channels lists what this build registers",
+        "items": "string",
+        "orTypes": [
+          "string"
+        ]
+      },
+      {
+        "name": "traceTarget",
+        "type": "string",
+        "required": false,
+        "description": "file (default, writes a .utrace) | network (streams to a trace server) | none (memory only)"
+      },
+      {
+        "name": "file",
+        "type": "string",
+        "required": false,
+        "description": ".utrace path to write, absolute or relative (default a timestamped file under <Project>/Saved/Profiling)"
+      },
+      {
+        "name": "host",
+        "type": "string",
+        "required": false,
+        "description": "Trace server for traceTarget=network (default 127.0.0.1)"
+      },
+      {
+        "name": "truncate",
+        "type": "boolean",
+        "required": false,
+        "description": "Overwrite the target file if it exists (default true)"
+      },
+      {
+        "name": "excludeTail",
+        "type": "boolean",
+        "required": false,
+        "description": "Drop events buffered before the trace started (default false)"
+      }
+    ],
+    "contractExempt": "starts an Insights trace"
+  },
+  "stop_insights_trace": {
+    "category": "editor",
+    "params": [],
+    "contractExempt": "stops the running Insights trace"
+  },
+  "stop_standalone_game": {
+    "category": "editor",
+    "params": [],
+    "contractExempt": "terminates the standalone game process"
+  },
   "teleport_runtime_actor": {
     "category": "editor",
     "params": [
@@ -1238,6 +2390,29 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "trigger_hitch": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "hitchMilliseconds",
+        "type": "number",
+        "required": false,
+        "description": "How long to stall the game thread (default 250, max 5000)"
+      },
+      {
+        "name": "bookmark",
+        "type": "boolean",
+        "required": false,
+        "description": "Also drop a trace bookmark at the stall (default true)"
+      }
+    ],
+    "contractExempt": "stalls the game thread"
+  },
+  "undo": {
+    "category": "editor",
+    "params": [],
+    "contractExempt": "undoes the last editor transaction"
+  },
   "undo_redo_steps": {
     "category": "editor",
     "params": [
@@ -1254,6 +2429,30 @@ export const handlerSpecs: HandlerSpecs = {
         "description": "undo (default) | redo"
       }
     ]
+  },
+  "validate_assets": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "directory",
+        "type": "string",
+        "required": false,
+        "description": "Package path validated recursively (default /Game/). Not with assetPath or assetPaths"
+      },
+      {
+        "name": "assetPath",
+        "type": "string",
+        "required": false,
+        "description": "One exact package or object path to validate"
+      },
+      {
+        "name": "assetPaths",
+        "type": "array",
+        "required": false,
+        "description": "Exact package or object paths to validate",
+        "items": "string"
+      }
+    ]
   }
 };
 
@@ -1261,10 +2460,28 @@ export const handlerSpecs: HandlerSpecs = {
 export const paramsClauses: Readonly<Record<string, string>> = {
   add_sequence_section: "Params: sequencePath (or assetPath, or path), trackType, actorLabel?, actorPath?, startSeconds?, endSeconds?, cameraActorLabel?, cameraActorPath?",
   add_sequence_track: "Params: assetPath (or path), trackType, actorLabel?, actorPath?",
+  add_trace_bookmark: "Params: bookmarkName",
+  begin_editor_transaction: "Params: description? (or label)",
+  begin_profile_region: "Params: regionName, regionCategory?",
+  build_all: "Params: none",
+  build_geometry: "Params: none",
+  build_hlod: "Params: none",
+  build_lighting: "Params: quality?",
+  cancel_editor_transaction: "Params: index?",
+  capture_scene_png: "Params: outputPath (or filename), location?, rotation?, focusActorLabel?, focusActorPath?, focusDirection?, focusMargin?, world?, pieInstance?, width?, height?, fov?, fullyLoadTextures?",
+  capture_screenshot: "Params: filename (or outputPath), target?, pieInstance?, worldPath?",
   check_for_crashes: "Params: none",
   clear_dialog_policy: "Params: pattern?",
+  close_sequence: "Params: none",
+  configure_pie: "Params: numClients?, netMode?, runUnderOneProcess?, launchSeparateServer?, newWindowWidth?, newWindowHeight?",
+  cook_content: "Params: platform?",
+  create_level_sequence: "Params: name, packagePath?, onConflict?",
+  create_new_level: "Params: levelPath, templateLevel?, onConflict?",
   describe_object: "Params: objectPath (or path, or assetPath), includeProperties?, includeValues?, propertyNames?",
+  end_editor_transaction: "Params: none",
   end_profile_region: "Params: regionName",
+  execute_command: "Params: command",
+  find_object: "Params: at least one of objectPath/className/nameContains, outerPath?, exactClass?, includeDefaults?, world?, pieInstance?, cursor?, limit?",
   focus_viewport_on_actor: "Params: actorLabel?, actorPath?",
   get_build_status: "Params: none",
   get_crash_info: "Params: crashFolder",
@@ -1290,6 +2507,8 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   get_viewport_state: "Params: viewportIndex?",
   get_world_state: "Params: none",
   hit_test_viewport_pixel: "Params: x, y, width?, height?, maxDistance?, ignoreActors?",
+  hot_reload: "Params: none",
+  launch_standalone_game: "Params: mapName?, channels?, traceFile?, windowed?, resX?, resY?, extraArgs?",
   list_crashes: "Params: cursor?, limit?",
   list_dialogs: "Params: none",
   list_dirty_packages: "Params: none",
@@ -1297,115 +2516,235 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   list_pie_instances: "Params: none",
   list_trace_channels: "Params: filter?, enabledOnly?",
   open_asset: "Params: assetPath (or path)",
+  open_settings: "Params: container?, category?, section?",
+  open_tab: "Params: tabId",
+  pause_insights_trace: "Params: paused?",
+  pie_control: "Params: pieAction?, waitForAssetRegistry?, assetRegistryTimeoutSeconds?",
+  pie_set_player_view: "Params: pitch?, yaw?, roll?",
+  play_sequence: "Params: sequencePath? (or assetPath, or path), sequenceAction?",
+  purge_python_modules: "Params: prefix",
   read_bone_transforms: "Params: actorLabel?, actorPath?, componentName?, bones?, relativeTo?, space?, limit?, world?, pieInstance?",
+  redo: "Params: none",
   redraw_viewport: "Params: allViewports?, invalidateHitProxies?, viewportIndex?",
+  reload_handlers: "Params: none",
+  render_sequence_frames: "Params: sequencePath (or assetPath, or path), startFrame?, endFrame?, startSeconds?, endSeconds?, frameStep?, maxFrames?, width?, height?, outputDir?, format?, cameraActorLabel?, cameraActorPath?, location?, rotation?, fov?, fullyLoadTextures?",
+  respond_to_dialog: "Params: at least one of buttonLabel/buttonIndex/dialogAction, items?",
   restore_runtime_visibility: "Params: rollbackToken, world?, pieInstance?",
+  run_automation_tests: "Params: filter?, maxTests?, latentTimeoutSeconds?",
+  run_stat_command: "Params: command?, name?",
+  save_dirty: "Params: includeMaps?, includeContent?, commitDeletes?",
   scrub_sequence: "Params: sequencePath? (or assetPath, or path), seconds?, frame?, timeUnit?",
   search_log: "Params: query, maxResults?, cursor?, limit?",
+  set_cvars: "Params: cvars",
+  set_dialog_policy: "Params: pattern, at least one of response/buttonLabel",
+  set_game_view: "Params: enabled?, viewportIndex?",
   set_movement_mode: "Params: actorLabel?, actorPath?, mode?, customMode?, velocity?, world?, pieInstance?",
   set_object_property: "Params: propertyName, value, objectPath?, target?, subsystemClass?, playerIndex?, postEditChange?, world?, pieInstance?",
   set_pie_time_scale: "Params: factor",
   set_property: "Params: objectPath (or path, or assetPath), propertyName, value, save?",
+  set_realtime: "Params: enabled?",
+  set_runtime_visibility: "Params: hidden, actorLabels OR actorPaths OR actorClass, componentNames?, componentClasses?, affectActor?, affectComponents?, propagateToChildren?, matchSubclasses?, maxTargets?, dryRun?, world?, pieInstance?",
   set_scalability: "Params: level?",
   set_sequence_keyframes: "Params: sequencePath (or assetPath, or path), trackType, actorLabel?, actorPath?, sectionIndex?, channel, keyframes, interpolation?",
   set_sequence_playback_range: "Params: sequencePath (or assetPath, or path), startSeconds, endSeconds",
+  set_trace_channels: "Params: enable?, disable?",
   set_view_mode: "Params: viewMode, viewportIndex?",
   set_viewport_camera: "Params: location?, rotation?, projection?, viewportType?, orthoZoom?",
   set_viewport_exposure: "Params: ev100?, fixed?, mode?, viewportIndex?",
   set_viewport_view: "Params: fov?, nearClip?, farClip?, viewportType?, cameraSpeed?, viewportIndex?",
+  stage_game_input: "Params: inputMode?, showMouseCursor?",
+  start_insights_trace: "Params: channels?, traceTarget?, file?, host?, truncate?, excludeTail?",
+  stop_insights_trace: "Params: none",
+  stop_standalone_game: "Params: none",
   teleport_runtime_actor: "Params: actorLabel?, actorPath?, location?, rotation?, stopMovement?, sweep?, world?, pieInstance?",
+  trigger_hitch: "Params: hitchMilliseconds?, bookmark?",
+  undo: "Params: none",
   undo_redo_steps: "Params: steps?, direction?",
+  validate_assets: "Params: directory?, assetPath?, assetPaths?",
 };
 
 /** Every key the spec'd editor handlers declare, aliases included. */
 export const schema: Record<string, z.ZodType> = {
+  actorClass: z.string().optional().describe("Every actor of this class in the PIE world, bounded by maxTargets"),
   actorLabel: z.string().optional().describe("Actor label. Editor labels are not unique, so a label naming several actors is refused"),
+  actorLabels: z.array(z.string()).optional().describe("Explicit actor labels; a label matching several actors is refused"),
   actorPath: z.string().optional().describe("Full actor object path, the unambiguous selector. Wins over actorLabel"),
+  actorPaths: z.array(z.string()).optional().describe("Explicit actor object paths, the unambiguous selector"),
+  affectActor: z.boolean().optional().describe("Hide or show the actor itself (default true only without a component filter)"),
+  affectComponents: z.boolean().optional().describe("Hide or show matched components (default true with a component filter)"),
   allViewports: z.boolean().optional().describe("Redraw every level viewport rather than one (default false)"),
-  assetPath: z.string().optional().describe("Alias for sequencePath (add_sequence_section, scrub_sequence, set_sequence_keyframes, set_sequence_playback_range). Level Sequence asset path (add_sequence_track, get_sequence_info). Alias for objectPath (describe_object, get_property, set_property). Asset to open in its editor (open_asset)"),
+  assetPath: z.string().optional().describe("Alias for sequencePath (add_sequence_section, play_sequence, render_sequence_frames, scrub_sequence, set_sequence_keyframes, set_sequence_playback_range). Level Sequence asset path (add_sequence_track, get_sequence_info). Alias for objectPath (describe_object, get_property, set_property). Asset to open in its editor (open_asset). One exact package or object path to validate (validate_assets)"),
+  assetPaths: z.array(z.string()).optional().describe("Exact package or object paths to validate"),
+  assetRegistryTimeoutSeconds: z.number().optional().describe("start only: how long to wait for that scan (default 180)"),
   bones: z.array(z.string()).optional().describe("Bone or socket names; omit for every bone up to limit"),
-  cameraActorLabel: z.string().optional().describe("Camera actor to bind a CameraCut section to"),
-  cameraActorPath: z.string().optional().describe("Full object path of the camera actor. Wins over cameraActorLabel"),
+  bookmark: z.boolean().optional().describe("Also drop a trace bookmark at the stall (default true)"),
+  bookmarkName: z.string().optional().describe("Label for the timeline marker"),
+  buttonIndex: z.number().optional().describe("Index of the button to press, in the order list_dialogs reports"),
+  buttonLabel: z.string().optional().describe("Label of the button to press, matched exactly first, then as a substring (respond_to_dialog). Button a matched dialog gets pressed for it, matched exactly first, then as a substring. Reaches buttons no response names, such as Don't Save (set_dialog_policy)"),
+  cameraActorLabel: z.string().optional().describe("Camera actor to bind a CameraCut section to (add_sequence_section). Camera actor to render through instead of the camera cuts (render_sequence_frames)"),
+  cameraActorPath: z.string().optional().describe("Full object path of the camera actor. Wins over cameraActorLabel (add_sequence_section). Full object path of that camera actor. Wins over cameraActorLabel (render_sequence_frames)"),
   cameraSpeed: z.number().optional().describe("Viewport camera speed, greater than 0"),
-  category: z.string().optional().describe("Case-insensitive substring the log category must contain"),
+  category: z.string().optional().describe("Case-insensitive substring the log category must contain (get_output_log). Settings category, e.g. Engine (open_settings)"),
   channel: z.string().optional().describe("Location.X/Y/Z or Rotation.X/Y/Z (also x/y/z, yaw/pitch/roll) on a Transform track; the float channel on Fade or Float"),
+  channels: z.union([z.array(z.string()), z.string()]).optional().describe("Trace channels or a preset, as an array or a comma-separated string. Passing it (or traceFile) adds -trace and -tracefile (launch_standalone_game). Trace channels or a preset, as an array or a comma-separated string (default 'default'). list_trace_channels lists what this build registers (start_insights_trace)"),
   classFilter: z.string().optional().describe("Actor or component class name substring; omit to match every actor"),
+  className: z.string().optional().describe("Class to search for: a short name, a /Script path, a generated class name (WBP_Hud_C) or a Blueprint asset path"),
+  command: z.string().optional().describe("Console command to run in the editor world (execute_command). Full console command; wins over name (run_stat_command)"),
+  commitDeletes: z.boolean().optional().describe("Use the editor's dirty-package save, which deletes the packages of deleted World Partition actors and reports written and deleted files (default false)"),
+  componentClasses: z.array(z.string()).optional().describe("Only SceneComponents of these classes; implies affectComponents"),
   componentName: z.string().optional().describe("Root every path at the component with this instance name (get_runtime_values). SkeletalMeshComponent to read; omit for the first one (read_bone_transforms)"),
+  componentNames: z.array(z.string()).optional().describe("Only SceneComponents with these names; implies affectComponents"),
+  container: z.string().optional().describe("Project (default) | Editor"),
   cpuGpuMarginPercent: z.number().optional().describe("How far ahead one side must be before the frame is called bound by it (default 10)"),
   crashFolder: z.string().optional().describe("Crash folder name, as list_crashes reports it"),
   cursor: z.string().optional().describe("Resume a paged read: pass back the nextCursor from the previous page, unmodified"),
   customMode: z.number().int().optional().describe("0-255, only with mode=custom"),
+  cvars: z.union([z.array(z.object({ name: z.string().describe("Console variable name"), value: z.unknown().describe("Value to set; numbers and booleans are written as text") })), z.record(z.unknown())]).optional().describe("Console variables to set, as [{name, value}] or a {name: value} object"),
+  description: z.string().optional().describe("Undo-stack label for the transaction (default MCP Edit)"),
+  dialogAction: z.string().optional().describe("escape | close: dismiss the dialog without pressing a button, for a modal offering none that fits"),
   direction: z.string().optional().describe("undo (default) | redo"),
+  directory: z.string().optional().describe("Package path validated recursively (default /Game/). Not with assetPath or assetPaths"),
+  disable: z.union([z.array(z.string()), z.string()]).optional().describe("Channels to turn off, as an array or a comma-separated string"),
+  dryRun: z.boolean().optional().describe("Report the targets without touching them (default TRUE; pass false to apply)"),
+  enable: z.union([z.array(z.string()), z.string()]).optional().describe("Channels to turn on, as an array or a comma-separated string"),
+  enabled: z.boolean().optional().describe("Hide editor-only overlays (default true); false shows them again (set_game_view). Realtime update on every level viewport (default true) (set_realtime)"),
   enabledOnly: z.boolean().optional().describe("Only channels that are currently on (default false)"),
-  endSeconds: z.number().optional().describe("Section end in seconds (default one second after the start) (add_sequence_section). Range end in seconds (set_sequence_playback_range)"),
+  endFrame: z.number().optional().describe("Last display frame to render, inclusive. Not with endSeconds"),
+  endSeconds: z.number().optional().describe("Section end in seconds (default one second after the start) (add_sequence_section). Range end in seconds, exclusive (render_sequence_frames). Range end in seconds (set_sequence_playback_range)"),
   ev100: z.number().optional().describe("Fixed EV100 to pin the viewport to; implies fixed exposure"),
+  exactClass: z.boolean().optional().describe("Match className exactly instead of including subclasses (default false)"),
+  excludeTail: z.boolean().optional().describe("Drop events buffered before the trace started (default false)"),
+  extraArgs: z.string().optional().describe("Extra command-line arguments, appended verbatim"),
   factor: z.number().optional().describe("Time-scale factor, greater than 0 (e.g. 500)"),
   farClip: z.number().optional().describe("Far clip plane override"),
-  filter: z.string().optional().describe("Case-insensitive substring the message must contain (get_output_log). Case-insensitive substring over channel name and description (list_trace_channels)"),
+  file: z.string().optional().describe(".utrace path to write, absolute or relative (default a timestamped file under <Project>/Saved/Profiling)"),
+  filename: z.string().optional().describe("Alias for outputPath (capture_scene_png). Image path to write; .png is appended without an image extension (capture_screenshot)"),
+  filter: z.string().optional().describe("Case-insensitive substring the message must contain (get_output_log). Case-insensitive substring over channel name and description (list_trace_channels). Substring of the test names to run (run_automation_tests)"),
   fixed: z.boolean().optional().describe("Use a fixed exposure rather than eye adaptation"),
-  fov: z.number().optional().describe("Field of view in degrees, greater than 0 and less than 180"),
+  focusActorLabel: z.string().optional().describe("Frame the camera on this actor's bounds"),
+  focusActorPath: z.string().optional().describe("Full object path of the actor to frame. Wins over focusActorLabel"),
+  focusDirection: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Framing direction from the focus actor (default front and above)"),
+  focusMargin: z.number().optional().describe("Positive bounds fill margin; higher pulls back (default 1.5)"),
+  format: z.string().optional().describe("Image format; only png"),
+  fov: z.number().optional().describe("Capture FOV in degrees, greater than 0 and less than 180 (default 90) (capture_scene_png). Fixed camera FOV in degrees (default 90) (render_sequence_frames). Field of view in degrees, greater than 0 and less than 180 (set_viewport_view)"),
   frame: z.number().optional().describe("Playhead position as a frame number, read in timeUnit"),
-  height: z.number().optional().describe("Viewport height to read y against, when picking from a screenshot of another resolution"),
+  frameStep: z.number().optional().describe("Render every Nth frame (default 1)"),
+  fullyLoadTextures: z.boolean().optional().describe("Stream textures in and flush the render thread before the capture (default true) (capture_scene_png). Stream textures in before each capture (default true) (render_sequence_frames)"),
+  height: z.number().optional().describe("Capture height in pixels (default 720) (capture_scene_png). Viewport height to read y against, when picking from a screenshot of another resolution (hit_test_viewport_pixel). Frame height in pixels (default 720) (render_sequence_frames)"),
+  hidden: z.boolean().optional().describe("true hides the target, false shows it"),
+  hitchMilliseconds: z.number().optional().describe("How long to stall the game thread (default 250, max 5000)"),
+  host: z.string().optional().describe("Trace server for traceTarget=network (default 127.0.0.1)"),
   ignoreActors: z.array(z.string()).optional().describe("Actor labels to skip"),
+  includeContent: z.boolean().optional().describe("Include content packages (default true)"),
+  includeDefaults: z.boolean().optional().describe("Include class default objects and archetypes (default false)"),
   includeFunctions: z.boolean().optional().describe("Include each library's static BlueprintCallable functions (default true)"),
+  includeMaps: z.boolean().optional().describe("Include map packages (default true)"),
   includeProperties: z.boolean().optional().describe("Include reflected property metadata (default true)"),
   includeSectionDetails: z.boolean().optional().describe("Include attach sockets and first-key transform values per track"),
   includeValues: z.boolean().optional().describe("Include current property values (default false)"),
+  index: z.number().optional().describe("Which open transaction to cancel (default 0)"),
+  inputMode: z.string().optional().describe("gameOnly (default) | gameAndUI | uiOnly"),
   interpolation: z.string().optional().describe("cubic (default) | linear"),
   invalidateHitProxies: z.boolean().optional().describe("Also invalidate hit proxies, needed before a hit test (default true)"),
+  items: z.array(z.object({ index: z.number().describe("Row index from list_dialogs"), checked: z.boolean().describe("Whether the row ends up ticked") })).optional().describe("The dialog's own tickable rows to set before the button is pressed; indices come from list_dialogs, and rows left out keep their state"),
   keyframes: z.array(z.record(z.unknown())).optional().describe("Keys to add, as [{seconds, value}]"),
+  label: z.string().optional().describe("Alias for description"),
+  latentTimeoutSeconds: z.number().optional().describe("How long one test's latent command queue may take before it is reported abandoned (default 5, max 120)"),
+  launchSeparateServer: z.boolean().optional().describe("Launch a separate dedicated server"),
   level: z.string().optional().describe("Low | Medium | High | Epic | Cinematic (default Epic)"),
-  limit: z.number().optional().describe("Max rows for a pattern search (default 100, max 1000) (get_cvars). Max properties returned (default 200) (get_object_properties). Lines on this page (default 200, max 4096) (get_output_log). Crash folders on this page (default 50, max 500) (list_crashes). Max bones when bones is omitted (default 200) (read_bone_transforms). Matches on this page (default 100, max 4096) (search_log)"),
-  location: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Camera location (set_viewport_camera). Destination; omit to keep the current location (teleport_runtime_actor)"),
+  levelPath: z.string().optional().describe("Long package path of the new level, e.g. /Game/Maps/MyLevel. Validated before the engine is asked"),
+  limit: z.number().optional().describe("Objects on this page (default 50, max 1000) (find_object). Max rows for a pattern search (default 100, max 1000) (get_cvars). Max properties returned (default 200) (get_object_properties). Lines on this page (default 200, max 4096) (get_output_log). Crash folders on this page (default 50, max 500) (list_crashes). Max bones when bones is omitted (default 200) (read_bone_transforms). Matches on this page (default 100, max 4096) (search_log)"),
+  location: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Camera location (capture_scene_png, set_viewport_camera). Fixed camera location, when no camera actor is given (render_sequence_frames). Destination; omit to keep the current location (teleport_runtime_actor)"),
   logName: z.string().optional().describe("Listing to read (MapCheck, AssetCheck, PIE, LoadErrors...); omit to list the registered ones"),
+  mapName: z.string().optional().describe("Map to open in the standalone process"),
+  matchSubclasses: z.boolean().optional().describe("Match subclasses of actorClass and componentClasses (default true)"),
   maxDistance: z.number().optional().describe("Max ray length in cm (default 200000)"),
   maxEntries: z.number().optional().describe("Cap on entries returned (default 50)"),
+  maxFrames: z.number().optional().describe("Refuse a range with more frames than this (default 300, max 5000)"),
   maxLines: z.number().int().optional().describe("Messages to return (default 200) (get_message_log). How far back into the ring buffer to read (default 100) (get_output_log)"),
   maxResults: z.number().int().optional().describe("Cap on matching lines collected out of the 4096-line ring buffer (default 4096)"),
+  maxTargets: z.number().int().optional().describe("Upper bound on resolved actor and component targets; a larger set is refused rather than truncated"),
+  maxTests: z.number().optional().describe("Cap on tests to run (default 50)"),
   maxValueLength: z.number().optional().describe("Truncate each exported value past this many characters (default 2000)"),
   mode: z.string().optional().describe("none | walking | navwalking | falling | swimming | flying | custom (set_movement_mode). fixed | auto (set_viewport_exposure)"),
-  name: z.string().optional().describe("Console variable to read"),
+  name: z.string().optional().describe("Name of the new Level Sequence asset (create_level_sequence). Console variable to read (get_cvars). Bare stat name such as unit, fps, game or gpu, prefixed with 'stat ' (default fps) (run_stat_command)"),
+  nameContains: z.string().optional().describe("Case-insensitive substring of the object name"),
   names: z.array(z.string()).optional().describe("Console variables to read"),
   nearClip: z.number().optional().describe("Near clip plane; negative clears the override"),
-  objectPath: z.string().optional().describe("Object, asset, class or Blueprint path. A class or Blueprint resolves to its default object (describe_object, get_property, set_property). Object path of the live instance. Wins over target (get_object_properties, set_object_property)"),
+  netMode: z.string().optional().describe("standalone | listen | client"),
+  newWindowHeight: z.number().optional().describe("Play-in-New-Window height"),
+  newWindowWidth: z.number().optional().describe("Play-in-New-Window width"),
+  numClients: z.number().optional().describe("Number of PIE clients"),
+  objectPath: z.string().optional().describe("Object, asset, class or Blueprint path. A class or Blueprint resolves to its default object (describe_object, get_property, set_property). Check one path: reports found and isValid rather than failing when it is gone. Wins over the search filters (find_object). Object path of the live instance. Wins over target (get_object_properties, set_object_property)"),
+  onConflict: z.string().optional().describe("skip (default) returns an existing asset untouched, error refuses (create_level_sequence). When the level exists: skip (default) returns it untouched, error refuses (create_new_level)"),
   orthoZoom: z.number().optional().describe("Orthographic zoom, within the engine's own limits"),
-  path: z.string().optional().describe("Alias for sequencePath (add_sequence_section, scrub_sequence, set_sequence_keyframes, set_sequence_playback_range). Alias for assetPath (add_sequence_track, get_sequence_info, open_asset). Alias for objectPath (describe_object, get_property, set_property)"),
+  outerPath: z.string().optional().describe("Only objects somewhere under this outer, such as one level or world"),
+  outputDir: z.string().optional().describe("Absolute or project-relative directory for the frames (default Saved/SequenceFrames/<sequence>)"),
+  outputPath: z.string().optional().describe("Absolute or project-relative PNG path to write, e.g. Saved/Screenshots/cap.png (capture_scene_png). Alias for filename (capture_screenshot)"),
+  packagePath: z.string().optional().describe("Destination folder (default /Game/Cinematics)"),
+  path: z.string().optional().describe("Alias for sequencePath (add_sequence_section, play_sequence, render_sequence_frames, scrub_sequence, set_sequence_keyframes, set_sequence_playback_range). Alias for assetPath (add_sequence_track, get_sequence_info, open_asset). Alias for objectPath (describe_object, get_property, set_property)"),
   paths: z.array(z.string()).optional().describe("Dotted property or function paths to evaluate per match. A function segment may carry literal arguments, e.g. GetBalance(gold, 2)"),
-  pattern: z.string().optional().describe("Exact pattern of the policy to clear; omit to clear every policy (clear_dialog_policy). Substring matched against every registered console variable. Pass at least one of name, names and pattern (get_cvars). Case-insensitive substring of the library class name (list_function_libraries)"),
+  pattern: z.string().optional().describe("Exact pattern of the policy to clear; omit to clear every policy (clear_dialog_policy). Substring matched against every registered console variable. Pass at least one of name, names and pattern (get_cvars). Case-insensitive substring of the library class name (list_function_libraries). Substring matched case-insensitively against the dialog title and message (set_dialog_policy)"),
+  paused: z.boolean().optional().describe("true pauses the running trace, false resumes it (default true)"),
+  pieAction: z.string().optional().describe("start | stop | status (default status)"),
   pieInstance: z.number().optional().describe("PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"),
+  pitch: z.number().optional().describe("Control-rotation pitch"),
+  platform: z.string().optional().describe("Target platform (default Windows)"),
   playerIndex: z.number().optional().describe("Player index for target=playercontroller or playerpawn (default 0) (get_object_properties, set_object_property). 0-based player index (default 0) (get_pie_pawn)"),
   postEditChange: z.boolean().optional().describe("Fire PostEditChangeProperty after the write (default false)"),
+  prefix: z.string().optional().describe("Purge sys.modules entries starting with this prefix; must be non-empty"),
   projection: z.string().optional().describe("perspective | top | bottom | left | right | front | back | orthoFreelook. Switched before the pose is applied"),
+  propagateToChildren: z.boolean().optional().describe("Also take each matched component's descendants (default true)"),
   propertyName: z.string().optional().describe("Property name; dotted and indexed paths reach component and struct fields"),
   propertyNames: z.array(z.string()).optional().describe("Dotted or indexed property paths to report instead of every property (describe_object). Only these properties. The Details-panel spelling is accepted (get_object_properties)"),
+  quality: z.string().optional().describe("Preview (default) | Medium | High | Production"),
   query: z.string().optional().describe("Case-insensitive substring to search the captured log for"),
-  regionName: z.string().optional().describe("Name the region was opened under"),
+  regionCategory: z.string().optional().describe("Category shown alongside the region in Unreal Insights"),
+  regionName: z.string().optional().describe("Name the bracket is keyed by; end_profile_region closes it (begin_profile_region). Name the region was opened under (end_profile_region)"),
   relativeTo: z.string().optional().describe("Bone or socket whose live frame every sample is expressed in; supersedes space"),
+  response: z.string().optional().describe("yes | no | ok | cancel | retry | continue | yesall | noall. On a Slate modal it presses whichever button carries that meaning; an unknown keyword is refused"),
+  resX: z.number().optional().describe("Window width (default 1280)"),
+  resY: z.number().optional().describe("Window height (default 720)"),
+  roll: z.number().optional().describe("Control-rotation roll"),
   rollbackToken: z.string().optional().describe("Token from a non-dry-run set_runtime_visibility, valid for that PIE session only"),
-  rotation: z.object({ pitch: z.number(), yaw: z.number(), roll: z.number() }).optional().describe("Camera rotation (set_viewport_camera). Destination rotation; omit to keep the current one (teleport_runtime_actor)"),
+  rotation: z.object({ pitch: z.number(), yaw: z.number(), roll: z.number() }).optional().describe("Camera rotation (capture_scene_png, set_viewport_camera). Fixed camera rotation (render_sequence_frames). Destination rotation; omit to keep the current one (teleport_runtime_actor)"),
+  runUnderOneProcess: z.boolean().optional().describe("Run every client in the editor process"),
   save: z.boolean().optional().describe("Save the package to disk after the write (default true; false leaves it dirty)"),
   seconds: z.number().optional().describe("Playhead position in seconds. Pass exactly one of seconds and frame"),
+  section: z.string().optional().describe("Settings section, e.g. Physics, or a combined Engine.Physics"),
   sectionIndex: z.number().int().optional().describe("Target section index (default 0)"),
-  sequencePath: z.string().optional().describe("Level Sequence asset path (add_sequence_section, set_sequence_keyframes, set_sequence_playback_range). Level Sequence to open and scrub; omit to scrub the one already open (scrub_sequence)"),
+  sequenceAction: z.string().optional().describe("play (default) | pause | stop"),
+  sequencePath: z.string().optional().describe("Level Sequence asset path (add_sequence_section, set_sequence_keyframes, set_sequence_playback_range). Level Sequence to open and drive; omit to drive the one already open (play_sequence). Level Sequence to render (render_sequence_frames). Level Sequence to open and scrub; omit to scrub the one already open (scrub_sequence)"),
   severity: z.string().optional().describe("Severity-name substring: Error | Warning | PerformanceWarning | Info"),
+  showMouseCursor: z.boolean().optional().describe("Show the mouse cursor (default false for gameOnly, true otherwise)"),
   space: z.string().optional().describe("world (default) | component"),
-  startSeconds: z.number().optional().describe("Section start in seconds (add_sequence_section). Range start in seconds (set_sequence_playback_range)"),
+  startFrame: z.number().optional().describe("First display frame to render. Not with startSeconds"),
+  startSeconds: z.number().optional().describe("Section start in seconds (add_sequence_section). Range start in seconds (default the playback range) (render_sequence_frames). Range start in seconds (set_sequence_playback_range)"),
   steps: z.number().int().optional().describe("How many steps to apply (default 1)"),
   stopMovement: z.boolean().optional().describe("Stop the movement component so the move is not undone (default true)"),
   subsystemClass: z.string().optional().describe("Subsystem class name or /Script path, with target=subsystem"),
   sweep: z.boolean().optional().describe("Collide on the way (default false)"),
-  target: z.string().optional().describe("gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem"),
+  tabId: z.string().optional().describe("Registered editor tab id, e.g. ProjectSettings, OutputLog or ContentBrowserTab1"),
+  target: z.string().optional().describe("auto (default) | pie | editor | window (capture_screenshot). gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem (get_object_properties, set_object_property)"),
+  templateLevel: z.string().optional().describe("Level to copy; omit, Empty or None for a blank level"),
   timeUnit: z.string().optional().describe("How to read frame: display (default, the frame numbers Sequencer shows) | tick (the units get_sequence_info's playbackRange reports)"),
+  traceFile: z.string().optional().describe(".utrace path for the standalone process to write"),
+  traceTarget: z.string().optional().describe("file (default, writes a .utrace) | network (streams to a trace server) | none (memory only)"),
   trackType: z.string().optional().describe("Transform | Float | SkeletalAnimation | CameraCut | Audio | Event | Fade"),
+  truncate: z.boolean().optional().describe("Overwrite the target file if it exists (default true)"),
   value: z.unknown().optional().describe("New value as structured JSON, the form get_property returns under value"),
   velocity: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Velocity written to the CharacterMovementComponent"),
   viewMode: z.string().optional().describe("Lit | Unlit | Wireframe | LightingOnly | DetailLighting | ShaderComplexity | ... get_viewport_state lists what this build supports"),
   viewportIndex: z.number().optional().describe("Level viewport to act on (default the active one)"),
   viewportType: z.string().optional().describe("Perspective | Top | Bottom | Left | Right | Front | Back | OrthoFreelook"),
-  width: z.number().optional().describe("Viewport width to read x against, when picking from a screenshot of another resolution"),
-  world: z.string().optional().describe("World scope: editor | pie | auto. Each action names its own default"),
+  waitForAssetRegistry: z.boolean().optional().describe("start only: block until the AssetRegistry initial scan completes, since PIE silently no-ops during it on a cold editor (default true)"),
+  width: z.number().optional().describe("Capture width in pixels (default 1280) (capture_scene_png). Viewport width to read x against, when picking from a screenshot of another resolution (hit_test_viewport_pixel). Frame width in pixels (default 1280) (render_sequence_frames)"),
+  windowed: z.boolean().optional().describe("Run windowed rather than fullscreen (default true)"),
+  world: z.string().optional().describe("World scope: editor (default) | pie (capture_scene_png). World scope: any (default) | editor | pie (find_object). World scope: editor | pie | auto. Each action names its own default (get_object_properties, get_runtime_value, get_runtime_values, read_bone_transforms, restore_runtime_visibility, set_movement_mode, set_object_property, set_runtime_visibility, teleport_runtime_actor)"),
+  worldPath: z.string().optional().describe("Exact PIE UWorld path or name to capture"),
   x: z.number().optional().describe("Viewport pixel X"),
   y: z.number().optional().describe("Viewport pixel Y"),
+  yaw: z.number().optional().describe("Control-rotation yaw"),
 };
 
 /** Declare an action for a spec'd bridge method: effect, summary, method. */

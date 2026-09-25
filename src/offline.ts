@@ -144,7 +144,7 @@ export const EDITOR_BOUND_LOCAL_ACTIONS: Record<string, string> = {
   "blueprint.author": "Runs a sequence of bridge calls to create and populate a Blueprint.",
   "niagara.batch": "Runs a sequence of bridge calls against one Niagara system.",
   "editor.execute_python": "Runs Python inside the editor process.",
-  "editor.play_in_editor_ignore_blueprint_errors": "Drives Play In Editor through the pie_control bridge method.",
+  "editor.play_in_editor_ignore_blueprint_errors": "Starts Play In Editor through the pie_start_ignoring_blueprint_errors bridge method.",
   "editor.request_editor_shutdown": "Asks the running editor to shut itself down over the bridge.",
 };
 
