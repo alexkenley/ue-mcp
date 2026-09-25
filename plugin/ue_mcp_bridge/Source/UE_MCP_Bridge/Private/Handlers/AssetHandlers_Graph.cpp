@@ -222,15 +222,14 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadAssetGraph(const TSharedPtr<FJsonObje
 	MCP_CHECK_GAME_THREAD();
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const FString GraphFilter = OptionalString(Params, TEXT("graphName"));
+	const bool bIncludePins = OptionalBool(Params, TEXT("includePins"), true);
+	const int32 MaxNodes = FMath::Clamp(OptionalInt(Params, TEXT("maxNodes"), 500), 1, 5000);
 
 	TSharedPtr<FJsonValue> LoadError;
 	UObject* Asset = MCPRequireAssetObject(AssetPath, LoadError);
 	if (!Asset) return LoadError;
-
-	const FString GraphFilter = OptionalString(Params, TEXT("graphName"));
-	const bool bIncludePins = OptionalBool(Params, TEXT("includePins"), true);
-	const int32 MaxNodes = FMath::Clamp(OptionalInt(Params, TEXT("maxNodes"), 500), 1, 5000);
 
 	// A type with a category that already reads its graph is sent there rather
 	// than answered twice in two shapes. blueprint(get_connections) addresses
@@ -378,12 +377,13 @@ namespace
 
 	TSharedPtr<FJsonValue> MCPGraphAuthorBegin(const TSharedPtr<FJsonObject>& Params, FMCPGraphAuthorContext& Ctx)
 	{
-		if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), Ctx.AssetPath)) return Err;
+		if (auto Err = RequireString(Params, TEXT("assetPath"), Ctx.AssetPath)) return Err;
+		Ctx.bSave = OptionalBool(Params, TEXT("save"), true);
+		const FString GraphName = OptionalString(Params, TEXT("graphName"));
 
 		TSharedPtr<FJsonValue> LoadError;
 		Ctx.Asset = MCPRequireAssetObject(Ctx.AssetPath, LoadError);
 		if (!Ctx.Asset) return LoadError;
-		Ctx.bSave = OptionalBool(Params, TEXT("save"), true);
 
 		if (const TCHAR* Owner = MCPGraphAuthorOwnerFor(Ctx.Asset))
 		{
@@ -404,7 +404,6 @@ namespace
 				*Ctx.AssetPath, *Ctx.Asset->GetClass()->GetName(), *MCPGraphMissingHint(Ctx.Asset)));
 		}
 
-		const FString GraphName = OptionalString(Params, TEXT("graphName"));
 		if (GraphName.IsEmpty())
 		{
 			Ctx.Graphs = All;
@@ -523,22 +522,44 @@ namespace
 		return FString::Join(Out, TEXT("; "));
 	}
 
+	/** How one end of a link is addressed: <Role>Node, <Role>Pin, <Role>PinId, <Role>PinDirection. */
+	struct FMCPGraphPinAddress
+	{
+		FString Role;
+		FString NodeSpec;
+		FString PinName;
+		FString PinIdText;
+		FString DirectionText;
+	};
+
+	/** Read one end's addressing parameters. Called before the asset loads, so every one is read (#1057). */
+	FMCPGraphPinAddress MCPGraphReadPinAddress(const TSharedPtr<FJsonObject>& Params, const FString& Role)
+	{
+		FMCPGraphPinAddress Address;
+		Address.Role = Role;
+		Address.NodeSpec = OptionalString(Params, *(Role + TEXT("Node")));
+		Address.PinName = OptionalString(Params, *(Role + TEXT("Pin")));
+		Address.PinIdText = OptionalString(Params, *(Role + TEXT("PinId")));
+		Address.DirectionText = OptionalString(Params, *(Role + TEXT("PinDirection")));
+		return Address;
+	}
+
 	/** One pin, addressed by <Role>Node plus <Role>PinId (preferred) or <Role>Pin and <Role>PinDirection. */
 	UEdGraphPin* MCPGraphAuthorResolvePin(
-		const TSharedPtr<FJsonObject>& Params,
+		const FMCPGraphPinAddress& Address,
 		const TArray<UEdGraph*>& Graphs,
-		const FString& Role,
 		EEdGraphPinDirection PreferredDirection,
 		FString& OutError)
 	{
+		const FString& Role = Address.Role;
 		const FString NodeKey = Role + TEXT("Node");
 		const FString PinKey = Role + TEXT("Pin");
 		const FString PinIdKey = Role + TEXT("PinId");
 		const FString DirectionKey = Role + TEXT("PinDirection");
-		const FString NodeSpec = OptionalString(Params, *NodeKey);
-		const FString PinName = OptionalString(Params, *PinKey);
-		const FString PinIdText = OptionalString(Params, *PinIdKey);
-		const FString DirectionText = OptionalString(Params, *DirectionKey);
+		const FString& NodeSpec = Address.NodeSpec;
+		const FString& PinName = Address.PinName;
+		const FString& PinIdText = Address.PinIdText;
+		const FString& DirectionText = Address.DirectionText;
 
 		if (PinName.IsEmpty() && PinIdText.IsEmpty())
 		{
@@ -894,13 +915,15 @@ namespace
 TSharedPtr<FJsonValue> FAssetHandlers::ConnectGraphPins(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	const FMCPGraphPinAddress SourceAddress = MCPGraphReadPinAddress(Params, TEXT("source"));
+	const FMCPGraphPinAddress TargetAddress = MCPGraphReadPinAddress(Params, TEXT("target"));
 	FMCPGraphAuthorContext Ctx;
 	if (auto Err = MCPGraphAuthorBegin(Params, Ctx)) return Err;
 
 	FString Error;
-	UEdGraphPin* A = MCPGraphAuthorResolvePin(Params, Ctx.Graphs, TEXT("source"), EGPD_Output, Error);
+	UEdGraphPin* A = MCPGraphAuthorResolvePin(SourceAddress, Ctx.Graphs, EGPD_Output, Error);
 	if (!A) return MCPError(Error);
-	UEdGraphPin* B = MCPGraphAuthorResolvePin(Params, Ctx.Graphs, TEXT("target"), EGPD_Input, Error);
+	UEdGraphPin* B = MCPGraphAuthorResolvePin(TargetAddress, Ctx.Graphs, EGPD_Input, Error);
 	if (!B) return MCPError(Error);
 	if (A == B) return MCPError(TEXT("The source and target resolve to the same pin."));
 
@@ -1003,18 +1026,20 @@ TSharedPtr<FJsonValue> FAssetHandlers::ConnectGraphPins(const TSharedPtr<FJsonOb
 TSharedPtr<FJsonValue> FAssetHandlers::DisconnectGraphPins(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	const FMCPGraphPinAddress SourceAddress = MCPGraphReadPinAddress(Params, TEXT("source"));
+	const FMCPGraphPinAddress TargetAddress = MCPGraphReadPinAddress(Params, TEXT("target"));
 	FMCPGraphAuthorContext Ctx;
 	if (auto Err = MCPGraphAuthorBegin(Params, Ctx)) return Err;
 
 	FString Error;
-	UEdGraphPin* A = MCPGraphAuthorResolvePin(Params, Ctx.Graphs, TEXT("source"), EGPD_Output, Error);
+	UEdGraphPin* A = MCPGraphAuthorResolvePin(SourceAddress, Ctx.Graphs, EGPD_Output, Error);
 	if (!A) return MCPError(Error);
 
-	const bool bHasTarget = !OptionalString(Params, TEXT("targetPinId")).IsEmpty() || !OptionalString(Params, TEXT("targetPin")).IsEmpty();
+	const bool bHasTarget = !TargetAddress.PinIdText.IsEmpty() || !TargetAddress.PinName.IsEmpty();
 	UEdGraphPin* B = nullptr;
 	if (bHasTarget)
 	{
-		B = MCPGraphAuthorResolvePin(Params, Ctx.Graphs, TEXT("target"), EGPD_Input, Error);
+		B = MCPGraphAuthorResolvePin(TargetAddress, Ctx.Graphs, EGPD_Input, Error);
 		if (!B) return MCPError(Error);
 	}
 
@@ -1087,6 +1112,12 @@ TSharedPtr<FJsonValue> FAssetHandlers::DisconnectGraphPins(const TSharedPtr<FJso
 TSharedPtr<FJsonValue> FAssetHandlers::AddGraphNode(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	// Every parameter is read before anything can fail (#1057).
+	const FString NodeClassSpec = OptionalString(Params, TEXT("nodeClass"));
+	const FString ActionName = OptionalString(Params, TEXT("actionName"));
+	const FString SpawnMode = OptionalString(Params, TEXT("spawnMode"), TEXT("auto")).ToLower();
+	const double PosX = OptionalNumber(Params, TEXT("posX"), 0.0);
+	const double PosY = OptionalNumber(Params, TEXT("posY"), 0.0);
 	FMCPGraphAuthorContext Ctx;
 	if (auto Err = MCPGraphAuthorBegin(Params, Ctx)) return Err;
 
@@ -1101,9 +1132,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::AddGraphNode(const TSharedPtr<FJsonObject
 	const UEdGraphSchema* Schema = Graph->GetSchema();
 	if (!Schema) return MCPError(FString::Printf(TEXT("Graph '%s' has no schema, so no node can be created in it."), *Graph->GetName()));
 
-	const FString NodeClassSpec = OptionalString(Params, TEXT("nodeClass"));
-	const FString ActionName = OptionalString(Params, TEXT("actionName"));
-	const FString SpawnMode = OptionalString(Params, TEXT("spawnMode"), TEXT("auto")).ToLower();
 	if (SpawnMode != TEXT("auto") && SpawnMode != TEXT("action") && SpawnMode != TEXT("direct"))
 	{
 		return MCPError(FString::Printf(TEXT("spawnMode must be auto, action or direct, not '%s'."), *SpawnMode));
@@ -1123,8 +1151,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::AddGraphNode(const TSharedPtr<FJsonObject
 		NodeClass = MCPResolveClass(NodeClassSpec);
 		if (!NodeClass) return MCPClassNotFoundError(NodeClassSpec, TEXT("nodeClass"));
 	}
-	const double PosX = OptionalNumber(Params, TEXT("posX"), 0.0);
-	const double PosY = OptionalNumber(Params, TEXT("posY"), 0.0);
 
 	TSharedPtr<FEdGraphSchemaAction> Chosen;
 	TArray<FMCPGraphAuthorActionInfo> Infos;
@@ -1261,11 +1287,12 @@ TSharedPtr<FJsonValue> FAssetHandlers::AddGraphNode(const TSharedPtr<FJsonObject
 TSharedPtr<FJsonValue> FAssetHandlers::RemoveGraphNode(const TSharedPtr<FJsonObject>& Params)
 {
 	MCP_CHECK_GAME_THREAD();
+	FString NodeSpec;
+	const TSharedPtr<FJsonValue> MissingNode = RequireString(Params, TEXT("node"), NodeSpec);
 	FMCPGraphAuthorContext Ctx;
 	if (auto Err = MCPGraphAuthorBegin(Params, Ctx)) return Err;
+	if (MissingNode) return MissingNode;
 
-	FString NodeSpec;
-	if (auto Err = RequireString(Params, TEXT("node"), NodeSpec)) return Err;
 	FString Error;
 	UEdGraphNode* Node = MCPGraphAuthorResolveNode(Ctx.Graphs, NodeSpec, TEXT("node"), Error);
 	if (!Node) return MCPError(Error);
@@ -1490,6 +1517,9 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateCustomizableObject(const TSharedPtr
 	FString Name;
 	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
 	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game"));
+	// Every parameter is read before anything can fail (#1057).
+	FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
 	while (PackagePath.Len() > 1 && PackagePath.EndsWith(TEXT("/"))) PackagePath.LeftChopInline(1);
 	FText InvalidReason;
 	if (!FPackageName::IsValidLongPackageName(PackagePath + TEXT("/") + Name, true, &InvalidReason))
@@ -1498,13 +1528,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateCustomizableObject(const TSharedPtr
 	}
 	if (MCPIsProtectedAssetPath(PackagePath)) return MCPProtectedPathError(PackagePath);
 
-	FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 	OnConflict.ToLowerInline();
 	if (OnConflict != TEXT("skip") && OnConflict != TEXT("error"))
 	{
 		return MCPError(TEXT("onConflict must be 'skip' or 'error'"));
 	}
-	const bool bSave = OptionalBool(Params, TEXT("save"), true);
 
 	UClass* ObjectClass = FindObject<UClass>(nullptr, TEXT("/Script/CustomizableObject.CustomizableObject"));
 	if (!ObjectClass)

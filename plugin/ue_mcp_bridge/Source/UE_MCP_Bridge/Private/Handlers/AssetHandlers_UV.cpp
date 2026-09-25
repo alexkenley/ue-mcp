@@ -426,15 +426,15 @@ TSharedPtr<FJsonValue> MCPUvUnsupported(
 
 TSharedPtr<FJsonValue> MCPUvResolveTarget(const TSharedPtr<FJsonObject>& Params, FMCPUvTarget& Out)
 {
+	// `path` is an alias the registry resolves to assetPath before dispatch (#1057).
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	Out.AssetPath = AssetPath;
+	Out.LodIndex = OptionalInt(Params, TEXT("lodIndex"), 0);
 
 	UObject* Object = MCPLoadAssetObject(AssetPath);
 	if (!Object) return MCPAssetNotFoundError(AssetPath, TEXT("Mesh asset"));
 	Out.Asset = Object;
-
-	Out.LodIndex = OptionalInt(Params, TEXT("lodIndex"), 0);
 
 	if (UStaticMesh* SM = Cast<UStaticMesh>(Object))
 	{
@@ -997,16 +997,16 @@ void MCPUvWriteAssetHeader(const TSharedPtr<FJsonObject>& Out, const FMCPUvTarge
 #endif
 }
 
-/** Which channels a read should report, defaulting to all of them. */
+/** Which channels a read should report, defaulting to all of them. Requested
+ *  is the caller's `channels` array, read before the mesh loads (#1057). */
 TSharedPtr<FJsonValue> MCPUvSelectChannels(
-	const TSharedPtr<FJsonObject>& Params,
+	const TArray<TSharedPtr<FJsonValue>>* Requested,
 	const FMCPUvTarget& Target,
 	int32 ChannelCount,
 	TArray<int32>& OutChannels)
 {
 	OutChannels.Reset();
-	const TArray<TSharedPtr<FJsonValue>>* Requested = nullptr;
-	if (TryGetArrayParam(Params, TEXT("channels"), Requested) && Requested)
+	if (Requested)
 	{
 		for (const TSharedPtr<FJsonValue>& Entry : *Requested)
 		{
@@ -1055,7 +1055,7 @@ struct FMCPUvSelection
 };
 
 TSharedPtr<FJsonValue> MCPUvParseSelection(
-	const TSharedPtr<FJsonObject>& Params,
+	const TSharedPtr<FJsonObject>* SelectionPtr,
 	const FMCPUvTarget& Target,
 	FMeshDescription& Desc,
 	int32 Channel,
@@ -1065,8 +1065,8 @@ TSharedPtr<FJsonValue> MCPUvParseSelection(
 	Out.TriangleMask.Init(false, TriangleArraySize);
 	Out.Report = MakeShared<FJsonObject>();
 
-	const TSharedPtr<FJsonObject>* SelectionPtr = nullptr;
-	if (!TryGetObjectParam(Params, TEXT("selection"), SelectionPtr) || !SelectionPtr || !SelectionPtr->IsValid())
+	// SelectionPtr is the caller's `selection` object, read before the mesh loads (#1057).
+	if (!SelectionPtr || !SelectionPtr->IsValid())
 	{
 		Out.Mode = TEXT("all");
 		for (const FTriangleID TriangleID : Desc.Triangles().GetElementIDs())
@@ -1317,16 +1317,20 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadUvChannels(const TSharedPtr<FJsonObje
 {
 	MCP_CHECK_GAME_THREAD();
 
+	// Every parameter is read before the mesh loads (#1057).
+	const bool bIncludeIslands = OptionalBool(Params, TEXT("includeIslands"), true);
+	const bool bIncludeOverlap = OptionalBool(Params, TEXT("includeOverlap"), true);
+	const int32 RasterSize = MCPUvClampRasterSize(Params);
+	const TArray<TSharedPtr<FJsonValue>>* RequestedChannels = nullptr;
+	if (!TryGetArrayParam(Params, TEXT("channels"), RequestedChannels)) RequestedChannels = nullptr;
+
 	FMCPUvTarget Target;
 	if (auto Err = MCPUvResolveTarget(Params, Target)) return Err;
 
 	const int32 ChannelCount = MCPUvChannelCount(*Target.Desc);
-	const bool bIncludeIslands = OptionalBool(Params, TEXT("includeIslands"), true);
-	const bool bIncludeOverlap = OptionalBool(Params, TEXT("includeOverlap"), true);
-	const int32 RasterSize = MCPUvClampRasterSize(Params);
 
 	TArray<int32> Channels;
-	if (auto Err = MCPUvSelectChannels(Params, Target, ChannelCount, Channels)) return Err;
+	if (auto Err = MCPUvSelectChannels(RequestedChannels, Target, ChannelCount, Channels)) return Err;
 
 	const int32 LightmapChannel = MCPUvLightmapChannel(Target);
 	TVertexInstanceAttributesRef<FVector2f> UVs = MCPUvAttributes(*Target.Desc);
@@ -1365,6 +1369,19 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetUvChannelCount(const TSharedPtr<FJsonO
 {
 	MCP_CHECK_GAME_THREAD();
 
+	// Every parameter is read before the mesh loads (#1057).
+	const FString Op = OptionalString(Params, TEXT("op"), TEXT("set")).ToLower();
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
+	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
+	const bool bHasChannelCount = HasParam(Params, TEXT("channelCount"));
+	int32 RequestedChannelCount = 0;
+	const bool bChannelCountIsNumber = TryGetNumberParam(Params, TEXT("channelCount"), RequestedChannelCount);
+	const int32 AddCount = FMath::Max(1, OptionalInt(Params, TEXT("count"), 1));
+	const bool bHasRemoveChannel = HasParam(Params, TEXT("channel"));
+	const int32 RemoveChannel = OptionalInt(Params, TEXT("channel"), INDEX_NONE);
+	const int32 CopyFromChannel = OptionalInt(Params, TEXT("fromChannel"), INDEX_NONE);
+	const int32 CopyToChannel = OptionalInt(Params, TEXT("toChannel"), INDEX_NONE);
+
 	FMCPUvTarget Target;
 	if (auto Err = MCPUvResolveTarget(Params, Target)) return Err;
 	if (MCPIsProtectedAssetPath(Target.AssetPath)) return MCPProtectedPathError(Target.AssetPath);
@@ -1374,9 +1391,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetUvChannelCount(const TSharedPtr<FJsonO
 	}
 
 	const int32 PreviousCount = MCPUvChannelCount(*Target.Desc);
-	const FString Op = OptionalString(Params, TEXT("op"), TEXT("set")).ToLower();
-	const bool bSave = OptionalBool(Params, TEXT("save"), true);
-	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
 
 	int32 TargetCount = PreviousCount;
 	int32 FromChannel = INDEX_NONE;
@@ -1385,28 +1399,28 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetUvChannelCount(const TSharedPtr<FJsonO
 
 	if (Op == TEXT("set"))
 	{
-		if (!HasParam(Params, TEXT("channelCount")))
+		if (!bHasChannelCount)
 		{
 			return MCPError(FString::Printf(
 				TEXT("op='set' needs 'channelCount'. LOD %d of '%s' currently has %d channel(s); pass a number ")
 					TEXT("between 1 and %d."),
 				Target.LodIndex, *Target.AssetPath, PreviousCount, MCPUvMaxChannels));
 		}
-		TargetCount = OptionalInt(Params, TEXT("channelCount"), PreviousCount);
+		TargetCount = bChannelCountIsNumber ? RequestedChannelCount : PreviousCount;
 	}
 	else if (Op == TEXT("add"))
 	{
-		TargetCount = PreviousCount + FMath::Max(1, OptionalInt(Params, TEXT("count"), 1));
+		TargetCount = PreviousCount + AddCount;
 	}
 	else if (Op == TEXT("remove"))
 	{
-		if (!HasParam(Params, TEXT("channel")))
+		if (!bHasRemoveChannel)
 		{
 			return MCPError(FString::Printf(
 				TEXT("op='remove' needs 'channel', the index to remove. LOD %d of '%s' has %d channel(s)."),
 				Target.LodIndex, *Target.AssetPath, PreviousCount));
 		}
-		const int32 Channel = OptionalInt(Params, TEXT("channel"), INDEX_NONE);
+		const int32 Channel = RemoveChannel;
 		if (Channel < 0 || Channel >= PreviousCount)
 		{
 			return MCPUvBadChannel(Target.AssetPath, TEXT("channel"), Channel, PreviousCount, Target.LodIndex);
@@ -1423,8 +1437,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetUvChannelCount(const TSharedPtr<FJsonO
 	}
 	else if (Op == TEXT("copy"))
 	{
-		FromChannel = OptionalInt(Params, TEXT("fromChannel"), INDEX_NONE);
-		ToChannel = OptionalInt(Params, TEXT("toChannel"), INDEX_NONE);
+		FromChannel = CopyFromChannel;
+		ToChannel = CopyToChannel;
 		if (FromChannel < 0 || FromChannel >= PreviousCount)
 		{
 			return MCPUvBadChannel(Target.AssetPath, TEXT("fromChannel"), FromChannel, PreviousCount, Target.LodIndex);
@@ -1628,20 +1642,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::TransformUvs(const TSharedPtr<FJsonObject
 {
 	MCP_CHECK_GAME_THREAD();
 
-	FMCPUvTarget Target;
-	if (auto Err = MCPUvResolveTarget(Params, Target)) return Err;
-	if (MCPIsProtectedAssetPath(Target.AssetPath)) return MCPProtectedPathError(Target.AssetPath);
-	if (auto Blocked = MCPAssetWriteBlockedError(Target.Asset, Target.AssetPath, TEXT("transform UVs")))
-	{
-		return Blocked;
-	}
-
-	const int32 ChannelCount = MCPUvChannelCount(*Target.Desc);
+	// Every parameter is read before the mesh loads (#1057).
 	const int32 Channel = OptionalInt(Params, TEXT("channel"), 0);
-	if (Channel < 0 || Channel >= ChannelCount)
-	{
-		return MCPUvBadChannel(Target.AssetPath, TEXT("channel"), Channel, ChannelCount, Target.LodIndex);
-	}
 
 	// ── The transform ────────────────────────────────────────────────────────
 	FVector2D Translation(0.0, 0.0);
@@ -1658,14 +1660,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::TransformUvs(const TSharedPtr<FJsonObject
 	{
 		Scale.X = OptionalNumber(*ScaleObj, TEXT("u"), 1.0);
 		Scale.Y = OptionalNumber(*ScaleObj, TEXT("v"), 1.0);
-	}
-	if (FMath::IsNearlyZero(Scale.X) || FMath::IsNearlyZero(Scale.Y))
-	{
-		return MCPError(FString::Printf(
-			TEXT("scale {u:%g, v:%g} collapses the UVs onto a line or a point, which destroys the channel and has ")
-				TEXT("no inverse, so this call refuses rather than emitting a rollback record it cannot honour. ")
-				TEXT("Use a non-zero scale on both axes."),
-			Scale.X, Scale.Y));
 	}
 
 	const double RotationDegrees = OptionalNumber(Params, TEXT("rotate"), 0.0);
@@ -1685,6 +1679,34 @@ TSharedPtr<FJsonValue> FAssetHandlers::TransformUvs(const TSharedPtr<FJsonObject
 	// exists so the rollback record this call emits is exact rather than
 	// approximately right.
 	const FString Order = OptionalString(Params, TEXT("order"), TEXT("flipScaleRotateTranslate"));
+	const TSharedPtr<FJsonObject>* SelectionObj = nullptr;
+	if (!TryGetObjectParam(Params, TEXT("selection"), SelectionObj)) SelectionObj = nullptr;
+	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
+
+	FMCPUvTarget Target;
+	if (auto Err = MCPUvResolveTarget(Params, Target)) return Err;
+	if (MCPIsProtectedAssetPath(Target.AssetPath)) return MCPProtectedPathError(Target.AssetPath);
+	if (auto Blocked = MCPAssetWriteBlockedError(Target.Asset, Target.AssetPath, TEXT("transform UVs")))
+	{
+		return Blocked;
+	}
+
+	const int32 ChannelCount = MCPUvChannelCount(*Target.Desc);
+	if (Channel < 0 || Channel >= ChannelCount)
+	{
+		return MCPUvBadChannel(Target.AssetPath, TEXT("channel"), Channel, ChannelCount, Target.LodIndex);
+	}
+
+	if (FMath::IsNearlyZero(Scale.X) || FMath::IsNearlyZero(Scale.Y))
+	{
+		return MCPError(FString::Printf(
+			TEXT("scale {u:%g, v:%g} collapses the UVs onto a line or a point, which destroys the channel and has ")
+				TEXT("no inverse, so this call refuses rather than emitting a rollback record it cannot honour. ")
+				TEXT("Use a non-zero scale on both axes."),
+			Scale.X, Scale.Y));
+	}
+
 	const bool bForward = Order.Equals(TEXT("flipScaleRotateTranslate"), ESearchCase::IgnoreCase);
 	const bool bInverse = Order.Equals(TEXT("translateRotateScaleFlip"), ESearchCase::IgnoreCase);
 	if (!bForward && !bInverse)
@@ -1700,7 +1722,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::TransformUvs(const TSharedPtr<FJsonObject
 		&& FMath::IsNearlyZero(RotationDegrees);
 
 	FMCPUvSelection Selection;
-	if (auto Err = MCPUvParseSelection(Params, Target, *Target.Desc, Channel, Selection)) return Err;
+	if (auto Err = MCPUvParseSelection(SelectionObj, Target, *Target.Desc, Channel, Selection)) return Err;
 
 	if (Selection.SelectedTriangles == 0)
 	{
@@ -1710,9 +1732,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::TransformUvs(const TSharedPtr<FJsonObject
 				TEXT("because a mistyped filter and a deliberate no-op look identical otherwise."),
 			Target.LodIndex, Channel, *Target.AssetPath));
 	}
-
-	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
-	const bool bSave = OptionalBool(Params, TEXT("save"), true);
 
 	if (bIdentity)
 	{
@@ -1859,8 +1878,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::TransformUvs(const TSharedPtr<FJsonObject
 	Payload->SetStringField(TEXT("order"), bForward
 		? TEXT("translateRotateScaleFlip") : TEXT("flipScaleRotateTranslate"));
 	Payload->SetBoolField(TEXT("save"), bSave);
-	if (const TSharedPtr<FJsonObject>* SelectionObj = nullptr;
-		TryGetObjectParam(Params, TEXT("selection"), SelectionObj) && SelectionObj)
+	if (SelectionObj)
 	{
 		Payload->SetObjectField(TEXT("selection"), *SelectionObj);
 	}
@@ -1895,6 +1913,21 @@ TSharedPtr<FJsonValue> FAssetHandlers::UnwrapUvs(const TSharedPtr<FJsonObject>& 
 {
 	MCP_CHECK_GAME_THREAD();
 
+	// Every parameter is read before the mesh loads (#1057).
+	const FString Method = OptionalString(Params, TEXT("method"), TEXT("xatlas")).ToLower();
+	const int32 Channel = OptionalInt(Params, TEXT("channel"), 0);
+	const bool bPack = OptionalBool(Params, TEXT("pack"), true);
+	const int32 TextureResolution = FMath::Clamp(OptionalInt(Params, TEXT("textureResolution"), 1024), 16, 8192);
+	const int32 MaxIterations = FMath::Clamp(OptionalInt(Params, TEXT("maxIterations"), 2), 1, 16);
+	const int32 InitialPatchCount = FMath::Clamp(OptionalInt(Params, TEXT("initialPatchCount"), 100), 1, 10000);
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
+	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
+	const bool bPreserveVertexOrder = OptionalBool(Params, TEXT("preserveVertexOrder"), true);
+	const FTransform ProjectionTransform = OptionalTransform(Params, TEXT("projectionTransform"));
+	const int32 BackupToChannel = OptionalInt(Params, TEXT("backupToChannel"), INDEX_NONE);
+	const FString IslandSource = OptionalString(Params, TEXT("islandSource"), TEXT("UVIslands"));
+	const int32 RasterSize = MCPUvClampRasterSize(Params);
+
 	FMCPUvTarget Target;
 	if (auto Err = MCPUvResolveTarget(Params, Target)) return Err;
 	if (MCPIsProtectedAssetPath(Target.AssetPath)) return MCPProtectedPathError(Target.AssetPath);
@@ -1903,7 +1936,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::UnwrapUvs(const TSharedPtr<FJsonObject>& 
 		return Blocked;
 	}
 
-	const FString Method = OptionalString(Params, TEXT("method"), TEXT("xatlas")).ToLower();
 	static const TCHAR* const KnownMethods =
 		TEXT("xatlas, patchBuilder, expMap, conformal, spectralConformal, planar, box, cylinder");
 	const bool bKnownMethod =
@@ -1916,7 +1948,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::UnwrapUvs(const TSharedPtr<FJsonObject>& 
 	}
 
 	const int32 PreviousCount = MCPUvChannelCount(*Target.Desc);
-	const int32 Channel = OptionalInt(Params, TEXT("channel"), 0);
 	if (Channel < 0 || Channel >= MCPUvMaxChannels)
 	{
 		return MCPError(FString::Printf(
@@ -1925,16 +1956,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::UnwrapUvs(const TSharedPtr<FJsonObject>& 
 			Channel, MCPUvMaxChannels - 1, PreviousCount));
 	}
 	const bool bChannelExisted = Channel < PreviousCount;
-
-	const bool bPack = OptionalBool(Params, TEXT("pack"), true);
-	const int32 TextureResolution = FMath::Clamp(OptionalInt(Params, TEXT("textureResolution"), 1024), 16, 8192);
-	const int32 MaxIterations = FMath::Clamp(OptionalInt(Params, TEXT("maxIterations"), 2), 1, 16);
-	const int32 InitialPatchCount = FMath::Clamp(OptionalInt(Params, TEXT("initialPatchCount"), 100), 1, 10000);
-	const bool bSave = OptionalBool(Params, TEXT("save"), true);
-	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
-	const bool bPreserveVertexOrder = OptionalBool(Params, TEXT("preserveVertexOrder"), true);
-	const FTransform ProjectionTransform = OptionalTransform(Params, TEXT("projectionTransform"));
-	const int32 BackupToChannel = OptionalInt(Params, TEXT("backupToChannel"), INDEX_NONE);
 
 	if (BackupToChannel != INDEX_NONE
 		&& (BackupToChannel < 0 || BackupToChannel >= MCPUvMaxChannels || BackupToChannel == Channel))
@@ -2133,7 +2154,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::UnwrapUvs(const TSharedPtr<FJsonObject>& 
 				return MCPUvGeometryScriptUnavailable(FString::Printf(
 					TEXT("EGeometryScriptUVFlattenMethod has no '%s' in this engine build."), *Enumerator));
 			}
-			const FString IslandSource = OptionalString(Params, TEXT("islandSource"), TEXT("UVIslands"));
 			const int64 IslandValue = MCPUvEnumValue(MCPUvGSIslandSourceEnum,
 				IslandSource.Equals(TEXT("PolyGroups"), ESearchCase::IgnoreCase) ? TEXT("PolyGroups") : TEXT("UVIslands"));
 			Unwrap.SetObject(TEXT("TargetMesh"), Dynamic);
@@ -2253,7 +2273,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::UnwrapUvs(const TSharedPtr<FJsonObject>& 
 		TVertexInstanceAttributesRef<FVector2f> UVs = MCPUvAttributes(*After.Desc);
 		MCPUvMeasure(*After.Desc, UVs, Channel, Stats);
 		MCPUvBuildIslands(*After.Desc, UVs, Channel, Stats);
-		MCPUvRasterise(*After.Desc, UVs, Channel, MCPUvClampRasterSize(Params), Stats, nullptr, nullptr);
+		MCPUvRasterise(*After.Desc, UVs, Channel, RasterSize, Stats, nullptr, nullptr);
 	}
 
 	auto Result = MCPSuccess();
@@ -2347,6 +2367,23 @@ TSharedPtr<FJsonValue> FAssetHandlers::GenerateLightmapUvs(const TSharedPtr<FJso
 {
 	MCP_CHECK_GAME_THREAD();
 
+	// Every parameter is read before the mesh loads (#1057). The ones whose
+	// default comes from the mesh's current settings resolve that default below.
+	const bool bEnable = OptionalBool(Params, TEXT("enable"), true);
+	int32 RequestedSourceChannel = 0;
+	const bool bHasSourceChannel = TryGetNumberParam(Params, TEXT("sourceChannel"), RequestedSourceChannel);
+	int32 RequestedDestinationChannel = 0;
+	const bool bHasDestinationChannel = TryGetNumberParam(Params, TEXT("destinationChannel"), RequestedDestinationChannel);
+	int32 RequestedMinResolution = 0;
+	const bool bHasMinResolution = TryGetNumberParam(Params, TEXT("minLightmapResolution"), RequestedMinResolution);
+	int32 RequestedLightmapResolution = 0;
+	const bool bHasLightmapResolution = TryGetNumberParam(Params, TEXT("lightmapResolution"), RequestedLightmapResolution);
+	const bool bSetCoordinateIndex = OptionalBool(Params, TEXT("setLightmapCoordinateIndex"), true);
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
+	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
+	const bool bForce = OptionalBool(Params, TEXT("force"), false);
+	const int32 RasterSize = MCPUvClampRasterSize(Params);
+
 	FMCPUvTarget Target;
 	if (auto Err = MCPUvResolveTarget(Params, Target)) return Err;
 	if (MCPIsProtectedAssetPath(Target.AssetPath)) return MCPProtectedPathError(Target.AssetPath);
@@ -2378,19 +2415,16 @@ TSharedPtr<FJsonValue> FAssetHandlers::GenerateLightmapUvs(const TSharedPtr<FJso
 	const int32 PreviousCoordinateIndex = Mesh->GetLightMapCoordinateIndex();
 	const int32 PreviousResolution = Mesh->GetLightMapResolution();
 
-	const bool bEnable = OptionalBool(Params, TEXT("enable"), true);
-	const int32 SourceChannel = OptionalInt(Params, TEXT("sourceChannel"), Previous.SrcLightmapIndex);
-	const int32 DestinationChannel = OptionalInt(Params, TEXT("destinationChannel"),
-		Previous.DstLightmapIndex > 0 ? Previous.DstLightmapIndex : FMath::Max(ChannelCount, 1));
+	const int32 SourceChannel = bHasSourceChannel ? RequestedSourceChannel : Previous.SrcLightmapIndex;
+	const int32 DestinationChannel = bHasDestinationChannel
+		? RequestedDestinationChannel
+		: (Previous.DstLightmapIndex > 0 ? Previous.DstLightmapIndex : FMath::Max(ChannelCount, 1));
 	const int32 MinResolution = FMath::Clamp(
-		OptionalInt(Params, TEXT("minLightmapResolution"), Previous.MinLightmapResolution > 0 ? Previous.MinLightmapResolution : 64),
+		bHasMinResolution ? RequestedMinResolution : (Previous.MinLightmapResolution > 0 ? Previous.MinLightmapResolution : 64),
 		4, 4096);
 	const int32 LightmapResolution = FMath::Clamp(
-		OptionalInt(Params, TEXT("lightmapResolution"), PreviousResolution > 0 ? PreviousResolution : MinResolution),
+		bHasLightmapResolution ? RequestedLightmapResolution : (PreviousResolution > 0 ? PreviousResolution : MinResolution),
 		4, 4096);
-	const bool bSetCoordinateIndex = OptionalBool(Params, TEXT("setLightmapCoordinateIndex"), true);
-	const bool bSave = OptionalBool(Params, TEXT("save"), true);
-	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
 
 	if (SourceChannel < 0 || SourceChannel >= FMath::Max(ChannelCount, 1))
 	{
@@ -2435,8 +2469,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::GenerateLightmapUvs(const TSharedPtr<FJso
 		Out->SetBoolField(TEXT("previouslyEnabled"), Previous.bGenerateLightmapUVs != 0);
 	};
 
-	if (bSettingsAlreadyMatch && bChannelAlreadyPresent && !bDryRun
-		&& OptionalBool(Params, TEXT("force"), false) == false)
+	if (bSettingsAlreadyMatch && bChannelAlreadyPresent && !bDryRun && !bForce)
 	{
 		// Idempotent replay. The settings are the ones asked for AND the channel
 		// the build would produce is already there, so a rebuild would burn
@@ -2446,7 +2479,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::GenerateLightmapUvs(const TSharedPtr<FJso
 		TVertexInstanceAttributesRef<FVector2f> UVs = MCPUvAttributes(*Target.Desc);
 		MCPUvMeasure(*Target.Desc, UVs, DestinationChannel, Stats);
 		MCPUvBuildIslands(*Target.Desc, UVs, DestinationChannel, Stats);
-		MCPUvRasterise(*Target.Desc, UVs, DestinationChannel, MCPUvClampRasterSize(Params), Stats, nullptr, nullptr);
+		MCPUvRasterise(*Target.Desc, UVs, DestinationChannel, RasterSize, Stats, nullptr, nullptr);
 
 		auto Existing = MCPSuccess();
 		DescribeOutcome(Existing, Target);
@@ -2519,7 +2552,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::GenerateLightmapUvs(const TSharedPtr<FJso
 		TVertexInstanceAttributesRef<FVector2f> UVs = MCPUvAttributes(*After.Desc);
 		MCPUvMeasure(*After.Desc, UVs, DestinationChannel, Stats);
 		MCPUvBuildIslands(*After.Desc, UVs, DestinationChannel, Stats);
-		MCPUvRasterise(*After.Desc, UVs, DestinationChannel, MCPUvClampRasterSize(Params), Stats, nullptr, nullptr);
+		MCPUvRasterise(*After.Desc, UVs, DestinationChannel, RasterSize, Stats, nullptr, nullptr);
 	}
 
 	auto Result = MCPSuccess();
@@ -2610,23 +2643,24 @@ TSharedPtr<FJsonValue> FAssetHandlers::ExportUvLayout(const TSharedPtr<FJsonObje
 {
 	MCP_CHECK_GAME_THREAD();
 
-	FMCPUvTarget Target;
-	if (auto Err = MCPUvResolveTarget(Params, Target)) return Err;
-
-	const int32 ChannelCount = MCPUvChannelCount(*Target.Desc);
+	// Every parameter is read before the mesh loads (#1057).
 	const int32 Channel = OptionalInt(Params, TEXT("channel"), 0);
-	if (Channel < 0 || Channel >= ChannelCount)
-	{
-		return MCPUvBadChannel(Target.AssetPath, TEXT("channel"), Channel, ChannelCount, Target.LodIndex);
-	}
-
 	const int32 Size = FMath::Clamp(
 		OptionalInt(Params, TEXT("imageSize"), MCPUvDefaultImageSize), 64, MCPUvMaxImageSize);
 	const bool bShowIslands = OptionalBool(Params, TEXT("showIslands"), true);
 	const bool bShowOverlaps = OptionalBool(Params, TEXT("showOverlaps"), true);
 	const bool bShowGrid = OptionalBool(Params, TEXT("showGrid"), true);
-
 	FString OutputPath = OptionalString(Params, TEXT("outputPath"));
+
+	FMCPUvTarget Target;
+	if (auto Err = MCPUvResolveTarget(Params, Target)) return Err;
+
+	const int32 ChannelCount = MCPUvChannelCount(*Target.Desc);
+	if (Channel < 0 || Channel >= ChannelCount)
+	{
+		return MCPUvBadChannel(Target.AssetPath, TEXT("channel"), Channel, ChannelCount, Target.LodIndex);
+	}
+
 	if (OutputPath.IsEmpty())
 	{
 		const FMCPAssetPathForms Forms = MCPAssetPathForms(Target.AssetPath);
@@ -2806,14 +2840,18 @@ TSharedPtr<FJsonValue> FAssetHandlers::CheckUvs(const TSharedPtr<FJsonObject>& P
 {
 	MCP_CHECK_GAME_THREAD();
 
+	// Every parameter is read before the mesh loads (#1057).
+	const int32 RasterSize = MCPUvClampRasterSize(Params);
+	const double MaxOverlapFraction = FMath::Clamp(
+		OptionalNumber(Params, TEXT("maxOverlapFraction"), 0.001), 0.0, 1.0);
+	bool bRequestedRequireLightmap = false;
+	const bool bHasRequireLightmap = TryGetBoolParam(Params, TEXT("requireLightmapChannel"), bRequestedRequireLightmap);
+
 	FMCPUvTarget Target;
 	if (auto Err = MCPUvResolveTarget(Params, Target)) return Err;
 
 	const int32 ChannelCount = MCPUvChannelCount(*Target.Desc);
-	const int32 RasterSize = MCPUvClampRasterSize(Params);
-	const double MaxOverlapFraction = FMath::Clamp(
-		OptionalNumber(Params, TEXT("maxOverlapFraction"), 0.001), 0.0, 1.0);
-	const bool bRequireLightmap = OptionalBool(Params, TEXT("requireLightmapChannel"), Target.StaticMesh != nullptr);
+	const bool bRequireLightmap = bHasRequireLightmap ? bRequestedRequireLightmap : (Target.StaticMesh != nullptr);
 	const int32 LightmapChannel = MCPUvLightmapChannel(Target);
 
 	TArray<TSharedPtr<FJsonValue>> Issues;

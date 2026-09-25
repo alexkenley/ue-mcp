@@ -431,7 +431,10 @@ describe("actionSchema", () => {
     expect(schema.drift).toEqual([]);
 
     const byName = new Map(schema.params.map((p) => [p.name, p]));
-    expect(byName.get("assetPath")?.required).toBe(true);
+    // #1057: the handler's spec takes `path` as an alias of assetPath, so the
+    // two are one required choice rather than a bare required name.
+    expect(byName.get("assetPath")?.alternativeGroup).toBeDefined();
+    expect(byName.get("path")?.alternativeGroup).toBe(byName.get("assetPath")?.alternativeGroup);
     expect(byName.get("propertyName")?.required).toBe(true);
     expect(byName.get("save")?.required).toBe(false);
     expect(byName.get("save")?.type).toBe("boolean");

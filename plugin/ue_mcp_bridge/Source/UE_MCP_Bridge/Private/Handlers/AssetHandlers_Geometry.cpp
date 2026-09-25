@@ -443,15 +443,33 @@ FGeometryWeldKey MakeGeometryWeldKey(const FVector3f& Position)
 void FAssetGeometryHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("asset"));
-	Registry.RegisterHandler(TEXT("get_mesh_geometry"), &GetMeshGeometry);
-	Registry.RegisterHandler(TEXT("measure_mesh_geometry"), &MeasureMeshGeometry);
+
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else. The TS surface for it is generated from a recording of these
+	// (npm run specs:record, then npm run specs:generate), and each alias is
+	// resolved to its parameter by the registry before the handler runs.
+	using EType = EMCPParamType;
+	Registry.RegisterHandler(TEXT("get_mesh_geometry"), &GetMeshGeometry, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("LOD to read (default 0)")),
+		MCPParam::Optional(TEXT("sectionIndex"), EType::Integer, TEXT("One render section (omit for every section)")),
+		MCPParam::Optional(TEXT("include"), EType::Array, TEXT("positions | uvs | normals | triangles (omit for all four)")).Items(EType::String),
+		MCPParam::Optional(TEXT("uvChannel"), EType::Integer, TEXT("UV channel to return (default 0)")),
+		MCPParam::Optional(TEXT("dumpToFile"), EType::Boolean, TEXT("Write the geometry JSON to a file instead of returning it")),
+		MCPParam::Optional(TEXT("outputPath"), EType::String, TEXT("File for dumpToFile; relative paths resolve under Saved/")),
+	});
+	Registry.RegisterHandler(TEXT("measure_mesh_geometry"), &MeasureMeshGeometry, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("LOD to measure (default 0)")),
+		MCPParam::Optional(TEXT("sectionIndex"), EType::Integer, TEXT("One render section (omit to measure the whole LOD)")),
+	});
 }
 
 
 TSharedPtr<FJsonValue> FAssetGeometryHandlers::GetMeshGeometry(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	const int32 LodIndex = OptionalInt(Params, TEXT("lodIndex"), 0);
 	const int32 UVChannel = OptionalInt(Params, TEXT("uvChannel"), 0);
@@ -664,7 +682,7 @@ TSharedPtr<FJsonValue> FAssetGeometryHandlers::GetMeshGeometry(const TSharedPtr<
 TSharedPtr<FJsonValue> FAssetGeometryHandlers::MeasureMeshGeometry(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	const int32 LodIndex = OptionalInt(Params, TEXT("lodIndex"), 0);
 	const bool bHasSectionIndex = HasParam(Params, TEXT("sectionIndex"));

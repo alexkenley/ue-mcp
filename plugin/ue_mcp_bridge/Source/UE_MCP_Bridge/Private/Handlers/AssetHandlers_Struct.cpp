@@ -166,7 +166,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateUserDefinedStruct(const TSharedPtr<
 TSharedPtr<FJsonValue> FAssetHandlers::ListStructFields(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UUserDefinedStruct* Struct = LoadAssetByPath<UUserDefinedStruct>(AssetPath);
 	if (!Struct) return MCPError(FString::Printf(TEXT("UserDefinedStruct not found (native structs are not editable): %s"), *AssetPath));

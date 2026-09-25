@@ -114,7 +114,15 @@ namespace
 TSharedPtr<FJsonValue> FAssetHandlers::BulkSetAssetProperties(const TSharedPtr<FJsonObject>& Params)
 {
 	const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("items"), Items) || !Items)
+	const bool bHasItems = TryGetArrayParam(Params, TEXT("items"), Items);
+	// Every parameter is read before anything can fail (#1057).
+	bool bSave = true;
+	TryGetBoolParam(Params, TEXT("save"), bSave);
+	bool bDryRun = false;
+	TryGetBoolParam(Params, TEXT("dryRun"), bDryRun);
+	bool bContinueOnError = false;
+	TryGetBoolParam(Params, TEXT("continueOnError"), bContinueOnError);
+	if (!bHasItems || !Items)
 	{
 		return MCPError(TEXT("Missing 'items' array"));
 	}
@@ -128,13 +136,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::BulkSetAssetProperties(const TSharedPtr<F
 			TEXT("'items' exceeds the maximum batch size of %d (received %d)"),
 			MaxBulkPropertyAssets, Items->Num()));
 	}
-
-	bool bSave = true;
-	TryGetBoolParam(Params, TEXT("save"), bSave);
-	bool bDryRun = false;
-	TryGetBoolParam(Params, TEXT("dryRun"), bDryRun);
-	bool bContinueOnError = false;
-	TryGetBoolParam(Params, TEXT("continueOnError"), bContinueOnError);
 
 	TArray<FPreparedAssetWrite> PreparedAssets;
 	PreparedAssets.Reserve(Items->Num());

@@ -1,100 +1,6 @@
 {
-  "handlerCount": 94,
+  "handlerCount": 118,
   "handlers": {
-    "add_anim_notify": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimSequence or AnimMontage asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "notifyName",
-          "type": "string",
-          "required": true,
-          "description": "Notify name"
-        },
-        {
-          "name": "triggerTime",
-          "type": "number",
-          "required": true,
-          "description": "Trigger time in seconds, clamped to the asset length"
-        },
-        {
-          "name": "notifyClass",
-          "type": "string",
-          "required": false,
-          "description": "UAnimNotify class to spawn: a class name, a name without the AnimNotify_ prefix, or a path"
-        },
-        {
-          "name": "notifyProperties",
-          "type": "object",
-          "required": false,
-          "description": "EditAnywhere fields to set on the spawned notify object; requires a notifyClass that resolves"
-        },
-        {
-          "name": "branchingPoint",
-          "type": "boolean",
-          "required": false,
-          "description": "Force the montage notify's tick type. The PlayMontageNotify classes default to true on a montage, everything else to the engine's queued tick (#880)"
-        }
-      ]
-    },
-    "add_anim_notify_state": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimSequence or AnimMontage asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "notifyName",
-          "type": "string",
-          "required": true,
-          "description": "Notify name"
-        },
-        {
-          "name": "notifyStateClass",
-          "type": "string",
-          "required": true,
-          "description": "UAnimNotifyState subclass: a class name, a bare suffix such as TimedParticleEffect, or a full path"
-        },
-        {
-          "name": "triggerTime",
-          "type": "number",
-          "required": true,
-          "description": "Window start in seconds"
-        },
-        {
-          "name": "duration",
-          "type": "number",
-          "required": true,
-          "description": "Window length in seconds, greater than 0"
-        },
-        {
-          "name": "notifyProperties",
-          "type": "object",
-          "required": false,
-          "description": "EditAnywhere fields to set on the spawned notify state object, validated against the class first"
-        },
-        {
-          "name": "branchingPoint",
-          "type": "boolean",
-          "required": false,
-          "description": "On a montage, tick the window as a branching point"
-        }
-      ]
-    },
     "add_curve": {
       "category": "animation",
       "params": [
@@ -115,418 +21,215 @@
         }
       ]
     },
-    "add_montage_section": {
-      "category": "animation",
+    "add_curvetable_key": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimMontage asset path",
+          "description": "CurveTable asset path",
           "aliases": [
             "path"
           ]
         },
         {
-          "name": "sectionName",
+          "name": "rowName",
           "type": "string",
           "required": true,
-          "description": "Composite section to add"
+          "description": "Row to key"
         },
         {
-          "name": "startTime",
+          "name": "time",
           "type": "number",
-          "required": false,
-          "description": "Section start in seconds; taken from the segment when segmentIndex is given"
+          "required": true,
+          "description": "Key time"
         },
         {
-          "name": "linkedSection",
+          "name": "value",
+          "type": "any",
+          "required": true,
+          "description": "Key value (a number)"
+        },
+        {
+          "name": "interpMode",
           "type": "string",
           "required": false,
-          "description": "Next section to link to"
+          "description": "linear (default) | constant | cubic | none"
         },
         {
-          "name": "segmentIndex",
+          "name": "keyTimeTolerance",
           "type": "number",
           "required": false,
-          "description": "Segment to anchor the section to, so it moves with that segment (#826)"
+          "description": "How close an existing key must be to be updated rather than added"
+        }
+      ]
+    },
+    "add_curvetable_row": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "CurveTable asset path",
+          "aliases": [
+            "path"
+          ]
         },
         {
-          "name": "slotName",
+          "name": "rowName",
+          "type": "string",
+          "required": true,
+          "description": "Row to add"
+        },
+        {
+          "name": "curveType",
           "type": "string",
           "required": false,
-          "description": "Slot holding the anchor segment; wins over slotIndex"
+          "description": "simple | rich (default: the table's type, or rich for cubic)",
+          "aliases": [
+            "mode"
+          ]
         },
         {
-          "name": "slotIndex",
+          "name": "interpMode",
+          "type": "string",
+          "required": false,
+          "description": "linear (default) | constant | cubic | none"
+        }
+      ]
+    },
+    "add_datatable_row": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "DataTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "rowName",
+          "type": "string",
+          "required": true,
+          "description": "Row to append or overwrite"
+        },
+        {
+          "name": "row",
+          "type": "object",
+          "required": true,
+          "description": "Row-struct fields to write; fields not named keep their values",
+          "aliases": [
+            "fields",
+            "data"
+          ]
+        }
+      ]
+    },
+    "add_graph_node": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "EdGraph-backed asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "graphName",
+          "type": "string",
+          "required": false,
+          "description": "Graph to author in, by name or unique substring (required when the asset has several graphs)"
+        },
+        {
+          "name": "nodeClass",
+          "type": "string",
+          "required": false,
+          "description": "Class the node action spawns"
+        },
+        {
+          "name": "actionName",
+          "type": "string",
+          "required": false,
+          "description": "Schema menu entry name, or 'category|name'"
+        },
+        {
+          "name": "spawnMode",
+          "type": "string",
+          "required": false,
+          "description": "auto (default) | action | direct"
+        },
+        {
+          "name": "posX",
           "type": "number",
           "required": false,
-          "description": "Slot index holding the anchor segment (default 0)"
+          "description": "Node X position"
+        },
+        {
+          "name": "posY",
+          "type": "number",
+          "required": false,
+          "description": "Node Y position"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the asset after the edit (default true)"
+        }
+      ]
+    },
+    "add_socket": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh, SkeletalMesh or Skeleton asset path"
+        },
+        {
+          "name": "socketName",
+          "type": "string",
+          "required": true,
+          "description": "Socket name"
+        },
+        {
+          "name": "boneName",
+          "type": "string",
+          "required": false,
+          "description": "Bone to attach to (SkeletalMesh and Skeleton, default root)"
+        },
+        {
+          "name": "relativeLocation",
+          "type": "vec3",
+          "required": false,
+          "description": "Socket location relative to its parent"
+        },
+        {
+          "name": "relativeRotation",
+          "type": "rotator",
+          "required": false,
+          "description": "Socket rotation relative to its parent"
+        },
+        {
+          "name": "relativeScale",
+          "type": "vec3",
+          "required": false,
+          "description": "Socket scale"
         },
         {
           "name": "onConflict",
           "type": "string",
           "required": false,
-          "description": "skip (default) returns an existing section untouched, error refuses"
-        }
-      ]
-    },
-    "add_montage_segment": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimMontage asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "animSequencePath",
-          "type": "string",
-          "required": true,
-          "description": "AnimSequence or AnimComposite to append as a segment"
-        },
-        {
-          "name": "slotName",
-          "type": "string",
-          "required": false,
-          "description": "Target slot, created when absent"
-        },
-        {
-          "name": "slotIndex",
-          "type": "number",
-          "required": false,
-          "description": "Target slot index when slotName is omitted (default 0)"
-        },
-        {
-          "name": "startPos",
-          "type": "number",
-          "required": false,
-          "description": "Trim start inside the source, in seconds (default 0)"
-        },
-        {
-          "name": "endPos",
-          "type": "number",
-          "required": false,
-          "description": "Trim end inside the source, in seconds (default the source play length)"
-        },
-        {
-          "name": "playRate",
-          "type": "number",
-          "required": false,
-          "description": "Segment play rate; negative plays in reverse (default 1)"
-        },
-        {
-          "name": "loopCount",
-          "type": "integer",
-          "required": false,
-          "description": "How many times the segment repeats (default 1)"
-        },
-        {
-          "name": "insertIndex",
-          "type": "integer",
-          "required": false,
-          "description": "Position in the slot's segment list (default appends)"
-        }
-      ]
-    },
-    "add_motion_matching_node": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimBlueprint asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "databasePath",
-          "type": "string",
-          "required": false,
-          "description": "PoseSearchDatabase the node searches"
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph to add the node to (default AnimGraph)"
-        },
-        {
-          "name": "connectToOutput",
-          "type": "boolean",
-          "required": false,
-          "description": "Wire the node to the Output Pose (default true)"
-        },
-        {
-          "name": "blendTime",
-          "type": "number",
-          "required": false,
-          "description": "Inertial blend time"
-        }
-      ]
-    },
-    "add_pose_history_node": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimBlueprint asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph to add the node to (default AnimGraph)"
-        },
-        {
-          "name": "poseCount",
-          "type": "number",
-          "required": false,
-          "description": "History poses to retain"
-        },
-        {
-          "name": "samplingInterval",
-          "type": "number",
-          "required": false,
-          "description": "Seconds between history samples"
-        },
-        {
-          "name": "generateTrajectory",
-          "type": "boolean",
-          "required": false,
-          "description": "Self-generate the trajectory (default true)"
-        },
-        {
-          "name": "trajectoryHistoryCount",
-          "type": "number",
-          "required": false,
-          "description": "Generated trajectory history samples"
-        },
-        {
-          "name": "trajectoryPredictionCount",
-          "type": "number",
-          "required": false,
-          "description": "Generated trajectory prediction samples"
-        },
-        {
-          "name": "insertBeforeOutput",
-          "type": "boolean",
-          "required": false,
-          "description": "Splice into the pose chain feeding the Output Pose (default true)"
-        }
-      ]
-    },
-    "add_pose_search_schema_trajectory_channel": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "schemaPath",
-          "type": "string",
-          "required": true,
-          "description": "PoseSearchSchema to add the channel to",
-          "aliases": [
-            "assetPath"
-          ]
-        },
-        {
-          "name": "samples",
-          "type": "array",
-          "required": true,
-          "description": "[{offset, flags?, weight?}]: offset in seconds, negative for history and positive for prediction; flags from position, velocity, facingDirection, velocityDirection and their XY variants",
-          "items": "object"
-        },
-        {
-          "name": "weight",
-          "type": "number",
-          "required": false,
-          "description": "Channel weight"
-        }
-      ]
-    },
-    "add_pose_search_sequence": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "PoseSearchDatabase asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "sequencePath",
-          "type": "string",
-          "required": true,
-          "description": "AnimSequence, AnimComposite, AnimMontage or BlendSpace to append"
-        },
-        {
-          "name": "mirror",
-          "type": "string",
-          "required": false,
-          "description": "original | mirrored | both"
-        },
-        {
-          "name": "disableReselection",
-          "type": "boolean",
-          "required": false,
-          "description": "Disallow reselecting poses from the same asset"
-        },
-        {
-          "name": "sampleStart",
-          "type": "number",
-          "required": false,
-          "description": "Sampling range start in seconds"
-        },
-        {
-          "name": "sampleEnd",
-          "type": "number",
-          "required": false,
-          "description": "Sampling range end in seconds"
-        },
-        {
-          "name": "enabled",
-          "type": "boolean",
-          "required": false,
-          "description": "Include the clip in the database"
-        }
-      ]
-    },
-    "add_sequence_evaluator": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimBlueprint asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "sequencePath",
-          "type": "string",
-          "required": false,
-          "description": "AnimSequence to evaluate"
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "AnimGraph (default) or a state's name for its inner graph"
-        },
-        {
-          "name": "explicitTime",
-          "type": "number",
-          "required": false,
-          "description": "Initial ExplicitTime"
-        },
-        {
-          "name": "shouldLoop",
-          "type": "boolean",
-          "required": false,
-          "description": "bShouldLoop"
-        },
-        {
-          "name": "teleportToExplicitTime",
-          "type": "boolean",
-          "required": false,
-          "description": "bTeleportToExplicitTime (default false, so time advances and root motion extracts)"
-        },
-        {
-          "name": "connectToOutput",
-          "type": "boolean",
-          "required": false,
-          "description": "Wire the node to the graph's result pose (default true)"
-        }
-      ]
-    },
-    "add_state": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimBlueprint asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "stateMachineName",
-          "type": "string",
-          "required": true,
-          "description": "State machine to edit"
-        },
-        {
-          "name": "stateName",
-          "type": "string",
-          "required": true,
-          "description": "State to add"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns an existing state untouched, error refuses"
-        }
-      ]
-    },
-    "add_transition": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimBlueprint asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "stateMachineName",
-          "type": "string",
-          "required": true,
-          "description": "State machine to edit"
-        },
-        {
-          "name": "fromState",
-          "type": "string",
-          "required": true,
-          "description": "State the transition leaves"
-        },
-        {
-          "name": "toState",
-          "type": "string",
-          "required": true,
-          "description": "State the transition enters"
-        },
-        {
-          "name": "blendDuration",
-          "type": "number",
-          "required": false,
-          "description": "Crossfade in seconds (engine default 0.2)"
-        },
-        {
-          "name": "blendLogic",
-          "type": "string",
-          "required": false,
-          "description": "Standard | Inertialization"
+          "description": "skip (default) | update | error"
         }
       ]
     },
@@ -553,723 +256,283 @@
         }
       ]
     },
-    "analyze_animation": {
-      "category": "animation",
+    "append_asset_array_elements": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimSequence asset path",
+          "description": "Asset path; a Blueprint path writes its generated-class CDO",
           "aliases": [
             "path"
           ]
         },
+        {
+          "name": "propertyName",
+          "type": "string",
+          "required": true,
+          "description": "Path of the TArray property"
+        },
+        {
+          "name": "elements",
+          "type": "array",
+          "required": true,
+          "description": "Values to append, validated before any is written"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the package after the write (default true)"
+        }
+      ]
+    },
+    "asset_health_check": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Asset to check",
+          "aliases": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "bind_cloth_to_section": {
+      "category": "asset",
+      "params": [
         {
           "name": "skeletalMeshPath",
           "type": "string",
-          "required": false,
-          "description": "SkeletalMesh whose proportions to sample with; must be compatible with the sequence's skeleton"
-        },
-        {
-          "name": "boneNames",
-          "type": "array",
-          "required": false,
-          "description": "Bones to sample (default root, pelvis, head, hands and feet when present)",
-          "items": "string"
-        },
-        {
-          "name": "frames",
-          "type": "array",
-          "required": false,
-          "description": "Explicit frames to sample, integers in [0, frame count]",
-          "items": "number"
-        },
-        {
-          "name": "sampleRate",
-          "type": "number",
-          "required": false,
-          "description": "Samples per second when frames is omitted, 1 to 240 (default the source rate)"
-        },
-        {
-          "name": "loop",
-          "type": "boolean",
-          "required": false,
-          "description": "Include end-to-start loop continuity metrics"
-        },
-        {
-          "name": "facingBones",
-          "type": "array",
-          "required": false,
-          "description": "[boneA, boneB]: report the yaw of the boneA to boneB vector relative to the root bone's forward, per sample and over the clip",
-          "items": "string"
-        },
-        {
-          "name": "outputDirectory",
-          "type": "string",
-          "required": false,
-          "description": "Directory under Project/Saved/Codex/AnimationQA for analysis artifacts; must not already contain them"
-        }
-      ]
-    },
-    "apply_animation_modifier": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
           "required": true,
-          "description": "AnimSequence asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "modifierClass",
-          "type": "string",
-          "required": true,
-          "description": "UAnimationModifier subclass: a short name such as DistanceCurveModifier, or a /Script path",
-          "aliases": [
-            "modifier"
-          ]
-        },
-        {
-          "name": "props",
-          "type": "object",
-          "required": false,
-          "description": "EditAnywhere property values to set on the modifier before it runs"
-        }
-      ]
-    },
-    "author_blend_profile": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "skeletonPath",
-          "type": "string",
-          "required": true,
-          "description": "USkeleton that owns the blend profile"
-        },
-        {
-          "name": "profileName",
-          "type": "string",
-          "required": true,
-          "description": "Blend profile to create or edit"
-        },
-        {
-          "name": "operation",
-          "type": "string",
-          "required": false,
-          "description": "upsert (default) | remove | rename"
-        },
-        {
-          "name": "newProfileName",
-          "type": "string",
-          "required": false,
-          "description": "New name when operation=rename"
-        },
-        {
-          "name": "mode",
-          "type": "string",
-          "required": false,
-          "description": "TimeFactor | WeightFactor | BlendMask"
-        },
-        {
-          "name": "entries",
-          "type": "array",
-          "required": false,
-          "description": "Per-bone scales as [{bone, scale, recursive?}]",
-          "items": "object"
-        },
-        {
-          "name": "removeEntries",
-          "type": "array",
-          "required": false,
-          "description": "Bone names to drop from the profile",
-          "items": "string"
-        }
-      ]
-    },
-    "auto_align_retarget_pose": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "retargeterPath",
-          "type": "string",
-          "required": true,
-          "description": "Existing IKRetargeter to edit",
+          "description": "SkeletalMesh asset path",
           "aliases": [
             "assetPath"
           ]
         },
         {
-          "name": "side",
+          "name": "lodIndex",
+          "type": "integer",
+          "required": true,
+          "description": "Mesh LOD"
+        },
+        {
+          "name": "sectionIndex",
+          "type": "integer",
+          "required": true,
+          "description": "Render section to bind"
+        },
+        {
+          "name": "clothingAsset",
           "type": "string",
           "required": false,
-          "description": "source | target (default target)"
+          "description": "Clothing asset by name (optional when the mesh has one)"
+        },
+        {
+          "name": "assetLodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "LOD inside the clothing asset (default: lodIndex, clamped)"
         }
       ]
     },
-    "bake_root_motion_from_bone": {
-      "category": "animation",
+    "bulk_rename_assets": {
+      "category": "asset",
       "params": [
         {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimSequence asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "sourceBone",
-          "type": "string",
-          "required": true,
-          "description": "Bone whose translation moves onto the root, e.g. pelvis"
-        },
-        {
-          "name": "rootBone",
-          "type": "string",
-          "required": false,
-          "description": "Root bone name (default root)"
-        },
-        {
-          "name": "axes",
+          "name": "renames",
           "type": "array",
-          "required": false,
-          "description": "Axes to bake: x, y, z (default [x, y])",
-          "items": "string"
-        },
-        {
-          "name": "interpolation",
-          "type": "string",
-          "required": false,
-          "description": "linear (default) | per_frame"
-        }
-      ]
-    },
-    "begin_skeleton_edit": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "skeletalMeshPath",
-          "type": "string",
           "required": true,
-          "description": "SkeletalMesh whose reference skeleton to edit"
-        },
-        {
-          "name": "sessionTag",
-          "type": "string",
-          "required": false,
-          "description": "Stable key every later call addresses (default Skel_<MeshName>)"
+          "description": "Rename descriptors: {sourcePath, destinationPath}, {assetPath, newName} or {sourcePath, newPackagePath, newName}",
+          "items": "object"
         }
       ]
     },
-    "bind_anim_node_function": {
-      "category": "animation",
+    "check_uvs": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimBlueprint asset path",
+          "description": "StaticMesh or SkeletalMesh asset path",
           "aliases": [
             "path"
           ]
         },
         {
-          "name": "nodeGuid",
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Source LOD to act on (default 0)"
+        },
+        {
+          "name": "requireLightmapChannel",
+          "type": "boolean",
+          "required": false,
+          "description": "Treat a missing lightmap channel as a fault (default true for StaticMesh)"
+        },
+        {
+          "name": "maxOverlapFraction",
+          "type": "number",
+          "required": false,
+          "description": "Overlap above this fraction of the lightmap channel is a fault (default 0.001)"
+        },
+        {
+          "name": "rasterSize",
+          "type": "number",
+          "required": false,
+          "description": "Raster resolution for the overlap estimate (default 512)"
+        }
+      ]
+    },
+    "compare_textures": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPathA",
           "type": "string",
           "required": true,
-          "description": "Anim graph node to bind, from add_sequence_evaluator or an add_*_node action",
+          "description": "First Texture2D",
           "aliases": [
-            "nodeId"
+            "a"
           ]
         },
         {
-          "name": "functionName",
+          "name": "assetPathB",
           "type": "string",
           "required": true,
-          "description": "Existing thread-safe anim-node function on the AnimBlueprint",
+          "description": "Second Texture2D",
           "aliases": [
-            "function"
+            "b"
+          ]
+        }
+      ]
+    },
+    "connect_graph_pins": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "EdGraph-backed asset path",
+          "aliases": [
+            "path"
           ]
         },
         {
           "name": "graphName",
           "type": "string",
           "required": false,
-          "description": "Graph holding the node (default AnimGraph)"
+          "description": "Graph to author in, by name or unique substring (required when the asset has several graphs)"
         },
         {
-          "name": "binding",
+          "name": "sourceNode",
           "type": "string",
           "required": false,
-          "description": "update (default) | becomeRelevant | initialUpdate"
-        }
-      ]
-    },
-    "build_pose_search_index": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "PoseSearchDatabase asset path",
-          "aliases": [
-            "path"
-          ]
+          "description": "Node of the source pin: nodeGuid, node path, name or unique title"
         },
         {
-          "name": "wait",
+          "name": "sourcePinId",
+          "type": "string",
+          "required": false,
+          "description": "pinId of the source pin (preferred)"
+        },
+        {
+          "name": "sourcePin",
+          "type": "string",
+          "required": false,
+          "description": "Source pin name, when no pinId is given"
+        },
+        {
+          "name": "sourcePinDirection",
+          "type": "string",
+          "required": false,
+          "description": "input | output, to disambiguate sourcePin"
+        },
+        {
+          "name": "targetNode",
+          "type": "string",
+          "required": false,
+          "description": "Node of the target pin"
+        },
+        {
+          "name": "targetPinId",
+          "type": "string",
+          "required": false,
+          "description": "pinId of the target pin"
+        },
+        {
+          "name": "targetPin",
+          "type": "string",
+          "required": false,
+          "description": "Target pin name, when no pinId is given"
+        },
+        {
+          "name": "targetPinDirection",
+          "type": "string",
+          "required": false,
+          "description": "input | output, to disambiguate targetPin"
+        },
+        {
+          "name": "save",
           "type": "boolean",
           "required": false,
-          "description": "Block until the build resolves (default true)"
+          "description": "Save the asset after the edit (default true)"
         }
       ]
     },
-    "cancel_skeleton_edit": {
-      "category": "animation",
+    "create_asset_by_class": {
+      "category": "asset",
       "params": [
         {
-          "name": "sessionTag",
-          "type": "string",
-          "required": false,
-          "description": "The open skeleton edit session to address; wins over skeletalMeshPath"
-        },
-        {
-          "name": "skeletalMeshPath",
-          "type": "string",
-          "required": false,
-          "description": "The skeletal mesh whose one open session to address, when sessionTag is omitted"
-        }
-      ]
-    },
-    "commit_skeleton_edit": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "sessionTag",
-          "type": "string",
-          "required": false,
-          "description": "The open skeleton edit session to address; wins over skeletalMeshPath"
-        },
-        {
-          "name": "skeletalMeshPath",
-          "type": "string",
-          "required": false,
-          "description": "The skeletal mesh whose one open session to address, when sessionTag is omitted"
-        }
-      ]
-    },
-    "compare_curves_to_morph_targets": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "animPath",
+          "name": "name",
           "type": "string",
           "required": true,
-          "description": "AnimSequence or PoseAsset whose curve names to compare",
+          "description": "Asset name"
+        },
+        {
+          "name": "className",
+          "type": "string",
+          "required": true,
+          "description": "Concrete UObject class: class name with or without the C++ prefix, or a /Script/Module.Class path",
           "aliases": [
-            "assetPath"
+            "class"
           ]
         },
         {
-          "name": "skeletalMeshPath",
-          "type": "string",
-          "required": true,
-          "description": "SkeletalMesh whose morph targets to compare against",
-          "aliases": [
-            "meshPath"
-          ]
-        }
-      ]
-    },
-    "create_anim_blueprint": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "AnimBlueprint asset name"
-        },
-        {
-          "name": "skeletonPath",
-          "type": "string",
-          "required": true,
-          "description": "USkeleton the AnimBlueprint targets"
-        },
-        {
           "name": "packagePath",
           "type": "string",
           "required": false,
-          "description": "Destination folder (default /Game/Animations)"
+          "description": "Destination folder (default /Game)"
         },
         {
-          "name": "parentClass",
-          "type": "string",
+          "name": "properties",
+          "type": "object",
           "required": false,
-          "description": "Parent AnimInstance class name"
+          "description": "Property values keyed by property name"
         },
         {
           "name": "onConflict",
           "type": "string",
           "required": false,
-          "description": "skip (default) returns an existing asset untouched, error refuses"
+          "description": "skip (default) returns an existing asset; error refuses"
         }
       ]
     },
-    "create_anim_composite": {
-      "category": "animation",
+    "create_customizable_object": {
+      "category": "asset",
       "params": [
         {
           "name": "name",
           "type": "string",
           "required": true,
-          "description": "AnimComposite asset name"
-        },
-        {
-          "name": "skeletonPath",
-          "type": "string",
-          "required": true,
-          "description": "USkeleton the composite targets"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Animations)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns an existing asset untouched, error refuses"
-        }
-      ]
-    },
-    "create_anim_montage": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "AnimMontage asset name"
-        },
-        {
-          "name": "animSequencePath",
-          "type": "string",
-          "required": true,
-          "description": "AnimSequence the montage plays"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Animations)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns an existing asset untouched, error refuses"
-        }
-      ]
-    },
-    "create_blendspace": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "BlendSpace asset name"
-        },
-        {
-          "name": "skeletonPath",
-          "type": "string",
-          "required": true,
-          "description": "USkeleton the blendspace targets"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Animations)"
-        },
-        {
-          "name": "axisHorizontal",
-          "type": "string",
-          "required": false,
-          "description": "Horizontal axis name (default Speed)"
-        },
-        {
-          "name": "axisVertical",
-          "type": "string",
-          "required": false,
-          "description": "Vertical axis name (default Direction)"
-        },
-        {
-          "name": "horizontalMin",
-          "type": "number",
-          "required": false,
-          "description": "Horizontal axis minimum (default 0)"
-        },
-        {
-          "name": "horizontalMax",
-          "type": "number",
-          "required": false,
-          "description": "Horizontal axis maximum (default 500)"
-        },
-        {
-          "name": "verticalMin",
-          "type": "number",
-          "required": false,
-          "description": "Vertical axis minimum (default -180)"
-        },
-        {
-          "name": "verticalMax",
-          "type": "number",
-          "required": false,
-          "description": "Vertical axis maximum (default 180)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns an existing asset untouched, error refuses"
-        }
-      ]
-    },
-    "create_blendspace_1d": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "BlendSpace1D asset name"
-        },
-        {
-          "name": "skeletonPath",
-          "type": "string",
-          "required": true,
-          "description": "USkeleton the blendspace targets"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Animations)"
-        },
-        {
-          "name": "axisName",
-          "type": "string",
-          "required": false,
-          "description": "Axis display name (default Speed)"
-        },
-        {
-          "name": "axisMin",
-          "type": "number",
-          "required": false,
-          "description": "Axis minimum (default 0)"
-        },
-        {
-          "name": "axisMax",
-          "type": "number",
-          "required": false,
-          "description": "Axis maximum (default 500)"
-        },
-        {
-          "name": "gridNum",
-          "type": "number",
-          "required": false,
-          "description": "Grid divisions (default 4)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns an existing asset untouched, error refuses"
-        }
-      ]
-    },
-    "create_control_rig": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "skeletalMeshPath",
-          "type": "string",
-          "required": false,
-          "description": "SkeletalMesh to import the bone hierarchy from; pass exactly one of this and skeletonPath"
-        },
-        {
-          "name": "skeletonPath",
-          "type": "string",
-          "required": false,
-          "description": "Skeleton to import the bone hierarchy from; pass exactly one of this and skeletalMeshPath"
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": false,
-          "description": "Asset name (default <Source>_CtrlRig)"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default the source's folder)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
-        }
-      ]
-    },
-    "create_pose_search_database": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "PoseSearchDatabase asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/MotionMatching)"
-        },
-        {
-          "name": "schemaPath",
-          "type": "string",
-          "required": false,
-          "description": "Existing PoseSearchSchema to use; a schema that cannot index is refused"
-        },
-        {
-          "name": "skeletonPath",
-          "type": "string",
-          "required": false,
-          "description": "Author a <name>_Schema with default channels on this skeleton when schemaPath is omitted"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns an existing asset untouched, error refuses"
-        }
-      ]
-    },
-    "create_pose_search_schema": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "PoseSearchSchema asset name"
-        },
-        {
-          "name": "skeletonPath",
-          "type": "string",
-          "required": true,
-          "description": "USkeleton the schema samples"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/MotionMatching)"
-        },
-        {
-          "name": "mirrorDataTablePath",
-          "type": "string",
-          "required": false,
-          "description": "MirrorDataTable to bind"
-        },
-        {
-          "name": "sampleRate",
-          "type": "number",
-          "required": false,
-          "description": "Schema sample rate (default 30)"
-        },
-        {
-          "name": "addDefaultChannels",
-          "type": "boolean",
-          "required": false,
-          "description": "Add Trajectory and Pose default channels so the schema is buildable (default true)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns an existing asset untouched, error refuses"
-        }
-      ]
-    },
-    "create_sequence": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "AnimSequence asset name"
-        },
-        {
-          "name": "skeletonPath",
-          "type": "string",
-          "required": true,
-          "description": "USkeleton, or a SkeletalMesh whose skeleton to use"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Animations)"
-        },
-        {
-          "name": "numFrames",
-          "type": "number",
-          "required": false,
-          "description": "Frame count (default 30)"
-        },
-        {
-          "name": "frameRate",
-          "type": "number",
-          "required": false,
-          "description": "Frames per second (default 30)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns an existing asset untouched, error refuses"
-        }
-      ]
-    },
-    "create_skeleton": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Skeleton asset name"
-        },
-        {
-          "name": "skeletalMeshPath",
-          "type": "string",
-          "required": true,
-          "description": "SkeletalMesh to build the skeleton from; the factory assigns the new skeleton to it"
+          "description": "Asset name"
         },
         {
           "name": "packagePath",
@@ -1281,174 +544,829 @@
           "name": "onConflict",
           "type": "string",
           "required": false,
-          "description": "skip (default) | error. It never overwrites"
+          "description": "skip (default) | error"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the new asset (default true)"
         }
       ]
     },
-    "create_state_machine": {
-      "category": "animation",
+    "create_data_asset": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name"
+        },
+        {
+          "name": "className",
+          "type": "string",
+          "required": true,
+          "description": "UDataAsset subclass: class name with or without the C++ prefix, or a /Script/Module.Class path",
+          "aliases": [
+            "class"
+          ]
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game)"
+        },
+        {
+          "name": "properties",
+          "type": "object",
+          "required": false,
+          "description": "Property values keyed by property name"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns an existing asset; error refuses"
+        }
+      ]
+    },
+    "create_datatable": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name"
+        },
+        {
+          "name": "rowStruct",
+          "type": "string",
+          "required": true,
+          "description": "Row struct, e.g. /Script/Module.MyRow or a UserDefinedStruct path"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/DataTables)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns an existing asset; error refuses"
+        }
+      ]
+    },
+    "create_render_target_2d": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Asset name, without '/' or '.'"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game)"
+        },
+        {
+          "name": "width",
+          "type": "integer",
+          "required": false,
+          "description": "Pixel width, 1-8192 (default 512)"
+        },
+        {
+          "name": "height",
+          "type": "integer",
+          "required": false,
+          "description": "Pixel height, 1-8192 (default 512)"
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "required": false,
+          "description": "R8 | RG8 | RGBA8 | RGBA8_SRGB | R16F | RG16F | RGBA16F | R32F | RG32F | RGBA32F | RGB10A2 (default RGBA8_SRGB)"
+        },
+        {
+          "name": "clearColor",
+          "type": "object",
+          "required": false,
+          "description": "Linear clear color {r, g, b, a} (default transparent)"
+        },
+        {
+          "name": "generateMips",
+          "type": "boolean",
+          "required": false,
+          "description": "Generate mipmaps automatically (default false)"
+        },
+        {
+          "name": "targetGamma",
+          "type": "number",
+          "required": false,
+          "description": "Target gamma (default 0, the engine behavior)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns an existing asset; error refuses"
+        }
+      ]
+    },
+    "create_subobject": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimBlueprint asset path",
+          "description": "Asset that owns the new subobject",
           "aliases": [
             "path"
           ]
         },
         {
-          "name": "name",
+          "name": "className",
           "type": "string",
-          "required": false,
-          "description": "State machine name (default NewStateMachine)"
+          "required": true,
+          "description": "Class to instantiate, e.g. a /Script/Module.Class path"
         },
         {
-          "name": "graphName",
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Subobject name"
+        },
+        {
+          "name": "properties",
+          "type": "object",
+          "required": false,
+          "description": "Property values, validated on a throwaway instance first"
+        },
+        {
+          "name": "outer",
           "type": "string",
           "required": false,
-          "description": "Graph to add it to (default AnimGraph)"
+          "description": "asset (default) | package"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "reuse (default) | error"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the owning package (default true)"
         }
       ]
     },
-    "edit_skeleton_bones": {
-      "category": "animation",
+    "delete_asset": {
+      "category": "asset",
       "params": [
         {
-          "name": "sessionTag",
+          "name": "assetPath",
           "type": "string",
-          "required": false,
-          "description": "The open skeleton edit session to address; wins over skeletalMeshPath"
-        },
-        {
-          "name": "skeletalMeshPath",
-          "type": "string",
-          "required": false,
-          "description": "The skeletal mesh whose one open session to address, when sessionTag is omitted"
-        },
-        {
-          "name": "edits",
-          "type": "array",
           "required": true,
-          "description": "Hierarchy edits, each one of {op:'add',bone,parent,transform?} | {op:'remove',bone,removeChildren?} | {op:'rename',bone,newName} | {op:'reparent',bone,parent} | {op:'set_transform',bone,transform,moveChildren?}",
-          "items": "object"
+          "description": "Asset to delete",
+          "aliases": [
+            "path"
+          ]
         },
         {
           "name": "force",
           "type": "boolean",
           "required": false,
-          "description": "Remove a bone despite dependents, which are listed in the refusal"
+          "description": "Delete even when other packages reference it, closing open editors (default false)"
         }
       ]
     },
-    "get_bone_transform": {
-      "category": "animation",
+    "delete_asset_batch": {
+      "category": "asset",
       "params": [
         {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Editor label of the actor; pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path, the unambiguous selector; wins over actorLabel"
-        },
-        {
-          "name": "boneName",
-          "type": "string",
+          "name": "assetPaths",
+          "type": "array",
           "required": true,
-          "description": "Bone or socket to read"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "SkeletalMeshComponent to read (default CharacterMesh0, then Mesh, then the first one)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "auto (default, prefers PIE) | pie | game | editor"
-        },
-        {
-          "name": "space",
-          "type": "string",
-          "required": false,
-          "description": "world (default) | component | local"
-        }
-      ]
-    },
-    "get_bone_transforms": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "skeletonPath",
-          "type": "string",
-          "required": true,
-          "description": "USkeleton, or a SkeletalMesh whose skeleton to read",
+          "description": "Assets to delete",
           "aliases": [
-            "assetPath",
+            "paths"
+          ],
+          "items": "string"
+        },
+        {
+          "name": "force",
+          "type": "boolean",
+          "required": false,
+          "description": "Delete referenced assets too, closing open editors (default false)"
+        }
+      ]
+    },
+    "delete_datatable_row": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "DataTable asset path",
+          "aliases": [
             "path"
           ]
         },
         {
-          "name": "boneNames",
-          "type": "array",
-          "required": false,
-          "description": "Bones to return (default every bone)",
-          "items": "string"
-        },
-        {
-          "name": "space",
+          "name": "rowName",
           "type": "string",
-          "required": false,
-          "description": "local (default) | component, which composes the parent chain"
+          "required": true,
+          "description": "Row to remove"
         }
       ]
     },
-    "get_live_bone_transforms": {
-      "category": "animation",
+    "delete_folder": {
+      "category": "asset",
       "params": [
         {
-          "name": "actorLabel",
+          "name": "path",
           "type": "string",
           "required": false,
-          "description": "Editor label of the actor; pass this or actorPath"
+          "description": "Content folder to delete"
         },
         {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path, the unambiguous selector; wins over actorLabel"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "SkeletalMeshComponent to read (default CharacterMesh0, then Mesh, then the first one)"
-        },
-        {
-          "name": "boneNames",
+          "name": "paths",
           "type": "array",
           "required": false,
-          "description": "Bones to read (default every bone, max 1000)",
+          "description": "Content folders to delete",
           "items": "string"
         },
         {
-          "name": "space",
-          "type": "string",
+          "name": "force",
+          "type": "boolean",
           "required": false,
-          "description": "world (default) | component | local"
+          "description": "Also delete the assets inside (default false: only empty folders)"
+        }
+      ]
+    },
+    "diagnose_registry": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "path",
+          "type": "string",
+          "required": true,
+          "description": "Content path to diagnose"
         },
         {
-          "name": "world",
+          "name": "recursive",
+          "type": "boolean",
+          "required": false,
+          "description": "Include subfolders (default true)"
+        },
+        {
+          "name": "reconcile",
+          "type": "boolean",
+          "required": false,
+          "description": "Force a synchronous rescan first, which evicts pending-kill ghosts"
+        }
+      ]
+    },
+    "disconnect_graph_pins": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "EdGraph-backed asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "graphName",
           "type": "string",
           "required": false,
-          "description": "auto (default, prefers PIE) | pie | game | editor"
+          "description": "Graph to author in, by name or unique substring (required when the asset has several graphs)"
+        },
+        {
+          "name": "sourceNode",
+          "type": "string",
+          "required": false,
+          "description": "Node of the source pin: nodeGuid, node path, name or unique title"
+        },
+        {
+          "name": "sourcePinId",
+          "type": "string",
+          "required": false,
+          "description": "pinId of the source pin (preferred)"
+        },
+        {
+          "name": "sourcePin",
+          "type": "string",
+          "required": false,
+          "description": "Source pin name, when no pinId is given"
+        },
+        {
+          "name": "sourcePinDirection",
+          "type": "string",
+          "required": false,
+          "description": "input | output, to disambiguate sourcePin"
+        },
+        {
+          "name": "targetNode",
+          "type": "string",
+          "required": false,
+          "description": "Node of the target pin"
+        },
+        {
+          "name": "targetPinId",
+          "type": "string",
+          "required": false,
+          "description": "pinId of the target pin"
+        },
+        {
+          "name": "targetPin",
+          "type": "string",
+          "required": false,
+          "description": "Target pin name, when no pinId is given"
+        },
+        {
+          "name": "targetPinDirection",
+          "type": "string",
+          "required": false,
+          "description": "input | output, to disambiguate targetPin"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the asset after the edit (default true)"
+        }
+      ]
+    },
+    "duplicate_asset": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "sourcePath",
+          "type": "string",
+          "required": true,
+          "description": "Asset to duplicate"
+        },
+        {
+          "name": "destinationPath",
+          "type": "string",
+          "required": true,
+          "description": "Object path of the copy"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns an existing destination; error refuses"
+        }
+      ]
+    },
+    "edit_user_defined_enum": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "UserDefinedEnum asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "op",
+          "type": "string",
+          "required": true,
+          "description": "add_value | rename_value | remove_value"
+        },
+        {
+          "name": "displayName",
+          "type": "string",
+          "required": false,
+          "description": "Display text for the enumerator (add_value, rename_value)"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Enumerator to act on by short or display name; add_value uses it as the display name when displayName is omitted"
+        },
+        {
+          "name": "index",
+          "type": "number",
+          "required": false,
+          "description": "Enumerator index for rename_value and remove_value"
+        }
+      ]
+    },
+    "export_asset": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Asset to export",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": true,
+          "description": "File to write; a relative path resolves against the project directory"
+        }
+      ]
+    },
+    "export_texture": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Texture2D asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": true,
+          "description": "PNG file to write; a relative path resolves against the project directory",
+          "aliases": [
+            "filePath"
+          ]
+        }
+      ]
+    },
+    "export_uv_layout": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh or SkeletalMesh asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Source LOD to act on (default 0)"
+        },
+        {
+          "name": "channel",
+          "type": "number",
+          "required": false,
+          "description": "Channel to draw (default 0)"
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": false,
+          "description": "PNG to write (default under Saved/UVLayouts)"
+        },
+        {
+          "name": "imageSize",
+          "type": "number",
+          "required": false,
+          "description": "PNG edge length (default 1024, max 4096)"
+        },
+        {
+          "name": "showIslands",
+          "type": "boolean",
+          "required": false,
+          "description": "Colour each island separately (default true)"
+        },
+        {
+          "name": "showOverlaps",
+          "type": "boolean",
+          "required": false,
+          "description": "Highlight overlapping texels (default true)"
+        },
+        {
+          "name": "showGrid",
+          "type": "boolean",
+          "required": false,
+          "description": "Draw the unit-square border (default true)"
+        }
+      ]
+    },
+    "fill_datatable_from_json": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "DataTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "rows",
+          "type": "object",
+          "required": false,
+          "description": "Rows to upsert: {rowName: {field: value}}"
+        },
+        {
+          "name": "jsonString",
+          "type": "string",
+          "required": false,
+          "description": "The same rows object as JSON text, used when rows is omitted"
+        }
+      ]
+    },
+    "force_reload_asset": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Asset to reload from disk",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "discardUnsaved",
+          "type": "boolean",
+          "required": false,
+          "description": "Reload even when the package has unsaved changes, discarding them (default false)"
+        }
+      ]
+    },
+    "generate_lightmap_uvs": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Source LOD to act on (default 0)"
+        },
+        {
+          "name": "enable",
+          "type": "boolean",
+          "required": false,
+          "description": "Turn lightmap UV generation on (default) or off"
+        },
+        {
+          "name": "sourceChannel",
+          "type": "number",
+          "required": false,
+          "description": "Channel the generator reads (default: the current setting)"
+        },
+        {
+          "name": "destinationChannel",
+          "type": "number",
+          "required": false,
+          "description": "Channel it writes (default: the current setting, or the next free channel)"
+        },
+        {
+          "name": "minLightmapResolution",
+          "type": "number",
+          "required": false,
+          "description": "Packing resolution floor (default 64)"
+        },
+        {
+          "name": "lightmapResolution",
+          "type": "number",
+          "required": false,
+          "description": "The mesh's lightmap resolution"
+        },
+        {
+          "name": "setLightmapCoordinateIndex",
+          "type": "boolean",
+          "required": false,
+          "description": "Point LightMapCoordinateIndex at the destination channel (default true)"
+        },
+        {
+          "name": "force",
+          "type": "boolean",
+          "required": false,
+          "description": "Rebuild even when the settings already match"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the mesh (default true)"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Report without writing"
+        },
+        {
+          "name": "rasterSize",
+          "type": "number",
+          "required": false,
+          "description": "Raster resolution for the result's overlap estimate (default 512)"
+        }
+      ]
+    },
+    "get_asset_dependencies": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "packages",
+          "type": "array",
+          "required": false,
+          "description": "Package paths to look up",
+          "items": "string"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "One package path, used when packages is omitted"
+        },
+        {
+          "name": "hard",
+          "type": "boolean",
+          "required": false,
+          "description": "Include hard dependencies (default true)"
+        },
+        {
+          "name": "soft",
+          "type": "boolean",
+          "required": false,
+          "description": "Include soft dependencies (default true)"
+        }
+      ]
+    },
+    "get_asset_referencers": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "packages",
+          "type": "array",
+          "required": false,
+          "description": "Package paths to look up",
+          "items": "string"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "One package path, used when packages is omitted"
+        }
+      ]
+    },
+    "get_curvetable_keys": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "CurveTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "rowName",
+          "type": "string",
+          "required": true,
+          "description": "Row to read"
+        }
+      ]
+    },
+    "get_datatable_row": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "DataTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "rowName",
+          "type": "string",
+          "required": true,
+          "description": "Row to read"
+        }
+      ]
+    },
+    "get_mesh_bounds": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh or SkeletalMesh asset path"
+        }
+      ]
+    },
+    "get_mesh_collision": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh asset path"
+        }
+      ]
+    },
+    "get_mesh_geometry": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh or SkeletalMesh asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "LOD to read (default 0)"
+        },
+        {
+          "name": "sectionIndex",
+          "type": "integer",
+          "required": false,
+          "description": "One render section (omit for every section)"
+        },
+        {
+          "name": "include",
+          "type": "array",
+          "required": false,
+          "description": "positions | uvs | normals | triangles (omit for all four)",
+          "items": "string"
+        },
+        {
+          "name": "uvChannel",
+          "type": "integer",
+          "required": false,
+          "description": "UV channel to return (default 0)"
+        },
+        {
+          "name": "dumpToFile",
+          "type": "boolean",
+          "required": false,
+          "description": "Write the geometry JSON to a file instead of returning it"
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": false,
+          "description": "File for dumpToFile; relative paths resolve under Saved/"
+        }
+      ]
+    },
+    "get_mesh_info": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh or SkeletalMesh asset path"
         }
       ]
     },
@@ -1466,6 +1384,23 @@
         }
       ]
     },
+    "get_primary_asset_ids": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "type",
+          "type": "string",
+          "required": false,
+          "description": "FPrimaryAssetType to list (omit for every type)"
+        },
+        {
+          "name": "maxResults",
+          "type": "number",
+          "required": false,
+          "description": "Most ids to return (default 1000)"
+        }
+      ]
+    },
     "get_skeleton_info": {
       "category": "animation",
       "params": [
@@ -1480,58 +1415,479 @@
         }
       ]
     },
-    "inspect_anim_nodes": {
-      "category": "animation",
+    "get_stringtable_entry": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimBlueprint asset path",
+          "description": "StringTable asset path",
           "aliases": [
             "path"
           ]
         },
         {
-          "name": "graphName",
+          "name": "key",
           "type": "string",
-          "required": false,
-          "description": "Graph to inspect (default AnimGraph)"
-        },
-        {
-          "name": "nodeClass",
-          "type": "string",
-          "required": false,
-          "description": "Node class substring filter, e.g. PoseDriver"
+          "required": true,
+          "description": "Entry key"
         }
       ]
     },
-    "list_anim_assets": {
-      "category": "animation",
+    "get_texture_info": {
+      "category": "asset",
       "params": [
         {
-          "name": "directory",
+          "name": "assetPath",
           "type": "string",
-          "required": false,
-          "description": "Folder to scope the read to"
+          "required": true,
+          "description": "Texture2D asset path",
+          "aliases": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "import_animation": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "filePath",
+          "type": "string",
+          "required": true,
+          "description": "Source file on disk",
+          "aliases": [
+            "filename"
+          ]
         },
         {
-          "name": "recursive",
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Asset name (default: the file name)",
+          "aliases": [
+            "assetName"
+          ]
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/Animations)",
+          "aliases": [
+            "destinationPath"
+          ]
+        },
+        {
+          "name": "skeletonPath",
+          "type": "string",
+          "required": true,
+          "description": "Skeleton the animation targets"
+        },
+        {
+          "name": "importCustomAttribute",
           "type": "boolean",
           "required": false,
-          "description": "Include subfolders (default true)"
+          "description": "Import FBX custom attributes as curves (default true)"
         },
         {
-          "name": "cursor",
+          "name": "removeRedundantKeys",
+          "type": "boolean",
+          "required": false,
+          "description": "Strip keys that do not change the value (default true)"
+        },
+        {
+          "name": "importSettings",
+          "type": "object",
+          "required": false,
+          "description": "FbxAnimSequenceImportData or FbxImportUI fields by UPROPERTY name or dotted path"
+        }
+      ]
+    },
+    "import_curvetable": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "CurveTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "jsonString",
           "type": "string",
           "required": false,
-          "description": "Resume a paged read: the nextCursor the previous page returned, unmodified"
+          "description": "JSON rows to replace the table from"
         },
         {
-          "name": "limit",
-          "type": "integer",
+          "name": "csvString",
+          "type": "string",
           "required": false,
-          "description": "Rows per page (default 200, max 5000)"
+          "description": "CSV rows to replace the table from"
+        },
+        {
+          "name": "filePath",
+          "type": "string",
+          "required": false,
+          "description": "JSON or CSV file to replace the table from",
+          "aliases": [
+            "jsonPath",
+            "csvPath"
+          ]
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "required": false,
+          "description": "json | csv (default: from the file extension)"
+        },
+        {
+          "name": "interpMode",
+          "type": "string",
+          "required": false,
+          "description": "linear (default) | constant | cubic | none"
+        }
+      ]
+    },
+    "import_file": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "filePath",
+          "type": "string",
+          "required": true,
+          "description": "Source file on disk",
+          "aliases": [
+            "filename"
+          ]
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": true,
+          "description": "Destination folder",
+          "aliases": [
+            "destinationPath"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Asset name (default: the file name)",
+          "aliases": [
+            "assetName"
+          ]
+        },
+        {
+          "name": "factoryClass",
+          "type": "string",
+          "required": false,
+          "description": "UFactory subclass by name or /Script path (default: picked by extension)"
+        },
+        {
+          "name": "factoryProperties",
+          "type": "object",
+          "required": false,
+          "description": "Factory properties by UPROPERTY name or dotted path, set before the import"
+        },
+        {
+          "name": "replaceExisting",
+          "type": "boolean",
+          "required": false,
+          "description": "Replace an asset already at the destination (default true)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the imported assets (default false)"
+        },
+        {
+          "name": "automated",
+          "type": "boolean",
+          "required": false,
+          "description": "Suppress interactive dialogs (default true)"
+        }
+      ]
+    },
+    "import_skeletal_mesh": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "filePath",
+          "type": "string",
+          "required": true,
+          "description": "Source file on disk",
+          "aliases": [
+            "filename"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Asset name (default: the file name)",
+          "aliases": [
+            "assetName"
+          ]
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/Meshes)",
+          "aliases": [
+            "destinationPath"
+          ]
+        },
+        {
+          "name": "skeletonPath",
+          "type": "string",
+          "required": false,
+          "description": "Existing Skeleton to import onto"
+        },
+        {
+          "name": "importMaterials",
+          "type": "boolean",
+          "required": false,
+          "description": "Import materials (default true)"
+        },
+        {
+          "name": "importTextures",
+          "type": "boolean",
+          "required": false,
+          "description": "Import textures (default true)"
+        },
+        {
+          "name": "importUniformScale",
+          "type": "number",
+          "required": false,
+          "description": "Uniform import scale (default 1.0); 100 fixes metre-authored FBX"
+        },
+        {
+          "name": "importMorphTargets",
+          "type": "boolean",
+          "required": false,
+          "description": "Import morph targets (default true)"
+        },
+        {
+          "name": "createPhysicsAsset",
+          "type": "boolean",
+          "required": false,
+          "description": "Create a PhysicsAsset (default false)"
+        },
+        {
+          "name": "replaceExisting",
+          "type": "boolean",
+          "required": false,
+          "description": "Replace an asset already at the destination (default true)"
+        }
+      ]
+    },
+    "import_static_mesh": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "filePath",
+          "type": "string",
+          "required": true,
+          "description": "Source file on disk",
+          "aliases": [
+            "filename"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Asset name (default: the file name)",
+          "aliases": [
+            "assetName"
+          ]
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/Meshes)",
+          "aliases": [
+            "destinationPath"
+          ]
+        },
+        {
+          "name": "combineMeshes",
+          "type": "boolean",
+          "required": false,
+          "description": "Combine every mesh in the file into one (default false)"
+        },
+        {
+          "name": "importMaterials",
+          "type": "boolean",
+          "required": false,
+          "description": "Import materials (default true)"
+        },
+        {
+          "name": "importTextures",
+          "type": "boolean",
+          "required": false,
+          "description": "Import textures (default true)"
+        },
+        {
+          "name": "generateLightmapUVs",
+          "type": "boolean",
+          "required": false,
+          "description": "Generate lightmap UVs (default true)"
+        },
+        {
+          "name": "importUniformScale",
+          "type": "number",
+          "required": false,
+          "description": "Uniform import scale; 100 fixes metre-authored FBX"
+        }
+      ]
+    },
+    "import_stringtable": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StringTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "filePath",
+          "type": "string",
+          "required": true,
+          "description": "CSV file to merge into the table",
+          "aliases": [
+            "filename",
+            "csvPath"
+          ]
+        }
+      ]
+    },
+    "import_stringtable_csv": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StringTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "csvPath",
+          "type": "string",
+          "required": true,
+          "description": "CSV file; a relative path resolves against the project directory",
+          "aliases": [
+            "filePath"
+          ]
+        },
+        {
+          "name": "expectedKeys",
+          "type": "array",
+          "required": false,
+          "description": "Keys the CSV must carry, checked before the asset is touched",
+          "items": "string"
+        },
+        {
+          "name": "requireExactKeys",
+          "type": "boolean",
+          "required": false,
+          "description": "Also fail when the CSV carries keys expectedKeys does not list (default false)"
+        },
+        {
+          "name": "replaceExisting",
+          "type": "boolean",
+          "required": false,
+          "description": "Remove entries the CSV does not carry (default false)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the table (default true)"
+        }
+      ]
+    },
+    "import_texture": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "filePath",
+          "type": "string",
+          "required": true,
+          "description": "Source file on disk",
+          "aliases": [
+            "filename"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Asset name (default: the file name)",
+          "aliases": [
+            "assetName"
+          ]
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/Textures)",
+          "aliases": [
+            "destinationPath"
+          ]
+        },
+        {
+          "name": "sRGB",
+          "type": "boolean",
+          "required": false,
+          "description": "Applied to the imported texture"
+        },
+        {
+          "name": "compressionSettings",
+          "type": "string",
+          "required": false,
+          "description": "Compression setting such as Default, Normalmap, Grayscale, HDR or BC7, applied to the imported texture"
+        },
+        {
+          "name": "lodGroup",
+          "type": "string",
+          "required": false,
+          "description": "Texture LOD group, applied to the imported texture"
+        },
+        {
+          "name": "neverStream",
+          "type": "boolean",
+          "required": false,
+          "description": "Applied to the imported texture"
+        },
+        {
+          "name": "noCompression",
+          "type": "boolean",
+          "required": false,
+          "description": "Factory option: import uncompressed"
+        },
+        {
+          "name": "noAlpha",
+          "type": "boolean",
+          "required": false,
+          "description": "Factory option: drop the alpha channel"
         }
       ]
     },
@@ -1563,130 +1919,191 @@
         }
       ]
     },
-    "list_bones": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Editor label of the actor; pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path, the unambiguous selector; wins over actorLabel"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "SkeletalMeshComponent to read (default CharacterMesh0, then Mesh, then the first one)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "auto (default, prefers PIE) | pie | game | editor"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: the nextCursor the previous page returned, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Bones per page (default 200, max 5000)"
-        }
-      ]
-    },
-    "list_control_rig_variables": {
-      "category": "animation",
+    "list_asset_sockets": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "Control Rig Blueprint asset path",
+          "description": "StaticMesh, SkeletalMesh or Skeleton asset path"
+        }
+      ]
+    },
+    "list_curvetable_rows": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "CurveTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "rowFilter",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive substring filter on row names"
+        }
+      ]
+    },
+    "list_enum_values": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "UEnum or UserDefinedEnum asset path",
           "aliases": [
             "path"
           ]
         }
       ]
     },
-    "list_montage_segments": {
-      "category": "animation",
+    "list_skeleton_bones": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimMontage asset path",
+          "description": "SkeletalMesh or Skeleton asset path",
           "aliases": [
             "path"
           ]
         },
         {
-          "name": "slotName",
-          "type": "string",
+          "name": "includeTransforms",
+          "type": "boolean",
           "required": false,
-          "description": "List only this slot"
+          "description": "Include rest-pose transforms (default true)"
         }
       ]
     },
-    "list_skeletal_meshes": {
-      "category": "animation",
+    "list_sockets": {
+      "category": "asset",
       "params": [
         {
-          "name": "directory",
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh, SkeletalMesh or Skeleton asset path"
+        }
+      ]
+    },
+    "list_stringtable_keys": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StringTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "keyFilter",
           "type": "string",
           "required": false,
-          "description": "Folder to scope the read to"
-        },
+          "description": "Case-insensitive substring filter on keys"
+        }
+      ]
+    },
+    "list_struct_fields": {
+      "category": "asset",
+      "params": [
         {
-          "name": "recursive",
-          "type": "boolean",
-          "required": false,
-          "description": "Include subfolders (default true)"
-        },
-        {
-          "name": "cursor",
+          "name": "assetPath",
           "type": "string",
-          "required": false,
-          "description": "Resume a paged read: the nextCursor the previous page returned, unmodified"
+          "required": true,
+          "description": "UserDefinedStruct asset path",
+          "aliases": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "measure_mesh_geometry": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh or SkeletalMesh asset path",
+          "aliases": [
+            "path"
+          ]
         },
         {
-          "name": "limit",
+          "name": "lodIndex",
           "type": "integer",
           "required": false,
-          "description": "Rows per page (default 200, max 5000)"
+          "description": "LOD to measure (default 0)"
+        },
+        {
+          "name": "sectionIndex",
+          "type": "integer",
+          "required": false,
+          "description": "One render section (omit to measure the whole LOD)"
         }
       ]
     },
-    "preview_animation": {
-      "category": "animation",
+    "move_asset": {
+      "category": "asset",
       "params": [
         {
-          "name": "actorLabel",
+          "name": "sourcePath",
           "type": "string",
           "required": false,
-          "description": "Editor label of the actor; pass this or actorPath"
+          "description": "Asset to rename, together with destinationPath"
         },
         {
-          "name": "actorPath",
+          "name": "destinationPath",
           "type": "string",
           "required": false,
-          "description": "Full actor object path, the unambiguous selector; wins over actorLabel"
+          "description": "New object path, together with sourcePath"
         },
         {
-          "name": "enabled",
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "Asset to rename in its own folder, together with newName"
+        },
+        {
+          "name": "newName",
+          "type": "string",
+          "required": false,
+          "description": "New asset name, together with assetPath"
+        },
+        {
+          "name": "force",
           "type": "boolean",
           "required": false,
-          "description": "Tick animation in the editor (default true)"
+          "description": "World renames only: merge into a destination that already holds external packages (used by rollback)"
+        }
+      ]
+    },
+    "move_folder": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "sourcePath",
+          "type": "string",
+          "required": true,
+          "description": "Content folder to move"
+        },
+        {
+          "name": "destinationPath",
+          "type": "string",
+          "required": true,
+          "description": "Content folder to move it to"
         }
       ]
     },
@@ -1738,61 +2155,49 @@
         }
       ]
     },
-    "read_anim_sequence": {
-      "category": "animation",
+    "read_asset": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
-          "required": false,
-          "description": "AnimSequence to read; omit when reading a batch",
+          "required": true,
+          "description": "Asset path",
+          "aliases": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "read_asset_graph": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "EdGraph-backed asset path",
           "aliases": [
             "path"
           ]
         },
         {
-          "name": "assetPaths",
-          "type": "array",
-          "required": false,
-          "description": "Batch: up to 1000 AnimSequence paths, one row each",
-          "items": "string"
-        },
-        {
-          "name": "directory",
+          "name": "graphName",
           "type": "string",
           "required": false,
-          "description": "Batch: every AnimSequence in this folder"
+          "description": "Only graphs whose name contains this"
         },
         {
-          "name": "recursive",
+          "name": "includePins",
           "type": "boolean",
           "required": false,
-          "description": "With directory: include subfolders (default true)"
+          "description": "Include each node's pins and links (default true)"
         },
         {
-          "name": "nameFilter",
-          "type": "string",
+          "name": "maxNodes",
+          "type": "number",
           "required": false,
-          "description": "With directory: case-insensitive substring, or * ? wildcard, the asset name must match"
-        },
-        {
-          "name": "fields",
-          "type": "array",
-          "required": false,
-          "description": "Result keys to return; assetPath is always kept and an unknown name is refused with the valid list",
-          "items": "string"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: the nextCursor the previous page returned, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Batch rows per page (default 50, max 200)"
+          "description": "Nodes reported per graph (default 500, max 5000)"
         }
       ]
     },
@@ -1834,130 +2239,76 @@
         }
       ]
     },
-    "read_control_rig_graph": {
-      "category": "animation",
+    "read_cloth_data": {
+      "category": "asset",
       "params": [
         {
-          "name": "assetPath",
+          "name": "skeletalMeshPath",
           "type": "string",
           "required": true,
-          "description": "Control Rig Blueprint asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Substring filter over model names"
-        },
-        {
-          "name": "includePins",
-          "type": "boolean",
-          "required": false,
-          "description": "Include each node's pins (default true)"
-        },
-        {
-          "name": "includeDefaults",
-          "type": "boolean",
-          "required": false,
-          "description": "Include pin default values (default true)"
-        },
-        {
-          "name": "includeLinks",
-          "type": "boolean",
-          "required": false,
-          "description": "Include pin-to-pin links (default true)"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Nodes per graph (default 200)"
-        }
-      ]
-    },
-    "read_control_rig_hierarchy": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Control Rig Blueprint asset path",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "read_ik_retargeter": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "IKRetargeter asset path",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "read_ik_rig": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "IKRigDefinition asset path",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "read_mirror_data_table": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "MirrorDataTable asset path",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "read_pose_search_database": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "PoseSearchDatabase asset path",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "read_pose_search_schema": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "schemaPath",
-          "type": "string",
-          "required": true,
-          "description": "PoseSearchSchema to read",
+          "description": "SkeletalMesh asset path",
           "aliases": [
             "assetPath"
+          ]
+        }
+      ]
+    },
+    "read_curvetable": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "CurveTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "rowFilter",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive substring filter on row names"
+        }
+      ]
+    },
+    "read_datatable": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "DataTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "rowFilter",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive substring filter on row names"
+        },
+        {
+          "name": "outputPath",
+          "type": "string",
+          "required": false,
+          "description": "Write the rows to this JSON file instead of returning them; relative paths resolve under Saved/"
+        }
+      ]
+    },
+    "read_import_sources": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Imported asset path",
+          "aliases": [
+            "path"
           ]
         }
       ]
@@ -1982,46 +2333,142 @@
         }
       ]
     },
-    "rebind_leader_pose": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Editor label of the actor; pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path, the unambiguous selector; wins over actorLabel"
-        },
-        {
-          "name": "bodyComponent",
-          "type": "string",
-          "required": false,
-          "description": "Body component every other one follows (default CharacterMesh0, then Mesh)"
-        }
-      ]
-    },
-    "remove_anim_curve": {
-      "category": "animation",
+    "read_stringtable": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimSequence asset path",
+          "description": "StringTable asset path",
           "aliases": [
             "path"
           ]
         },
         {
-          "name": "curveName",
+          "name": "keyFilter",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive substring filter on keys"
+        }
+      ]
+    },
+    "read_uv_channels": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "Float curve to remove"
+          "description": "StaticMesh or SkeletalMesh asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Source LOD to act on (default 0)"
+        },
+        {
+          "name": "channels",
+          "type": "array",
+          "required": false,
+          "description": "Only these channels (omit for every channel)",
+          "items": "number"
+        },
+        {
+          "name": "includeIslands",
+          "type": "boolean",
+          "required": false,
+          "description": "Include the per-island breakdown (default true)"
+        },
+        {
+          "name": "includeOverlap",
+          "type": "boolean",
+          "required": false,
+          "description": "Compute the overlapping-area fraction (default true)"
+        },
+        {
+          "name": "rasterSize",
+          "type": "number",
+          "required": false,
+          "description": "Raster resolution for the coverage and overlap estimate (default 512)"
+        }
+      ]
+    },
+    "reimport_asset": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Imported asset to rebuild from its source file",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "filePath",
+          "type": "string",
+          "required": false,
+          "description": "New source file to record and reimport from",
+          "aliases": [
+            "filename"
+          ]
+        }
+      ]
+    },
+    "reimport_datatable": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "DataTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "jsonPath",
+          "type": "string",
+          "required": false,
+          "description": "JSON file to replace the table from"
+        },
+        {
+          "name": "jsonString",
+          "type": "string",
+          "required": false,
+          "description": "JSON text to replace the table from"
+        }
+      ]
+    },
+    "reindex_assets_fts": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "directory",
+          "type": "string",
+          "required": false,
+          "description": "Content path to rescan (default /Game)"
+        }
+      ]
+    },
+    "reload_package": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Asset whose package to reload",
+          "aliases": [
+            "path"
+          ]
         }
       ]
     },
@@ -2051,32 +2498,6 @@
         }
       ]
     },
-    "remove_anim_notify_state": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimSequence or AnimMontage asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "notifyName",
-          "type": "string",
-          "required": false,
-          "description": "Notify name to match"
-        },
-        {
-          "name": "notifyStateClass",
-          "type": "string",
-          "required": false,
-          "description": "Notify state class to match. Pass at least one of notifyName and notifyStateClass; both filters apply together"
-        }
-      ]
-    },
     "remove_animation_notify": {
       "category": "animation",
       "params": [
@@ -2103,139 +2524,112 @@
         }
       ]
     },
-    "remove_montage_section": {
-      "category": "animation",
+    "remove_curvetable_row": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimMontage asset path",
+          "description": "CurveTable asset path",
           "aliases": [
             "path"
           ]
         },
         {
-          "name": "sectionName",
+          "name": "rowName",
           "type": "string",
           "required": true,
-          "description": "Composite section to remove"
+          "description": "Row to remove"
         }
       ]
     },
-    "remove_montage_segment": {
-      "category": "animation",
+    "remove_datatable_row": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimMontage asset path",
+          "description": "DataTable asset path",
           "aliases": [
             "path"
           ]
         },
         {
-          "name": "segmentIndex",
-          "type": "number",
-          "required": true,
-          "description": "Segment to remove"
-        },
-        {
-          "name": "slotName",
+          "name": "rowName",
           "type": "string",
-          "required": false,
-          "description": "Slot holding the segment; wins over slotIndex"
-        },
-        {
-          "name": "slotIndex",
-          "type": "number",
-          "required": false,
-          "description": "Slot index holding the segment (default 0)"
+          "required": true,
+          "description": "Row to remove"
         }
       ]
     },
-    "remove_state": {
-      "category": "animation",
+    "remove_graph_node": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimBlueprint asset path",
+          "description": "EdGraph-backed asset path",
           "aliases": [
             "path"
           ]
         },
         {
-          "name": "stateMachineName",
+          "name": "graphName",
           "type": "string",
-          "required": true,
-          "description": "State machine to edit"
+          "required": false,
+          "description": "Graph to author in, by name or unique substring (required when the asset has several graphs)"
         },
         {
-          "name": "stateName",
+          "name": "node",
           "type": "string",
           "required": true,
-          "description": "State to remove, with every transition that touches it"
+          "description": "Node to remove: nodeGuid, path, name or unique title"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the asset after the edit (default true)"
         }
       ]
     },
-    "remove_state_machine": {
-      "category": "animation",
+    "remove_socket": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimBlueprint asset path",
-          "aliases": [
-            "path"
-          ]
+          "description": "StaticMesh, SkeletalMesh or Skeleton asset path"
         },
         {
-          "name": "stateMachineName",
+          "name": "socketName",
           "type": "string",
           "required": true,
-          "description": "State machine to edit"
+          "description": "Socket to remove"
         }
       ]
     },
-    "remove_transition": {
-      "category": "animation",
+    "remove_stringtable_entry": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimBlueprint asset path",
+          "description": "StringTable asset path",
           "aliases": [
             "path"
           ]
         },
         {
-          "name": "stateMachineName",
+          "name": "key",
           "type": "string",
           "required": true,
-          "description": "State machine to edit"
-        },
-        {
-          "name": "transitionGuid",
-          "type": "string",
-          "required": false,
-          "description": "Transition to remove, from add_transition or read_state_machine"
-        },
-        {
-          "name": "fromState",
-          "type": "string",
-          "required": false,
-          "description": "With toState, removes every transition between the two"
-        },
-        {
-          "name": "toState",
-          "type": "string",
-          "required": false,
-          "description": "With fromState, removes every transition between the two"
+          "description": "Entry key"
         }
       ]
     },
@@ -2256,118 +2650,133 @@
         }
       ]
     },
-    "reset_retarget_pose": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "retargeterPath",
-          "type": "string",
-          "required": true,
-          "description": "Existing IKRetargeter to edit",
-          "aliases": [
-            "assetPath"
-          ]
-        },
-        {
-          "name": "side",
-          "type": "string",
-          "required": false,
-          "description": "source | target (default target)"
-        }
-      ]
-    },
-    "reverse_sequence": {
-      "category": "animation",
+    "rename_asset": {
+      "category": "asset",
       "params": [
         {
           "name": "sourcePath",
           "type": "string",
-          "required": true,
-          "description": "AnimSequence to reverse"
+          "required": false,
+          "description": "Asset to rename, together with destinationPath"
         },
         {
           "name": "destinationPath",
           "type": "string",
           "required": false,
-          "description": "Asset path for the reversed copy; alternative to name and packagePath"
+          "description": "New object path, together with sourcePath"
         },
         {
-          "name": "name",
+          "name": "assetPath",
           "type": "string",
           "required": false,
-          "description": "Name of the reversed copy (default <Source>_Reversed)"
+          "description": "Asset to rename in its own folder, together with newName"
         },
         {
-          "name": "packagePath",
+          "name": "newName",
           "type": "string",
           "required": false,
-          "description": "Folder of the reversed copy (default the source's folder)"
+          "description": "New asset name, together with assetPath"
         },
         {
-          "name": "inPlace",
+          "name": "force",
           "type": "boolean",
           "required": false,
-          "description": "Reverse the source itself instead of writing a copy (default false)"
-        },
-        {
-          "name": "cycleOffsetFrames",
-          "type": "integer",
-          "required": false,
-          "description": "Rotate the reversed loop to start this many frames in"
-        },
-        {
-          "name": "cycleOffsetSeconds",
-          "type": "number",
-          "required": false,
-          "description": "Rotate the reversed loop to start this many seconds in, rounded to whole frames"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns an existing destination untouched, error refuses; it never overwrites"
+          "description": "World renames only: merge into a destination that already holds external packages (used by rollback)"
         }
       ]
     },
-    "scan_animation_tracks": {
-      "category": "animation",
+    "rename_curvetable_row": {
+      "category": "asset",
       "params": [
         {
-          "name": "directory",
+          "name": "assetPath",
           "type": "string",
-          "required": false,
-          "description": "Content root to scan (default every root)"
+          "required": true,
+          "description": "CurveTable asset path",
+          "aliases": [
+            "path"
+          ]
         },
         {
-          "name": "recursive",
+          "name": "oldName",
+          "type": "string",
+          "required": true,
+          "description": "Row to rename",
+          "aliases": [
+            "rowName"
+          ]
+        },
+        {
+          "name": "newName",
+          "type": "string",
+          "required": true,
+          "description": "New row name"
+        }
+      ]
+    },
+    "rename_datatable_row": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "DataTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "oldName",
+          "type": "string",
+          "required": true,
+          "description": "Row to rename",
+          "aliases": [
+            "rowName"
+          ]
+        },
+        {
+          "name": "newName",
+          "type": "string",
+          "required": true,
+          "description": "New row name"
+        }
+      ]
+    },
+    "save_all_dirty": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "saveMapPackages",
           "type": "boolean",
           "required": false,
-          "description": "Include subfolders (default true)"
+          "description": "Include map packages (default true)"
         },
         {
-          "name": "assetPaths",
-          "type": "array",
-          "required": false,
-          "description": "Scan exactly these AnimSequences instead of a directory",
-          "items": "string"
-        },
-        {
-          "name": "skeletonPath",
-          "type": "string",
-          "required": false,
-          "description": "Only sequences on this skeleton; a path that names no skeleton is refused"
-        },
-        {
-          "name": "targetTrackCount",
-          "type": "number",
-          "required": false,
-          "description": "Flag sequences with more than this many bone tracks"
-        },
-        {
-          "name": "includeTrackNames",
+          "name": "saveContentPackages",
           "type": "boolean",
           "required": false,
-          "description": "Include each sequence's bone track names"
+          "description": "Include content packages (default true)"
+        }
+      ]
+    },
+    "save_asset": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "Asset to save; omit to save every dirty asset under /Game",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "force",
+          "type": "boolean",
+          "required": false,
+          "description": "Write the package even when it is not dirty (needs assetPath)"
         }
       ]
     },
@@ -2388,96 +2797,205 @@
         }
       ]
     },
-    "set_ik_retargeter_rig": {
-      "category": "animation",
+    "set_asset_property": {
+      "category": "asset",
       "params": [
         {
-          "name": "retargeterPath",
+          "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "Existing IKRetargeter to edit",
+          "description": "Asset path; a Blueprint path writes its generated-class CDO",
           "aliases": [
-            "assetPath"
+            "path"
           ]
         },
         {
-          "name": "rigPath",
+          "name": "propertyName",
           "type": "string",
           "required": true,
-          "description": "IKRigDefinition to assign",
-          "aliases": [
-            "ikRig"
-          ]
+          "description": "Property path; dotted and indexed paths walk structs, arrays and instanced subobjects"
         },
         {
-          "name": "side",
-          "type": "string",
-          "required": false,
-          "description": "source | target (default target)"
-        }
-      ]
-    },
-    "set_ik_rig_mesh": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "rigPath",
-          "type": "string",
+          "name": "value",
+          "type": "any",
           "required": true,
-          "description": "Existing IKRigDefinition to edit",
-          "aliases": [
-            "assetPath"
-          ]
+          "description": "Value to write: scalar, object, array or asset path"
         },
         {
-          "name": "meshPath",
-          "type": "string",
-          "required": true,
-          "description": "SkeletalMesh to set as the rig's preview and source mesh",
-          "aliases": [
-            "skeletalMesh"
-          ]
-        }
-      ]
-    },
-    "set_live_post_process_anim_blueprint": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Editor label of the actor; pass this or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path, the unambiguous selector; wins over actorLabel"
-        },
-        {
-          "name": "animBlueprintClassPath",
-          "type": "string",
-          "required": false,
-          "description": "AnimBlueprintGeneratedClass object path, e.g. /Game/Animations/ABP_Name.ABP_Name_C, not the AnimBlueprint asset path"
-        },
-        {
-          "name": "clear",
+          "name": "save",
           "type": "boolean",
           "required": false,
-          "description": "Clear the transient override and fall back to the skeletal mesh asset's post-process AnimBP"
+          "description": "Save the package after the write (default true)"
+        }
+      ]
+    },
+    "set_cloth_config": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "skeletalMeshPath",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh asset path",
+          "aliases": [
+            "assetPath"
+          ]
         },
         {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "SkeletalMeshComponent to read (default CharacterMesh0, then Mesh, then the first one)"
+          "name": "properties",
+          "type": "object",
+          "required": true,
+          "description": "Config properties to set by reflection"
         },
         {
-          "name": "world",
+          "name": "clothingAsset",
           "type": "string",
           "required": false,
-          "description": "auto (default, prefers PIE) | pie | game | editor"
+          "description": "Only the clothing asset with this name"
+        },
+        {
+          "name": "configType",
+          "type": "string",
+          "required": false,
+          "description": "Only configs whose class or key contains this"
+        }
+      ]
+    },
+    "set_curvetable_keys": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "CurveTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "rowName",
+          "type": "string",
+          "required": true,
+          "description": "Row whose keys to replace"
+        },
+        {
+          "name": "keys",
+          "type": "array",
+          "required": true,
+          "description": "Replacement keys: [{time, value, interpMode?, arriveTangent?, leaveTangent?}]",
+          "items": "object"
+        }
+      ]
+    },
+    "set_datatable_cell": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "DataTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "rowName",
+          "type": "string",
+          "required": true,
+          "description": "Existing row to edit"
+        },
+        {
+          "name": "fieldName",
+          "type": "string",
+          "required": true,
+          "description": "Row-struct field to write"
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": true,
+          "description": "Value to write"
+        }
+      ]
+    },
+    "set_datatable_row": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "DataTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "rowName",
+          "type": "string",
+          "required": true,
+          "description": "Row to append or overwrite"
+        },
+        {
+          "name": "row",
+          "type": "object",
+          "required": true,
+          "description": "Row-struct fields to write; fields not named keep their values",
+          "aliases": [
+            "fields",
+            "data"
+          ]
+        }
+      ]
+    },
+    "set_mesh_material": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "materialPath",
+          "type": "string",
+          "required": true,
+          "description": "Material to assign"
+        },
+        {
+          "name": "slotIndex",
+          "type": "number",
+          "required": false,
+          "description": "Material slot index (default 0)"
+        }
+      ]
+    },
+    "set_mesh_nav": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh asset path"
+        },
+        {
+          "name": "bHasNavigationData",
+          "type": "boolean",
+          "required": false,
+          "description": "Whether the mesh generates navigation data"
+        },
+        {
+          "name": "clearNavCollision",
+          "type": "boolean",
+          "required": false,
+          "description": "Remove the mesh's NavCollision"
         }
       ]
     },
@@ -2519,38 +3037,6 @@
         }
       ]
     },
-    "set_montage_sequence": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimMontage asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "animSequencePath",
-          "type": "string",
-          "required": true,
-          "description": "AnimSequence to put in the slot"
-        },
-        {
-          "name": "slotIndex",
-          "type": "number",
-          "required": false,
-          "description": "Slot track index (default 0)"
-        },
-        {
-          "name": "segmentIndex",
-          "type": "number",
-          "required": false,
-          "description": "Replace only this segment; without it every segment in the slot is replaced (#626)"
-        }
-      ]
-    },
     "set_montage_slot": {
       "category": "animation",
       "params": [
@@ -2574,117 +3060,6 @@
           "type": "integer",
           "required": false,
           "description": "Slot track index (default 0)"
-        }
-      ]
-    },
-    "set_motion_matching_chooser": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimBlueprint asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "chooserPath",
-          "type": "string",
-          "required": true,
-          "description": "ChooserTable that selects the database",
-          "aliases": [
-            "table"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph holding the Motion Matching node (default AnimGraph)"
-        },
-        {
-          "name": "contextSource",
-          "type": "string",
-          "required": false,
-          "description": "What the chooser reads its columns from: self (default, the anim instance) | pawn (the owning pawn)"
-        }
-      ]
-    },
-    "set_pose_search_database_settings": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "PoseSearchDatabase asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "continuingPoseCostBias",
-          "type": "number",
-          "required": false,
-          "description": "Bias to keep playing the current clip"
-        },
-        {
-          "name": "baseCostBias",
-          "type": "number",
-          "required": false,
-          "description": "Flat cost added to every pose"
-        },
-        {
-          "name": "loopingCostBias",
-          "type": "number",
-          "required": false,
-          "description": "Bias for looping clips"
-        },
-        {
-          "name": "kdTreeQueryNumNeighbors",
-          "type": "number",
-          "required": false,
-          "description": "KD-tree neighbours to consider"
-        },
-        {
-          "name": "numberOfPrincipalComponents",
-          "type": "number",
-          "required": false,
-          "description": "PCA components for PCAKDTree mode"
-        },
-        {
-          "name": "poseSearchMode",
-          "type": "string",
-          "required": false,
-          "description": "bruteforce | pcakdtree | vptree | eventonly"
-        },
-        {
-          "name": "normalizationSetPath",
-          "type": "string",
-          "required": false,
-          "description": "PoseSearchNormalizationSet to assign"
-        }
-      ]
-    },
-    "set_pose_search_schema": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "PoseSearchDatabase asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "schemaPath",
-          "type": "string",
-          "required": true,
-          "description": "PoseSearchSchema to assign; a schema that cannot index is refused"
         }
       ]
     },
@@ -2726,179 +3101,416 @@
         }
       ]
     },
-    "set_sequence_properties": {
-      "category": "animation",
+    "set_sk_material_slots": {
+      "category": "asset",
       "params": [
         {
-          "name": "assetPaths",
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "slots",
           "type": "array",
           "required": true,
-          "description": "AnimSequences to write, or montages when resolveFromMontages is on",
-          "items": "string"
+          "description": "Slot assignments: [{slotName? | slotIndex?, materialPath}]",
+          "items": "object"
+        }
+      ]
+    },
+    "set_socket_transform": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh or SkeletalMesh asset path"
         },
         {
-          "name": "properties",
+          "name": "socketName",
+          "type": "string",
+          "required": true,
+          "description": "Socket to move"
+        },
+        {
+          "name": "relativeLocation",
+          "type": "vec3",
+          "required": false,
+          "description": "New relative location"
+        },
+        {
+          "name": "relativeRotation",
+          "type": "rotator",
+          "required": false,
+          "description": "New relative rotation"
+        },
+        {
+          "name": "relativeScale",
+          "type": "vec3",
+          "required": false,
+          "description": "New relative scale"
+        }
+      ]
+    },
+    "set_stringtable_entry": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StringTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "key",
+          "type": "string",
+          "required": true,
+          "description": "Entry key"
+        },
+        {
+          "name": "sourceString",
+          "type": "string",
+          "required": false,
+          "description": "Source string to write"
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": false,
+          "description": "Source string to write, when sourceString is omitted"
+        }
+      ]
+    },
+    "set_texture_settings_by_type": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "groups",
           "type": "object",
           "required": true,
-          "description": "{enableRootMotion?, forceRootLock?, useNormalizedRootMotionScale?, rootMotionRootLock?}"
+          "description": "Texture paths per profile: {normal?, grayscale?, baseColor?, hdr?}"
+        }
+      ]
+    },
+    "set_uv_channel_count": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh or SkeletalMesh asset path",
+          "aliases": [
+            "path"
+          ]
         },
         {
-          "name": "resolveFromMontages",
-          "type": "boolean",
+          "name": "lodIndex",
+          "type": "integer",
           "required": false,
-          "description": "Resolve a montage to its first AnimSequence (default true)"
-        }
-      ]
-    },
-    "set_state_animation": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimBlueprint asset path",
-          "aliases": [
-            "path"
-          ]
+          "description": "Source LOD to act on (default 0)"
         },
         {
-          "name": "stateMachineName",
-          "type": "string",
-          "required": true,
-          "description": "State machine to edit"
-        },
-        {
-          "name": "stateName",
-          "type": "string",
-          "required": true,
-          "description": "State whose animation to set"
-        },
-        {
-          "name": "animAssetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimSequence or BlendSpace the state plays"
-        }
-      ]
-    },
-    "set_state_machine_entry": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimBlueprint asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "stateMachineName",
-          "type": "string",
-          "required": true,
-          "description": "State machine to edit"
-        },
-        {
-          "name": "stateName",
+          "name": "op",
           "type": "string",
           "required": false,
-          "description": "State the entry points at; omitted or empty clears the link"
-        }
-      ]
-    },
-    "set_transition_blend": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimBlueprint asset path",
-          "aliases": [
-            "path"
-          ]
+          "description": "set (default) | add | remove | copy"
         },
         {
-          "name": "stateMachineName",
-          "type": "string",
-          "required": true,
-          "description": "State machine to edit"
-        },
-        {
-          "name": "fromState",
-          "type": "string",
-          "required": true,
-          "description": "State the transition leaves"
-        },
-        {
-          "name": "toState",
-          "type": "string",
-          "required": true,
-          "description": "State the transition enters"
-        },
-        {
-          "name": "blendDuration",
+          "name": "channelCount",
           "type": "number",
           "required": false,
-          "description": "Crossfade in seconds"
+          "description": "Target channel count (op=set)"
         },
         {
-          "name": "blendLogic",
-          "type": "string",
+          "name": "count",
+          "type": "number",
           "required": false,
-          "description": "Standard | Inertialization"
+          "description": "Channels to add (op=add, default 1)"
+        },
+        {
+          "name": "channel",
+          "type": "number",
+          "required": false,
+          "description": "Channel to remove (op=remove)"
+        },
+        {
+          "name": "fromChannel",
+          "type": "number",
+          "required": false,
+          "description": "Source channel (op=copy)"
+        },
+        {
+          "name": "toChannel",
+          "type": "number",
+          "required": false,
+          "description": "Destination channel (op=copy)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the mesh (default true)"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Report without writing"
         }
       ]
     },
-    "set_transition_condition": {
-      "category": "animation",
+    "transform_uvs": {
+      "category": "asset",
       "params": [
         {
           "name": "assetPath",
           "type": "string",
           "required": true,
-          "description": "AnimBlueprint asset path",
+          "description": "StaticMesh or SkeletalMesh asset path",
           "aliases": [
             "path"
           ]
         },
         {
-          "name": "stateMachineName",
-          "type": "string",
-          "required": true,
-          "description": "State machine to edit"
-        },
-        {
-          "name": "variableName",
-          "type": "string",
-          "required": true,
-          "description": "Existing bool variable the condition reads"
-        },
-        {
-          "name": "transitionGuid",
-          "type": "string",
+          "name": "lodIndex",
+          "type": "integer",
           "required": false,
-          "description": "Transition to condition, from add_transition or read_state_machine; wins over fromState and toState"
+          "description": "Source LOD to act on (default 0)"
         },
         {
-          "name": "fromState",
-          "type": "string",
+          "name": "channel",
+          "type": "number",
           "required": false,
-          "description": "With toState, the transition to condition when transitionGuid is omitted"
+          "description": "Channel to transform (default 0)"
         },
         {
-          "name": "toState",
-          "type": "string",
+          "name": "translate",
+          "type": "object",
           "required": false,
-          "description": "With fromState, the transition to condition when transitionGuid is omitted"
+          "description": "UV-space offset {u, v}"
         },
         {
-          "name": "negate",
+          "name": "scale",
+          "type": "object",
+          "required": false,
+          "description": "UV-space scale {u, v}; a zero component is refused"
+        },
+        {
+          "name": "rotate",
+          "type": "number",
+          "required": false,
+          "description": "Rotation in degrees"
+        },
+        {
+          "name": "origin",
+          "type": "object",
+          "required": false,
+          "description": "Pivot for rotate and scale {u, v} (default 0.5, 0.5)"
+        },
+        {
+          "name": "flipU",
           "type": "boolean",
           "required": false,
-          "description": "Enter when the variable is false (default false)"
+          "description": "Mirror across U"
+        },
+        {
+          "name": "flipV",
+          "type": "boolean",
+          "required": false,
+          "description": "Mirror across V"
+        },
+        {
+          "name": "order",
+          "type": "string",
+          "required": false,
+          "description": "flipScaleRotateTranslate (default) | translateRotateScaleFlip"
+        },
+        {
+          "name": "selection",
+          "type": "object",
+          "required": false,
+          "description": "What to transform: {mode: all|island|normal|polygonGroup, islandIndices?, normalDirection?, normalAngleTolerance?, polygonGroups?, materialSlotNames?}"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the mesh (default true)"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Report without writing"
+        }
+      ]
+    },
+    "unbind_cloth_from_section": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "skeletalMeshPath",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh asset path",
+          "aliases": [
+            "assetPath"
+          ]
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": true,
+          "description": "Mesh LOD"
+        },
+        {
+          "name": "sectionIndex",
+          "type": "integer",
+          "required": true,
+          "description": "Render section to unbind"
+        },
+        {
+          "name": "clothingAsset",
+          "type": "string",
+          "required": false,
+          "description": "Refuse unless the section is bound to this clothing asset"
+        }
+      ]
+    },
+    "unwrap_uvs": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh or SkeletalMesh asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Source LOD to act on (default 0)"
+        },
+        {
+          "name": "channel",
+          "type": "number",
+          "required": false,
+          "description": "Channel to write (default 0)"
+        },
+        {
+          "name": "method",
+          "type": "string",
+          "required": false,
+          "description": "xatlas (default) | patchBuilder | expMap | conformal | spectralConformal | planar | box | cylinder"
+        },
+        {
+          "name": "pack",
+          "type": "boolean",
+          "required": false,
+          "description": "Repack the islands after unwrapping (default true)"
+        },
+        {
+          "name": "textureResolution",
+          "type": "number",
+          "required": false,
+          "description": "Resolution the packer targets (default 1024)"
+        },
+        {
+          "name": "maxIterations",
+          "type": "number",
+          "required": false,
+          "description": "Solver iteration cap"
+        },
+        {
+          "name": "initialPatchCount",
+          "type": "number",
+          "required": false,
+          "description": "Starting patch count for patchBuilder"
+        },
+        {
+          "name": "islandSource",
+          "type": "string",
+          "required": false,
+          "description": "UVIslands (default) | PolyGroups"
+        },
+        {
+          "name": "projectionTransform",
+          "type": "object",
+          "required": false,
+          "description": "Transform for the planar, box and cylinder projections"
+        },
+        {
+          "name": "preserveVertexOrder",
+          "type": "boolean",
+          "required": false,
+          "description": "Keep the existing vertex order (default true)"
+        },
+        {
+          "name": "backupToChannel",
+          "type": "number",
+          "required": false,
+          "description": "Copy the existing UVs here first"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the mesh (default true)"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Report without writing"
+        },
+        {
+          "name": "rasterSize",
+          "type": "number",
+          "required": false,
+          "description": "Raster resolution for the result's overlap estimate (default 512)"
+        }
+      ]
+    },
+    "update_datatable_row": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "DataTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "rowName",
+          "type": "string",
+          "required": true,
+          "description": "Row to append or overwrite"
+        },
+        {
+          "name": "row",
+          "type": "object",
+          "required": true,
+          "description": "Row-struct fields to write; fields not named keep their values",
+          "aliases": [
+            "fields",
+            "data"
+          ]
         }
       ]
     }

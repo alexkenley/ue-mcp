@@ -39,6 +39,8 @@
 #include "Handlers/NiagaraHandlers.h"
 #include "Handlers/MaterialHandlers.h"
 #include "Handlers/WidgetHandlers.h"
+#include "Handlers/AssetHandlers.h"
+#include "Handlers/AssetHandlers_Geometry.h"
 #include "Misc/AutomationTest.h"
 
 namespace MCPHandlerSpecTests
@@ -122,6 +124,11 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FNiagaraHandlers::RegisterHandlers(Registry);
 	FMaterialHandlers::RegisterHandlers(Registry);
 	FWidgetHandlers::RegisterHandlers(Registry);
+	// asset's create actions are spec'd only where a validation the contract
+	// values fail (an unresolvable class or struct, a name holding '/', an
+	// invalid package name) runs before anything is created.
+	FAssetHandlers::RegisterHandlers(Registry);
+	FAssetGeometryHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
 	TestTrue(TEXT("handlers register with a parameter spec"), Specs.Num() > 0);

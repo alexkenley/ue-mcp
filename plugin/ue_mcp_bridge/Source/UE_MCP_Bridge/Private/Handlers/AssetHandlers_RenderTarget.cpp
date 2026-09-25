@@ -137,13 +137,24 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateRenderTarget2D(const TSharedPtr<FJs
 {
 	FString Name;
 	if (auto Error = RequireString(Params, TEXT("name"), Name)) return Error;
+	// Every parameter is read before anything can fail (#1057).
+	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game"));
+	const int32 Width = OptionalInt(Params, TEXT("width"), DefaultRenderTargetSize);
+	const int32 Height = OptionalInt(Params, TEXT("height"), DefaultRenderTargetSize);
+	FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	const FString Format = OptionalString(Params, TEXT("format"), TEXT("RGBA8_SRGB"));
+	FLinearColor ClearColor = FLinearColor::Transparent;
+	FString ColorError;
+	const bool bColorOk = TryReadColor(Params, ClearColor, ColorError);
+	const bool bGenerateMips = OptionalBool(Params, TEXT("generateMips"), false);
+	const double TargetGamma = OptionalNumber(Params, TEXT("targetGamma"), 0.0);
+
 	Name.TrimStartAndEndInline();
 	if (Name.IsEmpty() || Name.Contains(TEXT("/")) || Name.Contains(TEXT(".")))
 	{
 		return MCPError(TEXT("name must be a non-empty Unreal asset name without '/' or '.'"));
 	}
 
-	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game"));
 	PackagePath.TrimStartAndEndInline();
 	while (PackagePath.EndsWith(TEXT("/"))) PackagePath.LeftChopInline(1);
 	if (!FPackageName::IsValidLongPackageName(PackagePath, true))
@@ -159,14 +170,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateRenderTarget2D(const TSharedPtr<FJs
 		return MCPError(FString::Printf(TEXT("Refusing to create an asset in protected mount: %s"), *PackagePath));
 	}
 
-	const int32 Width = OptionalInt(Params, TEXT("width"), DefaultRenderTargetSize);
-	const int32 Height = OptionalInt(Params, TEXT("height"), DefaultRenderTargetSize);
 	if (Width < 1 || Width > MaxRenderTargetSize || Height < 1 || Height > MaxRenderTargetSize)
 	{
 		return MCPError(FString::Printf(TEXT("width and height must be between 1 and %d"), MaxRenderTargetSize));
 	}
 
-	FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 	OnConflict.ToLowerInline();
 	if (OnConflict != TEXT("skip") && OnConflict != TEXT("error"))
 	{
@@ -174,17 +182,12 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateRenderTarget2D(const TSharedPtr<FJs
 	}
 
 	ETextureRenderTargetFormat RenderTargetFormat = RTF_RGBA8_SRGB;
-	const FString Format = OptionalString(Params, TEXT("format"), TEXT("RGBA8_SRGB"));
 	if (!TryParseRenderTargetFormat(Format, RenderTargetFormat))
 	{
 		return MCPError(FString::Printf(TEXT("format must be one of %s"), *RenderTargetFormatList()));
 	}
 
-	FLinearColor ClearColor = FLinearColor::Transparent;
-	FString ColorError;
-	if (!TryReadColor(Params, ClearColor, ColorError)) return MCPError(ColorError);
-	const bool bGenerateMips = OptionalBool(Params, TEXT("generateMips"), false);
-	const double TargetGamma = OptionalNumber(Params, TEXT("targetGamma"), 0.0);
+	if (!bColorOk) return MCPError(ColorError);
 	if (!FMath::IsFinite(TargetGamma) || TargetGamma < 0.0)
 	{
 		return MCPError(TEXT("targetGamma must be a finite number greater than or equal to 0"));

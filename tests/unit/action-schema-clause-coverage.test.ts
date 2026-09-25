@@ -75,8 +75,6 @@ const ROUTING: ReadonlySet<string> = ROUTING_PARAMS;
  * waved through.
  */
 const ENGLISH_NOT_A_PARAMETER: Record<string, string[]> = {
-  // "renames[] where each entry is {sourcePath, destinationPath} OR ..."
-  "asset.bulk_rename": ["where"],
   // "parameters?: [{name, type}] where type is bool/int/float/..."
   "blueprint.add_event_dispatcher": ["type"],
   // "... onConflict? (skip | overwrite), override? ..." reads as prose here:

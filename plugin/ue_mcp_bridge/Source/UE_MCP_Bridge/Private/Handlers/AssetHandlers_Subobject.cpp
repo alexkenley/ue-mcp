@@ -86,11 +86,21 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateSubobject(const TSharedPtr<FJsonObj
 	MCP_CHECK_GAME_THREAD();
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString ClassName;
 	if (auto Err = RequireString(Params, TEXT("className"), ClassName)) return Err;
 	FString Name;
 	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const FString OuterSpec = OptionalString(Params, TEXT("outer"), TEXT("asset")).ToLower();
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("reuse")).ToLower();
+	const TSharedPtr<FJsonObject>* PropertiesField = nullptr;
+	TSharedPtr<FJsonObject> Properties;
+	if (TryGetObjectParam(Params, TEXT("properties"), PropertiesField) && PropertiesField && (*PropertiesField).IsValid())
+	{
+		Properties = *PropertiesField;
+	}
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
 	Name.TrimStartAndEndInline();
 	if (Name.IsEmpty())
 	{
@@ -157,7 +167,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateSubobject(const TSharedPtr<FJsonObj
 	// subobject-of-the-asset form. outer=package gives
 	// "/Game/Foo/DA_Thing.Name", which is what a plugin that keeps its payload
 	// as siblings of the asset inside one package expects.
-	const FString OuterSpec = OptionalString(Params, TEXT("outer"), TEXT("asset")).ToLower();
 	if (OuterSpec != TEXT("asset") && OuterSpec != TEXT("package"))
 	{
 		return MCPError(FString::Printf(
@@ -177,18 +186,10 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateSubobject(const TSharedPtr<FJsonObj
 	}
 
 	const FName SubobjectName(*Name);
-	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("reuse")).ToLower();
 	if (OnConflict != TEXT("reuse") && OnConflict != TEXT("error"))
 	{
 		return MCPError(FString::Printf(
 			TEXT("'onConflict' must be 'reuse' (default) or 'error', got '%s'."), *OnConflict));
-	}
-
-	const TSharedPtr<FJsonObject>* PropertiesField = nullptr;
-	TSharedPtr<FJsonObject> Properties;
-	if (TryGetObjectParam(Params, TEXT("properties"), PropertiesField) && PropertiesField && (*PropertiesField).IsValid())
-	{
-		Properties = *PropertiesField;
 	}
 
 	// Every property is applied to a throwaway instance first, so a bad path or
@@ -305,7 +306,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateSubobject(const TSharedPtr<FJsonObj
 	// Saving in the same call is what closes the garbage-collection window the
 	// issue is about: after this the subobject is an export on disk, so a later
 	// call resolves it by path even if the in-memory copy is collected.
-	const bool bSave = OptionalBool(Params, TEXT("save"), true);
 	bool bPersisted = false;
 	FString PersistReason;
 	if (bSave)
