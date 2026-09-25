@@ -166,7 +166,8 @@ namespace
 	 */
 	bool MSEditResolve(const TSharedPtr<FJsonObject>& Params, FMSEditTarget& Out, TSharedPtr<FJsonValue>& OutError)
 	{
-		if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("metasoundPath"), Out.AssetPath))
+		// metasoundPath is a spec alias the registry resolves to assetPath (#1057).
+		if (auto Err = RequireString(Params, TEXT("assetPath"), Out.AssetPath))
 		{
 			OutError = Err;
 			return false;
@@ -438,6 +439,8 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRemoveNode(const TSharedPtr<FJso
 {
 	FString NodeId;
 	if (auto Err = RequireString(Params, TEXT("nodeId"), NodeId)) return Err;
+	// Read before the asset load can fail (#1057).
+	const bool bRemoveUnusedDependencies = OptionalBool(Params, TEXT("removeUnusedDependencies"), true);
 
 	FMSEditTarget Target;
 	TSharedPtr<FJsonValue> Error;
@@ -495,7 +498,6 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRemoveNode(const TSharedPtr<FJso
 		}
 	}
 
-	const bool bRemoveUnusedDependencies = OptionalBool(Params, TEXT("removeUnusedDependencies"), true);
 	EMetaSoundBuilderResult R = EMetaSoundBuilderResult::Failed;
 	Target.Builder->RemoveNode(Node, R, bRemoveUnusedDependencies);
 	if (!MSEditOk(R))
@@ -539,15 +541,16 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRemoveNode(const TSharedPtr<FJso
 // ─────────────────────────────────────────────────────────────────────────────
 TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundDisconnect(const TSharedPtr<FJsonObject>& Params)
 {
-	FMSEditTarget Target;
-	TSharedPtr<FJsonValue> Error;
-	if (!MSEditResolve(Params, Target, Error)) return Error;
-
+	// Read before the asset load can fail (#1057).
 	const FString FromNodeId = OptionalString(Params, TEXT("fromNodeId"));
 	const FString FromOutput = OptionalString(Params, TEXT("fromOutput"));
 	const FString ToNodeId = OptionalString(Params, TEXT("toNodeId"));
 	const FString ToInput = OptionalString(Params, TEXT("toInput"));
 	const FString GraphOutput = OptionalString(Params, TEXT("graphOutput"));
+
+	FMSEditTarget Target;
+	TSharedPtr<FJsonValue> Error;
+	if (!MSEditResolve(Params, Target, Error)) return Error;
 
 	const bool bHasFrom = !FromNodeId.IsEmpty() && !FromOutput.IsEmpty();
 	const bool bHasTo = !ToNodeId.IsEmpty() && !ToInput.IsEmpty();
@@ -730,6 +733,9 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundDisconnect(const TSharedPtr<FJso
 // ─────────────────────────────────────────────────────────────────────────────
 TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRemoveMember(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the memberKind check can refuse; MSEditResolve uses it (#1057).
+	FString AssetPathArg;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPathArg)) return Err;
 	FString MemberKind;
 	if (auto Err = RequireString(Params, TEXT("memberKind"), MemberKind)) return Err;
 	FString Name;
@@ -887,6 +893,9 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRemoveMember(const TSharedPtr<FJ
 // ─────────────────────────────────────────────────────────────────────────────
 TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRenameMember(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the memberKind check can refuse; MSEditResolve uses it (#1057).
+	FString AssetPathArg;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPathArg)) return Err;
 	FString MemberKind;
 	if (auto Err = RequireString(Params, TEXT("memberKind"), MemberKind)) return Err;
 	FString Name;
@@ -1042,7 +1051,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundRenameMember(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FAudioHandlers::SoundCueRemoveNode(const TSharedPtr<FJsonObject>& Params)
 {
 	FString CuePath;
-	if (auto Err = RequireStringAlt(Params, TEXT("cuePath"), TEXT("assetPath"), CuePath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("cuePath"), CuePath)) return Err;
 	FString NodeId;
 	if (auto Err = RequireString(Params, TEXT("nodeId"), NodeId)) return Err;
 
@@ -1146,14 +1155,14 @@ TSharedPtr<FJsonValue> FAudioHandlers::SoundCueRemoveNode(const TSharedPtr<FJson
 TSharedPtr<FJsonValue> FAudioHandlers::SoundCueDisconnect(const TSharedPtr<FJsonObject>& Params)
 {
 	FString CuePath;
-	if (auto Err = RequireStringAlt(Params, TEXT("cuePath"), TEXT("assetPath"), CuePath)) return Err;
-
-	USoundCue* Cue = Cast<USoundCue>(MCPLoadAssetObject(CuePath));
-	if (!Cue) return MCPError(FString::Printf(TEXT("SoundCue not found: %s"), *CuePath));
-
+	if (auto Err = RequireString(Params, TEXT("cuePath"), CuePath)) return Err;
+	// Read before the asset load can fail (#1057).
 	const FString ChildNodeId = OptionalString(Params, TEXT("childNodeId"));
 	const FString ParentNodeId = OptionalString(Params, TEXT("parentNodeId"));
 	const bool bClearRoot = OptionalBool(Params, TEXT("clearRoot"), false);
+
+	USoundCue* Cue = Cast<USoundCue>(MCPLoadAssetObject(CuePath));
+	if (!Cue) return MCPError(FString::Printf(TEXT("SoundCue not found: %s"), *CuePath));
 
 	if (ChildNodeId.IsEmpty() && !bClearRoot)
 	{
@@ -1269,7 +1278,9 @@ TSharedPtr<FJsonValue> FAudioHandlers::SoundCueDisconnect(const TSharedPtr<FJson
 TSharedPtr<FJsonValue> FAudioHandlers::SetSoundClassParent(const TSharedPtr<FJsonObject>& Params)
 {
 	FString SoundClassPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("soundClassPath"), TEXT("assetPath"), SoundClassPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("soundClassPath"), SoundClassPath)) return Err;
+	// Read before the asset load can fail (#1057).
+	const FString ParentPath = OptionalString(Params, TEXT("parentPath"));
 
 	USoundClass* SoundClass = Cast<USoundClass>(MCPLoadAssetObject(SoundClassPath));
 	if (!SoundClass)
@@ -1277,7 +1288,6 @@ TSharedPtr<FJsonValue> FAudioHandlers::SetSoundClassParent(const TSharedPtr<FJso
 		return MCPError(FString::Printf(TEXT("SoundClass not found: %s"), *SoundClassPath));
 	}
 
-	const FString ParentPath = OptionalString(Params, TEXT("parentPath"));
 	USoundClass* NewParent = nullptr;
 	if (!ParentPath.IsEmpty())
 	{
@@ -1372,7 +1382,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::SetSoundClassParent(const TSharedPtr<FJso
 TSharedPtr<FJsonValue> FAudioHandlers::ReadSoundRouting(const TSharedPtr<FJsonObject>& Params)
 {
 	FString SoundPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("soundPath"), TEXT("assetPath"), SoundPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("soundPath"), SoundPath)) return Err;
 
 	UObject* Asset = MCPLoadAssetObject(SoundPath);
 	if (!Asset)

@@ -707,13 +707,13 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundAddNode(const TSharedPtr<FJsonOb
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString ClassName;
 	if (auto Err = RequireString(Params, TEXT("nodeClassName"), ClassName)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const FString Namespace = OptionalString(Params, TEXT("nodeNamespace"), TEXT("UE"));
+	const FString Variant = OptionalString(Params, TEXT("nodeVariant"));
+	const int32 Major = OptionalInt(Params, TEXT("majorVersion"), 1);
 
 	FMSSession* S = FindSession(AssetPath);
 	if (!S) return MSAuthorNoSessionError(AssetPath);
-
-	const FString Namespace = OptionalString(Params, TEXT("nodeNamespace"), TEXT("UE"));
-	const FString Variant = OptionalString(Params, TEXT("nodeVariant"));
-	const int32 Major = (int32)OptionalNumber(Params, TEXT("majorVersion"), 1);
 
 	FMetasoundFrontendClassName FrontendClass = Variant.IsEmpty()
 		? FMetasoundFrontendClassName(FName(*Namespace), FName(*ClassName))
@@ -756,11 +756,13 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundAddGraphInput(const TSharedPtr<F
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
 	if (auto Err = RequireString(Params, TEXT("dataType"), DataType)) return Err;
+	// Read before the session lookup can fail (#1057).
+	const TSharedPtr<FJsonValue> DefaultValue = TryGetParam(Params, TEXT("defaultValue"));
 
 	FMSSession* S = FindSession(AssetPath);
 	if (!S) return MSAuthorNoSessionError(AssetPath);
 
-	FMetasoundFrontendLiteral Default = MakeLiteral(TryGetParam(Params, TEXT("defaultValue")), DataType);
+	FMetasoundFrontendLiteral Default = MakeLiteral(DefaultValue, DataType);
 	EMetaSoundBuilderResult Result = EMetaSoundBuilderResult::Failed;
 	S->Builder->AddGraphInputNode(FName(*Name), FName(*DataType), Default, Result, /*bIsConstructorInput*/ false);
 	if (!Ok(Result)) return MCPError(FString::Printf(TEXT("Failed to add graph input '%s' (%s)."), *Name, *DataType));
@@ -922,11 +924,12 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundConnectAudioOut(const TSharedPtr
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	if (auto Err = RequireString(Params, TEXT("fromNodeId"), FromNodeId)) return Err;
 	if (auto Err = RequireString(Params, TEXT("fromOutput"), FromOutput)) return Err;
+	// Read before the session lookup can fail (#1057).
+	const int32 Channel = OptionalInt(Params, TEXT("channel"), 0);
 
 	FMSSession* S = FindSession(AssetPath);
 	if (!S) return MSAuthorNoSessionError(AssetPath);
 
-	const int32 Channel = (int32)OptionalNumber(Params, TEXT("channel"), 0);
 	if (!S->AudioOuts.IsValidIndex(Channel))
 	{
 		return MCPError(FString::Printf(TEXT("Audio output channel %d out of range (source has %d)."), Channel, S->AudioOuts.Num()));
@@ -975,12 +978,17 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundSetInputDefault(const TSharedPtr
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before anything can fail (#1057). Either
+	// graphInput, or nodeId with inputName, addresses the vertex.
+	const TSharedPtr<FJsonValue> Value = TryGetParam(Params, TEXT("value"));
+	const FString TypeHint = OptionalString(Params, TEXT("dataType"));
+	const FString GraphInput = OptionalString(Params, TEXT("graphInput"));
+	const FString NodeId = OptionalString(Params, TEXT("nodeId"));
+	const FString InputName = OptionalString(Params, TEXT("inputName"));
 
 	FMSSession* S = FindSession(AssetPath);
 	if (!S) return MSAuthorNoSessionError(AssetPath);
 
-	const TSharedPtr<FJsonValue> Value = TryGetParam(Params, TEXT("value"));
-	const FString TypeHint = OptionalString(Params, TEXT("dataType"));
 	FMetasoundFrontendLiteral Lit = MakeLiteral(Value, TypeHint);
 	EMetaSoundBuilderResult R = EMetaSoundBuilderResult::Failed;
 
@@ -991,8 +999,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundSetInputDefault(const TSharedPtr
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	bool bCapturedPrevious = false;
 
-	FString GraphInput;
-	if (TryGetStringParam(Params, TEXT("graphInput"), GraphInput) && !GraphInput.IsEmpty())
+	if (!GraphInput.IsEmpty())
 	{
 		EMetaSoundBuilderResult PrevResult = EMetaSoundBuilderResult::Failed;
 		const FMetasoundFrontendLiteral Previous = S->Builder->GetGraphInputDefault(FName(*GraphInput), PrevResult);
@@ -1012,9 +1019,8 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundSetInputDefault(const TSharedPtr
 	}
 	else
 	{
-		FString NodeId, InputName;
-		if (auto Err = RequireString(Params, TEXT("nodeId"), NodeId)) return Err;
-		if (auto Err = RequireString(Params, TEXT("inputName"), InputName)) return Err;
+		if (NodeId.IsEmpty()) return MCPError(TEXT("Missing required parameter 'nodeId' (or pass graphInput)"));
+		if (InputName.IsEmpty()) return MCPError(TEXT("Missing required parameter 'inputName' (or pass graphInput)"));
 		FMetaSoundBuilderNodeInputHandle In = S->Builder->FindNodeInputByName(NodeFromId(NodeId), FName(*InputName), R);
 		if (!Ok(R)) return MCPError(FString::Printf(TEXT("Input vertex '%s' not found on node."), *InputName));
 

@@ -13,6 +13,7 @@
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
 #include "Handlers/AnimationHandlers.h"
+#include "Handlers/AudioHandlers.h"
 #include "Handlers/FabHandlers.h"
 #include "Handlers/NetworkingHandlers.h"
 #include "Handlers/ProjectHandlers.h"
@@ -83,6 +84,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 
 	FMCPHandlerRegistry Registry;
 	FAnimationHandlers::RegisterHandlers(Registry);
+	FAudioHandlers::RegisterHandlers(Registry);
 	FNetworkingHandlers::RegisterHandlers(Registry);
 	FFabHandlers::RegisterHandlers(Registry);
 	FProjectHandlers::RegisterHandlers(Registry);

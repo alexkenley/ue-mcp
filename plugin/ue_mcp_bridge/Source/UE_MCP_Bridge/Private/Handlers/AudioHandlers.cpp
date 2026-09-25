@@ -29,65 +29,249 @@ void FAudioHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("audio"));
-	Registry.RegisterHandler(TEXT("list_sound_assets"), &ListSoundAssets);
-	Registry.RegisterHandler(TEXT("extract_sound_wave_pcm"), &ExtractSoundWavePCM);
+
+	// #1057: a spec'd handler declares its parameters here and nowhere else; the
+	// TS surface is generated from a recording of these. Creators and importers
+	// stay unspecced, because the contract test would run them.
+	using EType = EMCPParamType;
+	Registry.RegisterHandler(TEXT("list_sound_assets"), &ListSoundAssets, {
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content directory to list (default /Game)")),
+		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include subdirectories (default true)")),
+		MCPParam::Optional(TEXT("offset"), EType::Number, TEXT("Refused. The row offset was replaced by cursor paging (#730); pass cursor and limit instead")),
+		MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the nextCursor from the previous page, unmodified")),
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows per page, 1 to 5000 (default 1000)")).Alias(TEXT("maxResults")),
+	});
+	Registry.RegisterHandler(TEXT("extract_sound_wave_pcm"), &ExtractSoundWavePCM, {
+		MCPParam::Required(TEXT("soundPath"), EType::String, TEXT("SoundWave asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Optional(TEXT("maxSeconds"), EType::Number, TEXT("Cap the decoded window in seconds (default the full asset)")),
+		MCPParam::Optional(TEXT("downmixMono"), EType::Boolean, TEXT("Average the channels to mono (default false)")),
+	});
 	Registry.RegisterHandler(TEXT("import_audio"), &ImportAudio);
 	Registry.RegisterHandler(TEXT("create_sound_cue"), &CreateSoundCue);
 	Registry.RegisterHandler(TEXT("create_metasound_source"), &CreateMetaSoundSource);
-	Registry.RegisterHandler(TEXT("play_sound_at_location"), &PlaySoundAtLocation);
-	Registry.RegisterHandler(TEXT("spawn_ambient_sound"), &SpawnAmbientSound);
+	Registry.RegisterHandler(TEXT("play_sound_at_location"), &PlaySoundAtLocation, {
+		MCPParam::Required(TEXT("soundPath"), EType::String, TEXT("Sound asset to play (SoundWave, SoundCue or MetaSoundSource)")).Alias(TEXT("assetPath")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("World location to play at (default origin)")),
+		MCPParam::Optional(TEXT("volumeMultiplier"), EType::Number, TEXT("Volume multiplier (default 1)")).Alias(TEXT("volume")),
+		MCPParam::Optional(TEXT("pitchMultiplier"), EType::Number, TEXT("Pitch multiplier (default 1)")).Alias(TEXT("pitch")),
+	});
+	Registry.RegisterHandler(TEXT("spawn_ambient_sound"), &SpawnAmbientSound, {
+		MCPParam::Required(TEXT("soundPath"), EType::String, TEXT("Sound asset the AmbientSound plays")).Alias(TEXT("assetPath")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("World location of the actor (default origin)")),
+		MCPParam::Optional(TEXT("label"), EType::String, TEXT("Actor label")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip | error | rename when an actor with that label exists (default skip)")),
+		MCPParam::Optional(TEXT("volumeMultiplier"), EType::Number, TEXT("Volume multiplier on the audio component (default 1)")).Alias(TEXT("volume")),
+	});
 
 	// MetaSound graph authoring (AudioHandlers_MetaSound.cpp)
 	Registry.RegisterHandler(TEXT("metasound_author"), &MetaSoundAuthor);
-	Registry.RegisterHandler(TEXT("metasound_list_node_classes"), &MetaSoundListNodeClasses);
-	Registry.RegisterHandler(TEXT("metasound_get_graph"), &MetaSoundGetGraph);
-	Registry.RegisterHandler(TEXT("metasound_add_node"), &MetaSoundAddNode);
-	Registry.RegisterHandler(TEXT("metasound_add_graph_input"), &MetaSoundAddGraphInput);
-	Registry.RegisterHandler(TEXT("metasound_add_graph_output"), &MetaSoundAddGraphOutput);
-	Registry.RegisterHandler(TEXT("metasound_connect"), &MetaSoundConnect);
-	Registry.RegisterHandler(TEXT("metasound_connect_graph_input"), &MetaSoundConnectGraphInput);
-	Registry.RegisterHandler(TEXT("metasound_connect_graph_output"), &MetaSoundConnectGraphOutput);
-	Registry.RegisterHandler(TEXT("metasound_connect_audio_out"), &MetaSoundConnectAudioOut);
-	Registry.RegisterHandler(TEXT("metasound_set_input_default"), &MetaSoundSetInputDefault);
-	Registry.RegisterHandler(TEXT("metasound_build"), &MetaSoundBuild);
-	Registry.RegisterHandler(TEXT("metasound_read_document"), &MetaSoundReadDocument);
-	Registry.RegisterHandler(TEXT("metasound_list_connections"), &MetaSoundListConnections);
-	Registry.RegisterHandler(TEXT("metasound_list_variables"), &MetaSoundListVariables);
-	Registry.RegisterHandler(TEXT("metasound_search_nodes"), &MetaSoundSearchNodes);
-	Registry.RegisterHandler(TEXT("metasound_inspect_node"), &MetaSoundInspectNode);
-	Registry.RegisterHandler(TEXT("metasound_list_node_pins"), &MetaSoundListNodePins);
-	Registry.RegisterHandler(TEXT("metasound_validate"), &MetaSoundValidate);
+	Registry.RegisterHandler(TEXT("metasound_list_node_classes"), &MetaSoundListNodeClasses, {
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring over the node class name")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_get_graph"), &MetaSoundGetGraph, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSoundSource asset path")).Alias(TEXT("metasoundPath")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_add_node"), &MetaSoundAddNode, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSoundSource asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("nodeClassName"), EType::String, TEXT("Registered node class name, e.g. Sine")),
+		MCPParam::Optional(TEXT("nodeNamespace"), EType::String, TEXT("Node class namespace (default UE)")),
+		MCPParam::Optional(TEXT("nodeVariant"), EType::String, TEXT("Node class variant, e.g. Audio")),
+		MCPParam::Optional(TEXT("majorVersion"), EType::Integer, TEXT("Node class major version (default 1)")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_add_graph_input"), &MetaSoundAddGraphInput, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSoundSource asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Graph input name")),
+		MCPParam::Required(TEXT("dataType"), EType::String, TEXT("MetaSound data type: Float, Int32, Bool, String, Trigger, Audio, Time, ...")),
+		MCPParam::Optional(TEXT("defaultValue"), EType::Any, TEXT("Literal default for the input")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_add_graph_output"), &MetaSoundAddGraphOutput, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSoundSource asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Graph output name")),
+		MCPParam::Required(TEXT("dataType"), EType::String, TEXT("MetaSound data type: Float, Int32, Bool, String, Trigger, Audio, Time, ...")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_connect"), &MetaSoundConnect, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSoundSource asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("fromNodeId"), EType::String, TEXT("Source node id")),
+		MCPParam::Required(TEXT("fromOutput"), EType::String, TEXT("Output vertex name on the source node")),
+		MCPParam::Required(TEXT("toNodeId"), EType::String, TEXT("Destination node id")),
+		MCPParam::Required(TEXT("toInput"), EType::String, TEXT("Input vertex name on the destination node")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_connect_graph_input"), &MetaSoundConnectGraphInput, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSoundSource asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("graphInput"), EType::String, TEXT("Graph input name")),
+		MCPParam::Required(TEXT("toNodeId"), EType::String, TEXT("Destination node id")),
+		MCPParam::Required(TEXT("toInput"), EType::String, TEXT("Input vertex name on the destination node")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_connect_graph_output"), &MetaSoundConnectGraphOutput, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSoundSource asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("fromNodeId"), EType::String, TEXT("Source node id")),
+		MCPParam::Required(TEXT("fromOutput"), EType::String, TEXT("Output vertex name on the source node")),
+		MCPParam::Required(TEXT("graphOutput"), EType::String, TEXT("Graph output name")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_connect_audio_out"), &MetaSoundConnectAudioOut, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSoundSource asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("fromNodeId"), EType::String, TEXT("Source node id")),
+		MCPParam::Required(TEXT("fromOutput"), EType::String, TEXT("Output vertex name on the source node, of Audio type")),
+		MCPParam::Optional(TEXT("channel"), EType::Integer, TEXT("Audio output channel: 0 left or mono, 1 right (default 0)")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_set_input_default"), &MetaSoundSetInputDefault, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSoundSource asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Default value to set")),
+		MCPParam::Optional(TEXT("dataType"), EType::String, TEXT("Literal type hint: Float | Int32 | Bool | String")),
+		MCPParam::Optional(TEXT("nodeId"), EType::String, TEXT("Node whose input to set, with inputName. Pass either nodeId and inputName, or graphInput")),
+		MCPParam::Optional(TEXT("inputName"), EType::String, TEXT("Input vertex name on nodeId")),
+		MCPParam::Optional(TEXT("graphInput"), EType::String, TEXT("Graph input whose default to set, instead of nodeId and inputName")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_build"), &MetaSoundBuild, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSoundSource asset path")).Alias(TEXT("metasoundPath")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_read_document"), &MetaSoundReadDocument, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSound asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Optional(TEXT("pageId"), EType::String, TEXT("Graph page to read, for assets that declare more than one (default the default page)")),
+		MCPParam::Optional(TEXT("includeNodes"), EType::Boolean, TEXT("Include the node list (default true)")),
+		MCPParam::Optional(TEXT("includeConnections"), EType::Boolean, TEXT("Include the edge list (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_list_connections"), &MetaSoundListConnections, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSound asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Optional(TEXT("pageId"), EType::String, TEXT("Graph page to read, for assets that declare more than one (default the default page)")),
+		MCPParam::Optional(TEXT("nodeId"), EType::String, TEXT("Narrow to edges touching this node")),
+		MCPParam::Optional(TEXT("direction"), EType::String, TEXT("With nodeId: in | out | both (default both)")),
+		MCPParam::Optional(TEXT("dataType"), EType::String, TEXT("Only edges carrying this data type")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_list_variables"), &MetaSoundListVariables, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSound asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Optional(TEXT("pageId"), EType::String, TEXT("Graph page to read, for assets that declare more than one (default the default page)")),
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring over the variable name")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_search_nodes"), &MetaSoundSearchNodes, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSound asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Optional(TEXT("pageId"), EType::String, TEXT("Graph page to read, for assets that declare more than one (default the default page)")),
+		MCPParam::Optional(TEXT("query"), EType::String, TEXT("Substring over node name, class name, namespace or variant")),
+		MCPParam::Optional(TEXT("dataType"), EType::String, TEXT("Only nodes with a vertex of this data type")),
+		MCPParam::Optional(TEXT("classType"), EType::String, TEXT("External | Input | Output | Variable | ...")),
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Most matches to return, 1 to 1000 (default 100)")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_inspect_node"), &MetaSoundInspectNode, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSound asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("nodeId"), EType::String, TEXT("Node id to inspect")),
+		MCPParam::Optional(TEXT("pageId"), EType::String, TEXT("Graph page to read, for assets that declare more than one (default the default page)")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_list_node_pins"), &MetaSoundListNodePins, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSound asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("nodeId"), EType::String, TEXT("Node id whose vertices to list")),
+		MCPParam::Optional(TEXT("pageId"), EType::String, TEXT("Graph page to read, for assets that declare more than one (default the default page)")),
+		MCPParam::Optional(TEXT("direction"), EType::String, TEXT("inputs | outputs | both (default both)")),
+		MCPParam::Optional(TEXT("dataType"), EType::String, TEXT("Only vertices of this data type")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_validate"), &MetaSoundValidate, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSound asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Optional(TEXT("pageId"), EType::String, TEXT("Graph page to read, for assets that declare more than one (default the default page)")),
+	});
 
 	// SoundCue graph authoring (AudioHandlers_SoundCue.cpp)
 	Registry.RegisterHandler(TEXT("soundcue_author"), &SoundCueAuthor);
-	Registry.RegisterHandler(TEXT("soundcue_add_node"), &SoundCueAddNode);
-	Registry.RegisterHandler(TEXT("soundcue_connect"), &SoundCueConnect);
-	Registry.RegisterHandler(TEXT("soundcue_get_graph"), &SoundCueGetGraph);
+	Registry.RegisterHandler(TEXT("soundcue_add_node"), &SoundCueAddNode, {
+		MCPParam::Required(TEXT("cuePath"), EType::String, TEXT("SoundCue asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Required(TEXT("nodeType"), EType::String, TEXT("wave_player | mixer | random | modulator | attenuation | looping | concatenator | delay | switch")),
+		MCPParam::Optional(TEXT("soundWavePath"), EType::String, TEXT("SoundWave for a wave_player node")),
+		MCPParam::Optional(TEXT("properties"), EType::Object, TEXT("Node-specific fields to set, as {property: value}")),
+	});
+	Registry.RegisterHandler(TEXT("soundcue_connect"), &SoundCueConnect, {
+		MCPParam::Required(TEXT("cuePath"), EType::String, TEXT("SoundCue asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Required(TEXT("childNodeId"), EType::String, TEXT("Node to attach")),
+		MCPParam::Optional(TEXT("parentNodeId"), EType::String, TEXT("Parent node (omit to make the child the cue root)")),
+		MCPParam::Optional(TEXT("childIndex"), EType::Integer, TEXT("Slot under the parent (default append)")),
+	});
+	Registry.RegisterHandler(TEXT("soundcue_get_graph"), &SoundCueGetGraph, {
+		MCPParam::Required(TEXT("cuePath"), EType::String, TEXT("SoundCue asset path")).Alias(TEXT("assetPath")),
+	});
 
 	// Mixing + routing + spatialization (AudioHandlers_Mixing.cpp)
 	Registry.RegisterHandler(TEXT("create_submix"), &CreateSubmix);
-	Registry.RegisterHandler(TEXT("set_submix_parent"), &SetSubmixParent);
-	Registry.RegisterHandler(TEXT("add_submix_effect"), &AddSubmixEffect);
+	Registry.RegisterHandler(TEXT("set_submix_parent"), &SetSubmixParent, {
+		MCPParam::Required(TEXT("submixPath"), EType::String, TEXT("SoundSubmix to reparent")),
+		MCPParam::Optional(TEXT("parentPath"), EType::String, TEXT("New parent submix (empty detaches to root)")),
+	});
+	Registry.RegisterHandler(TEXT("add_submix_effect"), &AddSubmixEffect, {
+		MCPParam::Required(TEXT("submixPath"), EType::String, TEXT("SoundSubmix whose effect chain to append to")),
+		MCPParam::Required(TEXT("effectType"), EType::String, TEXT("reverb | eq | dynamics | filter | delay")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Preset asset name (default <submix>_<effectType>)")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Preset folder (default /Game/Audio/SubmixEffects)")),
+		MCPParam::Optional(TEXT("settings"), EType::Object, TEXT("Effect Settings struct as JSON")),
+	});
 	Registry.RegisterHandler(TEXT("create_sound_class"), &CreateSoundClass);
 	Registry.RegisterHandler(TEXT("create_sound_mix"), &CreateSoundMix);
 	Registry.RegisterHandler(TEXT("create_concurrency"), &CreateConcurrency);
 	Registry.RegisterHandler(TEXT("create_attenuation"), &CreateAttenuation);
-	Registry.RegisterHandler(TEXT("set_sound_submix"), &SetSoundSubmix);
-	Registry.RegisterHandler(TEXT("add_sound_submix_send"), &AddSoundSubmixSend);
-	Registry.RegisterHandler(TEXT("set_sound_class"), &SetSoundClass);
-	Registry.RegisterHandler(TEXT("set_sound_attenuation"), &SetSoundAttenuation);
-	Registry.RegisterHandler(TEXT("set_sound_concurrency"), &SetSoundConcurrency);
-	Registry.RegisterHandler(TEXT("set_audio_property"), &SetAudioProperty);
+	Registry.RegisterHandler(TEXT("set_sound_submix"), &SetSoundSubmix, {
+		MCPParam::Required(TEXT("soundPath"), EType::String, TEXT("Sound asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Optional(TEXT("submixPath"), EType::String, TEXT("Base submix to route to (empty detaches)")),
+	});
+	Registry.RegisterHandler(TEXT("add_sound_submix_send"), &AddSoundSubmixSend, {
+		MCPParam::Required(TEXT("soundPath"), EType::String, TEXT("Sound asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Required(TEXT("submixPath"), EType::String, TEXT("Submix to send to")),
+		MCPParam::Optional(TEXT("sendLevel"), EType::Number, TEXT("Send level (default 1.0)")),
+	});
+	Registry.RegisterHandler(TEXT("set_sound_class"), &SetSoundClass, {
+		MCPParam::Required(TEXT("soundPath"), EType::String, TEXT("Sound asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Required(TEXT("soundClassPath"), EType::String, TEXT("SoundClass to assign")),
+	});
+	Registry.RegisterHandler(TEXT("set_sound_attenuation"), &SetSoundAttenuation, {
+		MCPParam::Required(TEXT("soundPath"), EType::String, TEXT("Sound asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Optional(TEXT("attenuationPath"), EType::String, TEXT("SoundAttenuation to attach (empty clears)")),
+	});
+	Registry.RegisterHandler(TEXT("set_sound_concurrency"), &SetSoundConcurrency, {
+		MCPParam::Required(TEXT("soundPath"), EType::String, TEXT("Sound asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Optional(TEXT("concurrencyPath"), EType::String, TEXT("SoundConcurrency to attach (empty clears)")),
+	});
+	Registry.RegisterHandler(TEXT("set_audio_property"), &SetAudioProperty, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Audio asset path")),
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("UPROPERTY name, dotted for nested structs")),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Value as JSON: scalars, structs, arrays, object paths, or UE export text")),
+	});
 
-	// ── Authoring depth (AudioHandlers_Depth.cpp) ───────────────────────
-	Registry.RegisterHandler(TEXT("metasound_remove_node"), &MetaSoundRemoveNode);
-	Registry.RegisterHandler(TEXT("metasound_disconnect"), &MetaSoundDisconnect);
-	Registry.RegisterHandler(TEXT("metasound_remove_member"), &MetaSoundRemoveMember);
-	Registry.RegisterHandler(TEXT("metasound_rename_member"), &MetaSoundRenameMember);
-	Registry.RegisterHandler(TEXT("soundcue_remove_node"), &SoundCueRemoveNode);
-	Registry.RegisterHandler(TEXT("soundcue_disconnect"), &SoundCueDisconnect);
-	Registry.RegisterHandler(TEXT("set_sound_class_parent"), &SetSoundClassParent);
-	Registry.RegisterHandler(TEXT("read_sound_routing"), &ReadSoundRouting);
+	// Authoring depth (AudioHandlers_Depth.cpp)
+	Registry.RegisterHandler(TEXT("metasound_remove_node"), &MetaSoundRemoveNode, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSound asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("nodeId"), EType::String, TEXT("Node id to remove")),
+		MCPParam::Optional(TEXT("removeUnusedDependencies"), EType::Boolean, TEXT("Also drop node classes the graph no longer references (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_disconnect"), &MetaSoundDisconnect, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSound asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Optional(TEXT("fromNodeId"), EType::String, TEXT("Source node id, with fromOutput")),
+		MCPParam::Optional(TEXT("fromOutput"), EType::String, TEXT("Output vertex name on fromNodeId")),
+		MCPParam::Optional(TEXT("toNodeId"), EType::String, TEXT("Destination node id, with toInput")),
+		MCPParam::Optional(TEXT("toInput"), EType::String, TEXT("Input vertex name on toNodeId")),
+		MCPParam::Optional(TEXT("graphOutput"), EType::String, TEXT("Graph output to clear, audio outputs included (Out Mono, Out Left, Out Right)")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_remove_member"), &MetaSoundRemoveMember, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSound asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("memberKind"), EType::String, TEXT("input | output | variable")),
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Member name to remove")),
+	});
+	Registry.RegisterHandler(TEXT("metasound_rename_member"), &MetaSoundRenameMember, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("MetaSound asset path")).Alias(TEXT("metasoundPath")),
+		MCPParam::Required(TEXT("memberKind"), EType::String, TEXT("input | output")),
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Current graph input or output name")),
+		MCPParam::Required(TEXT("newName"), EType::String, TEXT("Name to rename it to")),
+	});
+	Registry.RegisterHandler(TEXT("soundcue_remove_node"), &SoundCueRemoveNode, {
+		MCPParam::Required(TEXT("cuePath"), EType::String, TEXT("SoundCue asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Required(TEXT("nodeId"), EType::String, TEXT("Node to remove")),
+	});
+	Registry.RegisterHandler(TEXT("soundcue_disconnect"), &SoundCueDisconnect, {
+		MCPParam::Required(TEXT("cuePath"), EType::String, TEXT("SoundCue asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Optional(TEXT("childNodeId"), EType::String, TEXT("Child to detach")),
+		MCPParam::Optional(TEXT("parentNodeId"), EType::String, TEXT("Detach from this parent only (default every parent)")),
+		MCPParam::Optional(TEXT("clearRoot"), EType::Boolean, TEXT("Unset the cue root instead of detaching a parent link")),
+	});
+	Registry.RegisterHandler(TEXT("set_sound_class_parent"), &SetSoundClassParent, {
+		MCPParam::Required(TEXT("soundClassPath"), EType::String, TEXT("SoundClass to reparent")).Alias(TEXT("assetPath")),
+		MCPParam::Optional(TEXT("parentPath"), EType::String, TEXT("New parent SoundClass (empty detaches to the root)")),
+	});
+	Registry.RegisterHandler(TEXT("read_sound_routing"), &ReadSoundRouting, {
+		MCPParam::Required(TEXT("soundPath"), EType::String, TEXT("Sound asset path")).Alias(TEXT("assetPath")),
+	});
 }
 
 // #664: import a WAV/OGG/FLAC file as a USoundWave. Passing a null factory lets
@@ -181,6 +365,10 @@ TSharedPtr<FJsonValue> FAudioHandlers::ListSoundAssets(const TSharedPtr<FJsonObj
 	// directory, filter recursively via a single FARFilter query, and paginate.
 	const FString Directory = OptionalString(Params, TEXT("directory"), TEXT("/Game"));
 	const bool bRecursive = OptionalBool(Params, TEXT("recursive"), true);
+	// Noted before the offset refusal can return, so every declared parameter
+	// is read (#1057). ReadPageRequest reads both for real below.
+	HasParam(Params, TEXT("cursor"));
+	HasParam(Params, TEXT("limit"));
 
 	// T3: the row offset #730 introduced is replaced by the shared cursor. An
 	// offset re-read a moved library at a row number and could not tell that it
@@ -253,6 +441,9 @@ TSharedPtr<FJsonValue> FAudioHandlers::ExtractSoundWavePCM(const TSharedPtr<FJso
 {
 	FString SoundPath;
 	if (auto Err = RequireString(Params, TEXT("soundPath"), SoundPath)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const double MaxSeconds = OptionalNumber(Params, TEXT("maxSeconds"), 0.0);
+	const bool bDownmix = OptionalBool(Params, TEXT("downmixMono"), false);
 
 	USoundWave* Wave = LoadObject<USoundWave>(nullptr, *SoundPath);
 	if (!Wave)
@@ -275,14 +466,12 @@ TSharedPtr<FJsonValue> FAudioHandlers::ExtractSoundWavePCM(const TSharedPtr<FJso
 
 	// Optional decode window so callers can bound the response size (CLAP-style
 	// pipelines only need a few seconds). Default is the whole asset.
-	const double MaxSeconds = OptionalNumber(Params, TEXT("maxSeconds"), 0.0);
 	if (MaxSeconds > 0.0)
 	{
 		const int32 FrameCap = FMath::Clamp(FMath::FloorToInt(MaxSeconds * (double)SampleRate), 0, TotalFrames);
 		TotalFrames = FrameCap;
 	}
 
-	const bool bDownmix = OptionalBool(Params, TEXT("downmixMono"), false);
 	const int16* Samples = reinterpret_cast<const int16*>(RawPCM.GetData());
 
 	TArray<uint8> OutBytes;
@@ -349,33 +538,21 @@ TSharedPtr<FJsonValue> FAudioHandlers::CreateSoundCue(const TSharedPtr<FJsonObje
 
 TSharedPtr<FJsonValue> FAudioHandlers::PlaySoundAtLocation(const TSharedPtr<FJsonObject>& Params)
 {
-	// Get required sound asset path
+	// Every parameter is read before anything can fail; volume and pitch are
+	// aliases the registry resolves (#1057).
 	FString SoundPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), SoundPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("soundPath"), SoundPath)) return Err;
+	const FVector Location = OptionalVec3(Params, TEXT("location"));
+	const double Volume = OptionalNumber(Params, TEXT("volumeMultiplier"), 1.0);
+	const double Pitch = OptionalNumber(Params, TEXT("pitchMultiplier"), 1.0);
 
-	// Load the sound asset
 	USoundBase* Sound = Cast<USoundBase>(UEditorAssetLibrary::LoadAsset(SoundPath));
 	if (!Sound)
 	{
 		return MCPError(FString::Printf(TEXT("Sound not found: %s"), *SoundPath));
 	}
 
-	// Get the editor world
 	REQUIRE_EDITOR_WORLD(World);
-
-	const FVector Location = OptionalVec3(Params, TEXT("location"));
-
-	// Parse optional volume and pitch multipliers (accept both short and long names)
-	double Volume = 1.0;
-	double Pitch = 1.0;
-	if (!TryGetNumberParam(Params, TEXT("volume"), Volume))
-	{
-		TryGetNumberParam(Params, TEXT("volumeMultiplier"), Volume);
-	}
-	if (!TryGetNumberParam(Params, TEXT("pitch"), Pitch))
-	{
-		TryGetNumberParam(Params, TEXT("pitchMultiplier"), Pitch);
-	}
 
 	// No rollback: destructive/external - playing a one-shot sound has no inverse.
 	// Replays produce a new audible event; not natural-key idempotent.
@@ -395,21 +572,29 @@ TSharedPtr<FJsonValue> FAudioHandlers::PlaySoundAtLocation(const TSharedPtr<FJso
 
 TSharedPtr<FJsonValue> FAudioHandlers::SpawnAmbientSound(const TSharedPtr<FJsonObject>& Params)
 {
-	// Get required sound asset path
+	// Every parameter is read, and the sound loaded, before anything is spawned:
+	// an AmbientSound with no sound plays nothing (#1057).
 	FString SoundPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), SoundPath)) return Err;
-
-	REQUIRE_EDITOR_WORLD(World);
-
+	if (auto Err = RequireString(Params, TEXT("soundPath"), SoundPath)) return Err;
+	const FVector Location = OptionalVec3(Params, TEXT("location"));
 	const FString Label = OptionalString(Params, TEXT("label"));
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	double Volume = 1.0;
+	const bool bHasVolume = TryGetNumberParam(Params, TEXT("volumeMultiplier"), Volume);
+
+	USoundBase* Sound = Cast<USoundBase>(UEditorAssetLibrary::LoadAsset(SoundPath));
+	if (!Sound)
+	{
+		return MCPError(FString::Printf(TEXT("Sound not found: %s"), *SoundPath));
+	}
+
+	REQUIRE_EDITOR_WORLD(World);
 
 	if (auto Existing = MCPCheckActorLabelExists(World, Label, OnConflict, TEXT("AmbientSound")))
 	{
 		return Existing;
 	}
 
-	const FVector Location = OptionalVec3(Params, TEXT("location"));
 	FTransform SpawnTransform(FRotator::ZeroRotator, Location);
 	AAmbientSound* AmbientSoundActor = World->SpawnActor<AAmbientSound>(AAmbientSound::StaticClass(), SpawnTransform);
 	if (!AmbientSoundActor)
@@ -422,21 +607,12 @@ TSharedPtr<FJsonValue> FAudioHandlers::SpawnAmbientSound(const TSharedPtr<FJsonO
 		AmbientSoundActor->SetActorLabel(Label);
 	}
 
-	// Load and assign the sound asset to the AudioComponent
-	USoundBase* Sound = Cast<USoundBase>(UEditorAssetLibrary::LoadAsset(SoundPath));
-	if (Sound)
+	if (UAudioComponent* AudioComp = AmbientSoundActor->GetAudioComponent())
 	{
-		UAudioComponent* AudioComp = AmbientSoundActor->GetAudioComponent();
-		if (AudioComp)
+		AudioComp->SetSound(Sound);
+		if (bHasVolume)
 		{
-			AudioComp->SetSound(Sound);
-
-			// Apply optional volume multiplier
-			double Volume = 1.0;
-			if (TryGetNumberParam(Params, TEXT("volume"), Volume))
-			{
-				AudioComp->VolumeMultiplier = static_cast<float>(Volume);
-			}
+			AudioComp->VolumeMultiplier = static_cast<float>(Volume);
 		}
 	}
 

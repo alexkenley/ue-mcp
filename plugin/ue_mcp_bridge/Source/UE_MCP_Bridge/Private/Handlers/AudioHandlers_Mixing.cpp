@@ -96,11 +96,12 @@ TSharedPtr<FJsonValue> FAudioHandlers::SetSubmixParent(const TSharedPtr<FJsonObj
 {
 	FString SubmixPath;
 	if (auto Err = RequireString(Params, TEXT("submixPath"), SubmixPath)) return Err;
+	// Read before the asset load can fail (#1057).
+	const FString ParentPath = OptionalString(Params, TEXT("parentPath"));
 
 	USoundSubmix* Submix = Cast<USoundSubmix>(UEditorAssetLibrary::LoadAsset(SubmixPath));
 	if (!Submix) return MCPError(FString::Printf(TEXT("Submix not found: %s"), *SubmixPath));
 
-	const FString ParentPath = OptionalString(Params, TEXT("parentPath"));
 	USoundSubmixBase* Parent = nullptr;
 	if (!ParentPath.IsEmpty())
 	{
@@ -139,6 +140,13 @@ TSharedPtr<FJsonValue> FAudioHandlers::AddSubmixEffect(const TSharedPtr<FJsonObj
 	FString SubmixPath, EffectType;
 	if (auto Err = RequireString(Params, TEXT("submixPath"), SubmixPath)) return Err;
 	if (auto Err = RequireString(Params, TEXT("effectType"), EffectType)) return Err;
+	// Every parameter is read before the submix load can fail, and the submix
+	// is loaded before any preset asset is created (#1057).
+	FString RequestedName;
+	const bool bHasName = TryGetStringParam(Params, TEXT("name"), RequestedName);
+	const FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/Audio/SubmixEffects"));
+	const TSharedPtr<FJsonObject>* SettingsObj = nullptr;
+	const bool bHasSettings = TryGetObjectParam(Params, TEXT("settings"), SettingsObj) && SettingsObj;
 
 	USoundSubmix* Submix = Cast<USoundSubmix>(UEditorAssetLibrary::LoadAsset(SubmixPath));
 	if (!Submix) return MCPError(FString::Printf(TEXT("Submix not found: %s"), *SubmixPath));
@@ -156,8 +164,9 @@ TSharedPtr<FJsonValue> FAudioHandlers::AddSubmixEffect(const TSharedPtr<FJsonObj
 	UClass* PresetClass = FindObject<UClass>(nullptr, *ClassPath);
 	if (!PresetClass) return MCPError(FString::Printf(TEXT("Effect preset class unavailable: %s (plugin not loaded?)"), *ClassPath));
 
-	const FString Name = OptionalString(Params, TEXT("name"), FString::Printf(TEXT("%s_%s"), *Submix->GetName(), *EffectType));
-	const FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/Audio/SubmixEffects"));
+	const FString Name = bHasName
+		? RequestedName
+		: FString::Printf(TEXT("%s_%s"), *Submix->GetName(), *EffectType);
 
 	auto Created = MCPCreateAssetIdempotent<USoundEffectSubmixPreset>(Name, PackagePath, TEXT("rename"), TEXT("SubmixEffectPreset"), PresetClass, nullptr);
 	if (Created.EarlyReturn)
@@ -190,8 +199,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::AddSubmixEffect(const TSharedPtr<FJsonObj
 	USoundEffectSubmixPreset* Preset = Created.Asset;
 
 	// Apply effect settings, if given, onto the preset's Settings struct.
-	const TSharedPtr<FJsonObject>* SettingsObj = nullptr;
-	if (TryGetObjectParam(Params, TEXT("settings"), SettingsObj) && SettingsObj)
+	if (bHasSettings)
 	{
 		FString E;
 		SetProp(Preset, TEXT("Settings"), MakeShared<FJsonValueObject>(*SettingsObj), E);
@@ -405,11 +413,12 @@ TSharedPtr<FJsonValue> FAudioHandlers::CreateAttenuation(const TSharedPtr<FJsonO
 TSharedPtr<FJsonValue> FAudioHandlers::SetSoundSubmix(const TSharedPtr<FJsonObject>& Params)
 {
 	FString SoundPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("soundPath"), TEXT("assetPath"), SoundPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("soundPath"), SoundPath)) return Err;
+	// Read before the asset load can fail (#1057).
+	const FString SubmixPath = OptionalString(Params, TEXT("submixPath"));
 	USoundBase* Sound = LoadSound(SoundPath);
 	if (!Sound) return MCPError(FString::Printf(TEXT("Sound not found: %s"), *SoundPath));
 
-	const FString SubmixPath = OptionalString(Params, TEXT("submixPath"));
 	USoundSubmixBase* Submix = SubmixPath.IsEmpty() ? nullptr : Cast<USoundSubmixBase>(UEditorAssetLibrary::LoadAsset(SubmixPath));
 	if (!SubmixPath.IsEmpty() && !Submix) return MCPError(FString::Printf(TEXT("Submix not found: %s"), *SubmixPath));
 
@@ -438,8 +447,10 @@ TSharedPtr<FJsonValue> FAudioHandlers::SetSoundSubmix(const TSharedPtr<FJsonObje
 TSharedPtr<FJsonValue> FAudioHandlers::AddSoundSubmixSend(const TSharedPtr<FJsonObject>& Params)
 {
 	FString SoundPath, SubmixPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("soundPath"), TEXT("assetPath"), SoundPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("soundPath"), SoundPath)) return Err;
 	if (auto Err = RequireString(Params, TEXT("submixPath"), SubmixPath)) return Err;
+	// Read before the asset loads can fail (#1057).
+	const double SendLevel = OptionalNumber(Params, TEXT("sendLevel"), 1.0);
 
 	USoundBase* Sound = LoadSound(SoundPath);
 	if (!Sound) return MCPError(FString::Printf(TEXT("Sound not found: %s"), *SoundPath));
@@ -456,7 +467,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::AddSoundSubmixSend(const TSharedPtr<FJson
 
 	FSoundSubmixSendInfo Send;
 	Send.SoundSubmix = Submix;
-	Send.SendLevel = (float)OptionalNumber(Params, TEXT("sendLevel"), 1.0);
+	Send.SendLevel = (float)SendLevel;
 	Send.SendLevelControlMethod = ESendLevelControlMethod::Manual;
 	Sound->SoundSubmixSends.Add(Send);
 	UEditorAssetLibrary::SaveAsset(SoundPath);
@@ -492,7 +503,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::AddSoundSubmixSend(const TSharedPtr<FJson
 TSharedPtr<FJsonValue> FAudioHandlers::SetSoundClass(const TSharedPtr<FJsonObject>& Params)
 {
 	FString SoundPath, ClassPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("soundPath"), TEXT("assetPath"), SoundPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("soundPath"), SoundPath)) return Err;
 	if (auto Err = RequireString(Params, TEXT("soundClassPath"), ClassPath)) return Err;
 
 	USoundBase* Sound = LoadSound(SoundPath);
@@ -536,11 +547,12 @@ TSharedPtr<FJsonValue> FAudioHandlers::SetSoundClass(const TSharedPtr<FJsonObjec
 TSharedPtr<FJsonValue> FAudioHandlers::SetSoundAttenuation(const TSharedPtr<FJsonObject>& Params)
 {
 	FString SoundPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("soundPath"), TEXT("assetPath"), SoundPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("soundPath"), SoundPath)) return Err;
+	// Read before the asset load can fail (#1057).
+	const FString AttenPath = OptionalString(Params, TEXT("attenuationPath"));
 	USoundBase* Sound = LoadSound(SoundPath);
 	if (!Sound) return MCPError(FString::Printf(TEXT("Sound not found: %s"), *SoundPath));
 
-	const FString AttenPath = OptionalString(Params, TEXT("attenuationPath"));
 	USoundAttenuation* Atten = AttenPath.IsEmpty() ? nullptr : Cast<USoundAttenuation>(UEditorAssetLibrary::LoadAsset(AttenPath));
 	if (!AttenPath.IsEmpty() && !Atten) return MCPError(FString::Printf(TEXT("Attenuation not found: %s"), *AttenPath));
 
@@ -569,11 +581,12 @@ TSharedPtr<FJsonValue> FAudioHandlers::SetSoundAttenuation(const TSharedPtr<FJso
 TSharedPtr<FJsonValue> FAudioHandlers::SetSoundConcurrency(const TSharedPtr<FJsonObject>& Params)
 {
 	FString SoundPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("soundPath"), TEXT("assetPath"), SoundPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("soundPath"), SoundPath)) return Err;
+	// Read before the asset load can fail (#1057).
+	const FString ConcPath = OptionalString(Params, TEXT("concurrencyPath"));
 	USoundBase* Sound = LoadSound(SoundPath);
 	if (!Sound) return MCPError(FString::Printf(TEXT("Sound not found: %s"), *SoundPath));
 
-	const FString ConcPath = OptionalString(Params, TEXT("concurrencyPath"));
 
 	// This action replaces the whole set with at most one entry, so the previous
 	// set is what has to be captured, not just its first member. A set that held
@@ -625,6 +638,8 @@ TSharedPtr<FJsonValue> FAudioHandlers::SetAudioProperty(const TSharedPtr<FJsonOb
 	FString AssetPath, PropertyName;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	if (auto Err = RequireString(Params, TEXT("propertyName"), PropertyName)) return Err;
+	// Read before the asset load can fail (#1057).
+	const TSharedPtr<FJsonValue> Value = TryGetParam(Params, TEXT("value"));
 
 	UObject* Asset = UEditorAssetLibrary::LoadAsset(AssetPath);
 	if (!Asset) return MCPError(FString::Printf(TEXT("Asset not found: %s"), *AssetPath));
@@ -638,7 +653,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::SetAudioProperty(const TSharedPtr<FJsonOb
 		MCPQuery::ReadDottedProperty(Asset, PropertyName, PreviousType);
 
 	FString E;
-	if (!MCPJsonProperty::SetDottedPropertyFromJson(Asset, PropertyName, TryGetParam(Params, TEXT("value")), E))
+	if (!MCPJsonProperty::SetDottedPropertyFromJson(Asset, PropertyName, Value, E))
 	{
 		return MCPError(FString::Printf(TEXT("Failed to set '%s': %s"), *PropertyName, *E));
 	}

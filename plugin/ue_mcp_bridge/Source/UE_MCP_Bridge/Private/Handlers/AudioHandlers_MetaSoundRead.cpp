@@ -135,11 +135,14 @@ namespace
 	 */
 	bool MSReadResolve(const TSharedPtr<FJsonObject>& Params, FMSReadTarget& Out, TSharedPtr<FJsonValue>& OutError)
 	{
-		if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("metasoundPath"), Out.AssetPath))
+		// metasoundPath is a spec alias the registry resolves to assetPath, and
+		// pageId is read before the load can fail (#1057).
+		if (auto Err = RequireString(Params, TEXT("assetPath"), Out.AssetPath))
 		{
 			OutError = Err;
 			return false;
 		}
+		const FString WantPage = OptionalString(Params, TEXT("pageId"));
 
 		UObject* Obj = MCPLoadAssetObject(Out.AssetPath);
 		if (!Obj)
@@ -181,7 +184,6 @@ namespace
 
 		// Page selection. A document may hold several paged graphs; the default
 		// page is what the builder authors into unless told otherwise.
-		const FString WantPage = OptionalString(Params, TEXT("pageId"));
 		if (!WantPage.IsEmpty())
 		{
 			for (const FMetasoundFrontendGraph& Page : Out.Doc->RootGraph.GetConstGraphPages())
@@ -815,12 +817,13 @@ namespace
 // This is the verification counterpart to metasound_author.
 TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundReadDocument(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the asset load can fail (#1057).
+	const bool bIncludeNodes = OptionalBool(Params, TEXT("includeNodes"), true);
+	const bool bIncludeConnections = OptionalBool(Params, TEXT("includeConnections"), true);
+
 	FMSReadTarget T;
 	TSharedPtr<FJsonValue> Error;
 	if (!MSReadResolve(Params, T, Error)) return Error;
-
-	const bool bIncludeNodes = OptionalBool(Params, TEXT("includeNodes"), true);
-	const bool bIncludeConnections = OptionalBool(Params, TEXT("includeConnections"), true);
 
 	FMSReadDegree Degrees;
 	MSReadBuildDegrees(*T.Graph, Degrees);
@@ -937,6 +940,11 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundReadDocument(const TSharedPtr<FJ
 // Every edge as a rewireable argument list, optionally narrowed to one node.
 TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundListConnections(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the asset load can fail (#1057).
+	const FString NodeId = OptionalString(Params, TEXT("nodeId"));
+	const FString Direction = OptionalString(Params, TEXT("direction"), TEXT("both")).ToLower();
+	const FString DataTypeFilter = OptionalString(Params, TEXT("dataType"));
+
 	FMSReadTarget T;
 	TSharedPtr<FJsonValue> Error;
 	if (!MSReadResolve(Params, T, Error)) return Error;
@@ -944,16 +952,13 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundListConnections(const TSharedPtr
 	// Optional narrowing to one node, either end or a named end.
 	FGuid FilterNode;
 	bool bFilter = false;
-	FString NodeId;
-	if (TryGetStringParam(Params, TEXT("nodeId"), NodeId) && !NodeId.IsEmpty())
+	if (!NodeId.IsEmpty())
 	{
 		const FMetasoundFrontendNode* Node = MSReadRequireNode(Params, T, Error);
 		if (!Node) return Error;
 		FilterNode = Node->GetID();
 		bFilter = true;
 	}
-	const FString Direction = OptionalString(Params, TEXT("direction"), TEXT("both")).ToLower();
-	const FString DataTypeFilter = OptionalString(Params, TEXT("dataType"));
 
 	TArray<TSharedPtr<FJsonValue>> Conns;
 	int32 Problems = 0;
@@ -998,11 +1003,12 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundListConnections(const TSharedPtr
 // them, so a caller can follow a variable to the wiring that uses it.
 TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundListVariables(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the asset load can fail (#1057).
+	const FString Filter = OptionalString(Params, TEXT("filter")).ToLower();
+
 	FMSReadTarget T;
 	TSharedPtr<FJsonValue> Error;
 	if (!MSReadResolve(Params, T, Error)) return Error;
-
-	const FString Filter = OptionalString(Params, TEXT("filter")).ToLower();
 
 	TArray<TSharedPtr<FJsonValue>> Vars;
 	for (const FMetasoundFrontendVariable& Var : T.Graph->Variables)
@@ -1056,14 +1062,15 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundListVariables(const TSharedPtr<F
 // acting on a node.
 TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundSearchNodes(const TSharedPtr<FJsonObject>& Params)
 {
-	FMSReadTarget T;
-	TSharedPtr<FJsonValue> Error;
-	if (!MSReadResolve(Params, T, Error)) return Error;
-
+	// Read before the asset load can fail (#1057).
 	const FString Query = OptionalString(Params, TEXT("query")).ToLower();
 	const FString DataType = OptionalString(Params, TEXT("dataType"));
 	const FString ClassTypeFilter = OptionalString(Params, TEXT("classType")).ToLower();
 	const int32 Limit = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 100), 1, 1000);
+
+	FMSReadTarget T;
+	TSharedPtr<FJsonValue> Error;
+	if (!MSReadResolve(Params, T, Error)) return Error;
 
 	FMSReadDegree Degrees;
 	MSReadBuildDegrees(*T.Graph, Degrees);
@@ -1140,6 +1147,10 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundSearchNodes(const TSharedPtr<FJs
 // connection state, and the edges on both sides named by node.
 TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundInspectNode(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the asset load can fail; MSReadRequireNode resolves it (#1057).
+	FString NodeIdArg;
+	if (auto Err = RequireString(Params, TEXT("nodeId"), NodeIdArg)) return Err;
+
 	FMSReadTarget T;
 	TSharedPtr<FJsonValue> Error;
 	if (!MSReadResolve(Params, T, Error)) return Error;
@@ -1203,15 +1214,18 @@ TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundInspectNode(const TSharedPtr<FJs
 // connection state, for picking the vertex names the write actions want.
 TSharedPtr<FJsonValue> FAudioHandlers::MetaSoundListNodePins(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the asset load can fail; MSReadRequireNode resolves nodeId (#1057).
+	FString NodeIdArg;
+	if (auto Err = RequireString(Params, TEXT("nodeId"), NodeIdArg)) return Err;
+	const FString DataType = OptionalString(Params, TEXT("dataType"));
+	const FString Direction = OptionalString(Params, TEXT("direction"), TEXT("both")).ToLower();
+
 	FMSReadTarget T;
 	TSharedPtr<FJsonValue> Error;
 	if (!MSReadResolve(Params, T, Error)) return Error;
 
 	const FMetasoundFrontendNode* Node = MSReadRequireNode(Params, T, Error);
 	if (!Node) return Error;
-
-	const FString DataType = OptionalString(Params, TEXT("dataType"));
-	const FString Direction = OptionalString(Params, TEXT("direction"), TEXT("both")).ToLower();
 
 	FMSReadDegree Degrees;
 	MSReadBuildDegrees(*T.Graph, Degrees);
