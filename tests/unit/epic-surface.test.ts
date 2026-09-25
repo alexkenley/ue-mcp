@@ -72,7 +72,7 @@ describe("native tool surface filtering", () => {
     expect(actionEnumValues(mixed.schema.action)).toEqual(expect.arrayContaining(["keep", "describe"]));
     expect(actionEnumValues(mixed.schema.action)).not.toContain("epic_drop");
     await expect(catalog.actions.describe.handler({} as never, { category: "mixed" }))
-      .resolves.toMatchObject({ actions: ["- keep: Keep the local action. Params: retained, shared"] });
+      .resolves.toMatchObject({ signatures: ["keep(retained, shared)"] });
   });
 
   it("rebuilds action metadata on the real full surface without guessing schema ownership", () => {

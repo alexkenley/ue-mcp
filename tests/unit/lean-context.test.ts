@@ -9,6 +9,7 @@ import {
   buildMicroGateway,
 } from "../../src/lean-context.js";
 import { searchToolGraph } from "../../src/tool-search.js";
+import { actionSignature } from "../../src/action-signature.js";
 import { SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS_LEAN, SERVER_INSTRUCTIONS_MICRO } from "../../src/instructions.js";
 
 function fixtureTools(): ToolDef[] {
@@ -104,13 +105,13 @@ describe("applyLeanContext", () => {
     expect(enumValues).toContain("describe");
   });
 
-  it("per-category describe returns that category's action list", async () => {
+  it("per-category describe returns that category's signatures", async () => {
     const leaned = applyLeanContext(fixtureTools());
     const bpTool = leaned.find((t) => t.name === "blueprint")!;
-    const out = (await runAction(bpTool, "describe")) as { category: string; count: number; actions: string[] };
+    const out = (await runAction(bpTool, "describe")) as { category: string; count: number; signatures: string[] };
     expect(out.category).toBe("blueprint");
     expect(out.count).toBe(2);
-    expect(out.actions).toContain("- create: Create a new Blueprint asset");
+    expect(out.signatures).toEqual(["create()", "add_node()"]);
   });
 });
 
@@ -119,12 +120,13 @@ describe("catalog discovery tool", () => {
     const catalog = buildCatalogTool(fixtureTools());
     const out = (await runAction(catalog, "search", { query: "actor" })) as {
       count: number;
-      results: Array<{ category: string; action: string }>;
+      results: string[];
     };
     expect(out.count).toBeGreaterThan(0);
-    const keys = out.results.map((r) => `${r.category}.${r.action}`);
-    expect(keys).toContain("level.place_actor");
-    expect(keys).toContain("level.delete_actor");
+    // Signatures only (#1172): `category.action(params)`, no prose.
+    const keys = out.results;
+    expect(keys).toContain("level.place_actor()");
+    expect(keys).toContain("level.delete_actor()");
     // Blueprint actions should not match "actor".
     expect(keys.some((k) => k.startsWith("blueprint."))).toBe(false);
   });
@@ -214,8 +216,8 @@ describe("buildMicroGateway", () => {
 
   it("describe lists a category's actions and rejects unknown ones", async () => {
     const gw = buildMicroGateway(microFixture());
-    const ok = (await gw.actions.describe.handler!(ctxB, { action: "describe", category: "blueprint" })) as { actions: string[] };
-    expect(ok.actions.some((a) => a.startsWith("create:"))).toBe(true);
+    const ok = (await gw.actions.describe.handler!(ctxB, { action: "describe", category: "blueprint" })) as { signatures: string[] };
+    expect(ok.signatures).toEqual(["create()", "compile()"]);
     const bad = (await gw.actions.describe.handler!(ctxB, { action: "describe", category: "nope" })) as { error?: string };
     expect(bad.error).toBeDefined();
   });
@@ -269,10 +271,10 @@ describe("compact discovery for spatial requests", () => {
   })];
 
   it("uses the same intent ranking in full, lean and micro, without losing plugins", async () => {
-    const expected = searchToolGraph(tools, "clockwise").map(({ tool, action, description }) =>
-      ({ category: tool, action, description }),
-    );
-    expect(expected[0].action).toBe("nudge_component");
+    const ranked = searchToolGraph(tools, "clockwise");
+    expect(ranked[0].action).toBe("nudge_component");
+    const expected = ranked.map(({ tool, action }) => `${tool}.${actionSignature(tools[0], action)}`);
+    expect(expected[0]).toBe("level.nudge_component(componentName, axisRotation?:o)");
     for (const discovery of [buildCatalogTool(tools), buildMicroGateway(tools)]) {
       expect(await runAction(discovery, "search", { query: "clockwise" })).toMatchObject({ results: expected });
     }

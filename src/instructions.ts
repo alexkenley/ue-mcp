@@ -1,4 +1,5 @@
 import { ALL_TOOLS } from "./tools.js";
+import { SIGNATURE_LEGEND } from "./action-signature.js";
 
 /**
  * Counts and the category list, derived rather than transcribed (#817, plan
@@ -67,21 +68,22 @@ A successful transform write is not visual verification. Do not infer 3D contact
 
 export const SERVER_INSTRUCTIONS = `UE-MCP: Unreal Engine editor bridge (C++ plugin) - ${CATEGORY_COUNT} category tools covering ${ACTION_COUNT} actions: ${OWN_ACTION_COUNT} of ue-mcp's own, plus ${EPIC_ACTION_COUNT} official Unreal 5.8 tools wrapped in-process as \`epic_*\` actions (UE 5.8+; see the epic category).
 
-Every tool takes an "action" parameter that selects the operation. Call project(action="get_status") first.
+Every category tool takes "action" (the operation) and "args" (that action's parameters): level(action="spawn_actor", args={className: "PointLight"}). Call project(action="get_status") first.
 
 ═══ QUICK START ═══
 1. project(action="get_status") - check if the editor is connected
 2. If not connected: editor(action="start_editor") to launch UE
 3. level(action="get_outliner") - see what's in the current level
 4. asset(action="list") - browse project assets
-5. reflection(action="reflect_class", className="StaticMeshActor") - understand any UE class
-6. demo(action="step", stepIndex=1) through 19 - run the Neon Shrine demo to see the bridge in action
+5. reflection(action="reflect_class", args={className: "StaticMeshActor"}) - understand any UE class
+6. demo(action="step", args={stepIndex: 1}) through 19 - run the Neon Shrine demo to see the bridge in action
 7. demo(action="cleanup") - clean up after the demo
 
 ═══ TOOLS ═══
 
-Every category tool lists its own actions (and each action's parameters) in
-its description - read the description of the category you need. Categories:
+Every category tool lists one signature per action in its description.
+${SIGNATURE_LEGEND}
+Categories:
 ${CATEGORIES}.
 
 ═══ TIPS ═══
@@ -95,7 +97,7 @@ ${CATEGORIES}.
 • editor(action="hot_reload") triggers Live Coding compilation without restarting the editor.
 • editor(action="focus_on_actor", actorLabel="MyActor") snaps the viewport to any actor.
 • Log output: editor(action="get_log", category="LogMCPBridge") to see bridge-specific logs.
-• project(action="describe_action", name="level.nudge_component") returns that action's parameters, including nested fields.
+• project(action="describe_action", args={name: "level.nudge_component"}) returns that action's parameters with descriptions, including nested fields.
 
 ═══ SPATIAL EDITS ═══
 ${SPATIAL_GUIDANCE}
@@ -157,20 +159,20 @@ posting anything.
 
 // Compact instructions used when context.strategy = "lean". The per-action
 // catalog is intentionally omitted: agents pull it on demand via the `catalog`
-// tool or a category's `describe` action. This keeps the initialize handshake
-// small for token-constrained clients while preserving full capability.
+// tool or a category's `describe` action.
 export const SERVER_INSTRUCTIONS_LEAN = `UE-MCP (lean mode): Unreal Engine editor bridge (C++ plugin). ${CATEGORY_COUNT} category tools covering ${ACTION_COUNT} actions; the per-action catalog is loaded on demand to keep context small.
 
-Every tool takes an "action" parameter that selects the operation. Start with project(action="get_status").
+Every category tool takes "action" (the operation) and "args" (that action's parameters). Start with project(action="get_status").
 
 ═══ DISCOVER ACTIONS ═══
 Tool descriptions are trimmed in lean mode. Find the action you need with:
-- catalog(action="search", query="spawn actor") - rank matching actions across every category
-- catalog(action="describe", category="level", method="nudge_component") - one action's parameters, including nested fields
+- catalog(action="search", query="spawn actor") - matching action signatures across every category
+- catalog(action="describe", category="level", method="nudge_component") - one action's parameters with descriptions, including nested fields
 - catalog(action="list_categories") - the ${CATEGORY_COUNT} categories with one-line summaries
-- <category>(action="describe") - every action in one category (e.g. blueprint(action="describe"))
+- <category>(action="describe") - that category's signatures, a page at a time (args={offset} for the next)
 
-Each category's "action" parameter is still a validated enum, so unknown actions are rejected up front. Call describe/search first when you are unsure of the exact action name.
+${SIGNATURE_LEGEND}
+Each category's "action" parameter is still an enum, so unknown actions are rejected with the closest names. Call describe/search first when you are unsure of the exact action name.
 
 ═══ SPATIAL EDITS ═══
 ${SPATIAL_GUIDANCE}
@@ -188,7 +190,7 @@ do the job, tell the user when done and offer to feedback(action="submit") the g
 routes the issue to the tracker that owns the surface (core, or the plugin that provides it)
 by checking the plugin registry; feedback(action="route") previews that without posting.
 
-Full mode (every action listed inline) is the default. This lean surface is selected by
+Full mode (every signature listed inline) is the default. This lean surface is selected by
 context.strategy: lean in ue-mcp.yml or UE_MCP_CONTEXT_STRATEGY=lean.
 `;
 
@@ -198,13 +200,14 @@ context.strategy: lean in ue-mcp.yml or UE_MCP_CONTEXT_STRATEGY=lean.
 export const SERVER_INSTRUCTIONS_MICRO = `UE-MCP (micro mode): Unreal Engine editor bridge (C++ plugin). The entire surface (${CATEGORY_COUNT} categories, ${ACTION_COUNT} actions) is reached through a single gateway tool to keep context tiny.
 
 ═══ HOW TO USE ═══
-- tools(action="search", query="rotate clockwise") - find actions by intent
+- tools(action="search", query="rotate clockwise") - find action signatures by intent
 - tools(action="list_categories") - list every category with a one-line summary
-- tools(action="describe", category="blueprint") - list a category's actions and how to call them
-- tools(action="describe", category="level", method="nudge_component") - one action's parameters, including nested fields
+- tools(action="describe", category="blueprint") - that category's signatures, a page at a time (offset=nextOffset for more)
+- tools(action="describe", category="level", method="nudge_component") - one action's parameters with descriptions, including nested fields
 - tools(action="call", category="blueprint", method="create", args={ ... }) - invoke any action
 
 \`method\` is the action name; \`args\` is the object of that action's parameters.
+${SIGNATURE_LEGEND}
 Start with: tools(action="call", category="project", method="get_status").
 
 ═══ SPATIAL EDITS ═══
@@ -218,7 +221,7 @@ ${CATEGORIES}.
 flow(action="run", flowName="<name>") runs a named sequence; see the \`flows\` field
 from tools(action="call", category="project", method="get_status").
 
-Full mode (every action listed inline) is the default. This micro surface is selected by
+Full mode (every signature listed inline) is the default. This micro surface is selected by
 context.strategy: micro in ue-mcp.yml or UE_MCP_CONTEXT_STRATEGY=micro.
 `;
 

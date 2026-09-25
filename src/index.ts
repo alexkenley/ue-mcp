@@ -7,7 +7,9 @@ import type { ProjectContext } from "./project.js";
 import { ueMcpConfigRejections, describeConfigRejections } from "./project.js";
 import { attach, attachSummary } from "./deployer.js";
 import { SERVER_INSTRUCTIONS, SERVER_INSTRUCTIONS_LEAN, SERVER_INSTRUCTIONS_MICRO, multiEditorInstructions } from "./instructions.js";
-import { resolveContextStrategy, applyLeanContext, buildMicroGateway } from "./lean-context.js";
+import { resolveContextStrategy, applyLeanContext, buildMicroGateway, fullSurfaceDescription } from "./lean-context.js";
+import { envelopeInputSchema, envelopeShape, unwrapArgsEnvelope, usesArgsEnvelope, validateCategoryParams } from "./call-envelope.js";
+import { McpError as SdkMcpError } from "@modelcontextprotocol/sdk/types.js";
 import {
   routeEditorCall,
   callSubject,
@@ -677,7 +679,15 @@ async function main() {
         removeMigrateTarget(tool);
       }
       const registration = registeredTools.get(tool.name);
-      if (registration) registration.update({ paramsSchema: tool.schema });
+      if (!registration) continue;
+      if (usesArgsEnvelope(tool)) {
+        // The SDK rebuilds a stripping object from the raw shape; put the
+        // pass-through one back so a flat call still reaches validation.
+        registration.update({ paramsSchema: envelopeShape(tool) });
+        registration.inputSchema = envelopeInputSchema(tool);
+      } else {
+        registration.update({ paramsSchema: tool.schema });
+      }
     }
   };
 
@@ -714,8 +724,25 @@ async function main() {
     for (const [key, schema] of Object.entries(tool.schema)) {
       shape[key] = schema;
     }
+    // Category tools are advertised as `action` + `args` (#1172). The flat
+    // shape stays the validation contract, applied here instead of by the SDK.
+    const envelope = usesArgsEnvelope(tool);
+    const description = envelope && contextStrategy === "full" ? fullSurfaceDescription(tool) : tool.description;
 
-    const registration = server.tool(tool.name, tool.description, shape, async (rawParams, extra) => {
+    const callback = async (callArgs: Record<string, unknown>, extra: Parameters<typeof makeProgressReporter>[0]) => {
+      let rawParams: Record<string, unknown>;
+      try {
+        rawParams = envelope ? validateCategoryParams(tool, unwrapArgsEnvelope(tool, callArgs)) : callArgs;
+      } catch (e) {
+        // Thrown to the SDK, which words it exactly as its own validation did.
+        if (e instanceof SdkMcpError) throw e;
+        const msg = e instanceof Error ? e.message : String(e);
+        const code = e instanceof McpError ? e.code : ErrorCode.INVALID_PARAMS;
+        return {
+          content: withUpgradeNotice([{ type: "text" as const, text: `Error [${code}]: ${msg}` }]),
+          isError: true,
+        };
+      }
       let routed: RoutedCall;
       try {
         routed = routeCall(tool, rawParams);
@@ -1034,7 +1061,10 @@ async function main() {
           isError: true,
         };
       }
-    });
+    };
+    const registration = envelope
+      ? server.registerTool(tool.name, { description, inputSchema: envelopeInputSchema(tool) }, callback as never)
+      : server.tool(tool.name, description, shape, callback as never);
     registeredTools.set(tool.name, registration);
   }
 

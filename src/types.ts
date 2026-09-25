@@ -510,6 +510,12 @@ export interface CategoryOptions {
    * `{category, method, args}` envelope, where none of them are present.
    */
   nestedParamsKey?: string;
+  /**
+   * Advertise this tool's declared shape as-is rather than as `action` +
+   * `args` (#1172). Set by the lean `catalog` discovery tool, whose handful of
+   * parameters are already compact.
+   */
+  flatSurface?: boolean;
 }
 
 /**
