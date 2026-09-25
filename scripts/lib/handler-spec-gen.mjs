@@ -121,7 +121,7 @@ ${keys.join("\n")}
 };
 
 /** Declare an action for a spec'd bridge method: effect, summary, method. */
-export const specBp = makeSpecBp(paramsClauses);
+export const specBp = makeSpecBp(paramsClauses, handlerSpecs);
 `;
 }
 

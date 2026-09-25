@@ -57,6 +57,26 @@ function specdActions(tool: ToolDef = animationTool): Array<[string, { bridge: s
   return out;
 }
 
+/**
+ * describe_action reports a spec'd action's parameters from its spec: each
+ * declared name once, required exactly when the spec says, its aliases on it
+ * rather than as separate parameters or a choice between spellings.
+ */
+function expectDescribedFromSpec(tool: ToolDef, action: string, method: string): void {
+  const schema = actionSchema(tool, action);
+  const declared = SNAPSHOT.handlers[method].params;
+  const aliases = new Set(declared.flatMap((p) => p.aliases ?? []));
+  for (const param of declared) {
+    const entry = schema.params.find((p) => p.name === param.name);
+    expect(entry, `${action}.${param.name}`).toBeDefined();
+    expect(entry?.required, `${action}.${param.name} required`).toBe(param.required);
+    expect(entry?.aliases, `${action}.${param.name} aliases`).toEqual(param.aliases?.length ? param.aliases : undefined);
+    expect(entry?.alternativeGroup, `${action}.${param.name} is not a choice`).toBeUndefined();
+  }
+  for (const entry of schema.params) expect(aliases.has(entry.name), `${action}: alias ${entry.name} listed as a parameter`).toBe(false);
+  expect(schema.alternatives, action).toBeUndefined();
+}
+
 describe("the recording", () => {
   it("is well formed and counts itself", () => {
     expect(specProblems(SNAPSHOT.handlers)).toEqual([]);
@@ -149,20 +169,8 @@ describe("the animation surface", () => {
     }
   });
 
-  it("marks exactly the required parameters required", () => {
-    for (const [action, spec] of specdActions()) {
-      const schema = actionSchema(animationTool, action);
-      for (const param of SNAPSHOT.handlers[spec.bridge].params) {
-        const entry = schema.params.find((p) => p.name === param.name);
-        expect(entry, `${action}.${param.name}`).toBeDefined();
-        if (param.aliases?.length) {
-          // A required name with an alias is a required choice between the two.
-          expect(entry?.alternativeGroup, `${action}.${param.name} is a choice`).toBeDefined();
-        } else {
-          expect(entry?.required, `${action}.${param.name}`).toBe(param.required);
-        }
-      }
-    }
+  it("describes each spec'd action's parameters as its spec declares them", () => {
+    for (const [action, spec] of specdActions()) expectDescribedFromSpec(animationTool, action, spec.bridge);
   });
 
   it("declares every spec'd key, with one type wherever the category also declares it by hand", () => {
@@ -319,19 +327,8 @@ describe.each(SPEC_TOOLS)("the %s tool", (toolName) => {
     }
   });
 
-  it("marks exactly the required parameters required", () => {
-    for (const [action, spec] of actions) {
-      const schema = actionSchema(tool, action);
-      for (const param of SNAPSHOT.handlers[spec.bridge].params) {
-        const entry = schema.params.find((p) => p.name === param.name);
-        expect(entry, `${action}.${param.name}`).toBeDefined();
-        if (param.aliases?.length) {
-          expect(entry?.alternativeGroup, `${action}.${param.name} is a choice`).toBeDefined();
-        } else {
-          expect(entry?.required, `${action}.${param.name}`).toBe(param.required);
-        }
-      }
-    }
+  it("describes each spec'd action's parameters as its spec declares them", () => {
+    for (const [action, spec] of actions) expectDescribedFromSpec(tool, action, spec.bridge);
   });
 
   it("advertises every key its spec'd actions declare, accepting what the spec declares", () => {

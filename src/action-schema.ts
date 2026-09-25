@@ -55,6 +55,8 @@ export interface ParamSchema extends ValueSchema {
    * handler takes either one; what has to be satisfied is the group.
    */
   alternativeGroup?: number;
+  /** Other names the bridge accepts for this parameter, from a spec'd action's C++ spec. */
+  aliases?: string[];
 }
 
 export interface ActionSchema {
@@ -190,6 +192,12 @@ function typeName(schema: z.ZodTypeAny): string {
     }
     default: return def.typeName ? def.typeName.replace(/^Zod/, "").toLowerCase() : "unknown";
   }
+}
+
+/** A spec's wire type in typeName's vocabulary; vec3 and rotator are objects. */
+function specTypeName(type: string, items?: string): string {
+  if (type === "array") return `${specTypeName(items ?? "any")}[]`;
+  return type === "vec3" || type === "rotator" ? "object" : type;
 }
 
 /** Allowed values for an enum, or a union made entirely of string literals. */
@@ -723,9 +731,16 @@ export function actionSchema(tool: ToolDef, action: string): ActionSchema {
   // `asset.migrate` documents `toEditor OR destinationContentDir`, and with
   // one editor registered `toEditor` is not in the shape at all, which leaves
   // an ordinary required parameter rather than a choice.
+  // A spec'd action's parameters are its C++ spec's (#1057). Its clause is
+  // generated, so an `(or x)` there is an alias of one parameter, not a
+  // choice between two, and each name is required exactly when the spec says.
+  const recorded = spec.kind === "bridge" ? spec.paramSpec : undefined;
+  const recordedByName = new Map((recorded ?? []).map((p) => [p.name, p]));
+  const recordedAliases = new Set((recorded ?? []).flatMap((p) => p.aliases ?? []));
+
   const alternatives: AlternativeGroup[] = [];
   const groupIndex = new Map<number, number>();
-  parsed.alternatives.forEach((group, i) => {
+  if (!recorded) parsed.alternatives.forEach((group, i) => {
     const branches = group.branches
       .map((b) => b.filter((n) => declaredNames.has(n)))
       .filter((b) => b.length > 0);
@@ -751,6 +766,23 @@ export function actionSchema(tool: ToolDef, action: string): ActionSchema {
     // plus the routing parameters, which every action accepts.
     if (!doc && !forwards.has(name) && !ROUTING_PARAMS.has(name)) continue;
     covered.add(name);
+    // An alias is reported on the parameter it names, not as one of its own.
+    if (recordedAliases.has(name)) continue;
+    const declared = recordedByName.get(name);
+    if (declared) {
+      params.push({
+        ...valueSchema(schema),
+        name,
+        type: specTypeName(declared.type, declared.items),
+        required: declared.required,
+        description: declared.description || paramDoc,
+        enumValues: enumValues(inner),
+        default: dflt,
+        sources,
+        aliases: declared.aliases?.length ? [...declared.aliases] : undefined,
+      });
+      continue;
+    }
     params.push({
       ...valueSchema(schema),
       name,
