@@ -1,5 +1,5 @@
 {
-  "handlerCount": 836,
+  "handlerCount": 843,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -824,6 +824,94 @@
         }
       ]
     },
+    "add_force": {
+      "category": "physics",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor editor label; pass actorLabel or actorPath"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        },
+        {
+          "name": "impulse",
+          "type": "vec3",
+          "required": true,
+          "description": "Impulse or force vector {x,y,z}",
+          "aliases": [
+            "force",
+            "vector"
+          ]
+        },
+        {
+          "name": "mode",
+          "type": "string",
+          "required": false,
+          "description": "impulse (default) | force"
+        },
+        {
+          "name": "componentName",
+          "type": "string",
+          "required": false,
+          "description": "Primitive component to push (default: the root, else the first primitive)"
+        },
+        {
+          "name": "boneName",
+          "type": "string",
+          "required": false,
+          "description": "Physics bone to push"
+        },
+        {
+          "name": "location",
+          "type": "vec3",
+          "required": false,
+          "description": "World point to apply the impulse at; ignores mode"
+        },
+        {
+          "name": "velChange",
+          "type": "boolean",
+          "required": false,
+          "description": "Treat the impulse as a velocity change"
+        },
+        {
+          "name": "accelChange",
+          "type": "boolean",
+          "required": false,
+          "description": "Treat the force as an acceleration change"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: auto (default) | pie | editor"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world instance (0 = server/primary); omit for the primary world"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ]
+    },
     "add_function_parameter": {
       "category": "blueprint",
       "params": [
@@ -987,6 +1075,94 @@
           "type": "boolean",
           "required": false,
           "description": "Persist the asset (default true); false defers the write"
+        }
+      ]
+    },
+    "add_impulse": {
+      "category": "physics",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor editor label; pass actorLabel or actorPath"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        },
+        {
+          "name": "impulse",
+          "type": "vec3",
+          "required": true,
+          "description": "Impulse or force vector {x,y,z}",
+          "aliases": [
+            "force",
+            "vector"
+          ]
+        },
+        {
+          "name": "mode",
+          "type": "string",
+          "required": false,
+          "description": "impulse (default) | force"
+        },
+        {
+          "name": "componentName",
+          "type": "string",
+          "required": false,
+          "description": "Primitive component to push (default: the root, else the first primitive)"
+        },
+        {
+          "name": "boneName",
+          "type": "string",
+          "required": false,
+          "description": "Physics bone to push"
+        },
+        {
+          "name": "location",
+          "type": "vec3",
+          "required": false,
+          "description": "World point to apply the impulse at; ignores mode"
+        },
+        {
+          "name": "velChange",
+          "type": "boolean",
+          "required": false,
+          "description": "Treat the impulse as a velocity change"
+        },
+        {
+          "name": "accelChange",
+          "type": "boolean",
+          "required": false,
+          "description": "Treat the force as an acceleration change"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: auto (default) | pie | editor"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world instance (0 = server/primary); omit for the primary world"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
         }
       ]
     },
@@ -20424,6 +20600,156 @@
         }
       ]
     },
+    "set_collision": {
+      "category": "physics",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor editor label; pass actorLabel or actorPath"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        },
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "Blueprint whose component template to edit; needs componentName"
+        },
+        {
+          "name": "componentName",
+          "type": "string",
+          "required": false,
+          "description": "Primitive component name (prefix match on an actor, default every one); required with assetPath"
+        },
+        {
+          "name": "collisionProfile",
+          "type": "string",
+          "required": false,
+          "description": "Collision profile (preset) name, applied before the overrides"
+        },
+        {
+          "name": "collisionEnabled",
+          "type": "string",
+          "required": false,
+          "description": "NoCollision | QueryOnly | PhysicsOnly | QueryAndPhysics"
+        },
+        {
+          "name": "objectType",
+          "type": "string",
+          "required": false,
+          "description": "Object-type channel name, e.g. WorldStatic, Pawn, ECC_GameTraceChannel1"
+        },
+        {
+          "name": "responseToAllChannels",
+          "type": "string",
+          "required": false,
+          "description": "Block | Overlap | Ignore, applied to every channel before the per-channel responses"
+        },
+        {
+          "name": "responses",
+          "type": "object",
+          "required": false,
+          "description": "Per-channel responses, {channelName: Block | Overlap | Ignore}"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ],
+            [
+              "assetPath"
+            ]
+          ]
+        }
+      ]
+    },
+    "set_collision_enabled": {
+      "category": "physics",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor editor label; pass actorLabel or actorPath"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        },
+        {
+          "name": "collisionEnabled",
+          "type": "string",
+          "required": true,
+          "description": "NoCollision | QueryOnly | PhysicsOnly | QueryAndPhysics",
+          "aliases": [
+            "collisionType"
+          ]
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ]
+    },
+    "set_collision_profile": {
+      "category": "physics",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor editor label; pass actorLabel or actorPath"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        },
+        {
+          "name": "profileName",
+          "type": "string",
+          "required": true,
+          "description": "Collision profile (preset) name"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ]
+    },
     "set_component_override_materials": {
       "category": "blueprint",
       "params": [
@@ -22532,6 +22858,60 @@
         }
       ]
     },
+    "set_physics_properties": {
+      "category": "physics",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor editor label; pass actorLabel or actorPath"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        },
+        {
+          "name": "mass",
+          "type": "number",
+          "required": false,
+          "description": "Mass override in kg"
+        },
+        {
+          "name": "linearDamping",
+          "type": "number",
+          "required": false,
+          "description": "Linear damping"
+        },
+        {
+          "name": "angularDamping",
+          "type": "number",
+          "required": false,
+          "description": "Angular damping"
+        },
+        {
+          "name": "enableGravity",
+          "type": "boolean",
+          "required": false,
+          "description": "Whether gravity applies to the body"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ]
+    },
     "set_pie_time_scale": {
       "category": "editor",
       "params": [
@@ -23031,6 +23411,45 @@
           "type": "boolean",
           "required": false,
           "description": "Resolve a montage to its first AnimSequence (default true)"
+        }
+      ]
+    },
+    "set_simulate_physics": {
+      "category": "physics",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor editor label; pass actorLabel or actorPath"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        },
+        {
+          "name": "simulate",
+          "type": "boolean",
+          "required": true,
+          "description": "Turn physics simulation on or off",
+          "aliases": [
+            "enabled"
+          ]
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
         }
       ]
     },

@@ -22,6 +22,7 @@ import { handlerSpecs as material } from "./material.generated.js";
 import { handlerSpecs as networking } from "./networking.generated.js";
 import { handlerSpecs as niagara } from "./niagara.generated.js";
 import { handlerSpecs as pcg } from "./pcg.generated.js";
+import { handlerSpecs as physics } from "./physics.generated.js";
 import { handlerSpecs as project } from "./project.generated.js";
 import { handlerSpecs as reflection } from "./reflection.generated.js";
 import { handlerSpecs as statetree } from "./statetree.generated.js";
@@ -46,6 +47,7 @@ export const RECORDED_HANDLER_SPECS: HandlerSpecs = {
   ...networking,
   ...niagara,
   ...pcg,
+  ...physics,
   ...project,
   ...reflection,
   ...statetree,
