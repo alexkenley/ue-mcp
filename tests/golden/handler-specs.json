@@ -1,5 +1,5 @@
 {
-  "handlerCount": 39,
+  "handlerCount": 41,
   "handlers": {
     "add_curve": {
       "category": "animation",
@@ -291,6 +291,24 @@
           "type": "object",
           "required": false,
           "description": "Cell values keyed by column index (as string) or column name; same value format as cells"
+        }
+      ]
+    },
+    "demo_get_steps": {
+      "category": "demo",
+      "params": []
+    },
+    "demo_step": {
+      "category": "demo",
+      "params": [
+        {
+          "name": "step",
+          "type": "integer",
+          "required": false,
+          "description": "Step index to execute, 1 to 19. Omit for the step list",
+          "aliases": [
+            "stepIndex"
+          ]
         }
       ]
     },

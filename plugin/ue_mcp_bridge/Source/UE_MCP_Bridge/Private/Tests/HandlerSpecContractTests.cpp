@@ -42,6 +42,7 @@
 #include "Handlers/AssetHandlers.h"
 #include "Handlers/AssetHandlers_Geometry.h"
 #include "Handlers/ChooserHandlers.h"
+#include "Handlers/DemoHandlers.h"
 #include "Handlers/ReflectionHandlers.h"
 #include "Misc/AutomationTest.h"
 
@@ -132,6 +133,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FAssetHandlers::RegisterHandlers(Registry);
 	FAssetGeometryHandlers::RegisterHandlers(Registry);
 	FChooserHandlers::RegisterHandlers(Registry);
+	FDemoHandlers::RegisterHandlers(Registry);
 	FReflectionHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
