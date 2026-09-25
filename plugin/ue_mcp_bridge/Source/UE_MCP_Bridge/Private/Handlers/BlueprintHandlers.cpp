@@ -3253,6 +3253,9 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DuplicateBlueprint(const TSharedPtr<F
 	FString DestinationPath;
 	if (auto Err = RequireString(Params, TEXT("destinationPath"), DestinationPath)) return Err;
 
+	// A missing source is refused here; the asset library logs it at a level that varies by engine.
+	if (!MCPLoadAssetObject(SourcePath)) return MCPAssetNotFoundError(SourcePath);
+
 	UObject* Dup = UEditorAssetLibrary::DuplicateAsset(SourcePath, DestinationPath);
 	if (!Dup)
 	{

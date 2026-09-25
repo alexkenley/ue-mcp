@@ -139,9 +139,6 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	// invalid package name) runs before anything is created.
 	FAssetHandlers::RegisterHandlers(Registry);
 	FAssetGeometryHandlers::RegisterHandlers(Registry);
-	// duplicate_blueprint hands a source that does not exist to the editor asset
-	// library, which refuses it before anything is written and logs why.
-	AddExpectedError(TEXT("DuplicateAsset"), EAutomationExpectedErrorFlags::Contains, 0);
 	FBlueprintHandlers::RegisterHandlers(Registry);
 	FCollisionQueryHandlers::RegisterHandlers(Registry);
 	FChooserHandlers::RegisterHandlers(Registry);
