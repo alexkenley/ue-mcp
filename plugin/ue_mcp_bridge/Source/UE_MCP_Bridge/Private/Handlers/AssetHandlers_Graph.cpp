@@ -1145,13 +1145,15 @@ TSharedPtr<FJsonValue> FAssetHandlers::AddGraphNode(const TSharedPtr<FJsonObject
 		{
 			Chosen = Infos[Matches[0]].Action;
 		}
-		else if (SpawnMode == TEXT("action") || !ActionName.IsEmpty() || bAnySpawner)
+		else if (SpawnMode == TEXT("action") || !ActionName.IsEmpty() || bAnySpawner
+			|| !NodeClass || !NodeClass->IsChildOf(UEdGraphNode::StaticClass()))
 		{
 			// A schema that publishes spawn actions builds its nodes through them; a
 			// node constructed around them would miss what the action sets up.
 			return MCPGraphAuthorActionError(FString::Printf(
-				TEXT("No action of %s spawns '%s' in graph '%s'. availableActions lists what it offers."),
-				*Schema->GetClass()->GetName(), *Filter, *Graph->GetName()),
+				TEXT("No action of %s spawns '%s' in graph '%s'. availableActions lists what it offers.%s"),
+				*Schema->GetClass()->GetName(), *Filter, *Graph->GetName(),
+				bAnySpawner ? TEXT("") : TEXT(" This schema offers no node-creating actions outside its own editor, so nodes cannot be added here.")),
 				Infos, Filter);
 		}
 		else
