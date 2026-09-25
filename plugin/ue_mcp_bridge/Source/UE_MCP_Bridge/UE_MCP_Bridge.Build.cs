@@ -288,3 +288,4 @@ public class UE_MCP_Bridge : ModuleRules
 // Private/Tests/AnimationSkeletonCreateTests.cpp.
 // Rescan trigger: Private/Tests/NativeStructFPrefixTests.cpp (#1088).
 // Rescan trigger: Private/Tests/ReflectionSurfaceTests.cpp (#1106).
+// Rescan trigger: Private/Handlers/SequencerHandlers_Render.cpp (#1098).

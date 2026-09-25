@@ -47,6 +47,8 @@ void FSequencerHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("add_sequence_track"), &AddTrack);
 	Registry.RegisterHandler(TEXT("play_sequence"), &SequenceControl);
 	Registry.RegisterHandler(TEXT("scrub_sequence"), &ScrubSequence);
+	// #1098: a whole frame range in one call, so it gets the long timeout.
+	Registry.RegisterHandlerWithTimeout(TEXT("render_sequence_frames"), &RenderSequenceFrames, 600.0f);
 	Registry.RegisterHandler(TEXT("set_sequence_playback_range"), &SetPlaybackRange);
 	Registry.RegisterHandler(TEXT("add_sequence_section"), &AddSection);
 	Registry.RegisterHandler(TEXT("set_sequence_keyframes"), &SetKeyframes);
