@@ -1,0 +1,412 @@
+{
+  "handlerCount": 20,
+  "handlers": {
+    "add_curve": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "curveName",
+          "type": "string",
+          "required": true,
+          "description": "Float curve to add"
+        }
+      ]
+    },
+    "add_virtual_bone": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "skeletonPath",
+          "type": "string",
+          "required": true,
+          "description": "USkeleton asset path"
+        },
+        {
+          "name": "sourceBone",
+          "type": "string",
+          "required": true,
+          "description": "Bone the virtual bone starts from"
+        },
+        {
+          "name": "targetBone",
+          "type": "string",
+          "required": true,
+          "description": "Bone the virtual bone points at"
+        }
+      ]
+    },
+    "get_physics_asset_info": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh asset path",
+          "aliases": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "get_skeleton_info": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh asset path",
+          "aliases": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "list_anim_modifiers": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence asset path",
+          "aliases": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "list_animation_sockets": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh asset path",
+          "aliases": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "read_anim_blueprint": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimBlueprint asset path",
+          "aliases": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "read_anim_graph": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimBlueprint asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "graphName",
+          "type": "string",
+          "required": false,
+          "description": "Graph to read (default AnimGraph)"
+        }
+      ]
+    },
+    "read_anim_montage": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimMontage asset path",
+          "aliases": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "read_anim_sequence": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence asset path",
+          "aliases": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "read_blendspace": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "BlendSpace or BlendSpace1D asset path",
+          "aliases": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "read_bone_track": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence asset path"
+        },
+        {
+          "name": "boneName",
+          "type": "string",
+          "required": true,
+          "description": "Bone whose track to sample"
+        },
+        {
+          "name": "frames",
+          "type": "array",
+          "required": false,
+          "description": "Frames to sample (default: first, middle and last)",
+          "items": "number"
+        }
+      ]
+    },
+    "read_state_machine": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimBlueprint asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "stateMachineName",
+          "type": "string",
+          "required": true,
+          "description": "State machine to read"
+        }
+      ]
+    },
+    "remove_anim_notify": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence or AnimMontage asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "notifyName",
+          "type": "string",
+          "required": false,
+          "description": "Notify name to match"
+        },
+        {
+          "name": "notifyClass",
+          "type": "string",
+          "required": false,
+          "description": "Notify class to match. Pass at least one of notifyName and notifyClass; both filters apply together"
+        }
+      ]
+    },
+    "remove_animation_notify": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence or AnimMontage asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "notifyName",
+          "type": "string",
+          "required": false,
+          "description": "Notify name to match"
+        },
+        {
+          "name": "notifyClass",
+          "type": "string",
+          "required": false,
+          "description": "Notify class to match. Pass at least one of notifyName and notifyClass; both filters apply together"
+        }
+      ]
+    },
+    "remove_virtual_bone": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "skeletonPath",
+          "type": "string",
+          "required": true,
+          "description": "USkeleton asset path"
+        },
+        {
+          "name": "virtualBoneName",
+          "type": "string",
+          "required": true,
+          "description": "Virtual bone to remove"
+        }
+      ]
+    },
+    "set_anim_blueprint_skeleton": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimBlueprint asset path"
+        },
+        {
+          "name": "skeletonPath",
+          "type": "string",
+          "required": true,
+          "description": "USkeleton to target"
+        }
+      ]
+    },
+    "set_montage_properties": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimMontage asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "sequenceLength",
+          "type": "number",
+          "required": false,
+          "description": "Montage length in seconds"
+        },
+        {
+          "name": "rateScale",
+          "type": "number",
+          "required": false,
+          "description": "Playback rate scale"
+        },
+        {
+          "name": "blendIn",
+          "type": "number",
+          "required": false,
+          "description": "Blend-in time in seconds"
+        },
+        {
+          "name": "blendOut",
+          "type": "number",
+          "required": false,
+          "description": "Blend-out time in seconds"
+        }
+      ]
+    },
+    "set_montage_slot": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimMontage asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "slotName",
+          "type": "string",
+          "required": true,
+          "description": "Slot name to write onto the track"
+        },
+        {
+          "name": "trackIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Slot track index (default 0)"
+        }
+      ]
+    },
+    "set_root_motion_settings": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "AnimSequence asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "enableRootMotion",
+          "type": "boolean",
+          "required": false,
+          "description": "Extract root motion from the root bone"
+        },
+        {
+          "name": "forceRootLock",
+          "type": "boolean",
+          "required": false,
+          "description": "Lock the root bone even without root motion"
+        },
+        {
+          "name": "useNormalizedRootMotionScale",
+          "type": "boolean",
+          "required": false,
+          "description": "Normalize root motion scale"
+        },
+        {
+          "name": "rootMotionRootLock",
+          "type": "string",
+          "required": false,
+          "description": "Root lock mode: RefPose | AnimFirstFrame | Zero"
+        }
+      ]
+    }
+  }
+}

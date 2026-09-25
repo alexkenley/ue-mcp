@@ -99,7 +99,9 @@
     "epic:record": "node scripts/record-epic-catalog.mjs",
     "epic:generate": "node --import tsx scripts/generate-epic-actions.mjs",
     "epic:seed": "node scripts/seed-epic-effects.mjs",
-    "epic:unreviewed": "node scripts/epic-unreviewed.mjs"
+    "epic:unreviewed": "node scripts/epic-unreviewed.mjs",
+    "specs:record": "node scripts/record-handler-specs.mjs",
+    "specs:generate": "node --import tsx scripts/generate-handler-specs.mjs"
   },
   "dependencies": {
     "@db-lyon/flowkit": "^0.17.2",

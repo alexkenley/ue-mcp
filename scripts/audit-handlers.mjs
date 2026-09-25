@@ -39,9 +39,11 @@ function tsBridgeMethods() {
       // stops at the first \" inside the prose, so any action whose
       // description quotes something (parentPath=\"None\") was reported as an
       // unbridged handler. It can also be a paged(...) wrapper rather than a
-      // literal, so that shape is spelled out too.
+      // literal, so that shape is spelled out too. specBp(effect, summary,
+      // method) is the same shape for an action whose parameters come from its
+      // C++ spec (#1057).
       const BP_CALL =
-        /\bbp\(\s*"(?:read|mutate|unknown)"\s*,\s*(?:(?:"(?:[^"\\]|\\.)*"|paged\((?:[^()]|\([^()]*\))*\))\s*,\s*)?"([a-z_][a-z0-9_]*)"/g;
+        /\b(?:specBp|bp)\(\s*"(?:read|mutate|unknown)"\s*,\s*(?:(?:"(?:[^"\\]|\\.)*"|paged\((?:[^()]|\([^()]*\))*\))\s*,\s*)?"([a-z_][a-z0-9_]*)"/g;
       for (const m of src.matchAll(BP_CALL)) {
         const method = m[1];
         if (!methods.has(method)) methods.set(method, []);
