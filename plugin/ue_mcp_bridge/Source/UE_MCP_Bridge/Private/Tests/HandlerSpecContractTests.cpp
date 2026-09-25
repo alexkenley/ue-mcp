@@ -52,7 +52,6 @@
 #include "Handlers/BlueprintHandlers_Collision.h"
 #include "Handlers/ChooserHandlers.h"
 #include "Handlers/DemoHandlers.h"
-#include "Handlers/DiffHandlers.h"
 #include "Handlers/EpicHandlers.h"
 #include "Handlers/ReflectionHandlers.h"
 #include "Handlers/FoliageHandlers.h"
