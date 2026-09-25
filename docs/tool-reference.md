@@ -1373,7 +1373,7 @@ Nothing outside these modes ever answers a dialog by itself. `editor(set_dialog_
 | `read_graph` | Read graph structure. Params: `assetPath (or path)` |
 | `read_node_settings` | Read node settings. Params: `assetPath (or path), nodeName` |
 | `get_components` | List PCG components in level. Params: `none` |
-| `get_component_details` | Inspect PCG component. Params: `actorLabel OR actorPath (#983)` |
+| `get_component_details` | Inspect PCG component (#983). Params: `actorLabel OR actorPath` |
 | `create_graph` | Create graph. Idempotent by path: an existing graph is reported rather than replaced. Params: `name, packagePath?, onConflict?` |
 | `add_node` | Add node. nodeName is a RESULT, not an input: the engine assigns the name and this action reports it back for connect_nodes and remove_node. Params: `assetPath (or path), nodeType, posX?, posY?` |
 | `connect_nodes` | Wire nodes. Returns edgeVerified=true after confirming the UPCGEdge persisted; surfaces an error if AddEdge succeeded but no edge object was instantiated (#304). Params: `assetPath (or path), sourceNode (or sourceNodeName), sourcePin? (or sourcePinLabel), targetNode (or targetNodeName), targetPin? (or targetPinLabel)` |
@@ -1382,11 +1382,11 @@ Nothing outside these modes ever answers a dialog by itself. `editor(set_dialog_
 | `set_static_mesh_spawner_meshes` | Populate weighted MeshEntries on a PCGStaticMeshSpawner node (#145). entries=[{mesh, weight?}]; replace defaults to true. Params: `assetPath (or path), nodeName, entries, replace?` |
 | `remove_node` | Remove node. Params: `assetPath (or path), nodeName` |
 | `unwrap_instance_nodes` | Give instance nodes (UPCGSettingsInstance wrappers, read-only in the PCG editor's details panel) their own settings object, keeping every value and edge. Settings from a shared asset are copied into the node. Nodes that already own their settings are left alone. Omit nodeName for every node in the graph (#1087). Params: `assetPath (or path), nodeName?` |
-| `execute` | Regenerate PCG. Params: `actorLabel OR actorPath, seed? (writes the component Seed before generating) (#983)` |
-| `force_regenerate` | Force a stuck PCG component to regenerate (clears graph ref, re-sets, cleanup+generate). Params: `actorLabel OR actorPath (#146/#983)` |
-| `cleanup` | Cleanup a PCG component (remove spawned content). Params: `actorLabel OR actorPath, removeComponents? (default true) (#146)` |
-| `toggle_graph` | Toggle a PCG component's graph assignment to force reinit (no generate). Params: `actorLabel OR actorPath, graphPath? (#146)` |
-| `add_volume` | Place PCG volume. Idempotent by editor label when one is given. Params: `graphPath, location?, extent?, label?, onConflict? (skip\|error)` |
+| `execute` | Regenerate PCG. A seed is written to the component before generating, and the old one reported back as previousSeed (#983). Params: `actorLabel OR actorPath, seed?` |
+| `force_regenerate` | Force a stuck PCG component to regenerate (clears graph ref, re-sets, cleanup+generate) (#146/#983). Params: `actorLabel OR actorPath` |
+| `cleanup` | Cleanup a PCG component (remove spawned content) (#146). Params: `actorLabel OR actorPath, removeComponents?` |
+| `toggle_graph` | Toggle a PCG component's graph assignment to force reinit (no generate) (#146). Params: `actorLabel OR actorPath, graphPath?` |
+| `add_volume` | Place PCG volume. Idempotent by editor label when one is given. Params: `graphPath?, location?, extent?, label?, onConflict?` |
 | `import_graph` | Bulk-author a PCG graph from JSON: nodes=[{name,class,posX?,posY?,settings?}], connections=[{from,fromPin?,to,toPin?}], replace defaults to false. One call replaces N add_node + M connect_nodes + K set_node_settings (#213). Params: `assetPath (or path), nodes, connections?, replace?` |
 | `export_graph` | Export a PCG graph as JSON; includeSettings defaults to true. Round-trip safe with import_graph (#213). Params: `assetPath (or path), includeSettings?` |
 | `epic_add_comment_box` | [Epic PCGToolset.PCGToolset] Adds a comment box around the given nodes. Params: `graph, nodes, comment?, color?` |

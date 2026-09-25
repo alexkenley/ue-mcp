@@ -1,5 +1,5 @@
 {
-  "handlerCount": 881,
+  "handlerCount": 838,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -1542,6 +1542,42 @@
         }
       ]
     },
+    "add_pcg_volume": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "graphPath",
+          "type": "string",
+          "required": false,
+          "description": "PCGGraph to assign to the volume's component"
+        },
+        {
+          "name": "location",
+          "type": "vec3",
+          "required": false,
+          "description": "World location {x,y,z} (default origin)"
+        },
+        {
+          "name": "extent",
+          "type": "vec3",
+          "required": false,
+          "description": "Half-size of the volume box {x,y,z} (default 500 on each axis)"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "required": false,
+          "description": "Editor label. Also the idempotency key: an existing actor with this label is reported rather than duplicated"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the label exists: skip (default, report it) | error"
+        }
+      ],
+      "contractExempt": "Spawns a volume under the contract values; nothing it reads fails first"
+    },
     "add_perception_component": {
       "category": "gameplay",
       "params": [
@@ -2737,18 +2773,6 @@
           "description": "Viewport Z-order (#602)"
         }
       ]
-    },
-    "add_trace_bookmark": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "bookmarkName",
-          "type": "string",
-          "required": true,
-          "description": "Label for the timeline marker"
-        }
-      ],
-      "contractExempt": "writes a bookmark into the running trace"
     },
     "add_transition": {
       "category": "animation",
@@ -4093,39 +4117,6 @@
         }
       ]
     },
-    "begin_editor_transaction": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "description",
-          "type": "string",
-          "required": false,
-          "description": "Undo-stack label for the transaction (default MCP Edit)",
-          "aliases": [
-            "label"
-          ]
-        }
-      ],
-      "contractExempt": "opens an undo transaction"
-    },
-    "begin_profile_region": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "regionName",
-          "type": "string",
-          "required": true,
-          "description": "Name the bracket is keyed by; end_profile_region closes it"
-        },
-        {
-          "name": "regionCategory",
-          "type": "string",
-          "required": false,
-          "description": "Category shown alongside the region in Unreal Insights"
-        }
-      ],
-      "contractExempt": "opens a profiling region"
-    },
     "begin_skeleton_edit": {
       "category": "animation",
       "params": [
@@ -4292,33 +4283,6 @@
         }
       ]
     },
-    "build_all": {
-      "category": "editor",
-      "params": [],
-      "contractExempt": "builds geometry, lighting, paths and HLODs"
-    },
-    "build_geometry": {
-      "category": "editor",
-      "params": [],
-      "contractExempt": "rebuilds BSP geometry"
-    },
-    "build_hlod": {
-      "category": "editor",
-      "params": [],
-      "contractExempt": "builds HLODs"
-    },
-    "build_lighting": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "quality",
-          "type": "string",
-          "required": false,
-          "description": "Preview (default) | Medium | High | Production"
-        }
-      ],
-      "contractExempt": "builds lighting for the open level"
-    },
     "build_material_graph": {
       "category": "material",
       "params": [
@@ -4400,18 +4364,6 @@
         }
       ]
     },
-    "cancel_editor_transaction": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "index",
-          "type": "number",
-          "required": false,
-          "description": "Which open transaction to cancel (default 0)"
-        }
-      ],
-      "contractExempt": "cancels the open undo transaction and restores what it touched"
-    },
     "cancel_skeleton_edit": {
       "category": "animation",
       "params": [
@@ -4469,126 +4421,6 @@
           "description": "Runtime world scope: auto (default) | pie | editor"
         }
       ]
-    },
-    "capture_scene_png": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "outputPath",
-          "type": "string",
-          "required": true,
-          "description": "Absolute or project-relative PNG path to write, e.g. Saved/Screenshots/cap.png",
-          "aliases": [
-            "filename"
-          ]
-        },
-        {
-          "name": "location",
-          "type": "vec3",
-          "required": false,
-          "description": "Camera location"
-        },
-        {
-          "name": "rotation",
-          "type": "rotator",
-          "required": false,
-          "description": "Camera rotation"
-        },
-        {
-          "name": "focusActorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Frame the camera on this actor's bounds"
-        },
-        {
-          "name": "focusActorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full object path of the actor to frame. Wins over focusActorLabel"
-        },
-        {
-          "name": "focusDirection",
-          "type": "vec3",
-          "required": false,
-          "description": "Framing direction from the focus actor (default front and above)"
-        },
-        {
-          "name": "focusMargin",
-          "type": "number",
-          "required": false,
-          "description": "Positive bounds fill margin; higher pulls back (default 1.5)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: editor (default) | pie"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
-        },
-        {
-          "name": "width",
-          "type": "number",
-          "required": false,
-          "description": "Capture width in pixels (default 1280)"
-        },
-        {
-          "name": "height",
-          "type": "number",
-          "required": false,
-          "description": "Capture height in pixels (default 720)"
-        },
-        {
-          "name": "fov",
-          "type": "number",
-          "required": false,
-          "description": "Capture FOV in degrees, greater than 0 and less than 180 (default 90)"
-        },
-        {
-          "name": "fullyLoadTextures",
-          "type": "boolean",
-          "required": false,
-          "description": "Stream textures in and flush the render thread before the capture (default true)"
-        }
-      ],
-      "contractExempt": "spawns a capture actor and writes an image file"
-    },
-    "capture_screenshot": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "filename",
-          "type": "string",
-          "required": true,
-          "description": "Image path to write; .png is appended without an image extension",
-          "aliases": [
-            "outputPath"
-          ]
-        },
-        {
-          "name": "target",
-          "type": "string",
-          "required": false,
-          "description": "auto (default) | pie | editor | window"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
-        },
-        {
-          "name": "worldPath",
-          "type": "string",
-          "required": false,
-          "description": "Exact PIE UWorld path or name to capture"
-        }
-      ],
-      "contractExempt": "writes an image file"
     },
     "check_for_crashes": {
       "category": "editor",
@@ -4943,6 +4775,42 @@
         }
       ]
     },
+    "cleanup_pcg": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Editor label of the actor holding the PCG component; a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        },
+        {
+          "name": "removeComponents",
+          "type": "boolean",
+          "required": false,
+          "description": "Remove the managed spawned components too (default true)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ]
+    },
     "clear_ability_input": {
       "category": "gas",
       "params": [
@@ -5095,11 +4963,6 @@
           "description": "Up, Down, Left, Right, Next or Previous; omit to clear all six"
         }
       ]
-    },
-    "close_sequence": {
-      "category": "editor",
-      "params": [],
-      "contractExempt": "closes the open Sequencer"
     },
     "commit_skeleton_edit": {
       "category": "animation",
@@ -5327,48 +5190,6 @@
           "description": "MinNetUpdateFrequency in updates per second (omit to leave it)"
         }
       ]
-    },
-    "configure_pie": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "numClients",
-          "type": "number",
-          "required": false,
-          "description": "Number of PIE clients"
-        },
-        {
-          "name": "netMode",
-          "type": "string",
-          "required": false,
-          "description": "standalone | listen | client"
-        },
-        {
-          "name": "runUnderOneProcess",
-          "type": "boolean",
-          "required": false,
-          "description": "Run every client in the editor process"
-        },
-        {
-          "name": "launchSeparateServer",
-          "type": "boolean",
-          "required": false,
-          "description": "Launch a separate dedicated server"
-        },
-        {
-          "name": "newWindowWidth",
-          "type": "number",
-          "required": false,
-          "description": "Play-in-New-Window width"
-        },
-        {
-          "name": "newWindowHeight",
-          "type": "number",
-          "required": false,
-          "description": "Play-in-New-Window height"
-        }
-      ],
-      "contractExempt": "writes the editor's Play settings"
     },
     "connect_expressions_in_function": {
       "category": "material",
@@ -5772,18 +5593,6 @@
           "description": "Material property: BaseColor, Normal, Roughness, Metallic, EmissiveColor, etc."
         }
       ]
-    },
-    "cook_content": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "platform",
-          "type": "string",
-          "required": false,
-          "description": "Target platform (default Windows)"
-        }
-      ],
-      "contractExempt": "starts a content cook"
     },
     "count_actors_by_class": {
       "category": "level",
@@ -6400,30 +6209,6 @@
         }
       ]
     },
-    "create_level_sequence": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Name of the new Level Sequence asset"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Destination folder (default /Game/Cinematics)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) returns an existing asset untouched, error refuses"
-        }
-      ],
-      "contractExempt": "creates a Level Sequence asset"
-    },
     "create_macro": {
       "category": "blueprint",
       "params": [
@@ -6463,30 +6248,6 @@
           "description": "skip (default) reports the existing entry; error refuses"
         }
       ]
-    },
-    "create_new_level": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "levelPath",
-          "type": "string",
-          "required": true,
-          "description": "Long package path of the new level, e.g. /Game/Maps/MyLevel. Validated before the engine is asked"
-        },
-        {
-          "name": "templateLevel",
-          "type": "string",
-          "required": false,
-          "description": "Level to copy; omit, Empty or None for a blank level"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "When the level exists: skip (default) returns it untouched, error refuses"
-        }
-      ],
-      "contractExempt": "creates and opens a level"
     },
     "create_pcg_graph": {
       "category": "pcg",
@@ -7752,11 +7513,6 @@
         }
       ]
     },
-    "end_editor_transaction": {
-      "category": "editor",
-      "params": [],
-      "contractExempt": "commits the open undo transaction"
-    },
     "end_profile_region": {
       "category": "editor",
       "params": [
@@ -7768,17 +7524,41 @@
         }
       ]
     },
-    "execute_command": {
-      "category": "editor",
+    "execute_pcg_graph": {
+      "category": "pcg",
       "params": [
         {
-          "name": "command",
+          "name": "actorLabel",
           "type": "string",
-          "required": true,
-          "description": "Console command to run in the editor world"
+          "required": false,
+          "description": "Editor label of the actor holding the PCG component; a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        },
+        {
+          "name": "seed",
+          "type": "integer",
+          "required": false,
+          "description": "Write the component's Seed before generating; the old one is reported as previousSeed"
         }
       ],
-      "contractExempt": "runs a console command"
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ]
     },
     "export_actor_fbx": {
       "category": "level",
@@ -8260,87 +8040,6 @@
         }
       ]
     },
-    "find_object": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "objectPath",
-          "type": "string",
-          "required": false,
-          "description": "Check one path: reports found and isValid rather than failing when it is gone. Wins over the search filters"
-        },
-        {
-          "name": "className",
-          "type": "string",
-          "required": false,
-          "description": "Class to search for: a short name, a /Script path, a generated class name (WBP_Hud_C) or a Blueprint asset path"
-        },
-        {
-          "name": "nameContains",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring of the object name"
-        },
-        {
-          "name": "outerPath",
-          "type": "string",
-          "required": false,
-          "description": "Only objects somewhere under this outer, such as one level or world"
-        },
-        {
-          "name": "exactClass",
-          "type": "boolean",
-          "required": false,
-          "description": "Match className exactly instead of including subclasses (default false)"
-        },
-        {
-          "name": "includeDefaults",
-          "type": "boolean",
-          "required": false,
-          "description": "Include class default objects and archetypes (default false)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: any (default) | editor | pie"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "number",
-          "required": false,
-          "description": "Objects on this page (default 50, max 1000)"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "objectPath"
-            ],
-            [
-              "className"
-            ],
-            [
-              "nameContains"
-            ]
-          ]
-        }
-      ]
-    },
     "flush_blueprint_component_templates": {
       "category": "blueprint",
       "params": [
@@ -8383,6 +8082,36 @@
           "type": "string",
           "required": false,
           "description": "Full actor object path, the unambiguous selector. Wins over actorLabel"
+        }
+      ]
+    },
+    "force_regenerate_pcg": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Editor label of the actor holding the PCG component; a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
         }
       ]
     },
@@ -8485,11 +8214,6 @@
           "description": "Raster resolution for the result's overlap estimate (default 512)"
         }
       ]
-    },
-    "generate_project_files": {
-      "category": "project",
-      "params": [],
-      "contractExempt": "runs the project file generator"
     },
     "get_action_value": {
       "category": "gameplay",
@@ -10415,6 +10139,36 @@
         }
       ]
     },
+    "get_pcg_component_details": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Editor label of the actor holding the PCG component; a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ]
+    },
     "get_pcg_components": {
       "category": "pcg",
       "params": []
@@ -11121,11 +10875,6 @@
           "items": "string"
         }
       ]
-    },
-    "hot_reload": {
-      "category": "editor",
-      "params": [],
-      "contractExempt": "recompiles and reloads C++ modules"
     },
     "import_animation": {
       "category": "asset",
@@ -11987,58 +11736,6 @@
           "description": "Landscape actor object path; wins over actorLabel, which is not unique"
         }
       ]
-    },
-    "launch_standalone_game": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "mapName",
-          "type": "string",
-          "required": false,
-          "description": "Map to open in the standalone process"
-        },
-        {
-          "name": "channels",
-          "type": "array",
-          "required": false,
-          "description": "Trace channels or a preset, as an array or a comma-separated string. Passing it (or traceFile) adds -trace and -tracefile",
-          "items": "string",
-          "orTypes": [
-            "string"
-          ]
-        },
-        {
-          "name": "traceFile",
-          "type": "string",
-          "required": false,
-          "description": ".utrace path for the standalone process to write"
-        },
-        {
-          "name": "windowed",
-          "type": "boolean",
-          "required": false,
-          "description": "Run windowed rather than fullscreen (default true)"
-        },
-        {
-          "name": "resX",
-          "type": "number",
-          "required": false,
-          "description": "Window width (default 1280)"
-        },
-        {
-          "name": "resY",
-          "type": "number",
-          "required": false,
-          "description": "Window height (default 720)"
-        },
-        {
-          "name": "extraArgs",
-          "type": "string",
-          "required": false,
-          "description": "Extra command-line arguments, appended verbatim"
-        }
-      ],
-      "contractExempt": "launches a game process"
     },
     "line_trace": {
       "category": "level",
@@ -14868,42 +14565,6 @@
         }
       ]
     },
-    "open_settings": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "container",
-          "type": "string",
-          "required": false,
-          "description": "Project (default) | Editor"
-        },
-        {
-          "name": "category",
-          "type": "string",
-          "required": false,
-          "description": "Settings category, e.g. Engine"
-        },
-        {
-          "name": "section",
-          "type": "string",
-          "required": false,
-          "description": "Settings section, e.g. Physics, or a combined Engine.Physics"
-        }
-      ],
-      "contractExempt": "opens a settings viewer"
-    },
-    "open_tab": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "tabId",
-          "type": "string",
-          "required": true,
-          "description": "Registered editor tab id, e.g. ProjectSettings, OutputLog or ContentBrowserTab1"
-        }
-      ],
-      "contractExempt": "opens an editor tab"
-    },
     "override_function": {
       "category": "blueprint",
       "params": [
@@ -15012,66 +14673,6 @@
           "description": "Carry the previous data as a rollback record only up to this many vertices (default 262144 for heights, 524288 for weights)"
         }
       ]
-    },
-    "pause_insights_trace": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "paused",
-          "type": "boolean",
-          "required": false,
-          "description": "true pauses the running trace, false resumes it (default true)"
-        }
-      ],
-      "contractExempt": "pauses or resumes the running Insights trace"
-    },
-    "pie_control": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "pieAction",
-          "type": "string",
-          "required": false,
-          "description": "start | stop | status (default status)"
-        },
-        {
-          "name": "waitForAssetRegistry",
-          "type": "boolean",
-          "required": false,
-          "description": "start only: block until the AssetRegistry initial scan completes, since PIE silently no-ops during it on a cold editor (default true)"
-        },
-        {
-          "name": "assetRegistryTimeoutSeconds",
-          "type": "number",
-          "required": false,
-          "description": "start only: how long to wait for that scan (default 180)"
-        }
-      ],
-      "contractExempt": "starts and stops Play In Editor"
-    },
-    "pie_set_player_view": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "pitch",
-          "type": "number",
-          "required": false,
-          "description": "Control-rotation pitch"
-        },
-        {
-          "name": "yaw",
-          "type": "number",
-          "required": false,
-          "description": "Control-rotation yaw"
-        },
-        {
-          "name": "roll",
-          "type": "number",
-          "required": false,
-          "description": "Control-rotation roll"
-        }
-      ],
-      "contractExempt": "rotates the running PIE player's view"
     },
     "place_actor": {
       "category": "level",
@@ -15224,28 +14825,6 @@
         }
       ]
     },
-    "play_sequence": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "sequencePath",
-          "type": "string",
-          "required": false,
-          "description": "Level Sequence to open and drive; omit to drive the one already open",
-          "aliases": [
-            "assetPath",
-            "path"
-          ]
-        },
-        {
-          "name": "sequenceAction",
-          "type": "string",
-          "required": false,
-          "description": "play (default) | pause | stop"
-        }
-      ],
-      "contractExempt": "opens a sequence in Sequencer and drives its transport"
-    },
     "play_sound_at_location": {
       "category": "audio",
       "params": [
@@ -15360,18 +14939,6 @@
           "description": "World point to project onto the navmesh"
         }
       ]
-    },
-    "purge_python_modules": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "prefix",
-          "type": "string",
-          "required": true,
-          "description": "Purge sys.modules entries starting with this prefix; must be non-empty"
-        }
-      ],
-      "contractExempt": "purges loaded Python modules"
     },
     "query_zone_graph": {
       "category": "gameplay",
@@ -16735,11 +16302,6 @@
         }
       ]
     },
-    "redo": {
-      "category": "editor",
-      "params": [],
-      "contractExempt": "redoes the last undone editor transaction"
-    },
     "redraw_viewport": {
       "category": "editor",
       "params": [
@@ -16961,11 +16523,6 @@
           "description": "Content path to rescan (default /Game)"
         }
       ]
-    },
-    "reload_handlers": {
-      "category": "editor",
-      "params": [],
-      "contractExempt": "reloads the Python bridge handlers from disk"
     },
     "reload_package": {
       "category": "asset",
@@ -18780,118 +18337,6 @@
         }
       ]
     },
-    "render_sequence_frames": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "sequencePath",
-          "type": "string",
-          "required": true,
-          "description": "Level Sequence to render",
-          "aliases": [
-            "assetPath",
-            "path"
-          ]
-        },
-        {
-          "name": "startFrame",
-          "type": "number",
-          "required": false,
-          "description": "First display frame to render. Not with startSeconds"
-        },
-        {
-          "name": "endFrame",
-          "type": "number",
-          "required": false,
-          "description": "Last display frame to render, inclusive. Not with endSeconds"
-        },
-        {
-          "name": "startSeconds",
-          "type": "number",
-          "required": false,
-          "description": "Range start in seconds (default the playback range)"
-        },
-        {
-          "name": "endSeconds",
-          "type": "number",
-          "required": false,
-          "description": "Range end in seconds, exclusive"
-        },
-        {
-          "name": "frameStep",
-          "type": "number",
-          "required": false,
-          "description": "Render every Nth frame (default 1)"
-        },
-        {
-          "name": "maxFrames",
-          "type": "number",
-          "required": false,
-          "description": "Refuse a range with more frames than this (default 300, max 5000)"
-        },
-        {
-          "name": "width",
-          "type": "number",
-          "required": false,
-          "description": "Frame width in pixels (default 1280)"
-        },
-        {
-          "name": "height",
-          "type": "number",
-          "required": false,
-          "description": "Frame height in pixels (default 720)"
-        },
-        {
-          "name": "outputDir",
-          "type": "string",
-          "required": false,
-          "description": "Absolute or project-relative directory for the frames (default Saved/SequenceFrames/<sequence>)"
-        },
-        {
-          "name": "format",
-          "type": "string",
-          "required": false,
-          "description": "Image format; only png"
-        },
-        {
-          "name": "cameraActorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Camera actor to render through instead of the camera cuts"
-        },
-        {
-          "name": "cameraActorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full object path of that camera actor. Wins over cameraActorLabel"
-        },
-        {
-          "name": "location",
-          "type": "vec3",
-          "required": false,
-          "description": "Fixed camera location, when no camera actor is given"
-        },
-        {
-          "name": "rotation",
-          "type": "rotator",
-          "required": false,
-          "description": "Fixed camera rotation"
-        },
-        {
-          "name": "fov",
-          "type": "number",
-          "required": false,
-          "description": "Fixed camera FOV in degrees (default 90)"
-        },
-        {
-          "name": "fullyLoadTextures",
-          "type": "boolean",
-          "required": false,
-          "description": "Stream textures in before each capture (default true)"
-        }
-      ],
-      "contractExempt": "writes image files"
-    },
     "reorder_child": {
       "category": "widget",
       "params": [
@@ -19239,67 +18684,6 @@
         }
       ]
     },
-    "respond_to_dialog": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "buttonLabel",
-          "type": "string",
-          "required": false,
-          "description": "Label of the button to press, matched exactly first, then as a substring"
-        },
-        {
-          "name": "buttonIndex",
-          "type": "number",
-          "required": false,
-          "description": "Index of the button to press, in the order list_dialogs reports"
-        },
-        {
-          "name": "dialogAction",
-          "type": "string",
-          "required": false,
-          "description": "escape | close: dismiss the dialog without pressing a button, for a modal offering none that fits"
-        },
-        {
-          "name": "items",
-          "type": "array",
-          "required": false,
-          "description": "The dialog's own tickable rows to set before the button is pressed; indices come from list_dialogs, and rows left out keep their state",
-          "items": "object",
-          "fields": [
-            {
-              "name": "index",
-              "type": "number",
-              "required": true,
-              "description": "Row index from list_dialogs"
-            },
-            {
-              "name": "checked",
-              "type": "boolean",
-              "required": true,
-              "description": "Whether the row ends up ticked"
-            }
-          ]
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "buttonLabel"
-            ],
-            [
-              "buttonIndex"
-            ],
-            [
-              "dialogAction"
-            ]
-          ]
-        }
-      ],
-      "contractExempt": "presses a button on the active modal dialog"
-    },
     "restore_runtime_visibility": {
       "category": "editor",
       "params": [
@@ -19425,30 +18809,6 @@
           "description": "Runtime world scope: auto (default) | pie | editor"
         }
       ]
-    },
-    "run_automation_tests": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "filter",
-          "type": "string",
-          "required": false,
-          "description": "Substring of the test names to run"
-        },
-        {
-          "name": "maxTests",
-          "type": "number",
-          "required": false,
-          "description": "Cap on tests to run (default 50)"
-        },
-        {
-          "name": "latentTimeoutSeconds",
-          "type": "number",
-          "required": false,
-          "description": "How long one test's latent command queue may take before it is reported abandoned (default 5, max 120)"
-        }
-      ],
-      "contractExempt": "runs automation tests"
     },
     "run_behavior_tree": {
       "category": "gameplay",
@@ -19595,24 +18955,6 @@
         }
       ]
     },
-    "run_stat_command": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "command",
-          "type": "string",
-          "required": false,
-          "description": "Full console command; wins over name"
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": false,
-          "description": "Bare stat name such as unit, fps, game or gpu, prefixed with 'stat ' (default fps)"
-        }
-      ],
-      "contractExempt": "runs a stat console command"
-    },
     "sample_foliage": {
       "category": "foliage",
       "params": [
@@ -19725,30 +19067,6 @@
           "description": "Write the package even when it is not dirty (needs assetPath)"
         }
       ]
-    },
-    "save_dirty": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "includeMaps",
-          "type": "boolean",
-          "required": false,
-          "description": "Include map packages (default true)"
-        },
-        {
-          "name": "includeContent",
-          "type": "boolean",
-          "required": false,
-          "description": "Include content packages (default true)"
-        },
-        {
-          "name": "commitDeletes",
-          "type": "boolean",
-          "required": false,
-          "description": "Use the editor's dirty-package save, which deletes the packages of deleted World Partition actors and reports written and deleted files (default false)"
-        }
-      ],
-      "contractExempt": "saves every dirty package"
     },
     "scan_animation_tracks": {
       "category": "animation",
@@ -21295,39 +20613,6 @@
         }
       ]
     },
-    "set_config": {
-      "category": "project",
-      "params": [
-        {
-          "name": "configName",
-          "type": "string",
-          "required": false,
-          "description": "Config to write: Engine, Game, Input... or a file name ending .ini (default DefaultEngine.ini)",
-          "aliases": [
-            "configFile"
-          ]
-        },
-        {
-          "name": "section",
-          "type": "string",
-          "required": true,
-          "description": "INI section"
-        },
-        {
-          "name": "key",
-          "type": "string",
-          "required": true,
-          "description": "INI key"
-        },
-        {
-          "name": "value",
-          "type": "string",
-          "required": true,
-          "description": "INI value"
-        }
-      ],
-      "contractExempt": "writes an INI file under the project's Config folder"
-    },
     "set_current_edit_level": {
       "category": "level",
       "params": [
@@ -21368,36 +20653,6 @@
           "items": "object"
         }
       ]
-    },
-    "set_cvars": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "cvars",
-          "type": "array",
-          "required": true,
-          "description": "Console variables to set, as [{name, value}] or a {name: value} object",
-          "items": "object",
-          "orTypes": [
-            "object"
-          ],
-          "fields": [
-            {
-              "name": "name",
-              "type": "string",
-              "required": true,
-              "description": "Console variable name"
-            },
-            {
-              "name": "value",
-              "type": "any",
-              "required": true,
-              "description": "Value to set; numbers and booleans are written as text"
-            }
-          ]
-        }
-      ],
-      "contractExempt": "writes console variables"
     },
     "set_datatable_cell": {
       "category": "asset",
@@ -21460,43 +20715,6 @@
           ]
         }
       ]
-    },
-    "set_dialog_policy": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "pattern",
-          "type": "string",
-          "required": true,
-          "description": "Substring matched case-insensitively against the dialog title and message"
-        },
-        {
-          "name": "response",
-          "type": "string",
-          "required": false,
-          "description": "yes | no | ok | cancel | retry | continue | yesall | noall. On a Slate modal it presses whichever button carries that meaning; an unknown keyword is refused"
-        },
-        {
-          "name": "buttonLabel",
-          "type": "string",
-          "required": false,
-          "description": "Button a matched dialog gets pressed for it, matched exactly first, then as a substring. Reaches buttons no response names, such as Don't Save"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "atLeastOne",
-          "branches": [
-            [
-              "response"
-            ],
-            [
-              "buttonLabel"
-            ]
-          ]
-        }
-      ],
-      "contractExempt": "arms a policy that answers dialogs unattended"
     },
     "set_editor_visibility": {
       "category": "level",
@@ -21862,24 +21080,6 @@
           "description": "Text shown at a deprecated function's call sites"
         }
       ]
-    },
-    "set_game_view": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "enabled",
-          "type": "boolean",
-          "required": false,
-          "description": "Hide editor-only overlays (default true); false shows them again"
-        },
-        {
-          "name": "viewportIndex",
-          "type": "number",
-          "required": false,
-          "description": "Level viewport to act on (default the active one)"
-        }
-      ],
-      "contractExempt": "toggles game view on a live level viewport"
     },
     "set_ik_retargeter_rig": {
       "category": "animation",
@@ -23618,18 +22818,6 @@
         }
       ]
     },
-    "set_realtime": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "enabled",
-          "type": "boolean",
-          "required": false,
-          "description": "Realtime update on every level viewport (default true)"
-        }
-      ],
-      "contractExempt": "toggles realtime on every level viewport"
-    },
     "set_renderer_property": {
       "category": "niagara",
       "params": [
@@ -23785,116 +22973,6 @@
           "description": "Widget class name that locates the live host widget"
         }
       ]
-    },
-    "set_runtime_visibility": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "hidden",
-          "type": "boolean",
-          "required": true,
-          "description": "true hides the target, false shows it"
-        },
-        {
-          "name": "actorLabels",
-          "type": "array",
-          "required": false,
-          "description": "Explicit actor labels; a label matching several actors is refused",
-          "items": "string"
-        },
-        {
-          "name": "actorPaths",
-          "type": "array",
-          "required": false,
-          "description": "Explicit actor object paths, the unambiguous selector",
-          "items": "string"
-        },
-        {
-          "name": "actorClass",
-          "type": "string",
-          "required": false,
-          "description": "Every actor of this class in the PIE world, bounded by maxTargets"
-        },
-        {
-          "name": "componentNames",
-          "type": "array",
-          "required": false,
-          "description": "Only SceneComponents with these names; implies affectComponents",
-          "items": "string"
-        },
-        {
-          "name": "componentClasses",
-          "type": "array",
-          "required": false,
-          "description": "Only SceneComponents of these classes; implies affectComponents",
-          "items": "string"
-        },
-        {
-          "name": "affectActor",
-          "type": "boolean",
-          "required": false,
-          "description": "Hide or show the actor itself (default true only without a component filter)"
-        },
-        {
-          "name": "affectComponents",
-          "type": "boolean",
-          "required": false,
-          "description": "Hide or show matched components (default true with a component filter)"
-        },
-        {
-          "name": "propagateToChildren",
-          "type": "boolean",
-          "required": false,
-          "description": "Also take each matched component's descendants (default true)"
-        },
-        {
-          "name": "matchSubclasses",
-          "type": "boolean",
-          "required": false,
-          "description": "Match subclasses of actorClass and componentClasses (default true)"
-        },
-        {
-          "name": "maxTargets",
-          "type": "integer",
-          "required": false,
-          "description": "Upper bound on resolved actor and component targets; a larger set is refused rather than truncated"
-        },
-        {
-          "name": "dryRun",
-          "type": "boolean",
-          "required": false,
-          "description": "Report the targets without touching them (default TRUE; pass false to apply)"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: editor | pie | auto. Each action names its own default"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "actorLabels"
-            ],
-            [
-              "actorPaths"
-            ],
-            [
-              "actorClass"
-            ]
-          ]
-        }
-      ],
-      "contractExempt": "hides and shows live PIE actors"
     },
     "set_scalability": {
       "category": "editor",
@@ -24820,32 +23898,6 @@
           "description": "Texture paths per profile: {normal?, grayscale?, baseColor?, hdr?}"
         }
       ]
-    },
-    "set_trace_channels": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "enable",
-          "type": "array",
-          "required": false,
-          "description": "Channels to turn on, as an array or a comma-separated string",
-          "items": "string",
-          "orTypes": [
-            "string"
-          ]
-        },
-        {
-          "name": "disable",
-          "type": "array",
-          "required": false,
-          "description": "Channels to turn off, as an array or a comma-separated string",
-          "items": "string",
-          "orTypes": [
-            "string"
-          ]
-        }
-      ],
-      "contractExempt": "switches trace channels on and off"
     },
     "set_transition_blend": {
       "category": "animation",
@@ -25997,70 +25049,6 @@
         }
       ]
     },
-    "stage_game_input": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "inputMode",
-          "type": "string",
-          "required": false,
-          "description": "gameOnly (default) | gameAndUI | uiOnly"
-        },
-        {
-          "name": "showMouseCursor",
-          "type": "boolean",
-          "required": false,
-          "description": "Show the mouse cursor (default false for gameOnly, true otherwise)"
-        }
-      ],
-      "contractExempt": "sets the running PIE player's input mode"
-    },
-    "start_insights_trace": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "channels",
-          "type": "array",
-          "required": false,
-          "description": "Trace channels or a preset, as an array or a comma-separated string (default 'default'). list_trace_channels lists what this build registers",
-          "items": "string",
-          "orTypes": [
-            "string"
-          ]
-        },
-        {
-          "name": "traceTarget",
-          "type": "string",
-          "required": false,
-          "description": "file (default, writes a .utrace) | network (streams to a trace server) | none (memory only)"
-        },
-        {
-          "name": "file",
-          "type": "string",
-          "required": false,
-          "description": ".utrace path to write, absolute or relative (default a timestamped file under <Project>/Saved/Profiling)"
-        },
-        {
-          "name": "host",
-          "type": "string",
-          "required": false,
-          "description": "Trace server for traceTarget=network (default 127.0.0.1)"
-        },
-        {
-          "name": "truncate",
-          "type": "boolean",
-          "required": false,
-          "description": "Overwrite the target file if it exists (default true)"
-        },
-        {
-          "name": "excludeTail",
-          "type": "boolean",
-          "required": false,
-          "description": "Drop events buffered before the trace started (default false)"
-        }
-      ],
-      "contractExempt": "starts an Insights trace"
-    },
     "stop_behavior_tree": {
       "category": "gameplay",
       "params": [
@@ -26107,16 +25095,6 @@
           "description": "With mode=restart, restart from the root rather than resuming"
         }
       ]
-    },
-    "stop_insights_trace": {
-      "category": "editor",
-      "params": [],
-      "contractExempt": "stops the running Insights trace"
-    },
-    "stop_standalone_game": {
-      "category": "editor",
-      "params": [],
-      "contractExempt": "terminates the standalone game process"
     },
     "summarize_static_mesh_usage": {
       "category": "level",
@@ -26265,6 +25243,42 @@
         }
       ]
     },
+    "toggle_pcg_graph": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Editor label of the actor holding the PCG component; a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector"
+        },
+        {
+          "name": "graphPath",
+          "type": "string",
+          "required": false,
+          "description": "PCGGraph to assign (default: re-apply the component's current graph)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ]
+    },
     "trace_ability_activation": {
       "category": "gas",
       "params": [
@@ -26386,24 +25400,6 @@
         }
       ]
     },
-    "trigger_hitch": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "hitchMilliseconds",
-          "type": "number",
-          "required": false,
-          "description": "How long to stall the game thread (default 250, max 5000)"
-        },
-        {
-          "name": "bookmark",
-          "type": "boolean",
-          "required": false,
-          "description": "Also drop a trace bookmark at the stall (default true)"
-        }
-      ],
-      "contractExempt": "stalls the game thread"
-    },
     "unbind_cloth_from_section": {
       "category": "asset",
       "params": [
@@ -26467,11 +25463,6 @@
           "description": "User tag scoping a Started binding"
         }
       ]
-    },
-    "undo": {
-      "category": "editor",
-      "params": [],
-      "contractExempt": "undoes the last editor transaction"
     },
     "undo_redo_steps": {
       "category": "editor",
@@ -26688,30 +25679,6 @@
           "type": "vec3",
           "required": false,
           "description": "Actor scale"
-        }
-      ]
-    },
-    "validate_assets": {
-      "category": "editor",
-      "params": [
-        {
-          "name": "directory",
-          "type": "string",
-          "required": false,
-          "description": "Package path validated recursively (default /Game/). Not with assetPath or assetPaths"
-        },
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": false,
-          "description": "One exact package or object path to validate"
-        },
-        {
-          "name": "assetPaths",
-          "type": "array",
-          "required": false,
-          "description": "Exact package or object paths to validate",
-          "items": "string"
         }
       ]
     },
