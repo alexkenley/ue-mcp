@@ -45,6 +45,7 @@
 #include "Handlers/BlueprintHandlers_Collision.h"
 #include "Handlers/ChooserHandlers.h"
 #include "Handlers/DemoHandlers.h"
+#include "Handlers/DiffHandlers.h"
 #include "Handlers/ReflectionHandlers.h"
 #include "Handlers/FoliageHandlers.h"
 #include "Handlers/LandscapeHandlers.h"
@@ -205,6 +206,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FCollisionQueryHandlers::RegisterHandlers(Registry);
 	FChooserHandlers::RegisterHandlers(Registry);
 	FDemoHandlers::RegisterHandlers(Registry);
+	FDiffHandlers::RegisterHandlers(Registry);
 	FReflectionHandlers::RegisterHandlers(Registry);
 	FFoliageHandlers::RegisterHandlers(Registry);
 	FLandscapeHandlers::RegisterHandlers(Registry);

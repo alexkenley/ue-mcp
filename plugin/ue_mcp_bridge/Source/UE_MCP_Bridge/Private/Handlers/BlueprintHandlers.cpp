@@ -89,8 +89,7 @@ void FBlueprintHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// #1057: a spec'd handler declares its parameters here and nowhere else; the
 	// TS surface is generated from a recording of them. A handler registered with
 	// a timeout is registered with its spec first; the timed registration keeps
-	// the spec. create_blueprint and create_blueprint_interface have no spec: the
-	// contract test would create the asset it is handed.
+	// the spec.
 	using EType = EMCPParamType;
 	const FMCPParamSpec SpecAssetPath = MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint")).Alias(TEXT("path"));
 	const FMCPParamSpec SpecAssetPathOrBlueprintPath = MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint")).Alias(TEXT("blueprintPath"));
@@ -123,7 +122,15 @@ void FBlueprintHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	const FMCPParamSpec SpecCursor = MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the nextCursor from the previous page, unmodified"));
 	const FMCPParamSpec SpecParameters = MCPParam::Optional(TEXT("parameters"), EType::Array, TEXT("Typed signature parameters [{name, type}]; type takes the add_variable vocabulary, containers included")).Items(EType::Object);
 
-	Registry.RegisterHandler(TEXT("create_blueprint"), &CreateBlueprint);
+	// The contract values name no class, so the parent class lookup refuses the
+	// call before anything is created, on either branch.
+	Registry.RegisterHandler(TEXT("create_blueprint"), &CreateBlueprint, {
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("Full destination, e.g. /Game/Blueprints/BP_Example. A .uasset suffix, an object suffix and backslashes are normalized away")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Asset name; with packagePath, the same destination as assetPath")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder, used with name")),
+		MCPParam::Optional(TEXT("parentClass"), EType::String, TEXT("Parent class: short name or full path (default Actor)")),
+		SpecOnConflict,
+	}, MCPSpec::ExactlyOne({ { TEXT("assetPath") }, { TEXT("name"), TEXT("packagePath") } }));
 	Registry.RegisterHandler(TEXT("read_blueprint"), &ReadBlueprint, {
 		SpecAssetPath,
 		MCPParam::Optional(TEXT("includeComponentProperties"), EType::Boolean, TEXT("Dump UPROPERTY name, type and value per component template (default false)")),
@@ -222,7 +229,10 @@ void FBlueprintHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		SpecAssetPath,
 		SpecFunctionName,
 	});
-	Registry.RegisterHandler(TEXT("create_blueprint_interface"), &CreateBlueprintInterface);
+	Registry.RegisterHandler(TEXT("create_blueprint_interface"), &CreateBlueprintInterface, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Full destination of the new Blueprint Interface")).Alias(TEXT("path")),
+		SpecOnConflict,
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves an interface at the contract path; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("override_function"), &OverrideFunction, {
 		SpecAssetPath,
 		SpecFunctionName,
@@ -1605,12 +1615,115 @@ UEdGraphNode* FBlueprintHandlers::FindNodeByGuidOrName(UEdGraph* Graph, const FS
 	return nullptr;
 }
 
+namespace
+{
+	const TCHAR* const CreateBlueprintPathHelp =
+		TEXT("Expected an Unreal package path such as '/Game/Blueprints/BP_Example'. ")
+		TEXT("A '.uasset' suffix, an object suffix such as '.BP_Example', and backslashes are accepted and normalized. ")
+		TEXT("A filesystem path or a path that does not start with '/' is not.");
+
+	/** #798: fold the spellings a caller uses for a create destination (a .uasset
+	 *  suffix, an object suffix, backslashes, a {refPath} reference serialized as
+	 *  JSON) into a long package path, and refuse what cannot be repaired
+	 *  without guessing. */
+	TSharedPtr<FJsonValue> NormalizeCreateBlueprintDestination(const FString& Raw, const TCHAR* Field, FString& OutPath)
+	{
+		FString Value = Raw.TrimStartAndEnd();
+		if (Value.StartsWith(TEXT("{")))
+		{
+			TSharedPtr<FJsonObject> Reference;
+			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Value);
+			if (FJsonSerializer::Deserialize(Reader, Reference) && Reference.IsValid())
+			{
+				for (const TCHAR* Key : { TEXT("refPath"), TEXT("assetPath"), TEXT("path") })
+				{
+					FString Inner;
+					if (Reference->TryGetStringField(Key, Inner) && !Inner.TrimStartAndEnd().IsEmpty())
+					{
+						Value = Inner.TrimStartAndEnd();
+						break;
+					}
+				}
+			}
+		}
+
+		Value.ReplaceInline(TEXT("\\"), TEXT("/"));
+		if (Value.IsEmpty())
+		{
+			return MCPError(FString::Printf(TEXT("%s must not be empty. %s"), Field, CreateBlueprintPathHelp));
+		}
+		const bool bDrivePath = Value.Len() >= 3 && FChar::IsAlpha(Value[0]) && Value[1] == TEXT(':') && Value[2] == TEXT('/');
+		if (bDrivePath || Value.StartsWith(TEXT("file:")))
+		{
+			return MCPError(FString::Printf(TEXT("%s '%s' is a filesystem path. %s"), Field, *Raw, CreateBlueprintPathHelp));
+		}
+
+		while (Value.Contains(TEXT("//")))
+		{
+			Value.ReplaceInline(TEXT("//"), TEXT("/"));
+		}
+		while (Value.Len() > 1 && Value.EndsWith(TEXT("/")))
+		{
+			Value = Value.LeftChop(1);
+		}
+		if (!Value.StartsWith(TEXT("/")))
+		{
+			return MCPError(FString::Printf(TEXT("%s '%s' is not a mount-rooted path. %s"), Field, *Raw, CreateBlueprintPathHelp));
+		}
+
+		// Everything from the first dot of the last segment is an extension or an
+		// object suffix; the bridge addresses the package.
+		int32 Cut = INDEX_NONE;
+		Value.FindLastChar(TEXT('/'), Cut);
+		const FString Dir = Value.Left(Cut);
+		FString Leaf = Value.Mid(Cut + 1);
+		int32 Dot = INDEX_NONE;
+		if (Leaf.FindChar(TEXT('.'), Dot))
+		{
+			Leaf = Leaf.Left(Dot);
+		}
+		if (Leaf.IsEmpty())
+		{
+			return MCPError(FString::Printf(TEXT("%s '%s' has no asset name. %s"), Field, *Raw, CreateBlueprintPathHelp));
+		}
+
+		const FString Normalized = Dir + TEXT("/") + Leaf;
+		TArray<FString> Segments;
+		Normalized.ParseIntoArray(Segments, TEXT("/"), true);
+		if (Segments.Num() < 2)
+		{
+			return MCPError(FString::Printf(TEXT("%s '%s' is missing a mount point. %s"), Field, *Raw, CreateBlueprintPathHelp));
+		}
+		OutPath = Normalized;
+		return nullptr;
+	}
+}
+
 TSharedPtr<FJsonValue> FBlueprintHandlers::CreateBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
-	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	// The destination is assetPath ('path' is its alias) or a name plus
+	// packagePath pair. Everything is read before anything can fail (#1057).
+	const FString RawAssetPath = OptionalString(Params, TEXT("assetPath")).TrimStartAndEnd();
+	const FString RawName = OptionalString(Params, TEXT("name")).TrimStartAndEnd();
+	const FString RawPackagePath = OptionalString(Params, TEXT("packagePath")).TrimStartAndEnd();
+	const FString ParentClassName = OptionalString(Params, TEXT("parentClass"), TEXT("Actor"));
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
-	FString ParentClassName = OptionalString(Params, TEXT("parentClass"), TEXT("Actor"));
+	FString AssetPath;
+	if (!RawAssetPath.IsEmpty())
+	{
+		if (auto Err = NormalizeCreateBlueprintDestination(RawAssetPath, TEXT("assetPath"), AssetPath)) return Err;
+	}
+	else if (!RawName.IsEmpty() && !RawPackagePath.IsEmpty())
+	{
+		if (auto Err = NormalizeCreateBlueprintDestination(RawPackagePath + TEXT("/") + RawName, TEXT("packagePath + name"), AssetPath)) return Err;
+	}
+	else
+	{
+		return MCPError(FString::Printf(
+			TEXT("Missing required parameter 'assetPath'. %s A 'name' plus 'packagePath' pair is accepted as the same thing."),
+			CreateBlueprintPathHelp));
+	}
 
 	// Find parent class -- try multiple resolution strategies
 	UClass* ParentClass = nullptr;
@@ -1638,8 +1751,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CreateBlueprint(const TSharedPtr<FJso
 	FString PackageName;
 	FString AssetName;
 	AssetPath.Split(TEXT("/"), &PackageName, &AssetName, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
-
-	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
 	// Idempotent: if asset already exists, return it.
 	UBlueprint* ExistingBP = LoadBlueprint(AssetPath);

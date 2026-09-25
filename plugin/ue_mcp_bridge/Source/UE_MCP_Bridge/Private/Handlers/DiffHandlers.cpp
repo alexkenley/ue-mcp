@@ -162,14 +162,29 @@ void FDiffHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("diff"));
-	Registry.RegisterHandler(TEXT("diff_blueprint"), &FDiffHandlers::DiffBlueprint);
 	Registry.RegisterHandler(TEXT("diff_asset"), &FDiffHandlers::DiffAsset);
+
+	// #1057: diff_blueprint is exposed as blueprint(diff), so its spec is
+	// recorded under blueprint and generates that tool's surface.
+	{
+		FMCPHandlerRegistry::FCategoryScope BlueprintScope(Registry, TEXT("blueprint"));
+		using EType = EMCPParamType;
+		Registry.RegisterHandler(TEXT("diff_blueprint"), &FDiffHandlers::DiffBlueprint, {
+			MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Base Blueprint (A)")).Alias(TEXT("path")),
+			MCPParam::Required(TEXT("otherPath"), EType::String, TEXT("Blueprint to compare against (B)")),
+			MCPParam::Optional(TEXT("fromRevision"), EType::String, TEXT("Reserved for source-control revision diffing, which is not implemented; passing it is refused")),
+			MCPParam::Optional(TEXT("toRevision"), EType::String, TEXT("Reserved for source-control revision diffing, which is not implemented; passing it is refused")),
+		});
+	}
 }
 
 TSharedPtr<FJsonValue> FDiffHandlers::DiffBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
+	// Both revision keys are read whichever one a call sends (#1057); 'path' is
+	// the spec's alias, renamed to assetPath before this runs.
+	MCPReadParamsAhead(Params, { TEXT("assetPath"), TEXT("otherPath"), TEXT("fromRevision"), TEXT("toRevision") });
 	FString PathA;
-	if (TSharedPtr<FJsonValue> Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), PathA)) return Err;
+	if (TSharedPtr<FJsonValue> Err = RequireString(Params, TEXT("assetPath"), PathA)) return Err;
 	FString PathB;
 	if (TSharedPtr<FJsonValue> Err = RequireString(Params, TEXT("otherPath"), PathB)) return Err;
 

@@ -41,6 +41,7 @@ import { CURSOR_PARAM, paged } from "../pagination.js";
 import { actions as epicActions, schema as epicSchema } from "./epic/project.generated.js";
 import { specBp, schema as specSchema } from "./specs/project.generated.js";
 import { specBp as reflectionSpecBp } from "./specs/reflection.generated.js";
+import { specBp as blueprintSpecBp } from "./specs/blueprint.generated.js";
 
 /**
  * The environment variables flattening every registered editor into one, right
@@ -1091,10 +1092,9 @@ export const projectTool: ToolDef = categoryTool(
       "Report Live Coding availability/state (available, started, enabledForSession, compiling). Helps choose between live_coding_compile and build_project.",
       "live_coding_status",
     ),
-    resolve_collision_profile: bp("read", 
-      "Read one collision profile's resolved per-channel responses: collisionEnabled, objectType, and every channel with Block/Overlap/Ignore. This is the project-side half of blueprint(get_component_collision) (#925): a component's ResponseArray only lists the channels it OVERRIDES, so the profile is where an inherited response actually comes from. Project trace and object channels appear under their configured names, with enumName (ECC_GameTraceChannel1) alongside so a caller can key on something stable. By default the eight engine channels plus every channel the project configured are returned; includeAllChannels=true adds the unused slots. channel narrows it to one. A profile that does not exist lists the ones that do. Params: profileName, channel?, includeAllChannels?",
+    resolve_collision_profile: blueprintSpecBp("read",
+      "Read one collision profile's resolved per-channel responses: collisionEnabled, objectType, and every channel with Block/Overlap/Ignore. This is the project-side half of blueprint(get_component_collision) (#925): a component's ResponseArray only lists the channels it OVERRIDES, so the profile is where an inherited response actually comes from. Project trace and object channels appear under their configured names, with enumName (ECC_GameTraceChannel1) alongside so a caller can key on something stable. By default the eight engine channels plus every channel the project configured are returned; includeAllChannels=true adds the unused slots. channel narrows it to one. A profile that does not exist lists the ones that do.",
       "resolve_collision_profile",
-      (p) => ({ profileName: p.profileName, channel: p.channel, includeAllChannels: p.includeAllChannels }),
     ),
 
     write_cpp_file: {

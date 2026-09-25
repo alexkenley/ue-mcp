@@ -1,5 +1,5 @@
 {
-  "handlerCount": 832,
+  "handlerCount": 836,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -5823,6 +5823,79 @@
         }
       ]
     },
+    "create_blueprint": {
+      "category": "blueprint",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "Full destination, e.g. /Game/Blueprints/BP_Example. A .uasset suffix, an object suffix and backslashes are normalized away",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Asset name; with packagePath, the same destination as assetPath"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder, used with name"
+        },
+        {
+          "name": "parentClass",
+          "type": "string",
+          "required": false,
+          "description": "Parent class: short name or full path (default Actor)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) reports the existing entry; error refuses"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "assetPath"
+            ],
+            [
+              "name",
+              "packagePath"
+            ]
+          ]
+        }
+      ]
+    },
+    "create_blueprint_interface": {
+      "category": "blueprint",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Full destination of the new Blueprint Interface",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) reports the existing entry; error refuses"
+        }
+      ],
+      "contractExempt": "Creates and saves an interface at the contract path; nothing it reads fails first"
+    },
     "create_control_rig": {
       "category": "animation",
       "params": [
@@ -6979,6 +7052,38 @@
           "type": "boolean",
           "required": false,
           "description": "Force a synchronous rescan first, which evicts pending-kill ghosts"
+        }
+      ]
+    },
+    "diff_blueprint": {
+      "category": "blueprint",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Base Blueprint (A)",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "otherPath",
+          "type": "string",
+          "required": true,
+          "description": "Blueprint to compare against (B)"
+        },
+        {
+          "name": "fromRevision",
+          "type": "string",
+          "required": false,
+          "description": "Reserved for source-control revision diffing, which is not implemented; passing it is refused"
+        },
+        {
+          "name": "toRevision",
+          "type": "string",
+          "required": false,
+          "description": "Reserved for source-control revision diffing, which is not implemented; passing it is refused"
         }
       ]
     },
@@ -18513,6 +18618,29 @@
           "type": "string",
           "required": true,
           "description": "Graph name to resolve"
+        }
+      ]
+    },
+    "resolve_collision_profile": {
+      "category": "blueprint",
+      "params": [
+        {
+          "name": "profileName",
+          "type": "string",
+          "required": true,
+          "description": "Collision profile to resolve, e.g. Pawn, BlockAll, or one the project defined"
+        },
+        {
+          "name": "channel",
+          "type": "string",
+          "required": false,
+          "description": "Narrow the answer to one collision channel: its configured name, the C++ enumerator, or the container index"
+        },
+        {
+          "name": "includeAllChannels",
+          "type": "boolean",
+          "required": false,
+          "description": "Include the unused GameTraceChannel slots (default false)"
         }
       ]
     },

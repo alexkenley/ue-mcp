@@ -82,33 +82,6 @@ export function splitAssetPath(assetPath: string): { packagePath: string; name: 
 }
 
 /**
- * Resolve the destination of a create action from either spelling: the
- * canonical `assetPath` (or its `path` alias), or the older `packagePath`
- * plus `name` pair. Returns the normalized package path.
- *
- * Throws INVALID_PARAMS naming both spellings when neither is usable, so the
- * caller is never told to supply an internal field name it cannot see in the
- * schema.
- */
-export function resolveCreateAssetPath(params: Record<string, unknown>): string {
-  for (const field of ["assetPath", "path"]) {
-    const value = coerceAssetPathValue(params[field]);
-    if (value !== undefined) return normalizeUnrealAssetPath(value, field);
-  }
-
-  const name = typeof params.name === "string" ? params.name.trim() : "";
-  const packagePath = typeof params.packagePath === "string" ? params.packagePath.trim() : "";
-  if (name !== "" && packagePath !== "") {
-    return normalizeUnrealAssetPath(`${packagePath}/${name}`, "packagePath + name");
-  }
-
-  throw invalid(
-    "Missing required parameter 'assetPath'. " +
-    `${PATH_FORMAT_HELP} A 'name' plus 'packagePath' pair is accepted as the same thing.`,
-  );
-}
-
-/**
  * Pull an asset path out of any value a caller might use for it: a plain
  * string, Unreal's `{ refPath }` object reference (what the wrapped engine
  * toolsets use), or either of those serialized as JSON by a client that
