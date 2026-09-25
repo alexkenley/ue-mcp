@@ -48,16 +48,23 @@ void FMCPHandlerRegistry::RegisterHandler(const FString& MethodName, FHandlerFun
 
 bool FMCPHandlerRegistry::RegisterHandler(const FString& MethodName, FHandlerFunction Handler, const TArray<FMCPParamSpec>& Params)
 {
+	return RegisterHandler(MethodName, MoveTemp(Handler), Params, FMCPSpecRules());
+}
+
+bool FMCPHandlerRegistry::RegisterHandler(const FString& MethodName, FHandlerFunction Handler, const TArray<FMCPParamSpec>& Params, const FMCPSpecRules& Rules)
+{
 	RegisterHandler(MethodName, MoveTemp(Handler));
-	const FString Problem = ValidateParamSpecs(Params);
+	FMCPHandlerSpec Spec;
+	Spec.Params = Params;
+	Spec.Choices = Rules.Choices;
+	Spec.ContractExemptReason = Rules.ContractExemptReason;
+	const FString Problem = ValidateHandlerSpec(Spec);
 	if (!Problem.IsEmpty())
 	{
 		HandlerSpecs.Remove(MethodName);
 		UE_LOG(LogMCPBridge, Error, TEXT("[UE-MCP] Parameter spec for '%s' refused: %s"), *MethodName, *Problem);
 		return false;
 	}
-	FMCPHandlerSpec Spec;
-	Spec.Params = Params;
 	HandlerSpecs.Add(MethodName, MoveTemp(Spec));
 	return true;
 }
@@ -104,9 +111,138 @@ FString FMCPHandlerRegistry::ValidateParamSpecs(const TArray<FMCPParamSpec>& Par
 		{
 			Problem = FString::Printf(TEXT("'%s' declares an item type but is not an array"), *Param.Name);
 		}
+		if (Problem.IsEmpty())
+		{
+			Problem = ValidateValueShape(Param);
+		}
 		if (!Problem.IsEmpty()) return Problem;
 	}
 	return FString();
+}
+
+FString FMCPHandlerRegistry::ValidateHandlerSpec(const FMCPHandlerSpec& Spec)
+{
+	const FString ParamsProblem = ValidateParamSpecs(Spec.Params);
+	if (!ParamsProblem.IsEmpty()) return ParamsProblem;
+
+	TMap<FString, bool> RequiredByName;
+	for (const FMCPParamSpec& Param : Spec.Params)
+	{
+		RequiredByName.Add(Param.Name, Param.bRequired);
+	}
+
+	TSet<FString> Chosen;
+	for (int32 ChoiceIndex = 0; ChoiceIndex < Spec.Choices.Num(); ++ChoiceIndex)
+	{
+		const FMCPParamChoice& Choice = Spec.Choices[ChoiceIndex];
+		if (Choice.Branches.Num() < 2)
+		{
+			return FString::Printf(TEXT("choice %d offers fewer than two branches"), ChoiceIndex);
+		}
+		for (const TArray<FString>& Branch : Choice.Branches)
+		{
+			if (Branch.Num() == 0)
+			{
+				return FString::Printf(TEXT("choice %d has an empty branch"), ChoiceIndex);
+			}
+			for (const FString& Name : Branch)
+			{
+				const bool* bRequired = RequiredByName.Find(Name);
+				if (!bRequired)
+				{
+					return FString::Printf(TEXT("choice %d names '%s', which is not a declared parameter"), ChoiceIndex, *Name);
+				}
+				if (*bRequired)
+				{
+					return FString::Printf(TEXT("'%s' is required and also a side of choice %d; the choice is what is required"), *Name, ChoiceIndex);
+				}
+				if (Chosen.Contains(Name))
+				{
+					return FString::Printf(TEXT("'%s' appears in more than one branch or choice"), *Name);
+				}
+				Chosen.Add(Name);
+			}
+		}
+	}
+
+	if (!Spec.ContractExemptReason.IsEmpty() && Spec.ContractExemptReason.TrimStartAndEnd().IsEmpty())
+	{
+		return TEXT("a contract exemption needs a reason");
+	}
+	return FString();
+}
+
+FString FMCPHandlerRegistry::ValidateValueShape(const FMCPParamSpec& Param)
+{
+	for (int32 Index = 0; Index < Param.OrTypes.Num(); ++Index)
+	{
+		const EMCPParamType OrType = Param.OrTypes[Index];
+		if (OrType == EMCPParamType::Any || Param.Type == EMCPParamType::Any)
+		{
+			return FString::Printf(TEXT("'%s' is a union with any, which already accepts everything"), *Param.Name);
+		}
+		if (OrType == EMCPParamType::Array)
+		{
+			return FString::Printf(TEXT("'%s' lists array as an alternative type; declare the array as the parameter's own type"), *Param.Name);
+		}
+		if (OrType == Param.Type)
+		{
+			return FString::Printf(TEXT("'%s' lists its own type as an alternative"), *Param.Name);
+		}
+		for (int32 Other = 0; Other < Index; ++Other)
+		{
+			if (Param.OrTypes[Other] == OrType)
+			{
+				return FString::Printf(TEXT("'%s' lists an alternative type twice"), *Param.Name);
+			}
+		}
+	}
+
+	if (Param.LiteralValue.IsValid())
+	{
+		const EJson Kind = Param.LiteralValue->Type;
+		const bool bFits =
+			(Param.Type == EMCPParamType::Boolean && Kind == EJson::Boolean)
+			|| (Param.Type == EMCPParamType::String && Kind == EJson::String)
+			|| ((Param.Type == EMCPParamType::Number || Param.Type == EMCPParamType::Integer) && Kind == EJson::Number);
+		if (!bFits)
+		{
+			return FString::Printf(TEXT("'%s' declares a literal that is not a value of its type"), *Param.Name);
+		}
+		if (Param.OrTypes.Num() > 0)
+		{
+			return FString::Printf(TEXT("'%s' is both a literal and a union"), *Param.Name);
+		}
+	}
+
+	if (Param.Fields.Num() > 0)
+	{
+		const bool bObject = Param.Type == EMCPParamType::Object
+			|| (Param.Type == EMCPParamType::Array && Param.ItemType == EMCPParamType::Object);
+		if (!bObject)
+		{
+			return FString::Printf(TEXT("'%s' declares fields but is neither an object nor an array of objects"), *Param.Name);
+		}
+		TSet<FString> FieldNames;
+		for (const FMCPParamField& Field : Param.Fields)
+		{
+			if (Field.Name.IsEmpty() || FieldNames.Contains(Field.Name))
+			{
+				return FString::Printf(TEXT("'%s' declares a field twice, or one with no name ('%s')"), *Param.Name, *Field.Name);
+			}
+			FieldNames.Add(Field.Name);
+			if (Field.Type != EMCPParamType::Array && Field.ItemType != EMCPParamType::Any)
+			{
+				return FString::Printf(TEXT("'%s.%s' declares an item type but is not an array"), *Param.Name, *Field.Name);
+			}
+		}
+	}
+	return FString();
+}
+
+const TCHAR* FMCPHandlerRegistry::ChoiceModeName(EMCPChoiceMode Mode)
+{
+	return Mode == EMCPChoiceMode::AtLeastOne ? TEXT("atLeastOne") : TEXT("exactlyOne");
 }
 
 const TCHAR* FMCPHandlerRegistry::ParamTypeName(EMCPParamType Type)
@@ -121,6 +257,7 @@ const TCHAR* FMCPHandlerRegistry::ParamTypeName(EMCPParamType Type)
 	case EMCPParamType::Array:   return TEXT("array");
 	case EMCPParamType::Vec3:    return TEXT("vec3");
 	case EMCPParamType::Rotator: return TEXT("rotator");
+	case EMCPParamType::Color:   return TEXT("color");
 	default:                     return TEXT("any");
 	}
 }
@@ -151,6 +288,43 @@ TSharedPtr<FJsonObject> FMCPHandlerRegistry::BuildHandlerSpecsJson() const
 			{
 				Entry->SetStringField(TEXT("items"), ParamTypeName(Param.ItemType));
 			}
+			// Written only when set, so a spec that uses none of them publishes
+			// exactly what it did before they existed.
+			if (Param.bNullable)
+			{
+				Entry->SetBoolField(TEXT("nullable"), true);
+			}
+			if (Param.OrTypes.Num() > 0)
+			{
+				TArray<FString> OrNames;
+				for (const EMCPParamType OrType : Param.OrTypes)
+				{
+					OrNames.Add(ParamTypeName(OrType));
+				}
+				Entry->SetArrayField(TEXT("orTypes"), MCPStringListToJson(OrNames));
+			}
+			if (Param.LiteralValue.IsValid())
+			{
+				Entry->SetField(TEXT("literal"), Param.LiteralValue);
+			}
+			if (Param.Fields.Num() > 0)
+			{
+				TArray<TSharedPtr<FJsonValue>> FieldValues;
+				for (const FMCPParamField& Field : Param.Fields)
+				{
+					TSharedPtr<FJsonObject> FieldEntry = MakeShared<FJsonObject>();
+					FieldEntry->SetStringField(TEXT("name"), Field.Name);
+					FieldEntry->SetStringField(TEXT("type"), ParamTypeName(Field.Type));
+					FieldEntry->SetBoolField(TEXT("required"), Field.bRequired);
+					FieldEntry->SetStringField(TEXT("description"), Field.Description);
+					if (Field.Type == EMCPParamType::Array && Field.ItemType != EMCPParamType::Any)
+					{
+						FieldEntry->SetStringField(TEXT("items"), ParamTypeName(Field.ItemType));
+					}
+					FieldValues.Add(MakeShared<FJsonValueObject>(FieldEntry));
+				}
+				Entry->SetArrayField(TEXT("fields"), FieldValues);
+			}
 			ParamValues.Add(MakeShared<FJsonValueObject>(Entry));
 		}
 
@@ -160,6 +334,27 @@ TSharedPtr<FJsonObject> FMCPHandlerRegistry::BuildHandlerSpecsJson() const
 			MethodEntry->SetStringField(TEXT("category"), *Category);
 		}
 		MethodEntry->SetArrayField(TEXT("params"), ParamValues);
+		if (Spec.Choices.Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> ChoiceValues;
+			for (const FMCPParamChoice& Choice : Spec.Choices)
+			{
+				TArray<TSharedPtr<FJsonValue>> BranchValues;
+				for (const TArray<FString>& Branch : Choice.Branches)
+				{
+					BranchValues.Add(MakeShared<FJsonValueArray>(MCPStringListToJson(Branch)));
+				}
+				TSharedPtr<FJsonObject> ChoiceEntry = MakeShared<FJsonObject>();
+				ChoiceEntry->SetStringField(TEXT("mode"), ChoiceModeName(Choice.Mode));
+				ChoiceEntry->SetArrayField(TEXT("branches"), BranchValues);
+				ChoiceValues.Add(MakeShared<FJsonValueObject>(ChoiceEntry));
+			}
+			MethodEntry->SetArrayField(TEXT("choices"), ChoiceValues);
+		}
+		if (!Spec.ContractExemptReason.IsEmpty())
+		{
+			MethodEntry->SetStringField(TEXT("contractExempt"), Spec.ContractExemptReason);
+		}
 		Out->SetObjectField(Method, MethodEntry);
 	}
 	return Out;
@@ -208,7 +403,12 @@ void FMCPHandlerRegistry::RegisterHandlerWithTimeout(const FString& MethodName, 
 
 bool FMCPHandlerRegistry::RegisterHandlerWithTimeout(const FString& MethodName, FHandlerFunction Handler, float TimeoutSeconds, const TArray<FMCPParamSpec>& Params)
 {
-	const bool bAccepted = RegisterHandler(MethodName, MoveTemp(Handler), Params);
+	return RegisterHandlerWithTimeout(MethodName, MoveTemp(Handler), TimeoutSeconds, Params, FMCPSpecRules());
+}
+
+bool FMCPHandlerRegistry::RegisterHandlerWithTimeout(const FString& MethodName, FHandlerFunction Handler, float TimeoutSeconds, const TArray<FMCPParamSpec>& Params, const FMCPSpecRules& Rules)
+{
+	const bool bAccepted = RegisterHandler(MethodName, MoveTemp(Handler), Params, Rules);
 	if (TimeoutSeconds > 0.0f)
 	{
 		HandlerTimeouts.Add(MethodName, TimeoutSeconds);

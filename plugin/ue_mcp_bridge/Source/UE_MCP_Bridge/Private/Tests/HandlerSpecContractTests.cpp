@@ -4,32 +4,21 @@
 // a parameter the surface advertises for nothing, and a name it reads that the
 // spec does not declare is one the surface can never deliver.
 //
-// The values point at an asset that does not exist, so every handler fails at
-// its first load and nothing is written. That is also why each spec'd handler
-// reads all of its parameters before loading anything. A spec'd handler with
-// nothing to load either only reads, or refuses these values (an unknown mode,
-// a zero factor, an empty path list) before it acts; one that would act on
-// them is left unspecified.
-// reads all of its parameters before loading anything. An actor selector gets
-// the same path, which names no actor, so nothing is spawned or edited either;
-// a handler that would create or spawn before failing is left unspecified.
-// The values point at an asset that does not exist, so every handler stops
-// before it writes: at its first load, or at a validation these values fail
-// (a zero duration, two sources where one is allowed). A handler with nothing
-// to load before it creates is left unspecced rather than given a spec this
-// test would run. That is also why each spec'd handler reads all of its
-// parameters before loading anything.
-// The values point at an asset that does not exist, so every handler that
-// writes fails at its first load, or on a refused value such as limit 0 or
-// step 0, before anything is written; a read-only handler may run to the end.
-// That is also why each spec'd handler reads all of its parameters before
-// loading or validating anything. A handler whose contract values could reach
-// a write (an asset create, an ini write, a demo scene step) carries no spec.
-// its first load and nothing is written. The same string is an actor path that
-// names nothing, so a world handler fails at its actor lookup. That is also why
-// each spec'd handler reads all of its parameters before loading anything. A
-// handler whose values would reach a write before either failure is left
-// unspecced, with the reason at its registration.
+// The values point at an asset that does not exist, and the same string is an
+// actor path that names nothing, so every handler stops before it writes: at
+// its first load, at its actor lookup, or at a validation these values fail
+// (a zero duration, limit 0, an unknown mode). That is also why each spec'd
+// handler reads all of its parameters before loading or validating anything.
+//
+// A spec with a choice is called once per branch, since a handler reads the
+// side it was given: each call sends the parameters outside every choice, one
+// branch of one choice and the first branch of each other one. Each call has
+// to read what it sent.
+//
+// A handler whose values would reach a create, spawn, save or run before
+// either failure is registered with MCPSpec::ContractExempt(reason). It is not
+// called here; tests/unit/handler-spec-exempt.test.ts holds its source to its
+// spec instead.
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -70,6 +59,15 @@ namespace MCPHandlerSpecTests
 	{
 		switch (Type)
 		{
+		case EMCPParamType::Color:
+		{
+			TSharedPtr<FJsonObject> Color = MakeShared<FJsonObject>();
+			Color->SetNumberField(TEXT("r"), 0.0);
+			Color->SetNumberField(TEXT("g"), 0.0);
+			Color->SetNumberField(TEXT("b"), 0.0);
+			Color->SetNumberField(TEXT("a"), 1.0);
+			return MakeShared<FJsonValueObject>(Color);
+		}
 		case EMCPParamType::String:
 			return MakeShared<FJsonValueString>(MissingAsset);
 		case EMCPParamType::Number:
@@ -98,6 +96,59 @@ namespace MCPHandlerSpecTests
 		default:
 			return MakeShared<FJsonValueObject>(MakeShared<FJsonObject>());
 		}
+	}
+
+	/** A declared parameter's contract value: its literal when it has one, else a value of its own type. */
+	TSharedPtr<FJsonValue> ValueForParam(const FMCPParamSpec& Param)
+	{
+		return Param.LiteralValue.IsValid() ? Param.LiteralValue : ValueFor(Param.Type);
+	}
+
+	/**
+	 * The parameter sets one spec is called with. Without a choice that is every
+	 * declared name. With choices, each branch of each choice gets one call,
+	 * carrying the names outside every choice and the first branch of each
+	 * other choice.
+	 */
+	TArray<TArray<FString>> ContractRuns(const FMCPHandlerSpec& Spec)
+	{
+		TSet<FString> InChoice;
+		for (const FMCPParamChoice& Choice : Spec.Choices)
+		{
+			for (const TArray<FString>& Branch : Choice.Branches)
+			{
+				InChoice.Append(Branch);
+			}
+		}
+		TArray<FString> Base;
+		for (const FMCPParamSpec& Param : Spec.Params)
+		{
+			if (!InChoice.Contains(Param.Name)) Base.Add(Param.Name);
+		}
+
+		TArray<TArray<FString>> Runs;
+		if (Spec.Choices.Num() == 0)
+		{
+			Runs.Add(Base);
+			return Runs;
+		}
+		for (int32 ChoiceIndex = 0; ChoiceIndex < Spec.Choices.Num(); ++ChoiceIndex)
+		{
+			for (const TArray<FString>& Branch : Spec.Choices[ChoiceIndex].Branches)
+			{
+				TArray<FString> Run = Base;
+				Run.Append(Branch);
+				for (int32 Other = 0; Other < Spec.Choices.Num(); ++Other)
+				{
+					if (Other != ChoiceIndex && Spec.Choices[Other].Branches.Num() > 0)
+					{
+						Run.Append(Spec.Choices[Other].Branches[0]);
+					}
+				}
+				Runs.Add(MoveTemp(Run));
+			}
+		}
+		return Runs;
 	}
 
 	/** Reads `assetPath` and echoes it back, so alias resolution is visible in the result. */
@@ -171,30 +222,45 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 			continue;
 		}
 
-		TestTrue(*FString::Printf(TEXT("%s: the spec validates"), *Method), FMCPHandlerRegistry::ValidateParamSpecs(Spec.Params).IsEmpty());
+		TestTrue(*FString::Printf(TEXT("%s: the spec validates"), *Method), FMCPHandlerRegistry::ValidateHandlerSpec(Spec).IsEmpty());
 
-		TSet<FString> Declared;
-		TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+		// Held to its spec by the source check in the unit tests instead: these
+		// values would reach a write before anything failed.
+		if (!Spec.ContractExemptReason.IsEmpty())
+		{
+			continue;
+		}
+
+		TMap<FString, const FMCPParamSpec*> Declared;
 		for (const FMCPParamSpec& Param : Spec.Params)
 		{
-			Declared.Add(Param.Name);
-			Params->SetField(Param.Name, ValueFor(Param.Type));
+			Declared.Add(Param.Name, &Param);
 		}
 
-		TSet<FString> Read;
+		for (const TArray<FString>& Run : ContractRuns(Spec))
 		{
-			FMCPParamReadScope Scope(Params);
-			(*Handler)(Params);
-			Read = Scope.ReadKeys();
-		}
+			TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+			for (const FString& Name : Run)
+			{
+				Params->SetField(Name, ValueForParam(*Declared.FindChecked(Name)));
+			}
 
-		for (const FString& Name : Declared)
-		{
-			TestTrue(*FString::Printf(TEXT("%s reads its declared parameter '%s'"), *Method, *Name), Read.Contains(Name));
-		}
-		for (const FString& Name : Read)
-		{
-			TestTrue(*FString::Printf(TEXT("%s reads only declared parameters, not '%s'"), *Method, *Name), Declared.Contains(Name));
+			TSet<FString> Read;
+			{
+				FMCPParamReadScope Scope(Params);
+				(*Handler)(Params);
+				Read = Scope.ReadKeys();
+			}
+
+			const FString Sent = FString::Join(Run, TEXT(", "));
+			for (const FString& Name : Run)
+			{
+				TestTrue(*FString::Printf(TEXT("%s reads its declared parameter '%s' (sent: %s)"), *Method, *Name, *Sent), Read.Contains(Name));
+			}
+			for (const FString& Name : Read)
+			{
+				TestTrue(*FString::Printf(TEXT("%s reads only declared parameters, not '%s'"), *Method, *Name), Declared.Contains(Name));
+			}
 		}
 	}
 	return true;
@@ -231,6 +297,71 @@ bool FMCPHandlerSpecRegistrationTest::RunTest(const FString& Parameters)
 		MCPParam::Optional(TEXT("frames"), EMCPParamType::Array, TEXT("probe")).Items(EMCPParamType::Integer),
 	}).IsEmpty());
 
+	// Value shapes.
+	TestTrue(TEXT("a nullable colour-or-number union validates"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("value"), EMCPParamType::Number, TEXT("probe")).Or(EMCPParamType::Color).Nullable(),
+		MCPParam::Optional(TEXT("tint"), EMCPParamType::Color, TEXT("probe")),
+		MCPParam::Optional(TEXT("reduceKeys"), EMCPParamType::Boolean, TEXT("probe")).Literal(false),
+		MCPParam::Optional(TEXT("entries"), EMCPParamType::Array, TEXT("probe")).Items(EMCPParamType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("mesh"), EMCPParamType::String, TEXT("probe")),
+			MCPParam::OptionalField(TEXT("weight"), EMCPParamType::Number, TEXT("probe")),
+		}),
+	}).IsEmpty());
+	TestFalse(TEXT("a type listed as its own alternative is refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("value"), EMCPParamType::Number, TEXT("probe")).Or(EMCPParamType::Number),
+	}).IsEmpty());
+	TestFalse(TEXT("a union with any is refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("value"), EMCPParamType::Number, TEXT("probe")).Or(EMCPParamType::Any),
+	}).IsEmpty());
+	TestFalse(TEXT("a literal of another type is refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("flag"), EMCPParamType::Boolean, TEXT("probe")).Literal(TEXT("yes")),
+	}).IsEmpty());
+	TestFalse(TEXT("fields on a string are refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("name"), EMCPParamType::String, TEXT("probe")).WithFields({
+			MCPParam::RequiredField(TEXT("x"), EMCPParamType::Number, TEXT("probe")),
+		}),
+	}).IsEmpty());
+	TestFalse(TEXT("fields on an array of strings are refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("names"), EMCPParamType::Array, TEXT("probe")).Items(EMCPParamType::String).WithFields({
+			MCPParam::RequiredField(TEXT("x"), EMCPParamType::Number, TEXT("probe")),
+		}),
+	}).IsEmpty());
+
+	// Choices.
+	auto SpecWith = [](const FMCPSpecRules& Rules)
+	{
+		FMCPHandlerSpec Spec;
+		Spec.Params = {
+			MCPParam::Required(TEXT("assetPath"), EMCPParamType::String, TEXT("probe")),
+			MCPParam::Optional(TEXT("settings"), EMCPParamType::Object, TEXT("probe")),
+			MCPParam::Optional(TEXT("propertyName"), EMCPParamType::String, TEXT("probe")),
+			MCPParam::Optional(TEXT("propertyValue"), EMCPParamType::String, TEXT("probe")),
+		};
+		Spec.Choices = Rules.Choices;
+		Spec.ContractExemptReason = Rules.ContractExemptReason;
+		return Spec;
+	};
+	TestTrue(TEXT("a choice between one name and a pair validates"), FMCPHandlerRegistry::ValidateHandlerSpec(SpecWith(
+		MCPSpec::ExactlyOne({ { TEXT("settings") }, { TEXT("propertyName"), TEXT("propertyValue") } }))).IsEmpty());
+	TestFalse(TEXT("a choice with one branch is refused"), FMCPHandlerRegistry::ValidateHandlerSpec(SpecWith(
+		MCPSpec::ExactlyOne({ { TEXT("settings") } }))).IsEmpty());
+	TestFalse(TEXT("a choice naming an undeclared parameter is refused"), FMCPHandlerRegistry::ValidateHandlerSpec(SpecWith(
+		MCPSpec::AtLeastOne({ { TEXT("settings") }, { TEXT("nothing") } }))).IsEmpty());
+	TestFalse(TEXT("a choice naming a required parameter is refused"), FMCPHandlerRegistry::ValidateHandlerSpec(SpecWith(
+		MCPSpec::ExactlyOne({ { TEXT("assetPath") }, { TEXT("settings") } }))).IsEmpty());
+	TestFalse(TEXT("a name in two branches is refused"), FMCPHandlerRegistry::ValidateHandlerSpec(SpecWith(
+		MCPSpec::ExactlyOne({ { TEXT("settings") }, { TEXT("settings"), TEXT("propertyName") } }))).IsEmpty());
+	TestFalse(TEXT("a blank exemption reason is refused"), FMCPHandlerRegistry::ValidateHandlerSpec(SpecWith(
+		MCPSpec::ContractExempt(TEXT("  ")))).IsEmpty());
+	{
+		const TArray<TArray<FString>> Runs = ContractRuns(SpecWith(
+			MCPSpec::ExactlyOne({ { TEXT("settings") }, { TEXT("propertyName"), TEXT("propertyValue") } })));
+		const bool bTwoRuns = Runs.Num() == 2
+			&& Runs[0] == TArray<FString>({ TEXT("assetPath"), TEXT("settings") })
+			&& Runs[1] == TArray<FString>({ TEXT("assetPath"), TEXT("propertyName"), TEXT("propertyValue") });
+		TestTrue(TEXT("a choice is called once per branch, each with the names outside it"), bTwoRuns);
+	}
+
 	FMCPHandlerRegistry Registry;
 	{
 		FMCPHandlerRegistry::FCategoryScope Scope(Registry, TEXT("animation"));
@@ -246,6 +377,27 @@ bool FMCPHandlerSpecRegistrationTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("a valid spec is accepted"), Registry.RegisterHandler(
 			TEXT("mcp_test_spec_alias"), &AliasProbe,
 			{ MCPParam::Required(TEXT("assetPath"), EMCPParamType::String, TEXT("probe")).Alias(TEXT("path")) }));
+
+		// Named through a variable so bridge-timeout-parity.test.ts, which mirrors
+		// every literal RegisterHandlerWithTimeout call, does not count a probe.
+		const FString RulesMethod = TEXT("mcp_test_spec_rules");
+		TestTrue(TEXT("a spec with a choice, value shapes and an exemption is accepted"), Registry.RegisterHandlerWithTimeout(
+			RulesMethod, &AliasProbe, 60.0f, {
+				MCPParam::Optional(TEXT("assetPath"), EMCPParamType::String, TEXT("probe")).Nullable(),
+				MCPParam::Optional(TEXT("tint"), EMCPParamType::Number, TEXT("probe")).Or(EMCPParamType::Color),
+				MCPParam::Optional(TEXT("confirm"), EMCPParamType::Boolean, TEXT("probe")).Literal(true),
+				MCPParam::Optional(TEXT("entries"), EMCPParamType::Array, TEXT("probe")).Items(EMCPParamType::Object).WithFields({
+					MCPParam::RequiredField(TEXT("mesh"), EMCPParamType::String, TEXT("probe")),
+				}),
+			},
+			MCPSpec::AtLeastOne({ { TEXT("assetPath") }, { TEXT("tint") } }).ContractExempt(TEXT("probe writes"))));
+
+		AddExpectedError(TEXT("Parameter spec for 'mcp_test_spec_bad_choice' refused"), EAutomationExpectedErrorFlags::Contains, 1);
+		TestFalse(TEXT("a choice over an undeclared name is refused at registration"), Registry.RegisterHandler(
+			TEXT("mcp_test_spec_bad_choice"), &AliasProbe,
+			{ MCPParam::Optional(TEXT("assetPath"), EMCPParamType::String, TEXT("probe")) },
+			MCPSpec::ExactlyOne({ { TEXT("assetPath") }, { TEXT("nothing") } })));
+		TestFalse(TEXT("and carries no spec"), Registry.GetHandlerSpecs().Contains(TEXT("mcp_test_spec_bad_choice")));
 	}
 
 	// The alias arrives as the declared name, and is not reported as unread.
@@ -295,6 +447,37 @@ bool FMCPHandlerSpecRegistrationTest::RunTest(const FString& Parameters)
 				const TArray<TSharedPtr<FJsonValue>>* Aliases = nullptr;
 				TestTrue(TEXT("aliases"), Param->TryGetArrayField(TEXT("aliases"), Aliases) && Aliases
 					&& Aliases->Num() == 1 && (*Aliases)[0]->AsString() == TEXT("path"));
+				TestFalse(TEXT("no shape fields when none are set"), Param->HasField(TEXT("nullable")) || Param->HasField(TEXT("orTypes"))
+					|| Param->HasField(TEXT("literal")) || Param->HasField(TEXT("fields")));
+			}
+			TestFalse(TEXT("no choices or exemption when none are set"),
+				(*Entry)->HasField(TEXT("choices")) || (*Entry)->HasField(TEXT("contractExempt")));
+		}
+
+		const TSharedPtr<FJsonObject>* Rules = nullptr;
+		if (TestTrue(TEXT("the rules spec is published"), Json->TryGetObjectField(TEXT("mcp_test_spec_rules"), Rules) && Rules))
+		{
+			TestEqual(TEXT("with its exemption"), (*Rules)->GetStringField(TEXT("contractExempt")), FString(TEXT("probe writes")));
+			const TArray<TSharedPtr<FJsonValue>>* Choices = nullptr;
+			if (TestTrue(TEXT("and its choice"), (*Rules)->TryGetArrayField(TEXT("choices"), Choices) && Choices && Choices->Num() == 1))
+			{
+				const TSharedPtr<FJsonObject> Choice = (*Choices)[0]->AsObject();
+				TestEqual(TEXT("mode"), Choice->GetStringField(TEXT("mode")), FString(TEXT("atLeastOne")));
+				const TArray<TSharedPtr<FJsonValue>>* Branches = nullptr;
+				TestTrue(TEXT("branches"), Choice->TryGetArrayField(TEXT("branches"), Branches) && Branches && Branches->Num() == 2
+					&& (*Branches)[1]->AsArray().Num() == 1 && (*Branches)[1]->AsArray()[0]->AsString() == TEXT("tint"));
+			}
+			const TArray<TSharedPtr<FJsonValue>>* Params = nullptr;
+			if (TestTrue(TEXT("and its params"), (*Rules)->TryGetArrayField(TEXT("params"), Params) && Params && Params->Num() == 4))
+			{
+				TestTrue(TEXT("nullable"), (*Params)[0]->AsObject()->GetBoolField(TEXT("nullable")));
+				const TArray<TSharedPtr<FJsonValue>>* OrTypes = nullptr;
+				TestTrue(TEXT("orTypes"), (*Params)[1]->AsObject()->TryGetArrayField(TEXT("orTypes"), OrTypes) && OrTypes
+					&& OrTypes->Num() == 1 && (*OrTypes)[0]->AsString() == TEXT("color"));
+				TestTrue(TEXT("literal"), (*Params)[2]->AsObject()->GetBoolField(TEXT("literal")));
+				const TArray<TSharedPtr<FJsonValue>>* Fields = nullptr;
+				TestTrue(TEXT("fields"), (*Params)[3]->AsObject()->TryGetArrayField(TEXT("fields"), Fields) && Fields
+					&& Fields->Num() == 1 && (*Fields)[0]->AsObject()->GetStringField(TEXT("name")) == TEXT("mesh"));
 			}
 		}
 	}
