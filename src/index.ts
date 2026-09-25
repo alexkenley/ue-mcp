@@ -42,7 +42,8 @@ import {
   isDialogRefusal,
   stampBlockedEditor,
 } from "./dialog-guard.js";
-import { resolveDialogMode, clientAdvertisesElicitation } from "./editor-control.js";
+import { resolveDialogMode, clientAdvertisesElicitation, connectedEditorOf } from "./editor-control.js";
+import { contestedProject } from "./project-holders.js";
 import { info, warn, debug } from "./log.js";
 import { startVersionCheck, consumeUpgradeNotice } from "./version-check.js";
 import { buildFlowRegistry } from "./flow/registry.js";
@@ -696,8 +697,13 @@ async function main() {
   /** The serving editor, appended to a response only beyond one editor (5.3). */
   const attribution = (session: EditorSession): TextBlock[] => {
     const line = editorAttribution(
-      { name: session.name, projectPath: session.project.projectPath },
+      {
+        name: session.name,
+        projectPath: session.project.projectPath,
+        pid: connectedEditorOf(session.bridge)?.pid,
+      },
       sessions.size,
+      contestedProject(session.project.projectPath) !== null,
     );
     return line ? [{ type: "text" as const, text: line }] : [];
   };
