@@ -38,6 +38,7 @@ import {
 } from "./field-select.js";
 import { mapTracked } from "./param-forwarding.js";
 import { McpError, ErrorCode } from "./errors.js";
+import { choiceViolation, type ParamChoice, type ParamSpec } from "./handler-spec.js";
 
 /**
  * Separate the per-call timeout budget from the action's own parameters.
@@ -88,6 +89,13 @@ export interface CallPreparation {
    * `routeEditorCall` already reads both levels for the same reason.
    */
   nestedParamsKey?: string;
+  /**
+   * The spec'd action's required choices and the parameters they name
+   * (#1057). The category's zod shape is one flat bag shared by every action,
+   * so it cannot say "actorLabel OR actorPath"; the call is checked here
+   * instead, after folding, and refused before anything is sent.
+   */
+  paramChoices?: { params: readonly ParamSpec[]; choices: readonly ParamChoice[] };
 }
 
 /** What the inbound half decided, carried to the outbound half. */
@@ -188,8 +196,19 @@ export function prepareCall(
   }
 
   const repaired = normalizePathParams(outerSelection.rest);
+  const folded = applyCategoryFolding(repaired.params, prep);
+  if (prep.paramChoices) {
+    const violation = choiceViolation(prep.paramChoices, folded);
+    if (violation) {
+      throw new McpError(
+        ErrorCode.INVALID_PARAMS,
+        `${prep.action ?? "This action"} ${violation}, so the call was not sent. `
+        + `project(action="describe_action") lists what it takes.`,
+      );
+    }
+  }
   return {
-    params: applyCategoryFolding(repaired.params, prep),
+    params: folded,
     repairs: repaired.repairs,
     selection: outerSelection.selection,
     timeoutMs: outerTimeout.timeoutMs,

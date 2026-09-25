@@ -23,6 +23,7 @@
 import { z } from "zod";
 import { ROUTING_PARAM_NAMES } from "./routing-params.js";
 import type { ActionEffectSource, ActionSpec, ToolDef } from "./types.js";
+import type { ParamSpec } from "./handler-spec.js";
 import type { ActionClass } from "./action-class.js";
 
 /** A readable schema summary, not a substitute for runtime validation. */
@@ -194,10 +195,21 @@ function typeName(schema: z.ZodTypeAny): string {
   }
 }
 
-/** A spec's wire type in typeName's vocabulary; vec3 and rotator are objects. */
+/** A spec's wire type in typeName's vocabulary; vec3, rotator and color are objects. */
 function specTypeName(type: string, items?: string): string {
   if (type === "array") return `${specTypeName(items ?? "any")}[]`;
-  return type === "vec3" || type === "rotator" ? "object" : type;
+  return type === "vec3" || type === "rotator" || type === "color" ? "object" : type;
+}
+
+/** One declared parameter's type: a union's alternatives joined with `|`, and null when it takes one. */
+function specParamTypeName(param: ParamSpec): string {
+  const names = [specTypeName(param.type, param.fields && param.type === "array" ? "object" : param.items)];
+  for (const orType of param.orTypes ?? []) {
+    const name = specTypeName(orType);
+    if (!names.includes(name)) names.push(name);
+  }
+  if (param.nullable) names.push("null");
+  return names.join("|");
 }
 
 /** Allowed values for an enum, or a union made entirely of string literals. */
@@ -740,6 +752,14 @@ export function actionSchema(tool: ToolDef, action: string): ActionSchema {
 
   const alternatives: AlternativeGroup[] = [];
   const groupIndex = new Map<number, number>();
+  // A spec's choices are declared, not parsed: each is published with the
+  // branches the spec names, and every one of them is required.
+  const specGroup = new Map<string, number>();
+  if (recorded) (spec.kind === "bridge" ? spec.paramChoices ?? [] : []).forEach((choice) => {
+    const index = alternatives.length;
+    alternatives.push({ branches: choice.branches.map((b) => [...b]), required: true });
+    for (const branch of choice.branches) for (const name of branch) specGroup.set(name, index);
+  });
   if (!recorded) parsed.alternatives.forEach((group, i) => {
     const branches = group.branches
       .map((b) => b.filter((n) => declaredNames.has(n)))
@@ -773,12 +793,13 @@ export function actionSchema(tool: ToolDef, action: string): ActionSchema {
       params.push({
         ...valueSchema(schema),
         name,
-        type: specTypeName(declared.type, declared.items),
+        type: specParamTypeName(declared),
         required: declared.required,
         description: declared.description || paramDoc,
-        enumValues: enumValues(inner),
+        enumValues: declared.literal !== undefined ? [String(declared.literal)] : enumValues(inner),
         default: dflt,
         sources,
+        alternativeGroup: specGroup.get(name),
         aliases: declared.aliases?.length ? [...declared.aliases] : undefined,
       });
       continue;

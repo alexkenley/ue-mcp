@@ -3,7 +3,7 @@
 // tests/unit/handler-specs.test.ts, which asserts the checked-in files are what
 // the recording renders to. Run under tsx, so the validation is the server's own.
 
-import { specProblems } from "../../src/handler-spec.js";
+import { specProblems, clauseItems, renderChoice } from "../../src/handler-spec.js";
 
 const ZOD_BY_TYPE = {
   string: "z.string()",
@@ -11,26 +11,57 @@ const ZOD_BY_TYPE = {
   integer: "z.number().int()",
   boolean: "z.boolean()",
   object: "z.record(z.unknown())",
+  array: "z.array(z.unknown())",
   vec3: "z.object({ x: z.number(), y: z.number(), z: z.number() })",
   rotator: "z.object({ pitch: z.number(), yaw: z.number(), roll: z.number() })",
+  color: "z.object({ r: z.number(), g: z.number(), b: z.number(), a: z.number().optional() })",
   any: "z.unknown()",
 };
 
-/** The zod expression a parameter's type renders to, without optionality. */
-export function zodExpression(param) {
-  if (param.type === "array") return `z.array(${ZOD_BY_TYPE[param.items ?? "any"]})`;
-  const expr = ZOD_BY_TYPE[param.type];
-  if (!expr) throw new Error(`unknown parameter type '${param.type}' on '${param.name}'`);
+function baseExpression(type, name) {
+  const expr = ZOD_BY_TYPE[type];
+  if (!expr) throw new Error(`unknown parameter type '${type}' on '${name}'`);
   return expr;
+}
+
+/** An object with declared fields, each described. */
+function fieldsExpression(fields, name) {
+  const entries = fields.map((f) => {
+    const base = f.type === "array" ? `z.array(${baseExpression(f.items ?? "any", `${name}.${f.name}`)})` : baseExpression(f.type, `${name}.${f.name}`);
+    return `${f.name}: ${base}${f.required ? "" : ".optional()"}.describe(${JSON.stringify(f.description)})`;
+  });
+  return `z.object({ ${entries.join(", ")} })`;
+}
+
+/**
+ * The zod expression a parameter renders to, without optionality. The written
+ * twin of paramZod in src/handler-spec.ts: a literal, an object or array
+ * element with declared fields, the alternative types of a union, then null.
+ */
+export function zodExpression(param) {
+  let expr;
+  if (param.literal !== undefined) expr = `z.literal(${JSON.stringify(param.literal)})`;
+  else if (param.type === "array") {
+    expr = `z.array(${param.fields ? fieldsExpression(param.fields, param.name) : baseExpression(param.items ?? "any", param.name)})`;
+  } else if (param.type === "object" && param.fields) expr = fieldsExpression(param.fields, param.name);
+  else expr = baseExpression(param.type, param.name);
+  if (param.orTypes?.length) {
+    expr = `z.union([${[expr, ...param.orTypes.map((t) => baseExpression(t, param.name))].join(", ")}])`;
+  }
+  return param.nullable ? `${expr}.nullable()` : expr;
 }
 
 /**
  * The `Params:` clause for one handler, in the grammar parseParams reads:
- * required names bare, optional ones with `?`, aliases as `(or alias)`.
+ * required names bare, optional ones with `?`, aliases as `(or alias)`, and a
+ * choice where its first member is declared, written as renderChoice writes it
+ * (`actorLabel OR actorPath`, `at least one of labelPrefix/tag`).
  */
 export function paramsClause(spec) {
   if (spec.params.length === 0) return "Params: none";
-  const items = spec.params.map((p) => {
+  const items = clauseItems(spec).map((item) => {
+    if (item.kind === "choice") return renderChoice(item.choice, spec.params);
+    const p = item.param;
     const aliases = p.aliases?.length ? ` (${p.aliases.map((a) => `or ${a}`).join(", ")})` : "";
     return `${p.name}${p.required ? "" : "?"}${aliases}`;
   });
