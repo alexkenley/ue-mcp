@@ -137,7 +137,10 @@ The advertised surface always comes from the recording, whether an editor is con
 
 Three tests hold the chain: `tests/unit/handler-specs.test.ts` (the generated modules are exactly what the recording renders to, every spec'd action takes its clause from the spec, and a key shared with hand-written actions has one type), `tests/live/handler-specs.test.ts` (the running plugin still publishes what was recorded), and the C++ suite's `UE.MCP.Bridge.HandlerSpec.Contract` (each spec'd handler, called with every declared parameter, reads exactly those and nothing else).
 
-`animation` is the pilot. Handlers without a spec, and every other category, are declared by hand as before.
+`animation` was the pilot, and `pcg` has followed. Handlers without a spec are declared by hand as before. Two kinds stay that way on purpose:
+
+- **A required choice.** `actorLabel OR actorPath`, or `settings OR propertyName + propertyValue`, is published as a choice group that `describe_action` reports. A spec has no way to say "one of these", so declaring both sides optional would advertise a weaker contract than the hand-written clause.
+- **A handler that would write before it fails.** The contract test calls every spec'd handler with values that name nothing. A create action or an actor spawn that does not first load something that is missing would create or spawn under those values, so it is left unspecified.
 
 #### Socket and thread ownership
 

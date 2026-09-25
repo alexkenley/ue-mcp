@@ -10,6 +10,9 @@
 // nothing to load either only reads, or refuses these values (an unknown mode,
 // a zero factor, an empty path list) before it acts; one that would act on
 // them is left unspecified.
+// reads all of its parameters before loading anything. An actor selector gets
+// the same path, which names no actor, so nothing is spawned or edited either;
+// a handler that would create or spawn before failing is left unspecified.
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -26,6 +29,7 @@
 #include "Handlers/DialogHandlers.h"
 #include "Handlers/EditorHandlers.h"
 #include "Handlers/SequencerHandlers.h"
+#include "Handlers/PCGHandlers.h"
 #include "Misc/AutomationTest.h"
 
 namespace MCPHandlerSpecTests
@@ -88,8 +92,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 {
 	using namespace MCPHandlerSpecTests;
-	// Loading a path with nothing behind it logs through the editor asset library.
+	// Loading a path with nothing behind it logs through the editor asset library,
+	// and a direct LoadObject names the missing path in its warning.
 	AddExpectedError(TEXT("LoadAsset failed"), EAutomationExpectedErrorFlags::Contains, 0);
+	AddExpectedError(TEXT("HandlerSpecContract/NoSuchAsset"), EAutomationExpectedErrorFlags::Contains, 0);
 
 	FMCPHandlerRegistry Registry;
 	FAnimationHandlers::RegisterHandlers(Registry);
@@ -103,6 +109,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FEditorHandlers::RegisterHandlers(Registry);
 	FSequencerHandlers::RegisterHandlers(Registry);
 	FDialogHandlers::RegisterHandlers(Registry);
+	FPCGHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
 	TestTrue(TEXT("handlers register with a parameter spec"), Specs.Num() > 0);
