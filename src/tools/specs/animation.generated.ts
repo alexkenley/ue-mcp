@@ -156,20 +156,6 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
-  "read_anim_sequence": {
-    "category": "animation",
-    "params": [
-      {
-        "name": "assetPath",
-        "type": "string",
-        "required": true,
-        "description": "AnimSequence asset path",
-        "aliases": [
-          "path"
-        ]
-      }
-    ]
-  },
   "read_blendspace": {
     "category": "animation",
     "params": [
@@ -429,7 +415,6 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   read_anim_blueprint: "Params: assetPath (or path)",
   read_anim_graph: "Params: assetPath (or path), graphName?",
   read_anim_montage: "Params: assetPath (or path)",
-  read_anim_sequence: "Params: assetPath (or path)",
   read_blendspace: "Params: assetPath (or path)",
   read_bone_track: "Params: assetPath, boneName, frames?",
   read_state_machine: "Params: assetPath (or path), stateMachineName",
@@ -444,7 +429,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
 
 /** Every key the spec'd animation handlers declare, aliases included. */
 export const schema: Record<string, z.ZodType> = {
-  assetPath: z.string().optional().describe("AnimSequence asset path (add_curve, list_anim_modifiers, read_anim_sequence, read_bone_track, set_root_motion_settings). SkeletalMesh asset path (get_physics_asset_info, get_skeleton_info, list_animation_sockets). AnimBlueprint asset path (read_anim_blueprint, read_anim_graph, read_state_machine, set_anim_blueprint_skeleton). AnimMontage asset path (read_anim_montage, set_montage_properties, set_montage_slot). BlendSpace or BlendSpace1D asset path (read_blendspace). AnimSequence or AnimMontage asset path (remove_anim_notify, remove_animation_notify)"),
+  assetPath: z.string().optional().describe("AnimSequence asset path (add_curve, list_anim_modifiers, read_bone_track, set_root_motion_settings). SkeletalMesh asset path (get_physics_asset_info, get_skeleton_info, list_animation_sockets). AnimBlueprint asset path (read_anim_blueprint, read_anim_graph, read_state_machine, set_anim_blueprint_skeleton). AnimMontage asset path (read_anim_montage, set_montage_properties, set_montage_slot). BlendSpace or BlendSpace1D asset path (read_blendspace). AnimSequence or AnimMontage asset path (remove_anim_notify, remove_animation_notify)"),
   blendIn: z.number().optional().describe("Blend-in time in seconds"),
   blendOut: z.number().optional().describe("Blend-out time in seconds"),
   boneName: z.string().optional().describe("Bone whose track to sample"),

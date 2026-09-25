@@ -1,5 +1,5 @@
 {
-  "handlerCount": 20,
+  "handlerCount": 19,
   "handlers": {
     "add_curve": {
       "category": "animation",
@@ -142,20 +142,6 @@
           "type": "string",
           "required": true,
           "description": "AnimMontage asset path",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "read_anim_sequence": {
-      "category": "animation",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "AnimSequence asset path",
           "aliases": [
             "path"
           ]
