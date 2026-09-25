@@ -2409,6 +2409,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CaptureControlRigPose(const TSharedPt
 
 TSharedPtr<FJsonValue> FAnimationHandlers::ApplyControlRigEdits(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read ahead on every engine: the sequence loads before the operations are
+	// read, and the older-engine refusal reads nothing else (#1057).
+	MCPReadParamsAhead(Params, { TEXT("sequencePath"), TEXT("bindingTag"), TEXT("operations") });
 #if !UE_MCP_HAS_5_8_API
 	return ControlRigSequencerUnsupported();
 #else
@@ -2746,6 +2749,10 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ApplyControlRigEdits(const TSharedPtr
 		}
 		else if (bSetOperation || bBoolOperation || bFloatOperation || bIntOperation)
 		{
+			// One or the other, never both: combining them silently would key
+			// frames the caller did not list together.
+			if (Operation->HasField(TEXT("frame")) == Operation->HasField(TEXT("frames")))
+				return MCPError(FString::Printf(TEXT("operations[%d] requires exactly one of frame or frames"), OperationIndex));
 			if (!ControlRigSequencerReadFrames(Operation, Write.Frames, Error))
 				return MCPError(FString::Printf(TEXT("operations[%d]: %s"), OperationIndex, *Error));
 			if (bBoolOperation && !Operation->TryGetBoolField(TEXT("value"), Write.BoolValue))
@@ -3556,8 +3563,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ApplyControlRigEdits(const TSharedPtr
 						TEXT("operations[%d] does not change a channel supported by %s"),
 						OperationIndex, *ControlString));
 				}
-				const int32 BlendIn = FMath::Max(0, OptionalInt(Operation, TEXT("blendInFrames"), 0));
-				const int32 BlendOut = FMath::Max(0, OptionalInt(Operation, TEXT("blendOutFrames"), 0));
+				const int32 BlendIn = OptionalInt(Operation, TEXT("blendInFrames"), 0);
+				const int32 BlendOut = OptionalInt(Operation, TEXT("blendOutFrames"), 0);
+				if (BlendIn < 0 || BlendOut < 0)
+				{
+					return MCPError(FString::Printf(
+						TEXT("operations[%d] blendInFrames and blendOutFrames must be non-negative"), OperationIndex));
+				}
 				for (int32 Index = 0; Index < Write.After.Num(); ++Index)
 				{
 					double Weight = 1.0;

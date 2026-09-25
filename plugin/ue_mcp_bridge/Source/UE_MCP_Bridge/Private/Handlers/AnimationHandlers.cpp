@@ -668,10 +668,101 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		EditBindingTag(),
 		MCPParam::Optional(TEXT("controlNames"), EType::Array, TEXT("Live controls to capture (default the current Control Rig selection)")).Items(EType::String),
 	});
-	// Hand-authored: operations is a union of eight object shapes (set, set_keys,
-	// offset, contact_lock, set_bool, set_float, set_int, propagate_pose), each
-	// with its own required fields, which a spec's one element shape cannot say.
-	Registry.RegisterHandler(TEXT("apply_control_rig_edits"), &ApplyControlRigEdits);
+	{
+		// Each operation is one of eight shapes picked by `op`. The spec gives
+		// each shape its fields; the rules between fields (exactly one of frame
+		// and frames, an end at or after its start, blends that leave a locked
+		// frame, normalized quaternions, unique controls) are the handler's.
+		auto Control = []()
+		{
+			return MCPParam::RequiredField(TEXT("control"), EType::String, TEXT("Control name on the session's rig"));
+		};
+		auto Frame = []()
+		{
+			return MCPParam::OptionalField(TEXT("frame"), EType::Integer, TEXT("One frame to key; pass exactly one of frame and frames"));
+		};
+		auto Frames = []()
+		{
+			return MCPParam::OptionalField(TEXT("frames"), EType::Array, TEXT("Frames to key; pass exactly one of frame and frames")).Items(EType::Integer);
+		};
+		auto Space = [](const TCHAR* What)
+		{
+			return MCPParam::OptionalField(TEXT("space"), EType::String, What);
+		};
+		auto BlendIn = []()
+		{
+			return MCPParam::OptionalField(TEXT("blendInFrames"), EType::Integer, TEXT("Frames to ease in over, from 0 (default 0)"));
+		};
+		auto BlendOut = []()
+		{
+			return MCPParam::OptionalField(TEXT("blendOutFrames"), EType::Integer, TEXT("Frames to ease out over, from 0 (default 0)"));
+		};
+		Registry.RegisterHandler(TEXT("apply_control_rig_edits"), &ApplyControlRigEdits, {
+			EditSequencePath(),
+			EditBindingTag(),
+			MCPParam::Required(TEXT("operations"), EType::Array, TEXT("Typed edits applied in one transaction, in order")).Items(EType::Object).Tagged(TEXT("op"), {
+				MCPParam::Variant(TEXT("set"), TEXT("Write one full absolute transform at frame or frames"), {
+					Control(),
+					Frame(),
+					Frames(),
+					MCPParam::RequiredField(TEXT("transform"), EType::Object, TEXT("{translation {x,y,z}, rotationDegrees {pitch,yaw,roll}, scale {x,y,z}}")),
+					Space(TEXT("local (default) | component | global, where global is an alias for component")),
+				}),
+				MCPParam::Variant(TEXT("set_keys"), TEXT("Write strictly ordered full per-frame transforms from normalized quaternions"), {
+					Control(),
+					MCPParam::RequiredField(TEXT("keys"), EType::Array, TEXT("[{frame, transform {translation {x,y,z}, rotationQuaternion {x,y,z,w}, scale {x,y,z}}}], frames strictly increasing")).Items(EType::Object),
+					Space(TEXT("local (default) | component | global, where global is an alias for component")),
+				}),
+				MCPParam::Variant(TEXT("offset"), TEXT("Apply translation, rotation or scale deltas across an inclusive frame range"), {
+					Control(),
+					MCPParam::RequiredField(TEXT("startFrame"), EType::Integer, TEXT("First frame of the range")),
+					MCPParam::RequiredField(TEXT("endFrame"), EType::Integer, TEXT("Last frame of the range, at or after startFrame")),
+					MCPParam::OptionalField(TEXT("translationCm"), EType::Vec3, TEXT("Translation delta in centimetres")),
+					MCPParam::OptionalField(TEXT("rotationDegrees"), EType::Rotator, TEXT("Rotation delta in degrees")),
+					MCPParam::OptionalField(TEXT("scaleMultiplier"), EType::Vec3, TEXT("Scale multiplier; one of translationCm, rotationDegrees and scaleMultiplier is required")),
+					Space(TEXT("local (default) | component | global, where global is an alias for component")),
+					BlendIn(),
+					BlendOut(),
+				}),
+				MCPParam::Variant(TEXT("contact_lock"), TEXT("Constrain a translatable driver control, or a driven bone or socket, to a fixed component-space target"), {
+					Control(),
+					MCPParam::OptionalField(TEXT("drivenReference"), EType::String, TEXT("Bone or socket to constrain instead of the control; bake and analyze before accepting it")),
+					MCPParam::RequiredField(TEXT("startFrame"), EType::Integer, TEXT("First frame of the lock")),
+					MCPParam::RequiredField(TEXT("endFrame"), EType::Integer, TEXT("Last frame of the lock, at or after startFrame")),
+					MCPParam::OptionalField(TEXT("target"), EType::Object, TEXT("{translation {x,y,z}, rotationQuaternion? {x,y,z,w}}: a fixed component-space target, or a transform relative to targetReference when that is set; pass target or targetReference")),
+					MCPParam::OptionalField(TEXT("targetReference"), EType::String, TEXT("Source-animation bone or socket to follow. Without target, the first frame's subject-to-reference offset is kept")),
+					BlendIn(),
+					BlendOut(),
+					MCPParam::OptionalField(TEXT("stabilizeControls"), EType::Array, TEXT("Up to 8 pole or stabilizer controls to hold steady; never the locked control itself")).Items(EType::String),
+					MCPParam::OptionalField(TEXT("positionToleranceCm"), EType::Number, TEXT("Readback position tolerance, above 0 and up to 100 (default 0.1)")),
+					MCPParam::OptionalField(TEXT("rotationToleranceDegrees"), EType::Number, TEXT("Readback rotation tolerance, above 0 and up to 180 (default 0.5)")),
+				}),
+				MCPParam::Variant(TEXT("set_bool"), TEXT("Key a bool control at frame or frames"), {
+					Control(),
+					Frame(),
+					Frames(),
+					MCPParam::RequiredField(TEXT("value"), EType::Boolean, TEXT("Value to key")),
+				}),
+				MCPParam::Variant(TEXT("set_float"), TEXT("Key a float control at frame or frames"), {
+					Control(),
+					Frame(),
+					Frames(),
+					MCPParam::RequiredField(TEXT("value"), EType::Number, TEXT("Finite value to key")),
+				}),
+				MCPParam::Variant(TEXT("set_int"), TEXT("Key an integer or enum control at frame or frames; an enum takes one of its enumOptions values"), {
+					Control(),
+					Frame(),
+					Frames(),
+					MCPParam::RequiredField(TEXT("value"), EType::Integer, TEXT("Value to key")),
+				}),
+				MCPParam::Variant(TEXT("propagate_pose"), TEXT("Key the controls that changed between two live snapshots across each control's donor frames"), {
+					MCPParam::RequiredField(TEXT("baseline"), EType::Object, TEXT("Snapshot from capture_control_rig_pose before the edit")),
+					MCPParam::RequiredField(TEXT("accepted"), EType::Object, TEXT("Snapshot from capture_control_rig_pose after the edit, same session, rig instance, frame and control set")),
+					MCPParam::RequiredField(TEXT("controls"), EType::Array, TEXT("[{control, mode fixed | local_delta, donorFrames strictly increasing}], each control once; bool, enum and int controls take fixed only")).Items(EType::Object),
+				}),
+			}),
+		});
+	}
 	Registry.RegisterHandler(TEXT("bake_control_rig_edit"), &BakeControlRigEdit, {
 		MCPParam::Required(TEXT("sequencePath"), EType::String, TEXT("LevelSequence holding the Control Rig edit session")),
 		MCPParam::Required(TEXT("bindingTag"), EType::String, TEXT("Edit-session natural key from begin_control_rig_edit")),
