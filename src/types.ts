@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { IBridge } from "./bridge.js";
 import type { ProjectContext } from "./project.js";
 import type { EditorSession, SessionRegistry } from "./session.js";
-import type { ParamSpec } from "./handler-spec.js";
+import type { ParamChoice, ParamSpec } from "./handler-spec.js";
 import { McpError, ErrorCode } from "./errors.js";
 import { MAX_BRIDGE_TIMEOUT_MS } from "./bridge-timeouts.js";
 import { unknownActionMessage } from "./action-schema.js";
@@ -329,6 +329,12 @@ export interface BridgeActionSpec extends ActionSpecBase {
    * flags and aliases; the category's zod shape is shared and cannot say.
    */
   paramSpec?: readonly ParamSpec[];
+  /**
+   * The spec's required choices (`actorLabel OR actorPath`), set by specBp.
+   * The flat category shape cannot express them, so every dispatch route
+   * checks them before the call is sent.
+   */
+  paramChoices?: readonly ParamChoice[];
   handler?: never;
 }
 
@@ -651,6 +657,9 @@ export function categoryTool(
         normalizeParams: options?.normalizeParams,
         paramGroups: options?.paramGroups,
         nestedParamsKey: options?.nestedParamsKey,
+        paramChoices: spec.kind === "bridge" && spec.paramSpec && spec.paramChoices?.length
+          ? { params: spec.paramSpec, choices: spec.paramChoices }
+          : undefined,
       });
       const requestedTimeout = pipeline.timeoutMs;
       const normalized = pipeline.params;

@@ -580,6 +580,12 @@ describe("animation Control Rig edit workflow", () => {
       operations,
     }, undefined);
 
+    // Spec'd (#1057): the bag goes through as sent, and the spec is the contract.
+    expect(animationTool.actions.bake_control_rig_edit.mapParams).toBeUndefined();
+    expect(handlerSpecs.bake_control_rig_edit.params.map((p) => p.name)).toEqual([
+      "sequencePath", "bindingTag", "outputAssetPath", "frameRate", "reduceKeys", "tolerance", "createLink", "onConflict",
+    ]);
+    expect(animationTool.schema.reduceKeys.safeParse(true).success).toBe(false);
     await animationTool.handler(ctx, {
       action: "bake_control_rig_edit",
       sequencePath: "/Game/MCP/LS_Wave_Edit",
@@ -590,7 +596,6 @@ describe("animation Control Rig edit workflow", () => {
       tolerance: 0.001,
       createLink: false,
       onConflict: "error",
-      operations,
     });
     expect(call).toHaveBeenLastCalledWith("bake_control_rig_edit", {
       sequencePath: "/Game/MCP/LS_Wave_Edit",

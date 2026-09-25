@@ -145,11 +145,9 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 
 	// #1057: a handler registered with a spec declares its parameters here and
 	// nowhere else; the TS surface is generated from a recording of these.
-	// Unspecified: create_pcg_graph and add_pcg_volume, which the contract test
-	// would see create an asset or spawn an actor before anything failed, and
-	// every action whose parameters are a required choice (actorLabel OR
-	// actorPath, settings OR propertyName + propertyValue), which a spec
-	// cannot express yet.
+	// create_pcg_graph is contract-exempt: its values would create a graph
+	// before anything failed. Unspecified: add_pcg_volume, which would spawn an
+	// actor, and the actor-selector actions, not yet migrated to a choice.
 	using EType = EMCPParamType;
 	auto GraphPath = []()
 	{
@@ -169,7 +167,11 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 200, max 2000)")),
 	});
 	Registry.RegisterHandler(TEXT("get_pcg_components"), &GetPCGComponents, TArray<FMCPParamSpec>());
-	Registry.RegisterHandler(TEXT("create_pcg_graph"), &CreatePCGGraph);
+	Registry.RegisterHandler(TEXT("create_pcg_graph"), &CreatePCGGraph, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Graph asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Folder for the new graph (default /Game/PCG)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the graph exists: skip (default, report it) | error")),
+	}, MCPSpec::ContractExempt(TEXT("Creates and saves a graph under the contract values; nothing it reads fails first")));
 	Registry.RegisterHandler(TEXT("read_pcg_graph"), &ReadPCGGraph, {
 		GraphPath(),
 	});
@@ -197,7 +199,15 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		GraphPath(),
 		MCPParam::Required(TEXT("nodeName"), EType::String, TEXT("Engine name of the node, as read_graph reports it")),
 	});
-	Registry.RegisterHandler(TEXT("set_pcg_node_settings"), &SetPCGNodeSettings);
+	// Called once per branch by the contract test: a settings object, then the
+	// single-property pair. Either way the graph load fails first.
+	Registry.RegisterHandler(TEXT("set_pcg_node_settings"), &SetPCGNodeSettings, {
+		GraphPath(),
+		MCPParam::Required(TEXT("nodeName"), EType::String, TEXT("Engine name of the node, as read_graph reports it")),
+		MCPParam::Optional(TEXT("settings"), EType::Object, TEXT("{propertyPath: value}; dotted paths and nested structs supported")),
+		MCPParam::Optional(TEXT("propertyName"), EType::String, TEXT("One property to write instead of a settings object")),
+		MCPParam::Optional(TEXT("propertyValue"), EType::String, TEXT("The value for propertyName, as UE export text")),
+	}, MCPSpec::ExactlyOne({ { TEXT("settings") }, { TEXT("propertyName"), TEXT("propertyValue") } }));
 	Registry.RegisterHandler(TEXT("execute_pcg_graph"), &ExecutePCGGraph);
 	Registry.RegisterHandler(TEXT("add_pcg_volume"), &SpawnPCGVolume);
 	Registry.RegisterHandler(TEXT("read_pcg_node_settings"), &ReadPCGNodeSettings, {
@@ -208,7 +218,10 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("set_static_mesh_spawner_meshes"), &SetStaticMeshSpawnerMeshes, {
 		GraphPath(),
 		MCPParam::Required(TEXT("nodeName"), EType::String, TEXT("Engine name of the node, as read_graph reports it")),
-		MCPParam::Required(TEXT("entries"), EType::Array, TEXT("Array of {mesh, weight?} entries")).Items(EType::Object),
+		MCPParam::Required(TEXT("entries"), EType::Array, TEXT("Weighted mesh entries")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("mesh"), EType::String, TEXT("StaticMesh asset path; an entry without one is skipped")),
+			MCPParam::OptionalField(TEXT("weight"), EType::Number, TEXT("Relative pick weight (default 1), truncated to a whole number")),
+		}),
 		MCPParam::Optional(TEXT("replace"), EType::Boolean, TEXT("Overwrite existing MeshEntries (default true)")),
 	});
 	// #146: force_regenerate / cleanup / toggle_graph on PCG components
@@ -1008,8 +1021,9 @@ TSharedPtr<FJsonValue> FPCGHandlers::RemovePCGNode(const TSharedPtr<FJsonObject>
 
 TSharedPtr<FJsonValue> FPCGHandlers::SetPCGNodeSettings(const TSharedPtr<FJsonObject>& Params)
 {
+	// 'path' is the spec's alias, renamed to assetPath before this runs.
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString NodeName;
 	if (auto Err = RequireString(Params, TEXT("nodeName"), NodeName)) return Err;

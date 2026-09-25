@@ -1487,6 +1487,12 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetComponentMaterials(const TSharedPtr<FJ
 // and behaves differently from one made in the details panel.
 TSharedPtr<FJsonValue> FLevelHandlers::SetActorHLODLayer(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("hlodLayer"), TEXT("actorLabels"), TEXT("labelPrefix"), TEXT("labelContains"), TEXT("tag"),
+		TEXT("classFilter"), TEXT("folderPath"), TEXT("folderPathPrefix"), TEXT("matchSubclasses"),
+		TEXT("enableAutoLODGeneration"), TEXT("dryRun"), TEXT("transactionLabel"),
+	});
+
 	MCP_CHECK_GAME_THREAD();
 	REQUIRE_EDITOR_WORLD(World);
 

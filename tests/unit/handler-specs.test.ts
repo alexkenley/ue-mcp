@@ -25,10 +25,12 @@ import { readRegistrations } from "../../scripts/audit-handler-conventions.mjs";
 import {
   compareHandlerSpecs,
   makeSpecBp,
+  paramZod,
   specProblems,
   zodSignature,
   type HandlerSpec,
   type HandlerSpecs,
+  type ParamSpec,
 } from "../../src/handler-spec.js";
 import { ROUTING_PARAM_NAMES } from "../../src/routing-params.js";
 import { parseParams, actionSchema } from "../../src/action-schema.js";
@@ -60,21 +62,28 @@ function specdActions(tool: ToolDef = animationTool): Array<[string, { bridge: s
 /**
  * describe_action reports a spec'd action's parameters from its spec: each
  * declared name once, required exactly when the spec says, its aliases on it
- * rather than as separate parameters or a choice between spellings.
+ * rather than as separate parameters or a choice between spellings, and the
+ * spec's choices as its only choice groups.
  */
 function expectDescribedFromSpec(tool: ToolDef, action: string, method: string): void {
   const schema = actionSchema(tool, action);
-  const declared = SNAPSHOT.handlers[method].params;
+  const spec = SNAPSHOT.handlers[method];
+  const declared = spec.params;
   const aliases = new Set(declared.flatMap((p) => p.aliases ?? []));
+  const choices = spec.choices ?? [];
+  const groupOf = new Map<string, number>();
+  choices.forEach((c, i) => c.branches.flat().forEach((n) => groupOf.set(n, i)));
   for (const param of declared) {
     const entry = schema.params.find((p) => p.name === param.name);
     expect(entry, `${action}.${param.name}`).toBeDefined();
     expect(entry?.required, `${action}.${param.name} required`).toBe(param.required);
     expect(entry?.aliases, `${action}.${param.name} aliases`).toEqual(param.aliases?.length ? param.aliases : undefined);
-    expect(entry?.alternativeGroup, `${action}.${param.name} is not a choice`).toBeUndefined();
+    expect(entry?.alternativeGroup, `${action}.${param.name} choice group`).toBe(groupOf.get(param.name));
   }
   for (const entry of schema.params) expect(aliases.has(entry.name), `${action}: alias ${entry.name} listed as a parameter`).toBe(false);
-  expect(schema.alternatives, action).toBeUndefined();
+  expect(schema.alternatives, action).toEqual(
+    choices.length ? choices.map((c) => ({ branches: c.branches, required: true })) : undefined,
+  );
 }
 
 describe("the recording", () => {
@@ -198,18 +207,8 @@ describe("the animation surface", () => {
 });
 
 /** What zodSignature reports for the key a spec'd parameter generates. */
-function specSignature(type: string, items?: string): string {
-  const base: Record<string, string> = {
-    string: "string",
-    number: "number",
-    integer: "integer",
-    boolean: "boolean",
-    object: "record<any>",
-    vec3: "{x:number,y:number,z:number}",
-    rotator: "{pitch:number,roll:number,yaw:number}",
-    any: "any",
-  };
-  return `${type === "array" ? `array<${base[items ?? "any"]}>` : base[type]}?`;
+function specSignature(param: ParamSpec): string {
+  return zodSignature(paramZod(param).optional());
 }
 
 /**
@@ -282,7 +281,7 @@ describe.each(OTHER_CATEGORIES)("the %s category", (category) => {
         for (const key of [param.name, ...(param.aliases ?? [])]) {
           const advertised = tool.schema[key];
           expect(advertised, `${method}: ${key} is advertised`).toBeDefined();
-          expect(zodSignature(advertised as z.ZodTypeAny), `${method}: ${key}`).toBe(specSignature(param.type, param.items));
+          expect(zodSignature(advertised as z.ZodTypeAny), `${method}: ${key}`).toBe(specSignature(param));
         }
       }
     }
@@ -328,7 +327,7 @@ describe.each(SPEC_TOOLS)("the %s tool", (toolName) => {
           const advertised = tool.schema[key];
           expect(advertised, `${action}: ${key} is advertised`).toBeDefined();
           const signature = zodSignature(advertised as z.ZodTypeAny);
-          expect(accepts(signature, specSignature(param.type, param.items)), `${action}: ${key} is ${signature}`).toBe(true);
+          expect(accepts(signature, specSignature(param)), `${action}: ${key} is ${signature}`).toBe(true);
         }
       }
     }

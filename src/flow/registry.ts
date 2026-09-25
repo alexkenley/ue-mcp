@@ -64,6 +64,9 @@ export function buildFlowRegistry(tools: ToolDef[]): TaskRegistry {
         normalizeParams: tool.options?.normalizeParams,
         paramGroups: tool.options?.paramGroups,
         nestedParamsKey: tool.options?.nestedParamsKey,
+        paramChoices: spec.kind === "bridge" && spec.paramSpec && spec.paramChoices?.length
+          ? { params: spec.paramSpec, choices: spec.paramChoices }
+          : undefined,
       };
 
       if (spec.handler) {

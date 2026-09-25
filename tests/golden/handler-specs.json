@@ -1,5 +1,5 @@
 {
-  "handlerCount": 826,
+  "handlerCount": 832,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -3822,6 +3822,62 @@
         }
       ]
     },
+    "bake_control_rig_edit": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "sequencePath",
+          "type": "string",
+          "required": true,
+          "description": "LevelSequence holding the Control Rig edit session"
+        },
+        {
+          "name": "bindingTag",
+          "type": "string",
+          "required": true,
+          "description": "Edit-session natural key from begin_control_rig_edit"
+        },
+        {
+          "name": "outputAssetPath",
+          "type": "string",
+          "required": true,
+          "description": "Destination AnimSequence asset path"
+        },
+        {
+          "name": "frameRate",
+          "type": "number",
+          "required": false,
+          "description": "Frames per second of the bake (default the sequence's display rate)"
+        },
+        {
+          "name": "reduceKeys",
+          "type": "boolean",
+          "required": false,
+          "description": "Key reduction is not supported yet; omit or pass false",
+          "literal": false
+        },
+        {
+          "name": "tolerance",
+          "type": "number",
+          "required": false,
+          "description": "Key-reduction tolerance (default 0.001)"
+        },
+        {
+          "name": "createLink",
+          "type": "boolean",
+          "required": false,
+          "description": "Sequencer links are not supported yet; omit or pass false",
+          "literal": false
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip returns an existing output, error (default) refuses; it never overwrites"
+        }
+      ],
+      "contractExempt": "5.8 only: before 5.8 the handler is a stub that reads nothing, and on 5.8 it bakes and saves a new AnimSequence"
+    },
     "bake_root_motion_from_bone": {
       "category": "animation",
       "params": [
@@ -6120,6 +6176,30 @@
           "description": "skip (default) reports the existing entry; error refuses"
         }
       ]
+    },
+    "create_pcg_graph": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Graph asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Folder for the new graph (default /Game/PCG)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the graph exists: skip (default, report it) | error"
+        }
+      ],
+      "contractExempt": "Creates and saves a graph under the contract values; nothing it reads fails first"
     },
     "create_player_controller": {
       "category": "gameplay",
@@ -19489,6 +19569,113 @@
         }
       ]
     },
+    "set_actor_hlod_layer": {
+      "category": "level",
+      "params": [
+        {
+          "name": "hlodLayer",
+          "type": "string",
+          "required": true,
+          "description": "HLODLayer asset path, or null to clear the per-actor override",
+          "nullable": true
+        },
+        {
+          "name": "actorLabels",
+          "type": "array",
+          "required": false,
+          "description": "Exact actor editor labels",
+          "items": "string"
+        },
+        {
+          "name": "labelPrefix",
+          "type": "string",
+          "required": false,
+          "description": "Case-sensitive prefix over the actor's editor label"
+        },
+        {
+          "name": "labelContains",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive substring over the actor's editor label"
+        },
+        {
+          "name": "tag",
+          "type": "string",
+          "required": false,
+          "description": "Actor must carry this tag"
+        },
+        {
+          "name": "classFilter",
+          "type": "string",
+          "required": false,
+          "description": "Actor class, resolved as a class or matched as a substring"
+        },
+        {
+          "name": "folderPath",
+          "type": "string",
+          "required": false,
+          "description": "World Outliner folder, matched exactly"
+        },
+        {
+          "name": "folderPathPrefix",
+          "type": "string",
+          "required": false,
+          "description": "World Outliner folder prefix"
+        },
+        {
+          "name": "matchSubclasses",
+          "type": "boolean",
+          "required": false,
+          "description": "Match subclasses of the class filter (default true)"
+        },
+        {
+          "name": "enableAutoLODGeneration",
+          "type": "boolean",
+          "required": false,
+          "description": "Also set bEnableAutoLODGeneration on each matched actor"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Report what would change without writing"
+        },
+        {
+          "name": "transactionLabel",
+          "type": "string",
+          "required": false,
+          "description": "Undo-stack entry name"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "actorLabels"
+            ],
+            [
+              "labelPrefix"
+            ],
+            [
+              "labelContains"
+            ],
+            [
+              "tag"
+            ],
+            [
+              "classFilter"
+            ],
+            [
+              "folderPath"
+            ],
+            [
+              "folderPathPrefix"
+            ]
+          ]
+        }
+      ]
+    },
     "set_actor_material": {
       "category": "level",
       "params": [
@@ -20200,6 +20387,61 @@
           "type": "integer",
           "required": false,
           "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
+        }
+      ]
+    },
+    "set_component_skeletal_mesh": {
+      "category": "level",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor editor label; pass actorLabel or actorPath"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector, and it wins over actorLabel"
+        },
+        {
+          "name": "skeletalMesh",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh asset path, or null to clear the mesh",
+          "nullable": true
+        },
+        {
+          "name": "componentName",
+          "type": "string",
+          "required": false,
+          "description": "Skinned mesh component (default: the first on the actor)"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: editor (default) | pie"
+        },
+        {
+          "name": "pieInstance",
+          "type": "integer",
+          "required": false,
+          "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
         }
       ]
     },
@@ -21381,6 +21623,26 @@
         }
       ]
     },
+    "set_material_base_color": {
+      "category": "material",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Material asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "color",
+          "type": "color",
+          "required": true,
+          "description": "Base colour {r, g, b, a?}; a channel left out is 1"
+        }
+      ]
+    },
     "set_material_blend_mode": {
       "category": "material",
       "params": [
@@ -22107,6 +22369,58 @@
           "type": "boolean",
           "required": false,
           "description": "bOnlyRelevantToOwner (default false)"
+        }
+      ]
+    },
+    "set_pcg_node_settings": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "PCGGraph asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "nodeName",
+          "type": "string",
+          "required": true,
+          "description": "Engine name of the node, as read_graph reports it"
+        },
+        {
+          "name": "settings",
+          "type": "object",
+          "required": false,
+          "description": "{propertyPath: value}; dotted paths and nested structs supported"
+        },
+        {
+          "name": "propertyName",
+          "type": "string",
+          "required": false,
+          "description": "One property to write instead of a settings object"
+        },
+        {
+          "name": "propertyValue",
+          "type": "string",
+          "required": false,
+          "description": "The value for propertyName, as UE export text"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "settings"
+            ],
+            [
+              "propertyName",
+              "propertyValue"
+            ]
+          ]
         }
       ]
     },
@@ -23262,8 +23576,22 @@
           "name": "entries",
           "type": "array",
           "required": true,
-          "description": "Array of {mesh, weight?} entries",
-          "items": "object"
+          "description": "Weighted mesh entries",
+          "items": "object",
+          "fields": [
+            {
+              "name": "mesh",
+              "type": "string",
+              "required": true,
+              "description": "StaticMesh asset path; an entry without one is skipped"
+            },
+            {
+              "name": "weight",
+              "type": "number",
+              "required": false,
+              "description": "Relative pick weight (default 1), truncated to a whole number"
+            }
+          ]
         },
         {
           "name": "replace",

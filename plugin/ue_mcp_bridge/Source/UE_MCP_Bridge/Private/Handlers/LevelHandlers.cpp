@@ -423,10 +423,16 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh asset path")).Alias(TEXT("meshPath")),
 	});
 	// #679/#677: spawn a SkeletalMeshActor for visual/deform verification.
-	// Unspecced: materials entries and skeletalMesh take null, which the spec types cannot express yet.
+	// Unspecced: materials entries take null, which a spec cannot declare for an array element yet.
 	Registry.RegisterHandler(TEXT("spawn_skeletal_mesh_actor"), &SpawnSkeletalMeshActor);
 	Registry.RegisterHandler(TEXT("place_skeletal_actor"), &SpawnSkeletalMeshActor);
-	Registry.RegisterHandler(TEXT("set_component_skeletal_mesh"), &SetComponentSkeletalMesh);
+	// Called once per selector by the contract test; the actor lookup fails first.
+	Registry.RegisterHandler(TEXT("set_component_skeletal_mesh"), &SetComponentSkeletalMesh, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Required(TEXT("skeletalMesh"), EType::String, TEXT("SkeletalMesh asset path, or null to clear the mesh")).Nullable(),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Skinned mesh component (default: the first on the actor)")),
+		SpecWorld, SpecPieInstance,
+	}, MCPSpec::ExactlyOne({ { TEXT("actorLabel") }, { TEXT("actorPath") } }));
 	// #666: add a material blendable to a PostProcessVolume.
 	Registry.RegisterHandler(TEXT("add_post_process_blendable"), &AddPostProcessBlendable, {
 		SpecActorLabel, SpecActorPath,
@@ -488,8 +494,19 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// #985: bulk HLOD layer assignment. A whole-map selector, so it takes the
 	// same 300 second budget as the other batch writes. Mirrored in
 	// src/bridge-timeouts.ts, which a parity test checks.
-	// Unspecced: hlodLayer takes null, which the spec types cannot express yet.
-	Registry.RegisterHandlerWithTimeout(TEXT("set_actor_hlod_layer"), &SetActorHLODLayer, 300.0f);
+	// The layer load fails first under the contract values, so the handler reads
+	// its selector ahead; the contract test calls it once per selector.
+	Registry.RegisterHandlerWithTimeout(TEXT("set_actor_hlod_layer"), &SetActorHLODLayer, 300.0f, {
+		MCPParam::Required(TEXT("hlodLayer"), EType::String, TEXT("HLODLayer asset path, or null to clear the per-actor override")).Nullable(),
+		SpecActorLabels, SpecLabelPrefix, SpecLabelContains, SpecSelectorTag,
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Actor class, resolved as a class or matched as a substring")),
+		SpecFolderPath, SpecFolderPathPrefix, SpecMatchSubclasses,
+		MCPParam::Optional(TEXT("enableAutoLODGeneration"), EType::Boolean, TEXT("Also set bEnableAutoLODGeneration on each matched actor")),
+		SpecDryRun, SpecTransactionLabel,
+	}, MCPSpec::AtLeastOne({
+		{ TEXT("actorLabels") }, { TEXT("labelPrefix") }, { TEXT("labelContains") }, { TEXT("tag") },
+		{ TEXT("classFilter") }, { TEXT("folderPath") }, { TEXT("folderPathPrefix") },
+	}));
 	Registry.RegisterHandler(TEXT("add_actor_tag"), &AddActorTag, {
 		SpecActorLabel, SpecActorPath, SpecTag,
 	});

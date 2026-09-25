@@ -23,6 +23,26 @@ enum class EMCPParamType : uint8
 	Vec3,
 	Rotator,
 	Any,
+	/** {r, g, b, a?} */
+	Color,
+};
+
+/** One field of an object parameter, or of each element of an array of objects. */
+struct FMCPParamField
+{
+	FString Name;
+	EMCPParamType Type = EMCPParamType::String;
+	bool bRequired = false;
+	FString Description;
+	/** Element type of an Array field. Any on every other type. */
+	EMCPParamType ItemType = EMCPParamType::Any;
+
+	FMCPParamField Items(EMCPParamType InItemType) const
+	{
+		FMCPParamField Copy = *this;
+		Copy.ItemType = InItemType;
+		return Copy;
+	}
 };
 
 /** One declared parameter of a handler. */
@@ -36,6 +56,14 @@ struct FMCPParamSpec
 	TArray<FString> Aliases;
 	/** Element type of an Array parameter. Any on every other type. */
 	EMCPParamType ItemType = EMCPParamType::Any;
+	/** JSON null is a value of its own, such as "clear the reference". */
+	bool bNullable = false;
+	/** Further types the value may take instead of Type: a number or a colour. */
+	TArray<EMCPParamType> OrTypes;
+	/** The one value the parameter accepts, when it is a flag with a single legal value. */
+	TSharedPtr<FJsonValue> LiteralValue;
+	/** The shape of an Object parameter, or of each element of an Array of objects. */
+	TArray<FMCPParamField> Fields;
 
 	FMCPParamSpec Alias(const TCHAR* InAlias) const
 	{
@@ -48,6 +76,48 @@ struct FMCPParamSpec
 	{
 		FMCPParamSpec Copy = *this;
 		Copy.ItemType = InItemType;
+		return Copy;
+	}
+
+	FMCPParamSpec Nullable() const
+	{
+		FMCPParamSpec Copy = *this;
+		Copy.bNullable = true;
+		return Copy;
+	}
+
+	FMCPParamSpec Or(EMCPParamType InType) const
+	{
+		FMCPParamSpec Copy = *this;
+		Copy.OrTypes.Add(InType);
+		return Copy;
+	}
+
+	FMCPParamSpec Literal(bool bValue) const
+	{
+		FMCPParamSpec Copy = *this;
+		Copy.LiteralValue = MakeShared<FJsonValueBoolean>(bValue);
+		return Copy;
+	}
+
+	FMCPParamSpec Literal(const TCHAR* Value) const
+	{
+		FMCPParamSpec Copy = *this;
+		Copy.LiteralValue = MakeShared<FJsonValueString>(FString(Value));
+		return Copy;
+	}
+
+	FMCPParamSpec LiteralNumber(double Value) const
+	{
+		FMCPParamSpec Copy = *this;
+		Copy.LiteralValue = MakeShared<FJsonValueNumber>(Value);
+		return Copy;
+	}
+
+	FMCPParamSpec WithFields(const TArray<FMCPParamField>& InFields) const
+	{
+		FMCPParamSpec Copy = *this;
+		Copy.Fields = InFields;
 		return Copy;
 	}
 };
@@ -70,12 +140,113 @@ namespace MCPParam
 		Spec.bRequired = false;
 		return Spec;
 	}
+
+	inline FMCPParamField RequiredField(const TCHAR* Name, EMCPParamType Type, const TCHAR* Description)
+	{
+		FMCPParamField Field;
+		Field.Name = Name;
+		Field.Type = Type;
+		Field.bRequired = true;
+		Field.Description = Description;
+		return Field;
+	}
+
+	inline FMCPParamField OptionalField(const TCHAR* Name, EMCPParamType Type, const TCHAR* Description)
+	{
+		FMCPParamField Field = RequiredField(Name, Type, Description);
+		Field.bRequired = false;
+		return Field;
+	}
+}
+
+/** How many branches of a choice a call supplies. */
+enum class EMCPChoiceMode : uint8
+{
+	/** One branch, never two: `actorLabel OR actorPath`. */
+	ExactlyOne,
+	/** One branch or more: `at least one of labelPrefix/tag`. */
+	AtLeastOne,
+};
+
+/**
+ * A required choice between parameters. Each branch is a set of names that go
+ * together, so `settings OR propertyName + propertyValue` has the branches
+ * {settings} and {propertyName, propertyValue}. Every name is a declared,
+ * optional parameter: what is required is the group.
+ */
+struct FMCPParamChoice
+{
+	EMCPChoiceMode Mode = EMCPChoiceMode::ExactlyOne;
+	TArray<TArray<FString>> Branches;
+};
+
+/**
+ * What a spec says beyond its parameter list: its choices, and whether the
+ * contract test may call it. Passed as the last argument of RegisterHandler.
+ */
+struct FMCPSpecRules
+{
+	TArray<FMCPParamChoice> Choices;
+	/** Why the contract test must not call this handler. Empty when it may. */
+	FString ContractExemptReason;
+
+	FMCPSpecRules ExactlyOne(const TArray<TArray<FString>>& Branches) const
+	{
+		FMCPSpecRules Copy = *this;
+		FMCPParamChoice Choice;
+		Choice.Mode = EMCPChoiceMode::ExactlyOne;
+		Choice.Branches = Branches;
+		Copy.Choices.Add(MoveTemp(Choice));
+		return Copy;
+	}
+
+	FMCPSpecRules AtLeastOne(const TArray<TArray<FString>>& Branches) const
+	{
+		FMCPSpecRules Copy = *this;
+		FMCPParamChoice Choice;
+		Choice.Mode = EMCPChoiceMode::AtLeastOne;
+		Choice.Branches = Branches;
+		Copy.Choices.Add(MoveTemp(Choice));
+		return Copy;
+	}
+
+	/** The contract values would reach a create, spawn, save or run before anything
+	 *  failed. The spec is still published and generates the surface; the unit test
+	 *  holds the handler source to it instead of the contract call. */
+	FMCPSpecRules ContractExempt(const TCHAR* Reason) const
+	{
+		FMCPSpecRules Copy = *this;
+		Copy.ContractExemptReason = Reason;
+		return Copy;
+	}
+};
+
+namespace MCPSpec
+{
+	/** `MCPSpec::ExactlyOne({ { TEXT("settings") }, { TEXT("propertyName"), TEXT("propertyValue") } })` */
+	inline FMCPSpecRules ExactlyOne(const TArray<TArray<FString>>& Branches)
+	{
+		return FMCPSpecRules().ExactlyOne(Branches);
+	}
+
+	inline FMCPSpecRules AtLeastOne(const TArray<TArray<FString>>& Branches)
+	{
+		return FMCPSpecRules().AtLeastOne(Branches);
+	}
+
+	inline FMCPSpecRules ContractExempt(const TCHAR* Reason)
+	{
+		return FMCPSpecRules().ContractExempt(Reason);
+	}
 }
 
 /** A handler's declared parameters. Present, even when empty, only for a handler registered with one. */
 struct FMCPHandlerSpec
 {
 	TArray<FMCPParamSpec> Params;
+	TArray<FMCPParamChoice> Choices;
+	/** Non-empty when the contract test must not call the handler, saying why. */
+	FString ContractExemptReason;
 };
 
 class FMCPHandlerRegistry
@@ -122,14 +293,31 @@ public:
 	void RegisterHandler(const FString& MethodName, FHandlerFunction Handler);
 
 	// Register a C++ handler together with its parameter spec (#1057). The
-	// handler is registered either way; a spec that fails ValidateParamSpecs is
+	// handler is registered either way; a spec that fails ValidateHandlerSpec is
 	// logged and dropped, and the call returns false.
 	bool RegisterHandler(const FString& MethodName, FHandlerFunction Handler, const TArray<FMCPParamSpec>& Params);
 
-	// Why a spec cannot be published, or empty when it can. Refuses the
-	// dispatcher's routing names, duplicates across names and aliases, and an
-	// item type on anything but an array.
+	// The same, with the spec's choices and contract exemption (MCPSpec::ExactlyOne,
+	// MCPSpec::AtLeastOne, MCPSpec::ContractExempt).
+	bool RegisterHandler(const FString& MethodName, FHandlerFunction Handler, const TArray<FMCPParamSpec>& Params, const FMCPSpecRules& Rules);
+
+	// Why a parameter list cannot be published, or empty when it can. Refuses
+	// the dispatcher's routing names, duplicates across names and aliases, an
+	// item type on anything but an array, and a nullable, union, literal or
+	// field shape that does not fit its type.
 	static FString ValidateParamSpecs(const TArray<FMCPParamSpec>& Params);
+
+	// ValidateParamSpecs, plus the choices: each has two branches or more, names
+	// only declared, optional parameters, and names each of them once across
+	// every choice.
+	static FString ValidateHandlerSpec(const FMCPHandlerSpec& Spec);
+
+	// Why one parameter's nullable, union, literal or field shape does not fit
+	// its type, or empty when it does.
+	static FString ValidateValueShape(const FMCPParamSpec& Param);
+
+	// Lowercase wire name of a choice mode: exactlyOne, atLeastOne.
+	static const TCHAR* ChoiceModeName(EMCPChoiceMode Mode);
 
 	// Lowercase wire name of a parameter type.
 	static const TCHAR* ParamTypeName(EMCPParamType Type);
@@ -137,7 +325,7 @@ public:
 	// Specs of every handler registered with one, keyed by method name.
 	const TMap<FString, FMCPHandlerSpec>& GetHandlerSpecs() const { return HandlerSpecs; }
 
-	// { method: { category?, params: [...] } } for the capabilities payload.
+	// { method: { category?, params: [...], choices?, contractExempt? } } for the capabilities payload.
 	TSharedPtr<FJsonObject> BuildHandlerSpecsJson() const;
 
 	// Params with every declared alias renamed to its parameter's name. Returns
@@ -157,6 +345,9 @@ public:
 
 	// The same, with a parameter spec (#1057). Returns what RegisterHandler with a spec returns.
 	bool RegisterHandlerWithTimeout(const FString& MethodName, FHandlerFunction Handler, float TimeoutSeconds, const TArray<FMCPParamSpec>& Params);
+
+	// The same, with the spec's choices and contract exemption.
+	bool RegisterHandlerWithTimeout(const FString& MethodName, FHandlerFunction Handler, float TimeoutSeconds, const TArray<FMCPParamSpec>& Params, const FMCPSpecRules& Rules);
 
 	// Look up a per-handler timeout. Returns 0 if no override registered,
 	// in which case the caller should use its default.
