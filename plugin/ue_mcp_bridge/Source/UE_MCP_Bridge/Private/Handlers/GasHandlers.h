@@ -80,14 +80,22 @@ FString ListAttributeDataPropertyNames(UClass* SetClass);
  * Defined once, in GasHandlers_Runtime.cpp, and declared here rather than
  * copied: the module is a unity build, so a second file-local copy of this is
  * a redefinition on some grouping, and the grouping shifts with file count and
- * file order. Reads actorLabel / actorPath / world / pieInstance out of Params
- * exactly as the runtime actions already document them, and writes a
+ * file order. Reads actorLabel / actorPath / world out of Params (not
+ * pieInstance: world=pie resolves the primary PIE world), and writes a
  * structured error to OutError on any failure.
  */
 UAbilitySystemComponent* ResolveActorASC(
 	const TSharedPtr<FJsonObject>& Params,
 	AActor*& OutActor,
 	TSharedPtr<FJsonValue>& OutError);
+
+/**
+ * Read, without resolving anything, the parameters ResolveActorASC reads:
+ * actorLabel, actorPath and world. A handler that can refuse before it
+ * resolves the actor calls this first, so it reads every parameter its spec
+ * declares on every path (#1057).
+ */
+void ReadActorASCParams(const TSharedPtr<FJsonObject>& Params);
 
 /** Resolve a UGameplayAbility subclass from a Blueprint path, a generated
  *  class path or a native class name. Error names the accepted spellings. */

@@ -18,6 +18,7 @@
 #include "Handlers/NetworkingHandlers.h"
 #include "Handlers/ProjectHandlers.h"
 #include "Handlers/StateTreeHandlers.h"
+#include "Handlers/GasHandlers.h"
 #include "Misc/AutomationTest.h"
 
 namespace MCPHandlerSpecTests
@@ -90,6 +91,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FFabHandlers::RegisterHandlers(Registry);
 	FProjectHandlers::RegisterHandlers(Registry);
 	FStateTreeHandlers::RegisterHandlers(Registry);
+	FGasHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
 	TestTrue(TEXT("handlers register with a parameter spec"), Specs.Num() > 0);

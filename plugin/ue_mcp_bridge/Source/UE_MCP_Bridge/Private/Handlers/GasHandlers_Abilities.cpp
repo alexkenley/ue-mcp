@@ -493,6 +493,12 @@ TSharedPtr<FJsonValue> FGasHandlers::SendAbilityInput(const TSharedPtr<FJsonObje
 	MCP_CHECK_GAME_THREAD();
 
 	const FString Event = OptionalString(Params, TEXT("inputEvent"), TEXT("pressed")).ToLower();
+	// Read before the event check can refuse (#1057).
+	const FString AbilitySpecName = OptionalString(Params, TEXT("abilityClass"));
+	const bool bHasInputId = HasParam(Params, TEXT("inputId"));
+	const int32 RequestedInputID = static_cast<int32>(OptionalNumber(Params, TEXT("inputId"), -1.0));
+	MCPGas::ReadActorASCParams(Params);
+
 	if (Event != TEXT("pressed") && Event != TEXT("released")
 		&& Event != TEXT("confirm") && Event != TEXT("cancel"))
 	{
@@ -529,7 +535,6 @@ TSharedPtr<FJsonValue> FGasHandlers::SendAbilityInput(const TSharedPtr<FJsonObje
 	// what makes this callable straight after bind_ability_input without the
 	// caller having to remember the number it chose.
 	int32 InputID = INDEX_NONE;
-	const FString AbilitySpecName = OptionalString(Params, TEXT("abilityClass"));
 	if (!AbilitySpecName.IsEmpty())
 	{
 		UClass* AbilityClass = MCPGas::ResolveGameplayAbilityClass(AbilitySpecName, Error);
@@ -552,9 +557,9 @@ TSharedPtr<FJsonValue> FGasHandlers::SendAbilityInput(const TSharedPtr<FJsonObje
 		InputID = Spec->InputID;
 		Result->SetStringField(TEXT("abilityClass"), AbilityClass->GetPathName());
 	}
-	else if (HasParam(Params, TEXT("inputId")))
+	else if (bHasInputId)
 	{
-		InputID = static_cast<int32>(OptionalNumber(Params, TEXT("inputId"), -1.0));
+		InputID = RequestedInputID;
 	}
 	else
 	{
@@ -639,10 +644,15 @@ TSharedPtr<FJsonValue> FGasHandlers::SendAbilityInput(const TSharedPtr<FJsonObje
 TSharedPtr<FJsonValue> FGasHandlers::AddEffectCue(const TSharedPtr<FJsonObject>& Params)
 {
 	FString EffectPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("effectPath"), TEXT("effectClass"), EffectPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("effectPath"), EffectPath)) return Err;
 
 	FString CueTagName;
 	if (auto Err = RequireString(Params, TEXT("cueTag"), CueTagName)) return Err;
+
+	// Read before anything can fail (#1057).
+	const float MinLevel = static_cast<float>(OptionalNumber(Params, TEXT("minLevel"), 0.0));
+	const float MaxLevel = static_cast<float>(OptionalNumber(Params, TEXT("maxLevel"), 0.0));
+	const FString MagnitudeAttributeName = OptionalString(Params, TEXT("magnitudeAttribute"));
 
 	TSharedPtr<FJsonValue> Error;
 	const FGameplayTag CueTag = MCPGasAbilResolveCueTag(CueTagName, Error);
@@ -651,10 +661,6 @@ TSharedPtr<FJsonValue> FGasHandlers::AddEffectCue(const TSharedPtr<FJsonObject>&
 	UGameplayEffect* GE = LoadBlueprintCDO<UGameplayEffect>(EffectPath, Error);
 	if (!GE) return Error;
 
-	const float MinLevel = static_cast<float>(OptionalNumber(Params, TEXT("minLevel"), 0.0));
-	const float MaxLevel = static_cast<float>(OptionalNumber(Params, TEXT("maxLevel"), 0.0));
-
-	const FString MagnitudeAttributeName = OptionalString(Params, TEXT("magnitudeAttribute"));
 	FGameplayAttribute MagnitudeAttribute;
 	if (!MagnitudeAttributeName.IsEmpty())
 	{
@@ -807,7 +813,7 @@ TSharedPtr<FJsonValue> FGasHandlers::AddEffectCue(const TSharedPtr<FJsonObject>&
 TSharedPtr<FJsonValue> FGasHandlers::RemoveEffectCue(const TSharedPtr<FJsonObject>& Params)
 {
 	FString EffectPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("effectPath"), TEXT("effectClass"), EffectPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("effectPath"), EffectPath)) return Err;
 
 	FString CueTagName;
 	if (auto Err = RequireString(Params, TEXT("cueTag"), CueTagName)) return Err;

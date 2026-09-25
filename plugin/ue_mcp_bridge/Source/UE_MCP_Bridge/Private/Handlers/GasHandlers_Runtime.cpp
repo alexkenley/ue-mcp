@@ -286,11 +286,15 @@ TSharedPtr<FJsonValue> FGasHandlers::ApplyEffect(const TSharedPtr<FJsonObject>& 
 	MCP_CHECK_GAME_THREAD();
 
 	FString EffectSpec;
-	if (auto Err = RequireStringAlt(Params, TEXT("effectClass"), TEXT("effectPath"), EffectSpec)) return Err;
+	if (auto Err = RequireString(Params, TEXT("effectClass"), EffectSpec)) return Err;
 
 	// Captured before anything resolves, because the rollback record has to name
 	// the same world scope this call ran against rather than re-guessing it.
 	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("auto"));
+	// Read before anything can fail (#1057).
+	const float Level = static_cast<float>(OptionalNumber(Params, TEXT("level"), 1.0));
+	const TSharedPtr<FJsonObject>* SetByCaller = nullptr;
+	const bool bHasSetByCaller = TryGetObjectParam(Params, TEXT("setByCaller"), SetByCaller);
 
 	AActor* Actor = nullptr;
 	TSharedPtr<FJsonValue> Err;
@@ -304,8 +308,6 @@ TSharedPtr<FJsonValue> FGasHandlers::ApplyEffect(const TSharedPtr<FJsonObject>& 
 			TEXT("GameplayEffect class not found: %s (pass a content path or class name)"), *EffectSpec));
 	}
 
-	const float Level = static_cast<float>(OptionalNumber(Params, TEXT("level"), 1.0));
-
 	FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
 	Context.AddInstigator(Actor, Actor);
 	FGameplayEffectSpecHandle SpecHandle = ASC->MakeOutgoingSpec(EffectClass, Level, Context);
@@ -316,9 +318,8 @@ TSharedPtr<FJsonValue> FGasHandlers::ApplyEffect(const TSharedPtr<FJsonObject>& 
 
 	// SetByCaller magnitudes: { "<tag-or-name>": <number> }. Prefer a gameplay
 	// tag when the key resolves to one; otherwise use the FName overload.
-	const TSharedPtr<FJsonObject>* SetByCaller = nullptr;
 	TArray<FString> AppliedKeys;
-	if (TryGetObjectParam(Params, TEXT("setByCaller"), SetByCaller) && SetByCaller && (*SetByCaller).IsValid())
+	if (bHasSetByCaller && SetByCaller && (*SetByCaller).IsValid())
 	{
 		for (const auto& KV : (*SetByCaller)->Values)
 		{
@@ -441,15 +442,17 @@ TSharedPtr<FJsonValue> FGasHandlers::RemoveEffect(const TSharedPtr<FJsonObject>&
 	MCP_CHECK_GAME_THREAD();
 
 	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("auto"));
+	// Read before anything can fail (#1057). effectPath is a spec alias of effectClass.
+	const FString HandleText = OptionalString(Params, TEXT("effectHandle"));
+	const FString EffectSpec = OptionalString(Params, TEXT("effectClass"));
+	// -1 is the engine's own "remove the whole effect regardless of stacks".
+	const int32 StacksToRemove = static_cast<int32>(OptionalNumber(Params, TEXT("stacksToRemove"), -1.0));
 
 	AActor* Actor = nullptr;
 	TSharedPtr<FJsonValue> Err;
 	UAbilitySystemComponent* ASC = ResolveASC(Params, Actor, Err);
 	if (!ASC) return Err;
 
-	const FString HandleText = OptionalString(Params, TEXT("effectHandle"));
-	const FString EffectSpec = OptionalString(Params, TEXT("effectClass"),
-		OptionalString(Params, TEXT("effectPath")));
 	if (HandleText.IsEmpty() && EffectSpec.IsEmpty())
 	{
 		return MCPError(TEXT(
@@ -457,9 +460,6 @@ TSharedPtr<FJsonValue> FGasHandlers::RemoveEffect(const TSharedPtr<FJsonObject>&
 			"or 'effectClass' (removes every active effect of that class on this actor). "
 			"gas(get_active_effects) lists the handles currently on an actor."));
 	}
-
-	// -1 is the engine's own "remove the whole effect regardless of stacks".
-	const int32 StacksToRemove = static_cast<int32>(OptionalNumber(Params, TEXT("stacksToRemove"), -1.0));
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("actorLabel"), Actor->GetActorLabel());
@@ -669,6 +669,9 @@ TSharedPtr<FJsonValue> FGasHandlers::GetAttribute(const TSharedPtr<FJsonObject>&
 {
 	MCP_CHECK_GAME_THREAD();
 
+	// Read before anything can fail (#1057).
+	const FString AttrName = OptionalString(Params, TEXT("attribute"));
+
 	AActor* Actor = nullptr;
 	TSharedPtr<FJsonValue> Err;
 	UAbilitySystemComponent* ASC = ResolveASC(Params, Actor, Err);
@@ -677,7 +680,6 @@ TSharedPtr<FJsonValue> FGasHandlers::GetAttribute(const TSharedPtr<FJsonObject>&
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("actorLabel"), Actor->GetActorLabel());
 
-	const FString AttrName = OptionalString(Params, TEXT("attribute"));
 	if (!AttrName.IsEmpty())
 	{
 		FString SetName;
@@ -761,6 +763,8 @@ namespace
 			OutError = Err;
 			return false;
 		}
+		// Read before the actor lookup can fail (#1057).
+		const bool bAllowAdopt = OptionalBool(Params, TEXT("registerOwnerSets"), true);
 
 		Out.ASC = ResolveASC(Params, Out.Actor, OutError);
 		if (!Out.ASC) return false;
@@ -773,7 +777,6 @@ namespace
 			return false;
 		}
 
-		const bool bAllowAdopt = OptionalBool(Params, TEXT("registerOwnerSets"), true);
 		Out.Set = ResolveRegisteredAttributeSet(
 			Out.ASC, Out.Actor, SetClass, bAllowAdopt, Out.bAdopted, Out.AdoptedClassNames, OutError);
 		if (!Out.Set) return false;
@@ -872,6 +875,14 @@ TSharedPtr<FJsonValue> FGasHandlers::SetLiveAttributeValue(const TSharedPtr<FJso
 	// ASC so the aggregator recomputes the current value from it, which is what
 	// a durable change needs. They are not interchangeable, so the caller says.
 	const FString ValueType = OptionalString(Params, TEXT("valueType"), TEXT("current")).ToLower();
+
+	// The valueType check below can refuse before ResolveLiveAttributeRequest
+	// reads the rest, so read them first (#1057).
+	OptionalString(Params, TEXT("attributeSet"));
+	OptionalString(Params, TEXT("attribute"));
+	OptionalBool(Params, TEXT("registerOwnerSets"), true);
+	MCPGas::ReadActorASCParams(Params);
+
 	if (ValueType != TEXT("current") && ValueType != TEXT("base"))
 	{
 		return MCPError(FString::Printf(
@@ -1016,6 +1027,9 @@ TSharedPtr<FJsonValue> FGasHandlers::InitAsc(const TSharedPtr<FJsonObject>& Para
 {
 	MCP_CHECK_GAME_THREAD();
 
+	// Read before anything can fail (#1057).
+	const FString AttrSetSpec = OptionalString(Params, TEXT("attributeSet"));
+
 	AActor* Actor = nullptr;
 	TSharedPtr<FJsonValue> Err;
 	UAbilitySystemComponent* ASC = ResolveASC(Params, Actor, Err);
@@ -1047,7 +1061,6 @@ TSharedPtr<FJsonValue> FGasHandlers::InitAsc(const TSharedPtr<FJsonObject>& Para
 	// that class, and the result says which of the two happened.
 	FString CreatedSet;
 	bool bConstructedSet = false;
-	const FString AttrSetSpec = OptionalString(Params, TEXT("attributeSet"));
 	if (!AttrSetSpec.IsEmpty())
 	{
 		UClass* AttrSetClass = ResolveClassDeriving(AttrSetSpec, UAttributeSet::StaticClass());
@@ -1215,6 +1228,9 @@ TSharedPtr<FJsonValue> FGasHandlers::GrantAbility(const TSharedPtr<FJsonObject>&
 {
 	FString AbilitySpec;
 	if (auto Err = RequireString(Params, TEXT("abilityClass"), AbilitySpec)) return Err;
+	// Read before anything can fail (#1057).
+	const int32 Level = static_cast<int32>(OptionalNumber(Params, TEXT("level"), 1.0));
+	const int32 InputID = static_cast<int32>(OptionalNumber(Params, TEXT("inputId"), -1.0));
 
 	AActor* Actor = nullptr;
 	TSharedPtr<FJsonValue> Error;
@@ -1223,9 +1239,6 @@ TSharedPtr<FJsonValue> FGasHandlers::GrantAbility(const TSharedPtr<FJsonObject>&
 
 	UClass* AbilityClass = ResolveAbilityClass(AbilitySpec, Error);
 	if (!AbilityClass) return Error;
-
-	const int32 Level = static_cast<int32>(OptionalNumber(Params, TEXT("level"), 1.0));
-	const int32 InputID = static_cast<int32>(OptionalNumber(Params, TEXT("inputId"), -1.0));
 
 	// Granting is server-authoritative in GAS. On a client ASC GiveAbility is a
 	// no-op that logs and returns an invalid handle, which would otherwise read
@@ -1398,6 +1411,8 @@ TSharedPtr<FJsonValue> FGasHandlers::TraceAbilityActivation(const TSharedPtr<FJs
 {
 	FString AbilitySpec;
 	if (auto Err = RequireString(Params, TEXT("abilityClass"), AbilitySpec)) return Err;
+	// Read before anything can fail (#1057).
+	const bool bActivate = OptionalBool(Params, TEXT("activate"), false);
 
 	AActor* Actor = nullptr;
 	TSharedPtr<FJsonValue> Error;
@@ -1572,7 +1587,7 @@ TSharedPtr<FJsonValue> FGasHandlers::TraceAbilityActivation(const TSharedPtr<FJs
 	}
 
 	// Optionally prove it, rather than only predicting it.
-	if (OptionalBool(Params, TEXT("activate"), false))
+	if (bActivate)
 	{
 		const bool bActivated = ASC->TryActivateAbility(Spec->Handle);
 		Result->SetBoolField(TEXT("activated"), bActivated);
@@ -1629,6 +1644,8 @@ namespace
 		}
 
 		const double RequestedCount = OptionalNumber(Params, TEXT("count"), 1.0);
+		// The count and tag checks can refuse before ResolveASC runs (#1057).
+		MCPGas::ReadActorASCParams(Params);
 		if (RequestedCount < 1.0 || RequestedCount != FMath::FloorToDouble(RequestedCount))
 		{
 			OutError = MCPError(FString::Printf(
@@ -1784,6 +1801,13 @@ UAbilitySystemComponent* ResolveActorASC(
 	TSharedPtr<FJsonValue>& OutError)
 {
 	return ResolveASC(Params, OutActor, OutError);
+}
+
+void ReadActorASCParams(const TSharedPtr<FJsonObject>& Params)
+{
+	OptionalString(Params, TEXT("actorLabel"));
+	OptionalString(Params, TEXT("actorPath"));
+	OptionalString(Params, TEXT("world"));
 }
 
 UClass* ResolveGameplayAbilityClass(const FString& Spec, TSharedPtr<FJsonValue>& OutError)

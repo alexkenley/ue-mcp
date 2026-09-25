@@ -111,6 +111,9 @@ namespace
 		const TSharedPtr<FJsonObject>& Params,
 		TSharedPtr<FJsonValue>& OutError)
 	{
+		// Read before the actor lookup can fail (#1057).
+		const bool bRegisterOwnerSets = OptionalBool(Params, TEXT("registerOwnerSets"), true);
+
 		AActor* Actor = nullptr;
 		UAbilitySystemComponent* ASC = MCPGas::ResolveActorASC(Params, Actor, OutError);
 		if (!ASC) return nullptr;
@@ -121,7 +124,7 @@ namespace
 		// rather than a missing one. Same default, and same opt-out, as
 		// get_live_attribute_value.
 		TArray<FString> Adopted;
-		if (OptionalBool(Params, TEXT("registerOwnerSets"), true))
+		if (bRegisterOwnerSets)
 		{
 			MCPGas::AdoptOwnerAttributeSets(ASC, Actor, Adopted);
 		}
@@ -333,6 +336,8 @@ namespace
 		FString& OutSource,
 		TSharedPtr<FJsonValue>& OutError)
 	{
+		// Both spellings are read before either can answer (#1057).
+		const FString Id = OptionalString(Params, IdField);
 		const TSharedPtr<FJsonObject>* Inline = nullptr;
 		if (TryGetObjectParam(Params, ObjectField, Inline) && Inline && (*Inline).IsValid())
 		{
@@ -340,7 +345,6 @@ namespace
 			return *Inline;
 		}
 
-		const FString Id = OptionalString(Params, IdField);
 		if (Id.IsEmpty()) return nullptr;
 
 		FMCPGasSnapStore& Store = MCPGasSnapGetStore();
@@ -405,11 +409,14 @@ TSharedPtr<FJsonValue> FGasHandlers::CaptureGasState(const TSharedPtr<FJsonObjec
 {
 	MCP_CHECK_GAME_THREAD();
 
+	// Read before anything can fail (#1057).
+	FString Id = OptionalString(Params, TEXT("snapshotId"));
+	const FString CompareWith = OptionalString(Params, TEXT("compareWith"));
+
 	TSharedPtr<FJsonValue> Error;
 	TSharedPtr<FJsonObject> Snapshot = MCPGasSnapBuild(Params, Error);
 	if (!Snapshot.IsValid()) return Error;
 
-	FString Id = OptionalString(Params, TEXT("snapshotId"));
 	if (Id.IsEmpty())
 	{
 		Id = FString::Printf(TEXT("gas-%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12));
@@ -443,7 +450,6 @@ TSharedPtr<FJsonValue> FGasHandlers::CaptureGasState(const TSharedPtr<FJsonObjec
 	// compare_gas_states because capturing touches the live ASC (it registers
 	// the actor's attribute sets in a world that has not begun play), so it
 	// belongs on the action gated as a mutation.
-	const FString CompareWith = OptionalString(Params, TEXT("compareWith"));
 	if (!CompareWith.IsEmpty())
 	{
 		FMCPGasSnapStore& CompareStore = MCPGasSnapGetStore();
