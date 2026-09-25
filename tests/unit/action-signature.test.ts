@@ -48,6 +48,19 @@ describe("signatures from a recorded C++ spec", () => {
     expect(actionSignature(tool, "do_it")).toBe("do_it(names:[s], rows?:[o], anything?:[*], target?:s/o, mode?:=fast)");
   });
 
+  it("writes a value's forms as the codes each form already has, and a tagged union by its tag field", () => {
+    const variants = [
+      { tag: "set", description: "", fields: [{ name: "frame", type: "integer" as const, required: true, description: "" }] },
+      { tag: "clear", description: "", fields: [] },
+    ];
+    const tool = specTool([
+      p("args", "any", false, { forms: ["argMap", "stringList", "argEntryList", "string"] }),
+      p("operations", "array", true, { items: "object", oneOf: { key: "op", variants } }),
+      p("operation", "object", false, { oneOf: { key: "op", variants } }),
+    ]);
+    expect(actionSignature(tool, "do_it")).toBe("do_it(args?:o/[s]/[o]/s, operations:[o<op>], operation?:o<op>)");
+  });
+
   it("writes a required choice where its first member is declared", () => {
     const tool = specTool(
       [p("actorLabel", "string", false), p("functionName", "string", true), p("actorPath", "string", false)],
@@ -144,7 +157,7 @@ describe("the shipped surface", () => {
   });
 
   it("explains every code a signature can use", () => {
-    for (const code of ["?", "|", "one(", "any(", "s ", "n ", "i ", "b ", "o ", "v ", "r ", "c ", "ref", "*", "[t]", "t/u", "=x", "+N"]) {
+    for (const code of ["?", "|", "one(", "any(", "s ", "n ", "i ", "b ", "o ", "v ", "r ", "c ", "ref", "*", "[t]", "t/u", "=x", "o<k>", "+N"]) {
       expect(SIGNATURE_LEGEND).toContain(code);
     }
   });

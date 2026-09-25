@@ -18,8 +18,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { z } from "zod";
-import { renderAll, paramsClause } from "../../scripts/lib/handler-spec-gen.mjs";
+import { z as zodRuntime, type z } from "zod";
+import { renderAll, paramsClause, zodExpression } from "../../scripts/lib/handler-spec-gen.mjs";
 import { readCategory } from "../../scripts/lib/tool-source.mjs";
 import { readRegistrations } from "../../scripts/audit-handler-conventions.mjs";
 import {
@@ -117,6 +117,62 @@ describe("the recording", () => {
     expect(specProblems(twice).join("\n")).toContain("declared twice");
     const items: HandlerSpecs = { probe: { params: [{ name: "a", type: "string", required: false, description: "", items: "number" }] } };
     expect(specProblems(items).join("\n")).toContain("items on a non-array");
+  });
+
+  it("refuses a malformed value form or tagged union", () => {
+    const one = (param: Partial<ParamSpec>): string =>
+      specProblems({ probe: { params: [{ name: "v", type: "any", required: false, description: "", ...param } as ParamSpec] } }).join("\n");
+    expect(one({ forms: ["argMap", "string"] })).toBe("");
+    expect(one({ type: "object", forms: ["argMap"] })).toContain("not of type any");
+    expect(one({ forms: ["argMap", "argMap"] })).toContain("listed twice");
+    expect(one({ forms: ["nope" as never] })).toContain("unknown form");
+    const variants = [
+      { tag: "set", description: "", fields: [{ name: "frame", type: "integer" as const, required: true, description: "" }] },
+      { tag: "clear", description: "", fields: [] },
+    ];
+    expect(one({ type: "array", items: "object", oneOf: { key: "op", variants } })).toBe("");
+    expect(one({ type: "object", oneOf: { key: "op", variants } })).toBe("");
+    expect(one({ type: "string", oneOf: { key: "op", variants } })).toContain("tagged union on something");
+    expect(one({ type: "object", oneOf: { key: "op", variants: [variants[0]] } })).toContain("fewer than two variants");
+    expect(one({ type: "object", oneOf: { key: "op", variants: [variants[0], variants[0]] } })).toContain("declared twice");
+    expect(one({
+      type: "object",
+      oneOf: { key: "op", variants: [variants[1], { tag: "set", description: "", fields: [{ name: "op", type: "string", required: true, description: "" }] }] },
+    })).toContain("named after its tag");
+  });
+
+  it("generates the same schema for a value form or tagged union as it builds at runtime", () => {
+    const variants = [
+      { tag: "set", description: "Set it", fields: [
+        { name: "frame", type: "integer" as const, required: true, description: "" },
+        { name: "at", type: "vec3" as const, required: false, description: "" },
+      ] },
+      { tag: "clear", description: "Clear it", fields: [{ name: "args", type: "any" as const, required: false, description: "", forms: ["argMap" as const, "argEntryList" as const] }] },
+    ];
+    const params: ParamSpec[] = [
+      { name: "args", type: "any", required: false, description: "", forms: ["argMap", "stringList", "argEntryList", "string"] },
+      { name: "text", type: "any", required: false, description: "", forms: ["string"] },
+      { name: "operations", type: "array", items: "object", required: false, description: "", oneOf: { key: "op", variants } },
+      { name: "operation", type: "object", required: false, description: "", oneOf: { key: "op", variants } },
+    ];
+    for (const param of params) {
+      const generated = new Function("z", `return ${zodExpression(param)}`)(zodRuntime) as z.ZodTypeAny;
+      expect(zodSignature(generated), param.name).toBe(zodSignature(paramZod(param)));
+    }
+
+    const args = paramZod(params[0]);
+    for (const accepted of [{ bEnabled: true }, { Loc: { x: 1 } }, { Rows: [[1, 2]] }, ["one"], [{ name: "bEnabled", value: 1 }], '{"a":1}']) {
+      expect(args.safeParse(accepted).success, JSON.stringify(accepted)).toBe(true);
+    }
+    const refused = args.safeParse(42);
+    expect(refused.success).toBe(false);
+    if (!refused.success) expect(refused.error.issues[0].message).toContain("parameter name to value");
+
+    const operations = paramZod(params[2]);
+    expect(operations.safeParse([{ op: "set", frame: 1 }, { op: "clear" }]).success).toBe(true);
+    expect(operations.safeParse([{ op: "set" }]).success, "a variant's required field").toBe(false);
+    expect(operations.safeParse([{ op: "nope" }]).success, "an unknown tag").toBe(false);
+    expect(operations.safeParse([{ op: "clear", frame: 1 }]).success, "another variant's field").toBe(false);
   });
 
   it("refuses one category key declared with two types", () => {

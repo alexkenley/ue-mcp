@@ -69,22 +69,22 @@ bool FMCPHandlerRegistry::RegisterHandler(const FString& MethodName, FHandlerFun
 	return true;
 }
 
+bool FMCPHandlerRegistry::IsParamIdentifier(const FString& Name)
+{
+	if (Name.IsEmpty() || FChar::IsDigit(Name[0])) return false;
+	for (const TCHAR C : Name)
+	{
+		if (!FChar::IsAlnum(C) && C != TEXT('_')) return false;
+	}
+	return true;
+}
+
 FString FMCPHandlerRegistry::ValidateParamSpecs(const TArray<FMCPParamSpec>& Params)
 {
-	auto IsIdentifier = [](const FString& Name)
-	{
-		if (Name.IsEmpty() || FChar::IsDigit(Name[0])) return false;
-		for (const TCHAR C : Name)
-		{
-			if (!FChar::IsAlnum(C) && C != TEXT('_')) return false;
-		}
-		return true;
-	};
-
 	TSet<FString> Seen;
 	auto Claim = [&](const FString& Name, const FString& Owner) -> FString
 	{
-		if (!IsIdentifier(Name))
+		if (!IsParamIdentifier(Name))
 		{
 			return FString::Printf(TEXT("'%s' (on '%s') is not an identifier"), *Name, *Owner);
 		}
@@ -215,11 +215,12 @@ FString FMCPHandlerRegistry::ValidateValueShape(const FMCPParamSpec& Param)
 		}
 	}
 
+	const bool bObjectShaped = Param.Type == EMCPParamType::Object
+		|| (Param.Type == EMCPParamType::Array && Param.ItemType == EMCPParamType::Object);
+
 	if (Param.Fields.Num() > 0)
 	{
-		const bool bObject = Param.Type == EMCPParamType::Object
-			|| (Param.Type == EMCPParamType::Array && Param.ItemType == EMCPParamType::Object);
-		if (!bObject)
+		if (!bObjectShaped)
 		{
 			return FString::Printf(TEXT("'%s' declares fields but is neither an object nor an array of objects"), *Param.Name);
 		}
@@ -231,13 +232,112 @@ FString FMCPHandlerRegistry::ValidateValueShape(const FMCPParamSpec& Param)
 				return FString::Printf(TEXT("'%s' declares a field twice, or one with no name ('%s')"), *Param.Name, *Field.Name);
 			}
 			FieldNames.Add(Field.Name);
-			if (Field.Type != EMCPParamType::Array && Field.ItemType != EMCPParamType::Any)
+			const FString FieldProblem = ValidateField(Param.Name, Field);
+			if (!FieldProblem.IsEmpty()) return FieldProblem;
+		}
+	}
+
+	if (Param.Forms.Num() > 0)
+	{
+		if (Param.Type != EMCPParamType::Any)
+		{
+			return FString::Printf(TEXT("'%s' declares forms but is not of type any; the forms are its type"), *Param.Name);
+		}
+		if (Param.LiteralValue.IsValid() || Param.Fields.Num() > 0 || Param.Variants.Num() > 0)
+		{
+			return FString::Printf(TEXT("'%s' declares forms together with a literal, fields or variants"), *Param.Name);
+		}
+		for (int32 Index = 0; Index < Param.Forms.Num(); ++Index)
+		{
+			for (int32 Other = 0; Other < Index; ++Other)
 			{
-				return FString::Printf(TEXT("'%s.%s' declares an item type but is not an array"), *Param.Name, *Field.Name);
+				if (Param.Forms[Other] == Param.Forms[Index])
+				{
+					return FString::Printf(TEXT("'%s' lists a form twice"), *Param.Name);
+				}
+			}
+		}
+	}
+
+	if (Param.Variants.Num() > 0 || !Param.VariantKey.IsEmpty())
+	{
+		if (!bObjectShaped)
+		{
+			return FString::Printf(TEXT("'%s' is a tagged union but is neither an object nor an array of objects"), *Param.Name);
+		}
+		if (Param.Fields.Num() > 0 || Param.OrTypes.Num() > 0 || Param.LiteralValue.IsValid())
+		{
+			return FString::Printf(TEXT("'%s' is a tagged union and also declares fields, a union or a literal"), *Param.Name);
+		}
+		if (!IsParamIdentifier(Param.VariantKey))
+		{
+			return FString::Printf(TEXT("'%s' is a tagged union whose tag field '%s' is not an identifier"), *Param.Name, *Param.VariantKey);
+		}
+		if (Param.Variants.Num() < 2)
+		{
+			return FString::Printf(TEXT("'%s' is a tagged union with fewer than two variants"), *Param.Name);
+		}
+		TSet<FString> Tags;
+		for (const FMCPParamVariant& Variant : Param.Variants)
+		{
+			if (Variant.Tag.IsEmpty() || Tags.Contains(Variant.Tag))
+			{
+				return FString::Printf(TEXT("'%s' declares a variant tag twice, or an empty one ('%s')"), *Param.Name, *Variant.Tag);
+			}
+			Tags.Add(Variant.Tag);
+			const FString Owner = FString::Printf(TEXT("%s[%s=%s]"), *Param.Name, *Param.VariantKey, *Variant.Tag);
+			TSet<FString> FieldNames;
+			for (const FMCPParamField& Field : Variant.Fields)
+			{
+				if (Field.Name.IsEmpty() || FieldNames.Contains(Field.Name) || Field.Name == Param.VariantKey)
+				{
+					return FString::Printf(TEXT("'%s' declares a field twice, one with no name, or one named after its tag ('%s')"), *Owner, *Field.Name);
+				}
+				FieldNames.Add(Field.Name);
+				const FString FieldProblem = ValidateField(Owner, Field);
+				if (!FieldProblem.IsEmpty()) return FieldProblem;
 			}
 		}
 	}
 	return FString();
+}
+
+FString FMCPHandlerRegistry::ValidateField(const FString& Owner, const FMCPParamField& Field)
+{
+	if (!IsParamIdentifier(Field.Name))
+	{
+		return FString::Printf(TEXT("'%s.%s' is not an identifier"), *Owner, *Field.Name);
+	}
+	if (Field.Type != EMCPParamType::Array && Field.ItemType != EMCPParamType::Any)
+	{
+		return FString::Printf(TEXT("'%s.%s' declares an item type but is not an array"), *Owner, *Field.Name);
+	}
+	if (Field.Forms.Num() > 0 && Field.Type != EMCPParamType::Any)
+	{
+		return FString::Printf(TEXT("'%s.%s' declares forms but is not of type any; the forms are its type"), *Owner, *Field.Name);
+	}
+	for (int32 Index = 0; Index < Field.Forms.Num(); ++Index)
+	{
+		for (int32 Other = 0; Other < Index; ++Other)
+		{
+			if (Field.Forms[Other] == Field.Forms[Index])
+			{
+				return FString::Printf(TEXT("'%s.%s' lists a form twice"), *Owner, *Field.Name);
+			}
+		}
+	}
+	return FString();
+}
+
+const TCHAR* FMCPHandlerRegistry::ValueFormName(EMCPValueForm Form)
+{
+	switch (Form)
+	{
+	case EMCPValueForm::ArgMap:       return TEXT("argMap");
+	case EMCPValueForm::ArgEntryList: return TEXT("argEntryList");
+	case EMCPValueForm::StringList:   return TEXT("stringList");
+	default:                          return TEXT("string");
+	}
 }
 
 const TCHAR* FMCPHandlerRegistry::ChoiceModeName(EMCPChoiceMode Mode)
@@ -267,6 +367,38 @@ TSharedPtr<FJsonObject> FMCPHandlerRegistry::BuildHandlerSpecsJson() const
 	TArray<FString> Methods;
 	HandlerSpecs.GetKeys(Methods);
 	Methods.Sort();
+
+	auto FormsJson = [](const TArray<EMCPValueForm>& Forms)
+	{
+		TArray<FString> Names;
+		for (const EMCPValueForm Form : Forms)
+		{
+			Names.Add(ValueFormName(Form));
+		}
+		return MCPStringListToJson(Names);
+	};
+	auto FieldsJson = [&FormsJson](const TArray<FMCPParamField>& Fields)
+	{
+		TArray<TSharedPtr<FJsonValue>> FieldValues;
+		for (const FMCPParamField& Field : Fields)
+		{
+			TSharedPtr<FJsonObject> FieldEntry = MakeShared<FJsonObject>();
+			FieldEntry->SetStringField(TEXT("name"), Field.Name);
+			FieldEntry->SetStringField(TEXT("type"), ParamTypeName(Field.Type));
+			FieldEntry->SetBoolField(TEXT("required"), Field.bRequired);
+			FieldEntry->SetStringField(TEXT("description"), Field.Description);
+			if (Field.Type == EMCPParamType::Array && Field.ItemType != EMCPParamType::Any)
+			{
+				FieldEntry->SetStringField(TEXT("items"), ParamTypeName(Field.ItemType));
+			}
+			if (Field.Forms.Num() > 0)
+			{
+				FieldEntry->SetArrayField(TEXT("forms"), FormsJson(Field.Forms));
+			}
+			FieldValues.Add(MakeShared<FJsonValueObject>(FieldEntry));
+		}
+		return FieldValues;
+	};
 
 	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 	for (const FString& Method : Methods)
@@ -309,21 +441,27 @@ TSharedPtr<FJsonObject> FMCPHandlerRegistry::BuildHandlerSpecsJson() const
 			}
 			if (Param.Fields.Num() > 0)
 			{
-				TArray<TSharedPtr<FJsonValue>> FieldValues;
-				for (const FMCPParamField& Field : Param.Fields)
+				Entry->SetArrayField(TEXT("fields"), FieldsJson(Param.Fields));
+			}
+			if (Param.Forms.Num() > 0)
+			{
+				Entry->SetArrayField(TEXT("forms"), FormsJson(Param.Forms));
+			}
+			if (Param.Variants.Num() > 0)
+			{
+				TArray<TSharedPtr<FJsonValue>> VariantValues;
+				for (const FMCPParamVariant& Variant : Param.Variants)
 				{
-					TSharedPtr<FJsonObject> FieldEntry = MakeShared<FJsonObject>();
-					FieldEntry->SetStringField(TEXT("name"), Field.Name);
-					FieldEntry->SetStringField(TEXT("type"), ParamTypeName(Field.Type));
-					FieldEntry->SetBoolField(TEXT("required"), Field.bRequired);
-					FieldEntry->SetStringField(TEXT("description"), Field.Description);
-					if (Field.Type == EMCPParamType::Array && Field.ItemType != EMCPParamType::Any)
-					{
-						FieldEntry->SetStringField(TEXT("items"), ParamTypeName(Field.ItemType));
-					}
-					FieldValues.Add(MakeShared<FJsonValueObject>(FieldEntry));
+					TSharedPtr<FJsonObject> VariantEntry = MakeShared<FJsonObject>();
+					VariantEntry->SetStringField(TEXT("tag"), Variant.Tag);
+					VariantEntry->SetStringField(TEXT("description"), Variant.Description);
+					VariantEntry->SetArrayField(TEXT("fields"), FieldsJson(Variant.Fields));
+					VariantValues.Add(MakeShared<FJsonValueObject>(VariantEntry));
 				}
-				Entry->SetArrayField(TEXT("fields"), FieldValues);
+				TSharedPtr<FJsonObject> OneOf = MakeShared<FJsonObject>();
+				OneOf->SetStringField(TEXT("key"), Param.VariantKey);
+				OneOf->SetArrayField(TEXT("variants"), VariantValues);
+				Entry->SetObjectField(TEXT("oneOf"), OneOf);
 			}
 			ParamValues.Add(MakeShared<FJsonValueObject>(Entry));
 		}

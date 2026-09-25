@@ -349,6 +349,57 @@ bool FMCPHandlerSpecRegistrationTest::RunTest(const FString& Parameters)
 		}),
 	}).IsEmpty());
 
+	// Value forms.
+	TestTrue(TEXT("an any parameter with forms, and a field with forms, validate"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("args"), EMCPParamType::Any, TEXT("probe")).OneOfForms({ EMCPValueForm::ArgMap, EMCPValueForm::String }),
+		MCPParam::Optional(TEXT("calls"), EMCPParamType::Array, TEXT("probe")).Items(EMCPParamType::Object).WithFields({
+			MCPParam::OptionalField(TEXT("args"), EMCPParamType::Any, TEXT("probe")).OneOfForms({ EMCPValueForm::ArgMap, EMCPValueForm::ArgEntryList }),
+		}),
+	}).IsEmpty());
+	TestFalse(TEXT("forms on a typed parameter are refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("args"), EMCPParamType::Object, TEXT("probe")).OneOfForms({ EMCPValueForm::ArgMap }),
+	}).IsEmpty());
+	TestFalse(TEXT("a form listed twice is refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("args"), EMCPParamType::Any, TEXT("probe")).OneOfForms({ EMCPValueForm::String, EMCPValueForm::String }),
+	}).IsEmpty());
+	TestFalse(TEXT("forms on a typed field are refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("calls"), EMCPParamType::Array, TEXT("probe")).Items(EMCPParamType::Object).WithFields({
+			MCPParam::OptionalField(TEXT("args"), EMCPParamType::String, TEXT("probe")).OneOfForms({ EMCPValueForm::ArgMap }),
+		}),
+	}).IsEmpty());
+
+	// Tagged unions.
+	const TArray<FMCPParamVariant> ProbeVariants = {
+		MCPParam::Variant(TEXT("set"), TEXT("probe"), { MCPParam::RequiredField(TEXT("frame"), EMCPParamType::Integer, TEXT("probe")) }),
+		MCPParam::Variant(TEXT("clear"), TEXT("probe"), {}),
+	};
+	TestTrue(TEXT("a tagged array of objects validates"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("operations"), EMCPParamType::Array, TEXT("probe")).Items(EMCPParamType::Object).Tagged(TEXT("op"), ProbeVariants),
+	}).IsEmpty());
+	TestTrue(TEXT("a tagged object validates"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("operation"), EMCPParamType::Object, TEXT("probe")).Tagged(TEXT("op"), ProbeVariants),
+	}).IsEmpty());
+	TestFalse(TEXT("a tagged array of strings is refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("operations"), EMCPParamType::Array, TEXT("probe")).Items(EMCPParamType::String).Tagged(TEXT("op"), ProbeVariants),
+	}).IsEmpty());
+	TestFalse(TEXT("a tagged union with one variant is refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("operation"), EMCPParamType::Object, TEXT("probe")).Tagged(TEXT("op"), { ProbeVariants[0] }),
+	}).IsEmpty());
+	TestFalse(TEXT("a variant tag declared twice is refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("operation"), EMCPParamType::Object, TEXT("probe")).Tagged(TEXT("op"), { ProbeVariants[0], ProbeVariants[0] }),
+	}).IsEmpty());
+	TestFalse(TEXT("a variant field named after the tag is refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("operation"), EMCPParamType::Object, TEXT("probe")).Tagged(TEXT("op"), {
+			ProbeVariants[1],
+			MCPParam::Variant(TEXT("set"), TEXT("probe"), { MCPParam::RequiredField(TEXT("op"), EMCPParamType::String, TEXT("probe")) }),
+		}),
+	}).IsEmpty());
+	TestFalse(TEXT("a tagged union with fields of its own is refused"), FMCPHandlerRegistry::ValidateParamSpecs({
+		MCPParam::Optional(TEXT("operation"), EMCPParamType::Object, TEXT("probe"))
+			.WithFields({ MCPParam::RequiredField(TEXT("x"), EMCPParamType::Number, TEXT("probe")) })
+			.Tagged(TEXT("op"), ProbeVariants),
+	}).IsEmpty());
+
 	// Choices.
 	auto SpecWith = [](const FMCPSpecRules& Rules)
 	{
@@ -413,6 +464,12 @@ bool FMCPHandlerSpecRegistrationTest::RunTest(const FString& Parameters)
 				}),
 			},
 			MCPSpec::AtLeastOne({ { TEXT("assetPath") }, { TEXT("tint") } }).ContractExempt(TEXT("probe writes"))));
+
+		TestTrue(TEXT("a spec with forms and a tagged union is accepted"), Registry.RegisterHandler(
+			TEXT("mcp_test_spec_shapes"), &AliasProbe, {
+				MCPParam::Optional(TEXT("args"), EMCPParamType::Any, TEXT("probe")).OneOfForms({ EMCPValueForm::ArgMap, EMCPValueForm::StringList }),
+				MCPParam::Optional(TEXT("operations"), EMCPParamType::Array, TEXT("probe")).Items(EMCPParamType::Object).Tagged(TEXT("op"), ProbeVariants),
+			}));
 
 		AddExpectedError(TEXT("Parameter spec for 'mcp_test_spec_bad_choice' refused"), EAutomationExpectedErrorFlags::Contains, 1);
 		TestFalse(TEXT("a choice over an undeclared name is refused at registration"), Registry.RegisterHandler(
@@ -500,6 +557,26 @@ bool FMCPHandlerSpecRegistrationTest::RunTest(const FString& Parameters)
 				const TArray<TSharedPtr<FJsonValue>>* Fields = nullptr;
 				TestTrue(TEXT("fields"), (*Params)[3]->AsObject()->TryGetArrayField(TEXT("fields"), Fields) && Fields
 					&& Fields->Num() == 1 && (*Fields)[0]->AsObject()->GetStringField(TEXT("name")) == TEXT("mesh"));
+			}
+		}
+
+		const TSharedPtr<FJsonObject>* Shapes = nullptr;
+		if (TestTrue(TEXT("the shapes spec is published"), Json->TryGetObjectField(TEXT("mcp_test_spec_shapes"), Shapes) && Shapes))
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Params = nullptr;
+			if (TestTrue(TEXT("with its params"), (*Shapes)->TryGetArrayField(TEXT("params"), Params) && Params && Params->Num() == 2))
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Forms = nullptr;
+				TestTrue(TEXT("forms"), (*Params)[0]->AsObject()->TryGetArrayField(TEXT("forms"), Forms) && Forms && Forms->Num() == 2
+					&& (*Forms)[0]->AsString() == TEXT("argMap") && (*Forms)[1]->AsString() == TEXT("stringList"));
+				const TSharedPtr<FJsonObject>* OneOf = nullptr;
+				const TArray<TSharedPtr<FJsonValue>>* Variants = nullptr;
+				const bool bTagged = (*Params)[1]->AsObject()->TryGetObjectField(TEXT("oneOf"), OneOf) && OneOf
+					&& (*OneOf)->GetStringField(TEXT("key")) == TEXT("op")
+					&& (*OneOf)->TryGetArrayField(TEXT("variants"), Variants) && Variants && Variants->Num() == 2
+					&& (*Variants)[0]->AsObject()->GetStringField(TEXT("tag")) == TEXT("set")
+					&& (*Variants)[0]->AsObject()->GetArrayField(TEXT("fields")).Num() == 1;
+				TestTrue(TEXT("oneOf"), bTagged);
 			}
 		}
 	}
