@@ -44,6 +44,7 @@ const PER_SESSION: Record<string, string> = {
   "engine-root.ts": "Resolves the engine one project builds, launches and reads source from, out of that project's own layout and config.",
   "project.ts": "One ProjectContext per session, with that project's config cascade.",
   "project-switch.ts": "Moves one session's project and socket together.",
+  "project-holders.ts": "Lists the editor processes holding one project, keyed by its path.",
   "port.ts": "Derives a bridge port from one project's root path.",
   "requested-port.ts": "Publishes one project's resolved port pin into that project's own Saved directory.",
   "deployer.ts": "Attaches and deploys the bridge into one project.",
