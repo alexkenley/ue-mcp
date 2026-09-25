@@ -423,10 +423,16 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh asset path")).Alias(TEXT("meshPath")),
 	});
 	// #679/#677: spawn a SkeletalMeshActor for visual/deform verification.
-	// Unspecced: materials entries and skeletalMesh take null, which the spec types cannot express yet.
+	// Unspecced: materials entries take null, which a spec cannot declare for an array element yet.
 	Registry.RegisterHandler(TEXT("spawn_skeletal_mesh_actor"), &SpawnSkeletalMeshActor);
 	Registry.RegisterHandler(TEXT("place_skeletal_actor"), &SpawnSkeletalMeshActor);
-	Registry.RegisterHandler(TEXT("set_component_skeletal_mesh"), &SetComponentSkeletalMesh);
+	// Called once per selector by the contract test; the actor lookup fails first.
+	Registry.RegisterHandler(TEXT("set_component_skeletal_mesh"), &SetComponentSkeletalMesh, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Required(TEXT("skeletalMesh"), EType::String, TEXT("SkeletalMesh asset path, or null to clear the mesh")).Nullable(),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Skinned mesh component (default: the first on the actor)")),
+		SpecWorld, SpecPieInstance,
+	}, MCPSpec::ExactlyOne({ { TEXT("actorLabel") }, { TEXT("actorPath") } }));
 	// #666: add a material blendable to a PostProcessVolume.
 	Registry.RegisterHandler(TEXT("add_post_process_blendable"), &AddPostProcessBlendable, {
 		SpecActorLabel, SpecActorPath,

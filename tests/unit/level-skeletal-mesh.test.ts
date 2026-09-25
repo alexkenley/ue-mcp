@@ -1,32 +1,48 @@
 import { describe, expect, it } from "vitest";
 import { levelTool } from "../../src/tools/level.js";
 
+function fakeCtx(seen: Array<Record<string, unknown>>) {
+  return {
+    bridge: {
+      isConnected: true,
+      call: async (_m: string, params: Record<string, unknown>) => { seen.push(params); return { success: true }; },
+      getTarget: () => ({ projectPath: null, port: 0, portSource: "default", verified: true }),
+      connect: async () => {},
+      retargetProject: () => ({}),
+    },
+    project: {},
+  } as never;
+}
+
 describe("level.set_component_skeletal_mesh (#1099)", () => {
-  it("is exposed and routes only its own parameters", () => {
+  it("is exposed and takes its parameters from its spec, the actor as a choice", () => {
     expect(levelTool.schema.action.safeParse("set_component_skeletal_mesh").success).toBe(true);
     const action = levelTool.actions.set_component_skeletal_mesh;
     expect(action.bridge).toBe("set_component_skeletal_mesh");
-    expect(action.mapParams?.({
-      action: "set_component_skeletal_mesh",
-      actorLabel: "Faction",
-      componentName: "SkeletalMeshComponent0",
-      skeletalMesh: "/Game/SK_Other",
-      world: "editor",
-      unrelated: 1,
-    })).toEqual({
-      actorLabel: "Faction",
-      actorPath: undefined,
-      componentName: "SkeletalMeshComponent0",
-      skeletalMesh: "/Game/SK_Other",
-      world: "editor",
-      pieInstance: undefined,
-    });
+    expect(action.kind === "bridge" && action.paramSpec?.map((p) => p.name)).toEqual(
+      ["actorLabel", "actorPath", "skeletalMesh", "componentName", "world", "pieInstance"],
+    );
+    expect(action.kind === "bridge" && action.paramChoices).toEqual([
+      { mode: "exactlyOne", branches: [["actorLabel"], ["actorPath"]] },
+    ]);
+    expect(action.description).toContain("Params: actorLabel OR actorPath, skeletalMesh, componentName?, world?, pieInstance?");
   });
 
-  it("accepts null to clear the mesh", () => {
+  it("accepts null to clear the mesh, and sends it", async () => {
     expect(levelTool.schema.skeletalMesh.safeParse(null).success).toBe(true);
-    const mapped = levelTool.actions.set_component_skeletal_mesh.mapParams?.({ actorLabel: "A", skeletalMesh: null });
-    expect(mapped).toHaveProperty("skeletalMesh", null);
+    const seen: Array<Record<string, unknown>> = [];
+    await levelTool.handler(fakeCtx(seen), { action: "set_component_skeletal_mesh", actorLabel: "A", skeletalMesh: null });
+    expect(seen).toEqual([{ actorLabel: "A", skeletalMesh: null }]);
+  });
+
+  it("refuses a call that names no actor, or names it twice, before sending", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    await expect(levelTool.handler(fakeCtx(seen), { action: "set_component_skeletal_mesh", skeletalMesh: null }))
+      .rejects.toThrow(/needs actorLabel OR actorPath/);
+    await expect(levelTool.handler(fakeCtx(seen), {
+      action: "set_component_skeletal_mesh", actorLabel: "A", actorPath: "/Game/M.M:PersistentLevel.A", skeletalMesh: null,
+    })).rejects.toThrow(/takes one side of actorLabel OR actorPath/);
+    expect(seen).toEqual([]);
   });
 });
 

@@ -1,5 +1,5 @@
 {
-  "handlerCount": 829,
+  "handlerCount": 830,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -20224,6 +20224,61 @@
           "type": "integer",
           "required": false,
           "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
+        }
+      ]
+    },
+    "set_component_skeletal_mesh": {
+      "category": "level",
+      "params": [
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor editor label; pass actorLabel or actorPath"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path; the unambiguous selector, and it wins over actorLabel"
+        },
+        {
+          "name": "skeletalMesh",
+          "type": "string",
+          "required": true,
+          "description": "SkeletalMesh asset path, or null to clear the mesh",
+          "nullable": true
+        },
+        {
+          "name": "componentName",
+          "type": "string",
+          "required": false,
+          "description": "Skinned mesh component (default: the first on the actor)"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: editor (default) | pie"
+        },
+        {
+          "name": "pieInstance",
+          "type": "integer",
+          "required": false,
+          "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
         }
       ]
     },
