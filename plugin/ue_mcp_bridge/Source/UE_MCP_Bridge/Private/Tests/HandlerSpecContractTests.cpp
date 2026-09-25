@@ -13,6 +13,7 @@
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
 #include "Handlers/AnimationHandlers.h"
+#include "Handlers/NetworkingHandlers.h"
 #include "Misc/AutomationTest.h"
 
 namespace MCPHandlerSpecTests
@@ -80,9 +81,10 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 
 	FMCPHandlerRegistry Registry;
 	FAnimationHandlers::RegisterHandlers(Registry);
+	FNetworkingHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
-	TestTrue(TEXT("animation registers handlers with a parameter spec"), Specs.Num() > 0);
+	TestTrue(TEXT("handlers register with a parameter spec"), Specs.Num() > 0);
 
 	TArray<FString> Methods;
 	Specs.GetKeys(Methods);

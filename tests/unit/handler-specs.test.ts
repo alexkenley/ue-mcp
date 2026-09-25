@@ -32,6 +32,8 @@ import {
 import { ROUTING_PARAM_NAMES } from "../../src/routing-params.js";
 import { parseParams, actionSchema } from "../../src/action-schema.js";
 import { animationTool } from "../../src/tools/animation.js";
+import { ALL_TOOLS } from "../../src/tools.js";
+import type { ToolDef } from "../../src/types.js";
 import { schema as specSchema, handlerSpecs } from "../../src/tools/specs/animation.generated.js";
 import { RECORDED_HANDLER_SPECS } from "../../src/tools/specs/index.js";
 import { deployedPlugin, checkBridgeParity } from "../../src/bridge-parity.js";
@@ -43,10 +45,10 @@ const SNAPSHOT = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "golden", "
   handlers: HandlerSpecs;
 };
 
-/** Actions of the animation tool that dispatch to a spec'd bridge method. */
-function specdActions(): Array<[string, { bridge: string; description: string; mapParams?: unknown }]> {
+/** Actions of a tool that dispatch to a spec'd bridge method. */
+function specdActions(tool: ToolDef = animationTool): Array<[string, { bridge: string; description: string; mapParams?: unknown }]> {
   const out: Array<[string, { bridge: string; description: string; mapParams?: unknown }]> = [];
-  for (const [name, spec] of Object.entries(animationTool.actions)) {
+  for (const [name, spec] of Object.entries(tool.actions)) {
     if (spec.kind === "bridge" && SNAPSHOT.handlers[spec.bridge]) {
       out.push([name, { bridge: spec.bridge, description: spec.description ?? "", mapParams: spec.mapParams }]);
     }
@@ -181,6 +183,94 @@ describe("the animation surface", () => {
     expect(parsed).not.toBeNull();
     const byName = new Map(parsed!.actions.map((a: { name: string; description: string }) => [a.name, a.description]));
     for (const [action, spec] of specdActions()) {
+      expect(byName.get(action), action).toBe(spec.description);
+    }
+  });
+});
+
+/** What zodSignature reports for the key a spec'd parameter generates. */
+function specSignature(type: string, items?: string): string {
+  const base: Record<string, string> = {
+    string: "string",
+    number: "number",
+    integer: "integer",
+    boolean: "boolean",
+    object: "record<any>",
+    vec3: "{x:number,y:number,z:number}",
+    rotator: "{pitch:number,roll:number,yaw:number}",
+    any: "any",
+  };
+  return `${type === "array" ? `array<${base[items ?? "any"]}>` : base[type]}?`;
+}
+
+// Every other recorded category is held to the same surface rules as the pilot.
+const OTHER_CATEGORIES = [...new Set(Object.values(SNAPSHOT.handlers).map((s) => s.category as string))]
+  .filter((c) => c !== "animation")
+  .sort();
+
+describe.each(OTHER_CATEGORIES)("the %s surface", (category) => {
+  const tool = ALL_TOOLS.find((t) => t.name === category)!;
+  const methods = Object.entries(SNAPSHOT.handlers).filter(([, s]) => s.category === category);
+
+  it("is a tool, and every spec'd method is dispatched by one of its actions", () => {
+    expect(tool, category).toBeDefined();
+    const bridged = new Set(specdActions(tool).map(([, spec]) => spec.bridge));
+    for (const [method] of methods) expect(bridged.has(method), method).toBe(true);
+  });
+
+  it("takes each spec'd action's Params clause from its spec, and renames nothing in TS", () => {
+    for (const [action, spec] of specdActions(tool)) {
+      const clause = paramsClause(SNAPSHOT.handlers[spec.bridge]);
+      expect(spec.description.endsWith(` ${clause}`), `${action}: description does not end with its generated clause`).toBe(true);
+      expect(spec.mapParams, `${action}: a spec'd action forwards its bag as sent; renames are aliases in the spec`).toBeUndefined();
+    }
+  });
+
+  it("documents every declared name and alias, and nothing else", () => {
+    const known = new Set(Object.keys(tool.schema));
+    for (const [action, spec] of specdActions(tool)) {
+      const declared = SNAPSHOT.handlers[spec.bridge].params.flatMap((p) => [p.name, ...(p.aliases ?? [])]).sort();
+      const documented = parseParams(spec.description, known).params.map((p) => p.name).sort();
+      expect(documented, action).toEqual(declared);
+    }
+  });
+
+  it("marks exactly the required parameters required", () => {
+    for (const [action, spec] of specdActions(tool)) {
+      const schema = actionSchema(tool, action);
+      for (const param of SNAPSHOT.handlers[spec.bridge].params) {
+        const entry = schema.params.find((p) => p.name === param.name);
+        expect(entry, `${action}.${param.name}`).toBeDefined();
+        if (param.aliases?.length) {
+          expect(entry?.alternativeGroup, `${action}.${param.name} is a choice`).toBeDefined();
+        } else {
+          expect(entry?.required, `${action}.${param.name}`).toBe(param.required);
+        }
+      }
+    }
+  });
+
+  it("declares every spec'd key, with one type wherever the category also declares it by hand", () => {
+    for (const [method, spec] of methods) {
+      for (const param of spec.params) {
+        for (const key of [param.name, ...(param.aliases ?? [])]) {
+          const advertised = tool.schema[key];
+          expect(advertised, `${method}: ${key} is advertised`).toBeDefined();
+          expect(zodSignature(advertised as z.ZodTypeAny), `${method}: ${key}`).toBe(specSignature(param.type, param.items));
+        }
+      }
+    }
+  });
+
+  it("keeps the dispatch parameter categoryTool authored", () => {
+    expect(tool.schema.action.description).toMatch(/^Action to perform/);
+  });
+
+  it("reads the same in the source the audits parse as it does at runtime", () => {
+    const parsed = readCategory(path.join(ROOT, "src", "tools", `${category}.ts`));
+    expect(parsed).not.toBeNull();
+    const byName = new Map(parsed!.actions.map((a: { name: string; description: string }) => [a.name, a.description]));
+    for (const [action, spec] of specdActions(tool)) {
       expect(byName.get(action), action).toBe(spec.description);
     }
   });

@@ -1,5 +1,5 @@
 {
-  "handlerCount": 19,
+  "handlerCount": 29,
   "handlers": {
     "add_curve": {
       "category": "animation",
@@ -41,6 +41,57 @@
           "type": "string",
           "required": true,
           "description": "Bone the virtual bone points at"
+        }
+      ]
+    },
+    "configure_net_cull_distance": {
+      "category": "networking",
+      "params": [
+        {
+          "name": "blueprintPath",
+          "type": "string",
+          "required": true,
+          "description": "Actor Blueprint asset path"
+        },
+        {
+          "name": "netCullDistanceSquared",
+          "type": "number",
+          "required": false,
+          "description": "NetCullDistanceSquared (default 225000000)"
+        }
+      ]
+    },
+    "configure_net_update_frequency": {
+      "category": "networking",
+      "params": [
+        {
+          "name": "blueprintPath",
+          "type": "string",
+          "required": true,
+          "description": "Actor Blueprint asset path"
+        },
+        {
+          "name": "netUpdateFrequency",
+          "type": "number",
+          "required": false,
+          "description": "NetUpdateFrequency in updates per second (omit to leave it)"
+        },
+        {
+          "name": "minNetUpdateFrequency",
+          "type": "number",
+          "required": false,
+          "description": "MinNetUpdateFrequency in updates per second (omit to leave it)"
+        }
+      ]
+    },
+    "get_networking_info": {
+      "category": "networking",
+      "params": [
+        {
+          "name": "blueprintPath",
+          "type": "string",
+          "required": true,
+          "description": "Actor Blueprint asset path"
         }
       ]
     },
@@ -275,6 +326,23 @@
         }
       ]
     },
+    "set_always_relevant": {
+      "category": "networking",
+      "params": [
+        {
+          "name": "blueprintPath",
+          "type": "string",
+          "required": true,
+          "description": "Actor Blueprint asset path"
+        },
+        {
+          "name": "alwaysRelevant",
+          "type": "boolean",
+          "required": false,
+          "description": "bAlwaysRelevant (default false)"
+        }
+      ]
+    },
     "set_anim_blueprint_skeleton": {
       "category": "animation",
       "params": [
@@ -353,6 +421,108 @@
           "type": "integer",
           "required": false,
           "description": "Slot track index (default 0)"
+        }
+      ]
+    },
+    "set_net_dormancy": {
+      "category": "networking",
+      "params": [
+        {
+          "name": "blueprintPath",
+          "type": "string",
+          "required": true,
+          "description": "Actor Blueprint asset path"
+        },
+        {
+          "name": "dormancy",
+          "type": "string",
+          "required": true,
+          "description": "DORM_Never | DORM_Awake | DORM_DormantAll | DORM_DormantPartial | DORM_Initial"
+        }
+      ]
+    },
+    "set_net_load_on_client": {
+      "category": "networking",
+      "params": [
+        {
+          "name": "blueprintPath",
+          "type": "string",
+          "required": true,
+          "description": "Actor Blueprint asset path"
+        },
+        {
+          "name": "loadOnClient",
+          "type": "boolean",
+          "required": false,
+          "description": "bNetLoadOnClient (default true)"
+        }
+      ]
+    },
+    "set_net_priority": {
+      "category": "networking",
+      "params": [
+        {
+          "name": "blueprintPath",
+          "type": "string",
+          "required": true,
+          "description": "Actor Blueprint asset path"
+        },
+        {
+          "name": "netPriority",
+          "type": "number",
+          "required": false,
+          "description": "NetPriority (default 1.0)"
+        }
+      ]
+    },
+    "set_only_relevant_to_owner": {
+      "category": "networking",
+      "params": [
+        {
+          "name": "blueprintPath",
+          "type": "string",
+          "required": true,
+          "description": "Actor Blueprint asset path"
+        },
+        {
+          "name": "onlyRelevantToOwner",
+          "type": "boolean",
+          "required": false,
+          "description": "bOnlyRelevantToOwner (default false)"
+        }
+      ]
+    },
+    "set_replicate_movement": {
+      "category": "networking",
+      "params": [
+        {
+          "name": "blueprintPath",
+          "type": "string",
+          "required": true,
+          "description": "Actor Blueprint asset path"
+        },
+        {
+          "name": "replicateMovement",
+          "type": "boolean",
+          "required": false,
+          "description": "Replicate movement (default false)"
+        }
+      ]
+    },
+    "set_replicates": {
+      "category": "networking",
+      "params": [
+        {
+          "name": "blueprintPath",
+          "type": "string",
+          "required": true,
+          "description": "Actor Blueprint asset path"
+        },
+        {
+          "name": "replicates",
+          "type": "boolean",
+          "required": false,
+          "description": "Replicate the actor (default false)"
         }
       ]
     },
