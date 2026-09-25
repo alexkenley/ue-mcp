@@ -1,5 +1,5 @@
 {
-  "handlerCount": 27,
+  "handlerCount": 39,
   "handlers": {
     "add_curve": {
       "category": "animation",
@@ -322,6 +322,51 @@
         }
       ]
     },
+    "inspect_save_game": {
+      "category": "reflection",
+      "params": [
+        {
+          "name": "slotName",
+          "type": "string",
+          "required": true,
+          "description": "Logical save slot name, a plain filename without a path"
+        },
+        {
+          "name": "userIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Platform user index (default 0)"
+        }
+      ]
+    },
+    "is_class_loaded": {
+      "category": "reflection",
+      "params": [
+        {
+          "name": "className",
+          "type": "string",
+          "required": true,
+          "description": "Class to probe: short name, /Script/Module.Class, or a Blueprint class path",
+          "aliases": [
+            "class"
+          ]
+        }
+      ]
+    },
+    "is_module_loaded": {
+      "category": "reflection",
+      "params": [
+        {
+          "name": "moduleName",
+          "type": "string",
+          "required": true,
+          "description": "Module name to probe",
+          "aliases": [
+            "module"
+          ]
+        }
+      ]
+    },
     "list_anim_modifiers": {
       "category": "animation",
       "params": [
@@ -347,6 +392,110 @@
           "aliases": [
             "path"
           ]
+        }
+      ]
+    },
+    "list_classes": {
+      "category": "reflection",
+      "params": [
+        {
+          "name": "parentFilter",
+          "type": "string",
+          "required": false,
+          "description": "List classes deriving from this one; with or without the C++ A/U/F/E prefix"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Rows to return on this page (default 100, max 1000)"
+        }
+      ]
+    },
+    "list_gameplay_tags": {
+      "category": "reflection",
+      "params": [
+        {
+          "name": "filter",
+          "type": "string",
+          "required": false,
+          "description": "Only tags starting with this prefix"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Rows to return on this page (default 500, max 5000)"
+        }
+      ]
+    },
+    "list_loaded_modules": {
+      "category": "reflection",
+      "params": [
+        {
+          "name": "filter",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive substring of the module name"
+        },
+        {
+          "name": "loadedOnly",
+          "type": "boolean",
+          "required": false,
+          "description": "Only modules that are loaded (default false)"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Rows to return on this page (default 500, max 5000)"
+        }
+      ]
+    },
+    "list_structs": {
+      "category": "reflection",
+      "params": [
+        {
+          "name": "package",
+          "type": "string",
+          "required": false,
+          "description": "Narrow to one package or content folder: /Script/Engine, a bare module name (Engine), or /Game/Data"
+        },
+        {
+          "name": "filter",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive substring of the struct name or cppName"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Rows to return on this page (default 200, max 5000)"
         }
       ]
     },
@@ -456,6 +605,104 @@
         }
       ]
     },
+    "reflect_class": {
+      "category": "reflection",
+      "params": [
+        {
+          "name": "className",
+          "type": "string",
+          "required": true,
+          "description": "Class to reflect: C++ spelling with or without the A/U/F/E prefix, /Script/Module.ClassName, or a Blueprint class path"
+        },
+        {
+          "name": "includeInherited",
+          "type": "boolean",
+          "required": false,
+          "description": "Walk superclass properties and functions too (default false)"
+        }
+      ]
+    },
+    "reflect_enum": {
+      "category": "reflection",
+      "params": [
+        {
+          "name": "enumName",
+          "type": "string",
+          "required": true,
+          "description": "UEnum by full path, short name, or short name without the E prefix"
+        }
+      ]
+    },
+    "reflect_instance": {
+      "category": "reflection",
+      "params": [
+        {
+          "name": "objectPath",
+          "type": "string",
+          "required": true,
+          "description": "The asset, CDO, actor or subobject to describe: an asset path, a full object path, a class path, or a Blueprint path (described as its generated-class defaults)"
+        },
+        {
+          "name": "propertyPath",
+          "type": "string",
+          "required": false,
+          "description": "Scope the read to one nested struct or object reference, dotted and indexable (Config.Traits[1].Params). Omit to describe the object itself"
+        },
+        {
+          "name": "filter",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive substring of the property name"
+        },
+        {
+          "name": "includeInherited",
+          "type": "boolean",
+          "required": false,
+          "description": "Walk superclass properties too (default true)"
+        },
+        {
+          "name": "includeValues",
+          "type": "boolean",
+          "required": false,
+          "description": "Include each property's current value and valueText (default true)"
+        },
+        {
+          "name": "editableOnly",
+          "type": "boolean",
+          "required": false,
+          "description": "Return only the properties the details panel would let you edit on this object (default false, which returns every property with its reason)"
+        },
+        {
+          "name": "maxDepth",
+          "type": "integer",
+          "required": false,
+          "description": "How far to expand struct and container types, 0 to 5 (default 1). 0 names the types without expanding them"
+        },
+        {
+          "name": "cursor",
+          "type": "string",
+          "required": false,
+          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Rows to return on this page (default 100, max 500)"
+        }
+      ]
+    },
+    "reflect_struct": {
+      "category": "reflection",
+      "params": [
+        {
+          "name": "structName",
+          "type": "string",
+          "required": true,
+          "description": "UScriptStruct to reflect, by name or path"
+        }
+      ]
+    },
     "remove_anim_notify": {
       "category": "animation",
       "params": [
@@ -539,6 +786,23 @@
           "type": "string",
           "required": true,
           "description": "USkeleton to target"
+        }
+      ]
+    },
+    "set_enum_entries": {
+      "category": "reflection",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "Existing UserDefinedEnum asset path"
+        },
+        {
+          "name": "entries",
+          "type": "array",
+          "required": true,
+          "description": "The complete new entry list: strings, or {name, displayName?} objects"
         }
       ]
     },

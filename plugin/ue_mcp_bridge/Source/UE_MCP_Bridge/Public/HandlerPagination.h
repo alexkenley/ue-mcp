@@ -232,6 +232,9 @@ namespace MCPPagination
 		const TCHAR* LimitField = nullptr;
 		if (HasParam(Params, TEXT("limit"))) LimitField = TEXT("limit");
 		else if (HasParam(Params, TEXT("maxResults"))) LimitField = TEXT("maxResults");
+		// Read before the limit can refuse the call, so a spec'd handler reads
+		// both paging parameters whatever the limit holds (#1057).
+		const FString Cursor = Params.IsValid() ? OptionalString(Params, TEXT("cursor")) : FString();
 
 		if (LimitField)
 		{

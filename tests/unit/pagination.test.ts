@@ -158,8 +158,12 @@ describe("the reflection category, which is the first adopter", () => {
     const spec = reflectionTool.actions.list_structs;
     expect(spec.bridge).toBe("list_structs");
     expect(reflectionTool.schema.package).toBeDefined();
-    expect(spec.mapParams!({ action: "list_structs", package: "/Script/Engine", filter: "Row" }))
-      .toMatchObject({ package: "/Script/Engine", filter: "Row" });
+    expect(reflectionTool.schema.filter).toBeDefined();
+    // Spec'd (#1057): no mapParams, so the bag reaches the bridge as sent.
+    expect(spec.mapParams).toBeUndefined();
+    expect(parseParamsClause(spec.description ?? "").map((p) => p.name)).toEqual(
+      expect.arrayContaining(["package", "filter"]),
+    );
   });
 
   it("keeps limit a positive whole number now that pagination owns it", () => {

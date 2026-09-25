@@ -42,6 +42,7 @@
 #include "Handlers/AssetHandlers.h"
 #include "Handlers/AssetHandlers_Geometry.h"
 #include "Handlers/ChooserHandlers.h"
+#include "Handlers/ReflectionHandlers.h"
 #include "Misc/AutomationTest.h"
 
 namespace MCPHandlerSpecTests
@@ -131,6 +132,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FAssetHandlers::RegisterHandlers(Registry);
 	FAssetGeometryHandlers::RegisterHandlers(Registry);
 	FChooserHandlers::RegisterHandlers(Registry);
+	FReflectionHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
 	TestTrue(TEXT("handlers register with a parameter spec"), Specs.Num() > 0);

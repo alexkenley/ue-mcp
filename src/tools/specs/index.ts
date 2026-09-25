@@ -7,9 +7,11 @@
 import type { HandlerSpecs } from "../../handler-spec.js";
 import { handlerSpecs as animation } from "./animation.generated.js";
 import { handlerSpecs as chooser } from "./chooser.generated.js";
+import { handlerSpecs as reflection } from "./reflection.generated.js";
 
 /** Every recorded handler spec, across categories. */
 export const RECORDED_HANDLER_SPECS: HandlerSpecs = {
   ...animation,
   ...chooser,
+  ...reflection,
 };
