@@ -151,6 +151,8 @@ TSharedPtr<FJsonValue> FSequencerHandlers::CreateLevelSequence(const TSharedPtr<
 
 TSharedPtr<FJsonValue> FSequencerHandlers::ReadSequenceInfo(const TSharedPtr<FJsonObject>& Params)
 {
+	if (auto Err = MCPRefuseDuringPlayInEditor(TEXT("get_sequence_info"))) return Err;
+
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
@@ -1187,6 +1189,8 @@ TSharedPtr<FJsonValue> FSequencerHandlers::AddSection(const TSharedPtr<FJsonObje
 // (default 0), channel, keyframes ([{seconds, value}]), interpolation? (cubic|linear).
 TSharedPtr<FJsonValue> FSequencerHandlers::SetKeyframes(const TSharedPtr<FJsonObject>& Params)
 {
+	if (auto PieErr = MCPRefuseDuringPlayInEditor(TEXT("set_sequence_keyframes"))) return PieErr;
+
 	FString Path, Err;
 	ULevelSequence* Sequence = LoadSequence(Params, Path, Err);
 	if (!Sequence) return MCPError(Err);

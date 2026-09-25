@@ -466,6 +466,18 @@ inline FString MCPPlayInEditorLoadNote()
 		TEXT("Stop play with editor(action=\"stop_pie\") and retry before treating this as an asset problem.");
 }
 
+/** A precondition refusal for an editor-world action while PIE is running,
+ *  nullptr otherwise. Without it the load fails as "not found" (#1098). */
+inline TSharedPtr<FJsonValue> MCPRefuseDuringPlayInEditor(const TCHAR* ActionName)
+{
+	if (!MCPIsPlayInEditorActive()) return nullptr;
+	return MCPError(FString::Printf(
+		TEXT("%s cannot run while a play-in-editor session is running: the editor's asset loader refuses every call in play mode, ")
+		TEXT("so the sequence would read as missing and captures would not follow the playhead. ")
+		TEXT("Stop play with editor(action=\"stop_pie\") and retry."),
+		ActionName));
+}
+
 /** The answer for a path MCPLoadAssetObject could not resolve.
  *
  *  A bare "Asset not found" is the same sentence for a path that names nothing,
