@@ -459,6 +459,7 @@ FGeometryWeldKey MakeGeometryWeldKey(const FVector3f& Position)
 
 void FAssetGeometryHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
+	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("asset"));
 	Registry.RegisterHandler(TEXT("get_mesh_geometry"), &GetMeshGeometry);
 	Registry.RegisterHandler(TEXT("measure_mesh_geometry"), &MeasureMeshGeometry);
 }
@@ -474,7 +475,7 @@ TSharedPtr<FJsonValue> FAssetGeometryHandlers::GetMeshGeometry(const TSharedPtr<
 	const bool bDumpToFile = OptionalBool(Params, TEXT("dumpToFile"), false);
 	const FString OutputPath = OptionalString(Params, TEXT("outputPath"), TEXT(""));
 
-	const bool bHasSectionIndex = Params->HasField(TEXT("sectionIndex"));
+	const bool bHasSectionIndex = HasParam(Params, TEXT("sectionIndex"));
 	const int32 RequestedSection = OptionalInt(Params, TEXT("sectionIndex"), 0);
 
 	// `include` selects which arrays come back. Omitted means all four, which is
@@ -484,7 +485,7 @@ TSharedPtr<FJsonValue> FAssetGeometryHandlers::GetMeshGeometry(const TSharedPtr<
 	bool bWantNormals = true;
 	bool bWantTriangles = true;
 	const TArray<TSharedPtr<FJsonValue>>* IncludeArray = nullptr;
-	if (Params->TryGetArrayField(TEXT("include"), IncludeArray) && IncludeArray)
+	if (TryGetArrayParam(Params, TEXT("include"), IncludeArray) && IncludeArray)
 	{
 		bWantPositions = bWantUVs = bWantNormals = bWantTriangles = false;
 		for (const TSharedPtr<FJsonValue>& Entry : *IncludeArray)
@@ -683,7 +684,7 @@ TSharedPtr<FJsonValue> FAssetGeometryHandlers::MeasureMeshGeometry(const TShared
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
 	const int32 LodIndex = OptionalInt(Params, TEXT("lodIndex"), 0);
-	const bool bHasSectionIndex = Params->HasField(TEXT("sectionIndex"));
+	const bool bHasSectionIndex = HasParam(Params, TEXT("sectionIndex"));
 	const int32 RequestedSection = OptionalInt(Params, TEXT("sectionIndex"), 0);
 
 	FGeometrySnapshot Snapshot;
