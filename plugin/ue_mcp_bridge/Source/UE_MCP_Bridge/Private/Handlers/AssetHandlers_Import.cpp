@@ -2142,6 +2142,10 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadDataTable(const TSharedPtr<FJsonObjec
 	if (auto Err = LoadDataTableParam(Params, AssetPath, DataTable)) return Err;
 
 	FString RowFilter = OptionalString(Params, TEXT("rowFilter"));
+	// A large table overflows the response inline, so outputPath writes the
+	// rows to a file under the shared dump convention (HandlerUtils.h) and
+	// the response carries only where they went and how much was written.
+	const FString OutputPath = OptionalString(Params, TEXT("outputPath"));
 
 	// Get the row struct for property iteration
 	const UScriptStruct* RowStruct = DataTable->GetRowStruct();
@@ -2157,7 +2161,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadDataTable(const TSharedPtr<FJsonObjec
 
 	TArray<TSharedPtr<FJsonValue>> ParsedRows;
 	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(JsonString);
-	if (FJsonSerializer::Deserialize(JsonReader, ParsedRows))
+	const bool bParsed = FJsonSerializer::Deserialize(JsonReader, ParsedRows);
+	if (bParsed)
 	{
 		// Apply row filter if specified
 		if (!RowFilter.IsEmpty())
@@ -2176,12 +2181,59 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadDataTable(const TSharedPtr<FJsonObjec
 					}
 				}
 			}
-			Result->SetArrayField(TEXT("rows"), FilteredRows);
-			Result->SetNumberField(TEXT("filteredCount"), FilteredRows.Num());
+			ParsedRows = MoveTemp(FilteredRows);
 		}
-		else
+	}
+	const bool bFiltered = bParsed && !RowFilter.IsEmpty();
+
+	if (!OutputPath.IsEmpty())
+	{
+		// The file holds the same row objects the inline form returns, so the
+		// export cannot be written when it did not parse: there would be no
+		// rows to filter, and a raw string is not the shape the caller asked for.
+		if (!bParsed)
 		{
-			Result->SetArrayField(TEXT("rows"), ParsedRows);
+			return MCPError(FString::Printf(
+				TEXT("The DataTable's JSON export could not be parsed, so no rows were written to '%s'. ")
+				TEXT("Call read_datatable without outputPath to get the raw export as rawJson."),
+				*OutputPath));
+		}
+
+		FString RowsText;
+		const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RowsText);
+		if (!FJsonSerializer::Serialize(ParsedRows, Writer))
+		{
+			return MCPError(TEXT("Failed to serialize DataTable rows"));
+		}
+
+		const FString ResolvedPath = FPaths::ConvertRelativePathToFull(MCPResolveDumpPath(OutputPath));
+		FString WriteError;
+		if (!MCPWriteDumpFile(ResolvedPath, RowsText, TEXT("DataTable rows"), WriteError))
+		{
+			return MCPError(WriteError);
+		}
+
+		Result->SetStringField(TEXT("assetPath"), AssetPath);
+		Result->SetStringField(TEXT("rowStruct"), RowStruct->GetName());
+		Result->SetNumberField(TEXT("totalRowCount"), DataTable->GetRowMap().Num());
+		if (bFiltered)
+		{
+			Result->SetNumberField(TEXT("filteredCount"), ParsedRows.Num());
+		}
+		Result->SetStringField(TEXT("outputPath"), ResolvedPath);
+		Result->SetNumberField(TEXT("rowCount"), ParsedRows.Num());
+		Result->SetNumberField(TEXT("bytes"), static_cast<double>(IFileManager::Get().FileSize(*ResolvedPath)));
+		// rowNames is left out as well: it grows with the table just as rows
+		// does, and every row in the file carries its own Name.
+		return MCPResult(Result);
+	}
+
+	if (bParsed)
+	{
+		Result->SetArrayField(TEXT("rows"), ParsedRows);
+		if (bFiltered)
+		{
+			Result->SetNumberField(TEXT("filteredCount"), ParsedRows.Num());
 		}
 	}
 	else

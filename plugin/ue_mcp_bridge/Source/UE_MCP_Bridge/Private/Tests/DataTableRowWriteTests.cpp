@@ -1,5 +1,6 @@
 // Coverage for the DataTable row write path and the JSON property setter it
-// runs on, for the three data-loss bugs they carried (#928, #929, #935).
+// runs on, for the three data-loss bugs they carried (#928, #929, #935), and
+// for read_datatable's outputPath form, which writes the rows to a file.
 //
 // run_automation_tests dispatches every EditorContext/EngineFilter test in the
 // process when it is called without a filter, against whatever project the
@@ -24,9 +25,17 @@
 #include "Math/IntVector.h"
 #include "GameFramework/DefaultPawn.h"
 #include "GameFramework/GameModeBase.h"
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
+#include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "MCPEngineCompat.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "UObject/UnrealType.h"
 
 namespace
@@ -100,6 +109,28 @@ bool ResponseSucceeded(const TSharedPtr<FJsonValue>& Response, FString& OutError
 		Obj->TryGetStringField(TEXT("error"), OutError);
 	}
 	return bSuccess;
+}
+
+/** Params for asset(read_datatable) against a transient table. An empty
+ *  filter or path leaves that param out, which is the inline, unfiltered read. */
+TSharedPtr<FJsonObject> MakeDataTableReadParams(const UDataTable* Table, const FString& RowFilter, const FString& OutputPath)
+{
+	TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+	Params->SetStringField(TEXT("assetPath"), Table->GetPathName());
+	if (!RowFilter.IsEmpty()) Params->SetStringField(TEXT("rowFilter"), RowFilter);
+	if (!OutputPath.IsEmpty()) Params->SetStringField(TEXT("outputPath"), OutputPath);
+	return Params;
+}
+
+/** One canonical text form of a row array, so rows returned inline and rows
+ *  read back from a file compare as strings. */
+FString CondenseDataTableRows(const TArray<TSharedPtr<FJsonValue>>& Rows)
+{
+	FString Text;
+	const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Text);
+	FJsonSerializer::Serialize(Rows, Writer);
+	return Text;
 }
 }
 
@@ -243,6 +274,164 @@ bool FDataTableRejectedWriteLeavesRowIntactTest::RunTest(const FString& Paramete
 	TestEqual(TEXT("the TMap is untouched"), RowA->PerPlatform.Num(), 1);
 	return true;
 #endif
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// read_datatable with outputPath writes exactly the rows the inline read
+// returns, rowFilter applied, and reports the file instead of the rows.
+// ─────────────────────────────────────────────────────────────────────────────
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataTableReadToFileTest,
+	"UE.MCP.Asset.DataTable.ReadToFileRoundTrips",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataTableReadToFileTest::RunTest(const FString& Parameters)
+{
+	UDataTable* Table = MakeTransientPerPlatformTable();
+	if (!TestNotNull(TEXT("transient DataTable was created"), Table)) return false;
+	FGCRootScope TableRoot(Table);
+
+	TMap<FName, int32> Overrides;
+	Overrides.Add(TEXT("Windows"), 41);
+	AddPerPlatformRow(Table, TEXT("AlphaOne"), 1, Overrides);
+	AddPerPlatformRow(Table, TEXT("AlphaTwo"), 2, TMap<FName, int32>());
+	AddPerPlatformRow(Table, TEXT("Beta"), 3, TMap<FName, int32>());
+
+	FMCPHandlerRegistry Registry;
+	FAssetHandlers::RegisterHandlers(Registry);
+	TestTrue(TEXT("read_datatable is registered"), Registry.HasHandler(TEXT("read_datatable")));
+
+	if (!TestTrue(
+			TEXT("the handler resolves the transient table by path"),
+			MCPLoadAssetObject(Table->GetPathName()) == Table))
+	{
+		return false;
+	}
+
+	// Every file this test writes lands in one folder of its own under Saved/,
+	// removed on the way out whatever the assertions found.
+	const FString DumpFolder = FString::Printf(
+		TEXT("UE_MCP/AutomationTests/ReadDataTable_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	const FString DumpDirectory = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), DumpFolder));
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*DumpDirectory, false, true);
+	};
+
+	auto Read = [this, &Registry, Table](const TCHAR* Label, const FString& RowFilter, const FString& OutputPath)
+		-> TSharedPtr<FJsonObject>
+	{
+		const TSharedPtr<FJsonValue> Response = Registry.ExecuteHandler(
+			TEXT("read_datatable"), MakeDataTableReadParams(Table, RowFilter, OutputPath));
+		FString Error;
+		const bool bSucceeded = ResponseSucceeded(Response, Error);
+		if (!TestTrue(FString::Printf(TEXT("%s succeeded (%s)"), Label, *Error), bSucceeded)) return nullptr;
+		return Response->AsObject();
+	};
+
+	auto LoadRows = [this](const FString& Path, TArray<TSharedPtr<FJsonValue>>& OutRows) -> bool
+	{
+		FString Text;
+		if (!TestTrue(FString::Printf(TEXT("the file can be read back (%s)"), *Path), FFileHelper::LoadFileToString(Text, *Path)))
+		{
+			return false;
+		}
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Text);
+		return TestTrue(TEXT("the file holds a JSON array"), FJsonSerializer::Deserialize(Reader, OutRows));
+	};
+
+	// ── The inline reads are the reference the files must match, and the
+	// shape they return must not have moved.
+	const TSharedPtr<FJsonObject> InlineAll = Read(TEXT("the inline read"), FString(), FString());
+	const TSharedPtr<FJsonObject> InlineFiltered = Read(TEXT("the filtered inline read"), TEXT("alpha"), FString());
+	if (!InlineAll.IsValid() || !InlineFiltered.IsValid()) return false;
+
+	const TArray<TSharedPtr<FJsonValue>>* InlineAllRows = nullptr;
+	const TArray<TSharedPtr<FJsonValue>>* InlineFilteredRows = nullptr;
+	if (!TestTrue(TEXT("the inline read returns rows"), InlineAll->TryGetArrayField(TEXT("rows"), InlineAllRows))) return false;
+	if (!TestTrue(TEXT("the filtered inline read returns rows"), InlineFiltered->TryGetArrayField(TEXT("rows"), InlineFilteredRows))) return false;
+	TestEqual(TEXT("the inline read returns every row"), InlineAllRows->Num(), 3);
+	TestEqual(TEXT("the filter keeps the two matching rows"), InlineFilteredRows->Num(), 2);
+	TestTrue(TEXT("the inline read still lists rowNames"), InlineAll->HasField(TEXT("rowNames")));
+	TestFalse(TEXT("the inline read names no file"), InlineAll->HasField(TEXT("outputPath")));
+
+	// ── A relative outputPath resolves under Saved/, creating the folder, and
+	// the file holds the filtered rows and nothing else.
+	{
+		const FString Requested = DumpFolder / TEXT("filtered.json");
+		const FString Expected = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), Requested));
+		const TSharedPtr<FJsonObject> Written = Read(TEXT("the filtered read to a relative path"), TEXT("alpha"), Requested);
+		if (!Written.IsValid()) return false;
+
+		FString OutputPath;
+		Written->TryGetStringField(TEXT("outputPath"), OutputPath);
+		TestEqual(TEXT("a relative path resolves under Saved/ and comes back absolute"), OutputPath, Expected);
+		TestFalse(TEXT("the rows do not come back inline"), Written->HasField(TEXT("rows")));
+		TestFalse(TEXT("nor does the per-row name list"), Written->HasField(TEXT("rowNames")));
+
+		int32 RowCount = -1;
+		Written->TryGetNumberField(TEXT("rowCount"), RowCount);
+		TestEqual(TEXT("rowCount counts the rows after the filter"), RowCount, 2);
+		int32 TotalRowCount = -1;
+		Written->TryGetNumberField(TEXT("totalRowCount"), TotalRowCount);
+		TestEqual(TEXT("totalRowCount still counts the whole table"), TotalRowCount, 3);
+		FString RowStruct;
+		Written->TryGetStringField(TEXT("rowStruct"), RowStruct);
+		TestEqual(TEXT("rowStruct names the row struct"), RowStruct, FString(TEXT("PerPlatformInt")));
+		int64 Bytes = -1;
+		Written->TryGetNumberField(TEXT("bytes"), Bytes);
+		TestEqual(TEXT("bytes is the size of the file on disk"), Bytes, IFileManager::Get().FileSize(*Expected));
+		TestTrue(TEXT("and the file is not empty"), Bytes > 0);
+
+		TArray<TSharedPtr<FJsonValue>> FileRows;
+		if (LoadRows(Expected, FileRows))
+		{
+			TestEqual(
+				TEXT("the file holds the rows the filtered inline read returned"),
+				CondenseDataTableRows(FileRows),
+				CondenseDataTableRows(*InlineFilteredRows));
+		}
+	}
+
+	// ── An absolute outputPath is used as given, a missing nested folder is
+	// created, and without a filter every row is written.
+	const FString AbsolutePath = DumpDirectory / TEXT("nested") / TEXT("all.json");
+	{
+		const TSharedPtr<FJsonObject> Written = Read(TEXT("the unfiltered read to an absolute path"), FString(), AbsolutePath);
+		if (!Written.IsValid()) return false;
+
+		FString OutputPath;
+		Written->TryGetStringField(TEXT("outputPath"), OutputPath);
+		TestEqual(TEXT("an absolute path is used as given"), OutputPath, AbsolutePath);
+		TestFalse(TEXT("no filteredCount without a filter"), Written->HasField(TEXT("filteredCount")));
+		int32 RowCount = -1;
+		Written->TryGetNumberField(TEXT("rowCount"), RowCount);
+		TestEqual(TEXT("rowCount counts every row"), RowCount, 3);
+
+		TArray<TSharedPtr<FJsonValue>> FileRows;
+		if (LoadRows(AbsolutePath, FileRows))
+		{
+			TestEqual(
+				TEXT("the file holds the rows the inline read returned"),
+				CondenseDataTableRows(FileRows),
+				CondenseDataTableRows(*InlineAllRows));
+		}
+	}
+
+	// ── Writing to the same path again replaces the file rather than
+	// appending to it or refusing.
+	{
+		const TSharedPtr<FJsonObject> Written = Read(TEXT("the second read to the same path"), TEXT("beta"), AbsolutePath);
+		if (!Written.IsValid()) return false;
+
+		TArray<TSharedPtr<FJsonValue>> FileRows;
+		if (LoadRows(AbsolutePath, FileRows))
+		{
+			TestEqual(TEXT("the file now holds only the second read's rows"), FileRows.Num(), 1);
+		}
+	}
+	return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
