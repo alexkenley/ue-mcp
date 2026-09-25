@@ -53,6 +53,8 @@ A parameter the action does not use is reported, not silently dropped:
 
 Either field means the call ran without that parameter. Check the spelling against the action's `Params:` list before trusting the result.
 
+Some actions take their `Params:` list from the handler's own declaration in the plugin rather than from a hand-written one (a pilot on `animation`, listed in `tests/golden/handler-specs.json`). There, `name (or other)` means `other` is an alias the editor renames to `name` before the handler runs. Send one of the two: sent together, the alias is the one ignored, and it comes back in `paramsNotRead`.
+
 #### `timeoutMs`
 
 How long to wait for this call, in milliseconds. Omitted, the wait is 30 seconds, or longer for the actions the editor itself allows longer. Raise it for a large batch, or for an editor busy compiling shaders.

@@ -382,6 +382,16 @@ earlier `save=false` call, and skips the write when nothing is pending. Rollback
 preserves the original call's `save` choice, so undoing a deferred edit does not
 save other pending edits.
 
+## Declaring parameters with a spec
+
+A handler can declare its parameters at registration instead of having them written again in TypeScript (#1057). The mechanism, and how the TS surface is generated from it, is in [Architecture: parameter specs](architecture.md#parameter-specs). What it asks of the handler:
+
+- **Read the declared names, and only those.** The registry renames each alias to its parameter before the handler runs, so a spec'd handler calls `RequireString(Params, TEXT("assetPath"), ...)`, never `RequireStringAlt` with the alias. A second spelling belongs in the spec as `.Alias(TEXT("path"))`.
+- **Read every parameter before anything can fail.** `UE.MCP.Bridge.HandlerSpec.Contract` calls each spec'd handler with every declared parameter pointing at an asset that does not exist, and asserts the read set equals the spec. A parameter read after the asset load is never reached, and fails the test as a declared parameter the handler does not read.
+- **Declare what the handler reads, not what the old surface documented.** Migrating `add_curve` dropped `curveType?`, which the TS side advertised and the handler never read.
+- **Never a routing name.** `action`, `timeoutMs`, `select`, `omit`, `editor` and `toEditor` are refused at registration and again by the generator.
+- **Change a spec, then re-record.** `npm run specs:record` against `tests/ue_mcp`, then `npm run specs:generate`, and commit the recording and the generated module together with the C++.
+
 ## Where the conversion stands
 
 The numbers move every time anyone touches a handler, so the live answer is the audit rather than a table here:

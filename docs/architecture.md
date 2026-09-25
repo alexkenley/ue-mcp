@@ -53,7 +53,7 @@ export const levelTool: ToolDef = categoryTool(
 
 **Two action types:**
 
-- **Bridge actions** (`bp()`) - forwarded to the C++ plugin over WebSocket
+- **Bridge actions** (`bp()`) - forwarded to the C++ plugin over WebSocket. An action whose handler declares a [parameter spec](#parameter-specs) uses `specBp()` instead, and its parameters are generated rather than written here
 - **Local actions** - handled in Node.js (filesystem operations like INI parsing, C++ header reading)
 
 ### Bridge Communication
@@ -107,10 +107,37 @@ On connect the client asks `get_bridge_capabilities`, which the bridge answers o
 | `engineVersion`, `projectName`, `pid`, `port`, `instanceId`, `startedAt` | Which editor answered |
 | `features` | Named capabilities, for asking about one thing rather than a version floor |
 | `actions`, `actionCount` | The method names the running binary actually registered |
+| `handlerSpecs` | The declared parameter contract of every handler registered with one (see [Parameter specs](#parameter-specs)) |
 
 A plugin built before the handshake existed answers `Unknown method`, which the client records as protocol version 1. When the plugin and client versions differ, the client says so once at connect, repeats it on any unknown-method answer (naming both versions and the method), and reports it under `bridgeProtocol` in `project(get_status)`.
 
 `bridgeApiVersion` in `project(get_status)` is read from the header on disk and therefore describes the source; `bridgeProtocol` comes from the running binary. When the two disagree, the deployed plugin has not been rebuilt.
+
+#### Parameter specs
+
+A handler's parameters used to be written twice: read off `Params` in C++, and declared again in the category's zod shape, `Params:` clause and `mapParams`. Nothing bound the two, so a parameter one side had and the other did not was stripped or ignored without an error (#1057). A handler registered with a spec declares them once, in C++:
+
+```cpp
+Registry.RegisterHandler(TEXT("set_montage_slot"), &SetMontageSlot, {
+	MCPParam::Required(TEXT("assetPath"), EMCPParamType::String, TEXT("AnimMontage asset path")).Alias(TEXT("path")),
+	MCPParam::Required(TEXT("slotName"), EMCPParamType::String, TEXT("Slot name to write onto the track")),
+	MCPParam::Optional(TEXT("trackIndex"), EMCPParamType::Integer, TEXT("Slot track index (default 0)")),
+});
+```
+
+From there the contract travels one way:
+
+1. **The registry** validates the spec at registration and refuses the dispatcher's routing names (`action`, `timeoutMs`, `select`, `omit`, `editor`, `toEditor`), a name declared twice, and an item type on anything but an array. A refused spec is logged and dropped; the handler still registers. At dispatch it renames each declared alias to its parameter's name, so the handler reads the declared names only.
+2. **The bridge** publishes every spec in `get_bridge_capabilities.handlerSpecs`, keyed by method.
+3. **`npm run specs:record`** writes that answer from a `tests/ue_mcp` editor to `tests/golden/handler-specs.json`.
+4. **`npm run specs:generate`** renders the recording into `src/tools/specs/<category>.generated.ts`: one zod entry per declared name and alias, and the `Params:` clause of each method.
+5. **The category** declares the action with `specBp(effect, summary, method)`. The summary and the effect are the only things written by hand; there is no `mapParams`, because a rename is an alias in the spec.
+
+The advertised surface always comes from the recording, whether an editor is connected or not, so the startup contract does not depend on which plugin answered. When one is connected, `project(get_status)` compares its `handlerSpecs` against the recording and reports any difference under `deployedPlugin.handlerSpecDrift`.
+
+Three tests hold the chain: `tests/unit/handler-specs.test.ts` (the generated modules are exactly what the recording renders to, every spec'd action takes its clause from the spec, and a key shared with hand-written actions has one type), `tests/live/handler-specs.test.ts` (the running plugin still publishes what was recorded), and the C++ suite's `UE.MCP.Bridge.HandlerSpec.Contract` (each spec'd handler, called with every declared parameter, reads exactly those and nothing else).
+
+`animation` is the pilot. Handlers without a spec, and every other category, are declared by hand as before.
 
 #### Socket and thread ownership
 
