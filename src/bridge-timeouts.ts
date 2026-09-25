@@ -92,6 +92,7 @@ export const REGISTERED_HANDLER_TIMEOUT_SECONDS: Readonly<Record<string, number>
   recreate_physics_state: 300,
   refresh_landscape_physical_material_collision: 600,
   remove_components_by_class: 300,
+  render_sequence_frames: 600,
   rerun_construction_scripts: 300,
   run_automation_tests: 300,
   sculpt_landscape: 120,

@@ -60,7 +60,8 @@ const BASELINE = {
   // non-zero, because a rollback is not always possible and pretending
   // otherwise would mean emitting inverses that do not invert. What is not
   // allowed is silence: see mutationsSilentOnRollback.
-  mutationsWithoutRollback: 127,
+  // 128: render_sequence_frames writes files, which nothing can delete (#1098).
+  mutationsWithoutRollback: 128,
   // Zero, and held there by a flat assertion. Every mutation with no inverse
   // now says so in its own result body with the reason, which is the half a
   // caller can act on.
