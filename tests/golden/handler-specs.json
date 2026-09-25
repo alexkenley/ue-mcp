@@ -1,67 +1,6 @@
 {
-  "handlerCount": 129,
+  "handlerCount": 34,
   "handlers": {
-    "add_blueprint_interface": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "blueprintPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path"
-        },
-        {
-          "name": "interfacePath",
-          "type": "string",
-          "required": true,
-          "description": "Interface class path"
-        }
-      ]
-    },
-    "add_component": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "componentClass",
-          "type": "string",
-          "required": true,
-          "description": "Component class: a short name such as ChildActorComponent, or a full path"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "Name of the new component (default: componentClass)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) reports the existing entry; error refuses"
-        },
-        {
-          "name": "parentComponent",
-          "type": "string",
-          "required": false,
-          "description": "SCS parent component for the hierarchy"
-        },
-        {
-          "name": "childActorClass",
-          "type": "string",
-          "required": false,
-          "description": "ChildActorClass for an added ChildActorComponent: a Blueprint path with or without _C, or a C++ class"
-        }
-      ]
-    },
     "add_curve": {
       "category": "animation",
       "params": [
@@ -82,269 +21,86 @@
         }
       ]
     },
-    "add_custom_event": {
-      "category": "blueprint",
+    "add_foliage_instances": {
+      "category": "foliage",
       "params": [
         {
-          "name": "assetPath",
+          "name": "foliageTypePath",
           "type": "string",
           "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
+          "description": "FoliageType asset path, or the name of a type already placed in the open level"
         },
         {
-          "name": "eventName",
-          "type": "string",
-          "required": true,
-          "description": "Custom event name"
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "parameters",
+          "name": "transforms",
           "type": "array",
           "required": false,
-          "description": "Typed signature parameters [{name, type}]; type takes the add_variable vocabulary, containers included",
+          "description": "Place one instance per entry at exactly {location, rotation?, scale?}",
           "items": "object"
         },
         {
-          "name": "netMode",
-          "type": "string",
+          "name": "center",
+          "type": "vec3",
           "required": false,
-          "description": "none (default), multicast, server or client"
+          "description": "Centre of the scatter disc"
         },
         {
-          "name": "reliable",
-          "type": "boolean",
-          "required": false,
-          "description": "Send the replicated event reliably (default true; ignored when netMode is none)"
-        },
-        {
-          "name": "callInEditor",
-          "type": "boolean",
-          "required": false,
-          "description": "Expose a details-panel button that runs it on a selected instance"
-        },
-        {
-          "name": "posX",
+          "name": "radius",
           "type": "number",
           "required": false,
-          "description": "Node X position in the graph"
+          "description": "Scatter disc radius in centimetres"
         },
         {
-          "name": "posY",
-          "type": "number",
+          "name": "count",
+          "type": "integer",
           "required": false,
-          "description": "Node Y position in the graph"
-        }
-      ]
-    },
-    "add_event_dispatcher": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "blueprintPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path"
+          "description": "Instances to scatter over the disc"
         },
         {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Dispatcher name"
-        },
-        {
-          "name": "parameters",
-          "type": "array",
+          "name": "seed",
+          "type": "integer",
           "required": false,
-          "description": "Typed signature parameters [{name, type}]; type takes the add_variable vocabulary, containers included",
-          "items": "object"
-        }
-      ]
-    },
-    "add_function_parameter": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
+          "description": "Random seed for scatter placement (default 0)"
         },
         {
-          "name": "functionName",
-          "type": "string",
-          "required": true,
-          "description": "Function name"
-        },
-        {
-          "name": "parameterName",
-          "type": "string",
-          "required": true,
-          "description": "Parameter name"
-        },
-        {
-          "name": "parameterType",
-          "type": "string",
-          "required": false,
-          "description": "Parameter type in the add_variable vocabulary, containers included (default float)"
-        },
-        {
-          "name": "isOutput",
+          "name": "projectToGround",
           "type": "boolean",
           "required": false,
-          "description": "An output parameter rather than an input (default false)"
+          "description": "Trace each candidate onto the geometry beneath it (default true)"
+        },
+        {
+          "name": "traceUp",
+          "type": "number",
+          "required": false,
+          "description": "How far above each candidate the ground trace starts, in centimetres (default 10000)"
+        },
+        {
+          "name": "traceDown",
+          "type": "number",
+          "required": false,
+          "description": "How far below each candidate the ground trace ends, in centimetres (default 100000)"
+        },
+        {
+          "name": "applyTypeRules",
+          "type": "boolean",
+          "required": false,
+          "description": "Apply the FoliageType's own scale, rotation, align, slope, height and collision rules (default true)"
+        },
+        {
+          "name": "skipCollision",
+          "type": "boolean",
+          "required": false,
+          "description": "Skip the type's CollisionWithWorld test (default false)"
         }
       ]
     },
-    "add_local_variable": {
-      "category": "blueprint",
+    "add_foliage_type_to_level": {
+      "category": "foliage",
       "params": [
         {
-          "name": "assetPath",
+          "name": "foliageTypePath",
           "type": "string",
           "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "functionName",
-          "type": "string",
-          "required": true,
-          "description": "Function name"
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Variable name"
-        },
-        {
-          "name": "varType",
-          "type": "string",
-          "required": false,
-          "description": "Variable type: bool, int, float, string, name, text, byte, vector, rotator, transform, object:/Script/Module.Class, struct:/Game/Path, enum:/Game/Path.Enum, or a container over any of those (Type[], set<Type>, map<Key,Value>)",
-          "aliases": [
-            "type"
-          ]
-        }
-      ]
-    },
-    "add_node": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "nodeClass",
-          "type": "string",
-          "required": true,
-          "description": "Node class or short alias such as CallFunction, CallParent or CustomEvent"
-        },
-        {
-          "name": "nodeParams",
-          "type": "object",
-          "required": false,
-          "description": "Node-specific settings, such as functionName and className for a CallFunction node"
-        }
-      ]
-    },
-    "add_timeline_track": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "timelineName",
-          "type": "string",
-          "required": true,
-          "description": "Timeline name"
-        },
-        {
-          "name": "trackName",
-          "type": "string",
-          "required": true,
-          "description": "Track name within the timeline"
-        },
-        {
-          "name": "trackType",
-          "type": "string",
-          "required": false,
-          "description": "float (default), vector, color or event"
-        },
-        {
-          "name": "keyframes",
-          "type": "array",
-          "required": false,
-          "description": "[{time, value}]: value is a number for float and event, {x,y,z} for vector, {r,g,b,a} for color",
-          "items": "object"
-        }
-      ]
-    },
-    "add_variable": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Variable name"
-        },
-        {
-          "name": "varType",
-          "type": "string",
-          "required": false,
-          "description": "Variable type: bool, int, float, string, name, text, byte, vector, rotator, transform, object:/Script/Module.Class, struct:/Game/Path, enum:/Game/Path.Enum, or a container over any of those (Type[], set<Type>, map<Key,Value>)",
-          "aliases": [
-            "type"
-          ]
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) reports the existing entry; error refuses"
+          "description": "FoliageType asset path"
         }
       ]
     },
@@ -371,1284 +127,190 @@
         }
       ]
     },
-    "audit_blueprint_dead_code": {
-      "category": "blueprint",
+    "batch_set_foliage_settings_where": {
+      "category": "foliage",
       "params": [
         {
-          "name": "directory",
-          "type": "string",
-          "required": false,
-          "description": "Content path to search under (default /Game)"
-        },
-        {
-          "name": "assetPaths",
-          "type": "array",
-          "required": false,
-          "description": "Blueprint asset paths; a World path resolves to its level script",
-          "items": "string"
-        },
-        {
-          "name": "recursive",
-          "type": "boolean",
-          "required": false,
-          "description": "Include subfolders of directory (default true)"
-        },
-        {
-          "name": "includeLevelScripts",
-          "type": "boolean",
-          "required": false,
-          "description": "Also sweep the level script Blueprint of every map under the directory, at a full map load each (default false)"
-        },
-        {
-          "name": "scanReferencers",
-          "type": "boolean",
-          "required": false,
-          "description": "Also scan every Blueprint package that depends on an audited one for references (default true)"
-        },
-        {
-          "name": "maxBlueprints",
-          "type": "integer",
-          "required": false,
-          "description": "Cap on Blueprints loaded (default 2000)"
-        },
-        {
-          "name": "maxSamples",
-          "type": "integer",
-          "required": false,
-          "description": "Samples listed per finding kind per Blueprint (default 20, max 500); counts stay complete"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows to return (default 200, max 5000)"
-        },
-        {
-          "name": "dumpToFile",
-          "type": "boolean",
-          "required": false,
-          "description": "Write the whole result to a JSON file instead of returning it inline"
-        },
-        {
-          "name": "outputPath",
-          "type": "string",
-          "required": false,
-          "description": "Absolute or Saved-relative JSON path for the dump"
-        }
-      ]
-    },
-    "auto_layout_graph": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "columnGap",
-          "type": "integer",
-          "required": false,
-          "description": "Horizontal spacing between columns (default 360)"
-        },
-        {
-          "name": "rowGap",
-          "type": "integer",
-          "required": false,
-          "description": "Vertical spacing between rows (default 200)"
-        },
-        {
-          "name": "previousPositionsLimit",
-          "type": "integer",
-          "required": false,
-          "description": "Capture each node's pre-layout coordinates only when the graph has at most this many nodes (default 200)"
-        },
-        {
-          "name": "capturePreviousPositions",
-          "type": "boolean",
-          "required": false,
-          "description": "Capture previousPositions regardless of previousPositionsLimit (default false)"
-        }
-      ]
-    },
-    "chooser_add_column": {
-      "category": "chooser",
-      "params": [
-        {
-          "name": "table",
-          "type": "string",
-          "required": true,
-          "description": "ChooserTable asset path, e.g. /Game/Path/CT_Locomotion",
-          "aliases": [
-            "assetPath"
-          ]
-        },
-        {
-          "name": "columnType",
-          "type": "string",
-          "required": true,
-          "description": "Chooser column struct short name (EnumColumn, BoolColumn, FloatRangeColumn, GameplayTagColumn, ObjectColumn, Output*Column and so on)"
-        },
-        {
-          "name": "inputStruct",
-          "type": "string",
-          "required": false,
-          "description": "Parameter struct to bind the column input (e.g. EnumContextProperty, BoolContextProperty)"
-        },
-        {
-          "name": "boundProperty",
-          "type": "string",
-          "required": false,
-          "description": "Context property name the column reads at evaluation time"
-        },
-        {
-          "name": "enumPath",
-          "type": "string",
-          "required": false,
-          "description": "Enum asset path for an EnumColumn"
-        }
-      ]
-    },
-    "chooser_add_row": {
-      "category": "chooser",
-      "params": [
-        {
-          "name": "table",
-          "type": "string",
-          "required": true,
-          "description": "ChooserTable asset path, e.g. /Game/Path/CT_Locomotion",
-          "aliases": [
-            "assetPath"
-          ]
-        },
-        {
-          "name": "output",
-          "type": "string",
-          "required": false,
-          "description": "Output asset path for the row (a PoseSearchDatabase, a nested ChooserTable, etc.)"
-        },
-        {
-          "name": "outputType",
-          "type": "string",
-          "required": false,
-          "description": "Output wrapper: 'asset' (hard ref, default) | 'soft_asset' | 'evaluate' (nested ChooserTable reference)"
-        },
-        {
-          "name": "cells",
-          "type": "array",
-          "required": false,
-          "description": "Per-column cell values aligned to column order; each is struct text like '(Value=2)', or a string, number or boolean. null leaves a column at its default"
-        },
-        {
-          "name": "inputs",
+          "name": "settings",
           "type": "object",
-          "required": false,
-          "description": "Cell values keyed by column index (as string) or column name; same value format as cells"
-        }
-      ]
-    },
-    "chooser_delete_row": {
-      "category": "chooser",
-      "params": [
-        {
-          "name": "table",
-          "type": "string",
           "required": true,
-          "description": "ChooserTable asset path, e.g. /Game/Path/CT_Locomotion",
-          "aliases": [
-            "assetPath"
-          ]
+          "description": "Property name to value, dotted paths supported"
         },
         {
-          "name": "index",
-          "type": "integer",
-          "required": true,
-          "description": "Row index, 0-based"
-        }
-      ]
-    },
-    "chooser_describe": {
-      "category": "chooser",
-      "params": [
-        {
-          "name": "table",
-          "type": "string",
-          "required": true,
-          "description": "ChooserTable asset path, e.g. /Game/Path/CT_Locomotion",
-          "aliases": [
-            "assetPath"
-          ]
-        }
-      ]
-    },
-    "chooser_list_object_references": {
-      "category": "chooser",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "ChooserTable asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "classFilter",
-          "type": "string",
-          "required": false,
-          "description": "Only references whose target class matches (substring)"
-        },
-        {
-          "name": "pathFilter",
-          "type": "string",
-          "required": false,
-          "description": "Substring filter on the referenced object path"
-        }
-      ]
-    },
-    "chooser_list_rows": {
-      "category": "chooser",
-      "params": [
-        {
-          "name": "table",
-          "type": "string",
-          "required": true,
-          "description": "ChooserTable asset path, e.g. /Game/Path/CT_Locomotion",
-          "aliases": [
-            "assetPath"
-          ]
-        }
-      ]
-    },
-    "chooser_remap_object_references": {
-      "category": "chooser",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "ChooserTable asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "from",
-          "type": "string",
-          "required": false,
-          "description": "Exact object path to replace (with to)"
-        },
-        {
-          "name": "to",
-          "type": "string",
-          "required": false,
-          "description": "Replacement object path (with from)"
-        },
-        {
-          "name": "fromPrefix",
-          "type": "string",
-          "required": false,
-          "description": "Path prefix to rewrite, e.g. /Game/Vendor/ (with toPrefix)"
-        },
-        {
-          "name": "toPrefix",
-          "type": "string",
-          "required": false,
-          "description": "Replacement prefix, e.g. /Game/MyProject/ (with fromPrefix)"
-        },
-        {
-          "name": "dryRun",
-          "type": "boolean",
-          "required": false,
-          "description": "Preview without writing (default true)"
-        },
-        {
-          "name": "allowMissing",
-          "type": "boolean",
-          "required": false,
-          "description": "Write a soft reference even when the target does not exist yet (default false)"
-        }
-      ]
-    },
-    "chooser_set_row": {
-      "category": "chooser",
-      "params": [
-        {
-          "name": "table",
-          "type": "string",
-          "required": true,
-          "description": "ChooserTable asset path, e.g. /Game/Path/CT_Locomotion",
-          "aliases": [
-            "assetPath"
-          ]
-        },
-        {
-          "name": "index",
-          "type": "integer",
-          "required": true,
-          "description": "Row index, 0-based"
-        },
-        {
-          "name": "output",
-          "type": "string",
-          "required": false,
-          "description": "Output asset path for the row (a PoseSearchDatabase, a nested ChooserTable, etc.)"
-        },
-        {
-          "name": "outputType",
-          "type": "string",
-          "required": false,
-          "description": "Output wrapper: 'asset' (hard ref, default) | 'soft_asset' | 'evaluate' (nested ChooserTable reference)"
-        },
-        {
-          "name": "disabled",
-          "type": "boolean",
-          "required": false,
-          "description": "Enable or disable the row without deleting it"
-        },
-        {
-          "name": "cells",
-          "type": "array",
-          "required": false,
-          "description": "Per-column cell values aligned to column order; each is struct text like '(Value=2)', or a string, number or boolean. null leaves a column at its default"
-        },
-        {
-          "name": "inputs",
-          "type": "object",
-          "required": false,
-          "description": "Cell values keyed by column index (as string) or column name; same value format as cells"
-        }
-      ]
-    },
-    "cleanup_graph": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph to clean (default: every graph)"
-        }
-      ]
-    },
-    "compile_blueprint": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "compile_blueprints": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPaths",
+          "name": "where",
           "type": "array",
           "required": true,
-          "description": "Blueprint asset paths to compile",
-          "items": "string"
-        },
-        {
-          "name": "save",
-          "type": "boolean",
-          "required": false,
-          "description": "Persist on success (default true)"
-        }
-      ]
-    },
-    "connect_pins": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "graphSelector",
-          "type": "string",
-          "required": false,
-          "description": "The exact selector list_graphs reports, which separates two graphs sharing a name. Wins over graphName"
-        },
-        {
-          "name": "sourceNodeId",
-          "type": "string",
-          "required": true,
-          "description": "Source node GUID, as get_connections and find_nodes report it, or its title",
-          "aliases": [
-            "sourceNode"
-          ]
-        },
-        {
-          "name": "sourcePin",
-          "type": "string",
-          "required": true,
-          "description": "Source pin name",
-          "aliases": [
-            "sourcePinName"
-          ]
-        },
-        {
-          "name": "targetNodeId",
-          "type": "string",
-          "required": true,
-          "description": "Target node GUID, as get_connections and find_nodes report it, or its title",
-          "aliases": [
-            "targetNode"
-          ]
-        },
-        {
-          "name": "targetPin",
-          "type": "string",
-          "required": true,
-          "description": "Target pin name",
-          "aliases": [
-            "targetPinName"
-          ]
-        },
-        {
-          "name": "breakExistingSource",
-          "type": "boolean",
-          "required": false,
-          "description": "Break every existing link on the source pin first"
-        },
-        {
-          "name": "breakExistingTarget",
-          "type": "boolean",
-          "required": false,
-          "description": "Break every existing link on the target pin first"
-        }
-      ]
-    },
-    "connect_pins_batch": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "connections",
-          "type": "array",
-          "required": true,
-          "description": "[{sourceNode, sourcePin, targetNode, targetPin}]",
-          "items": "object"
-        }
-      ]
-    },
-    "create_function": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "functionName",
-          "type": "string",
-          "required": true,
-          "description": "Function name"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) reports the existing entry; error refuses"
-        }
-      ]
-    },
-    "create_macro": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "macroName",
-          "type": "string",
-          "required": true,
-          "description": "Macro graph name"
-        },
-        {
-          "name": "inputs",
-          "type": "array",
-          "required": false,
-          "description": "Input parameters [{name, type}]",
+          "description": "Predicate over each type's current values: [{field, op, value}]",
           "items": "object"
         },
         {
-          "name": "outputs",
+          "name": "whereMode",
+          "type": "string",
+          "required": false,
+          "description": "all (default) | any"
+        },
+        {
+          "name": "foliageTypePaths",
           "type": "array",
           "required": false,
-          "description": "Output parameters [{name, type}]",
-          "items": "object"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default) reports the existing entry; error refuses"
-        }
-      ]
-    },
-    "delete_function": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "functionName",
-          "type": "string",
-          "required": true,
-          "description": "Function name"
-        }
-      ]
-    },
-    "delete_graph": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "graphSelector",
-          "type": "string",
-          "required": false,
-          "description": "The exact selector list_graphs reports, which separates two graphs sharing a name. Wins over graphName"
-        },
-        {
-          "name": "force",
-          "type": "boolean",
-          "required": false,
-          "description": "Remove a graph still owned by a live node, or an event graph; both are refused without it"
-        }
-      ]
-    },
-    "delete_macro": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "macroName",
-          "type": "string",
-          "required": true,
-          "description": "Macro graph name"
-        }
-      ]
-    },
-    "delete_node": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "graphSelector",
-          "type": "string",
-          "required": false,
-          "description": "The exact selector list_graphs reports, which separates two graphs sharing a name. Wins over graphName"
-        },
-        {
-          "name": "nodeId",
-          "type": "string",
-          "required": true,
-          "description": "Node GUID, as get_connections and find_nodes report it, or the node name",
-          "aliases": [
-            "nodeName"
-          ]
-        }
-      ]
-    },
-    "delete_variable": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Variable name"
-        }
-      ]
-    },
-    "demo_get_steps": {
-      "category": "demo",
-      "params": []
-    },
-    "demo_step": {
-      "category": "demo",
-      "params": [
-        {
-          "name": "step",
-          "type": "integer",
-          "required": false,
-          "description": "Step index to execute, 1 to 19. Omit for the step list",
-          "aliases": [
-            "stepIndex"
-          ]
-        }
-      ]
-    },
-    "disconnect_pins": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "graphSelector",
-          "type": "string",
-          "required": false,
-          "description": "The exact selector list_graphs reports, which separates two graphs sharing a name. Wins over graphName"
-        },
-        {
-          "name": "nodeId",
-          "type": "string",
-          "required": true,
-          "description": "Node GUID, as get_connections and find_nodes report it, or the node name",
-          "aliases": [
-            "nodeName"
-          ]
-        },
-        {
-          "name": "pinName",
-          "type": "string",
-          "required": true,
-          "description": "The pin whose links are broken"
-        },
-        {
-          "name": "linkedNodeId",
-          "type": "string",
-          "required": false,
-          "description": "Break only links to this node (GUID or name). Omit to break every link on the pin"
-        },
-        {
-          "name": "linkedPinName",
-          "type": "string",
-          "required": false,
-          "description": "With linkedNodeId, break only the link to this pin"
-        }
-      ]
-    },
-    "duplicate_blueprint": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "sourcePath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset to duplicate"
-        },
-        {
-          "name": "destinationPath",
-          "type": "string",
-          "required": true,
-          "description": "Full destination asset path"
-        }
-      ]
-    },
-    "edit_graph_parameters": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "op",
-          "type": "string",
-          "required": true,
-          "description": "add, remove, rename, set_type, set_default or reorder"
-        },
-        {
-          "name": "functionName",
-          "type": "string",
-          "required": false,
-          "description": "Function, macro or dispatcher signature to edit; name exactly one of functionName and eventName"
-        },
-        {
-          "name": "eventName",
-          "type": "string",
-          "required": false,
-          "description": "Custom event to edit"
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Narrows an eventName search to one graph"
-        },
-        {
-          "name": "isOutput",
-          "type": "boolean",
-          "required": false,
-          "description": "Edit the return side (default false)"
-        },
-        {
-          "name": "parameterName",
-          "type": "string",
-          "required": false,
-          "description": "Parameter to act on"
-        },
-        {
-          "name": "parameterType",
-          "type": "string",
-          "required": false,
-          "description": "Type in the add_variable vocabulary, for add and set_type"
-        },
-        {
-          "name": "newName",
-          "type": "string",
-          "required": false,
-          "description": "New name, for rename"
-        },
-        {
-          "name": "defaultValue",
-          "type": "any",
-          "required": false,
-          "description": "Default value as Unreal export text; an empty string clears it"
-        },
-        {
-          "name": "order",
-          "type": "array",
-          "required": false,
-          "description": "The COMPLETE desired order, never a partial list"
-        }
-      ]
-    },
-    "edit_local_variable": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "functionName",
-          "type": "string",
-          "required": true,
-          "description": "Function name"
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Variable name"
-        },
-        {
-          "name": "op",
-          "type": "string",
-          "required": true,
-          "description": "rename, remove, set_type or set_default"
-        },
-        {
-          "name": "newName",
-          "type": "string",
-          "required": false,
-          "description": "New name, for rename"
-        },
-        {
-          "name": "varType",
-          "type": "string",
-          "required": false,
-          "description": "Variable type: bool, int, float, string, name, text, byte, vector, rotator, transform, object:/Script/Module.Class, struct:/Game/Path, enum:/Game/Path.Enum, or a container over any of those (Type[], set<Type>, map<Key,Value>)",
-          "aliases": [
-            "type"
-          ]
-        },
-        {
-          "name": "defaultValue",
-          "type": "any",
-          "required": false,
-          "description": "Default value as Unreal export text; an empty string clears it"
-        }
-      ]
-    },
-    "edit_struct_metadata": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "UserDefinedStruct asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "tooltip",
-          "type": "string",
-          "required": false,
-          "description": "Tooltip"
-        },
-        {
-          "name": "fields",
-          "type": "array",
-          "required": false,
-          "description": "[{fieldName or fieldGuid, tooltip?, editableOnInstance?, saveGame?, multiLineText?, widget3D?, metadata?}]",
-          "items": "object"
-        }
-      ]
-    },
-    "export_blueprint_batch": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPaths",
-          "type": "array",
-          "required": false,
-          "description": "Blueprint asset paths; a World path resolves to its level script",
+          "description": "Explicit FoliageType asset paths",
           "items": "string"
         },
         {
           "name": "directory",
           "type": "string",
           "required": false,
-          "description": "Content path to search under (default /Game)"
+          "description": "Content directory to scan for FoliageType assets"
         },
         {
           "name": "recursive",
           "type": "boolean",
           "required": false,
-          "description": "Include subfolders of directory (default true)"
+          "description": "Scan directory recursively (default true)"
         },
         {
-          "name": "parentClass",
-          "type": "string",
-          "required": false,
-          "description": "Only Blueprints deriving from this class"
-        },
-        {
-          "name": "includeLevelScripts",
+          "name": "fromLevel",
           "type": "boolean",
           "required": false,
-          "description": "Also sweep the level script Blueprint of every map under the directory, at a full map load each (default false)"
-        },
-        {
-          "name": "outputDir",
-          "type": "string",
-          "required": false,
-          "description": "Absolute directory, or one relative to Saved/ (default Saved/UE_MCP/BlueprintExport)"
-        },
-        {
-          "name": "maxAssets",
-          "type": "integer",
-          "required": false,
-          "description": "Cap on Blueprints exported (default 200, max 5000)"
-        },
-        {
-          "name": "includeT3D",
-          "type": "boolean",
-          "required": false,
-          "description": "Also write one T3D file per graph (default false)"
-        }
-      ]
-    },
-    "export_nodes_t3d": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "nodeIds",
-          "type": "array",
-          "required": false,
-          "description": "Node GUIDs or names to export (omit for the whole graph)",
-          "items": "string"
-        }
-      ]
-    },
-    "flush_blueprint_component_templates": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "flush_inheritable_component_handler": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "get_blueprint_component_property": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": true,
-          "description": "SCS or inherited component name"
-        },
-        {
-          "name": "propertyName",
-          "type": "string",
-          "required": true,
-          "description": "Property name"
-        }
-      ]
-    },
-    "get_blueprint_connections": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "graphSelector",
-          "type": "string",
-          "required": false,
-          "description": "The exact selector list_graphs reports, which separates two graphs sharing a name. Wins over graphName"
-        },
-        {
-          "name": "nodeId",
-          "type": "string",
-          "required": false,
-          "description": "Report only the edges into and out of this node (GUID or name)"
-        },
-        {
-          "name": "kind",
-          "type": "string",
-          "required": false,
-          "description": "exec, data or all (default all)"
-        },
-        {
-          "name": "includeNestedGraphs",
-          "type": "boolean",
-          "required": false,
-          "description": "Also walk collapsed and nested graphs (default true)"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows to return on this page (default 200, max 1000)"
-        }
-      ]
-    },
-    "get_blueprint_dependencies": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "reverse",
-          "type": "boolean",
-          "required": false,
-          "description": "true reports the referencers of this asset instead"
-        }
-      ]
-    },
-    "get_blueprint_execution_flow": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "entryPoint",
-          "type": "string",
-          "required": false,
-          "description": "Event or function name to start the exec-flow trace from"
-        }
-      ]
-    },
-    "get_blueprint_variable_default": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Variable name"
-        }
-      ]
-    },
-    "get_blueprint_variable_metadata": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Variable name"
-        },
-        {
-          "name": "functionName",
-          "type": "string",
-          "required": false,
-          "description": "The function owning a local variable; omit for a member variable"
-        }
-      ]
-    },
-    "get_cdo_properties": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "className",
-          "type": "string",
-          "required": true,
-          "description": "C++ class name or path"
+          "description": "Take the foliage types placed in the open level"
         },
         {
           "name": "propertyNames",
           "type": "array",
           "required": false,
-          "description": "Property names to read (omit for all)",
+          "description": "Extra properties to report on each row without filtering on them",
           "items": "string"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Preview without writing (default TRUE)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save each changed FoliageType package (default true)"
+        },
+        {
+          "name": "maxTypes",
+          "type": "integer",
+          "required": false,
+          "description": "Refuse to scan more than this many types (default 2000)"
         }
       ]
     },
-    "get_component_collision": {
-      "category": "blueprint",
+    "clear_procedural_foliage": {
+      "category": "foliage",
       "params": [
         {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint path, or a native class (/Script/MyGame.MyCharacter or MyCharacter)",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": true,
-          "description": "Component whose effective collision to read"
-        },
-        {
-          "name": "channel",
+          "name": "actorLabel",
           "type": "string",
           "required": false,
-          "description": "Narrow the answer to one collision channel: its configured name, the C++ enumerator, or the container index"
+          "description": "Label of a ProceduralFoliageVolume, or of any actor with a ProceduralFoliageComponent"
         },
         {
-          "name": "includeAllChannels",
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Object path of that actor"
+        },
+        {
+          "name": "spawnerPath",
+          "type": "string",
+          "required": false,
+          "description": "Clear every volume in the open level bound to this ProceduralFoliageSpawner"
+        }
+      ]
+    },
+    "create_foliage_type": {
+      "category": "foliage",
+      "params": [
+        {
+          "name": "meshPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh the foliage type places"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Asset name (default FT_<mesh name>)"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Content folder for the asset (default /Game/Foliage)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "When the asset already exists: skip (default) | error"
+        },
+        {
+          "name": "settings",
+          "type": "object",
+          "required": false,
+          "description": "Property name to value, applied to the new FoliageType"
+        }
+      ]
+    },
+    "get_foliage_instances": {
+      "category": "foliage",
+      "params": [
+        {
+          "name": "foliageTypePath",
+          "type": "string",
+          "required": false,
+          "description": "FoliageType asset path, or the name of a type already placed in the open level"
+        },
+        {
+          "name": "center",
+          "type": "vec3",
+          "required": false,
+          "description": "Centre of the filter sphere"
+        },
+        {
+          "name": "radius",
+          "type": "number",
+          "required": false,
+          "description": "Filter sphere radius in centimetres"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Maximum instances to return (default 200, max 20000)"
+        },
+        {
+          "name": "startIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Skip this many matching instances first"
+        },
+        {
+          "name": "includeTransforms",
           "type": "boolean",
           "required": false,
-          "description": "Include the unused GameTraceChannel slots (default false)"
+          "description": "Return each instance's location, rotation and scale (default true)"
+        }
+      ]
+    },
+    "get_foliage_type_settings": {
+      "category": "foliage",
+      "params": [
+        {
+          "name": "foliageTypePath",
+          "type": "string",
+          "required": true,
+          "description": "FoliageType asset path",
+          "aliases": [
+            "foliageTypeName"
+          ]
         }
       ]
     },
@@ -1676,92 +338,6 @@
           "description": "SkeletalMesh asset path",
           "aliases": [
             "path"
-          ]
-        }
-      ]
-    },
-    "import_nodes_t3d": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "t3d",
-          "type": "string",
-          "required": true,
-          "description": "T3D blob from export_nodes_t3d, or copied from the Blueprint graph editor",
-          "aliases": [
-            "text"
-          ]
-        },
-        {
-          "name": "posX",
-          "type": "number",
-          "required": false,
-          "description": "Re-center pasted nodes around this X (with posY)"
-        },
-        {
-          "name": "posY",
-          "type": "number",
-          "required": false,
-          "description": "Re-center pasted nodes around this Y (with posX)"
-        }
-      ]
-    },
-    "inspect_save_game": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "slotName",
-          "type": "string",
-          "required": true,
-          "description": "Logical save slot name, a plain filename without a path"
-        },
-        {
-          "name": "userIndex",
-          "type": "integer",
-          "required": false,
-          "description": "Platform user index (default 0)"
-        }
-      ]
-    },
-    "is_class_loaded": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "className",
-          "type": "string",
-          "required": true,
-          "description": "Class to probe: short name, /Script/Module.Class, or a Blueprint class path",
-          "aliases": [
-            "class"
-          ]
-        }
-      ]
-    },
-    "is_module_loaded": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "moduleName",
-          "type": "string",
-          "required": true,
-          "description": "Module name to probe",
-          "aliases": [
-            "module"
           ]
         }
       ]
@@ -1794,24 +370,9 @@
         }
       ]
     },
-    "list_blueprint_functions": {
-      "category": "blueprint",
+    "list_foliage_types": {
+      "category": "foliage",
       "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "includeInherited",
-          "type": "boolean",
-          "required": false,
-          "description": "Append overridable parent and interface functions this Blueprint has not implemented (default false)"
-        },
         {
           "name": "cursor",
           "type": "string",
@@ -1822,312 +383,7 @@
           "name": "limit",
           "type": "integer",
           "required": false,
-          "description": "Rows to return on this page (default 200, max 2000)"
-        }
-      ]
-    },
-    "list_blueprint_graphs": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "list_blueprint_interfaces": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "blueprintPath"
-          ]
-        }
-      ]
-    },
-    "list_blueprint_variables": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "includeValues",
-          "type": "boolean",
-          "required": false,
-          "description": "Also resolve each variable's default off the generated-class CDO, and report whether the package holds unsaved changes (default false)"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows to return on this page (default 200, max 2000)"
-        }
-      ]
-    },
-    "list_classes": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "parentFilter",
-          "type": "string",
-          "required": false,
-          "description": "List classes deriving from this one; with or without the C++ A/U/F/E prefix"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows to return on this page (default 100, max 1000)"
-        }
-      ]
-    },
-    "list_event_dispatchers": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "blueprintPath"
-          ]
-        }
-      ]
-    },
-    "list_gameplay_tags": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "filter",
-          "type": "string",
-          "required": false,
-          "description": "Only tags starting with this prefix"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows to return on this page (default 500, max 5000)"
-        }
-      ]
-    },
-    "list_graph_parameters": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "functionName",
-          "type": "string",
-          "required": false,
-          "description": "Function, macro or dispatcher signature to read; name exactly one of functionName and eventName"
-        },
-        {
-          "name": "eventName",
-          "type": "string",
-          "required": false,
-          "description": "Custom event to read"
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Narrows an eventName search to one graph"
-        }
-      ]
-    },
-    "list_loaded_modules": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "filter",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring of the module name"
-        },
-        {
-          "name": "loadedOnly",
-          "type": "boolean",
-          "required": false,
-          "description": "Only modules that are loaded (default false)"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows to return on this page (default 500, max 5000)"
-        }
-      ]
-    },
-    "list_local_variables": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "functionName",
-          "type": "string",
-          "required": true,
-          "description": "Function name"
-        }
-      ]
-    },
-    "list_node_types": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "category",
-          "type": "string",
-          "required": false,
-          "description": "Node category: utilities (default), math, string, gameplay, actor and so on"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows to return on this page (default 100, max 1000)"
-        }
-      ]
-    },
-    "list_overridable_functions": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "list_structs": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "package",
-          "type": "string",
-          "required": false,
-          "description": "Narrow to one package or content folder: /Script/Engine, a bare module name (Engine), or /Game/Data"
-        },
-        {
-          "name": "filter",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring of the struct name or cppName"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows to return on this page (default 200, max 5000)"
-        }
-      ]
-    },
-    "override_function": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "functionName",
-          "type": "string",
-          "required": true,
-          "description": "Function name"
-        },
-        {
-          "name": "source",
-          "type": "string",
-          "required": false,
-          "description": "Advisory hint for where the function comes from: auto (default), interface or parent. Echoed back"
-        },
-        {
-          "name": "preferFunction",
-          "type": "boolean",
-          "required": false,
-          "description": "Force the function-graph form even when the function could be placed as an override event"
-        },
-        {
-          "name": "interfacePath",
-          "type": "string",
-          "required": false,
-          "description": "Implement this interface first when it is not present"
+          "description": "Rows on this page (default 200, max 2000)"
         }
       ]
     },
@@ -2193,132 +449,6 @@
         }
       ]
     },
-    "read_blueprint": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "includeComponentProperties",
-          "type": "boolean",
-          "required": false,
-          "description": "Dump UPROPERTY name, type and value per component template (default false)"
-        }
-      ]
-    },
-    "read_blueprint_graph": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "offset",
-          "type": "integer",
-          "required": false,
-          "description": "Row offset into the (filtered) node list"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Nodes to return; omit for a safe default page, or dump the whole graph with dumpToFile"
-        },
-        {
-          "name": "includePins",
-          "type": "boolean",
-          "required": false,
-          "description": "Include pins (default true)"
-        },
-        {
-          "name": "includeDefaults",
-          "type": "boolean",
-          "required": false,
-          "description": "Include pin default values (default true)"
-        },
-        {
-          "name": "includeComments",
-          "type": "boolean",
-          "required": false,
-          "description": "Include node comments (default true)"
-        },
-        {
-          "name": "dumpToFile",
-          "type": "boolean",
-          "required": false,
-          "description": "Write the whole result to a JSON file instead of returning it inline"
-        },
-        {
-          "name": "outputPath",
-          "type": "string",
-          "required": false,
-          "description": "Absolute or Saved-relative JSON path for the dump"
-        },
-        {
-          "name": "titleFilter",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring match on node title"
-        },
-        {
-          "name": "classFilter",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring match on node class name"
-        }
-      ]
-    },
-    "read_blueprint_graph_summary": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "titleFilter",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring match on node title"
-        },
-        {
-          "name": "classFilter",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring match on node class name"
-        }
-      ]
-    },
     "read_bone_track": {
       "category": "animation",
       "params": [
@@ -2343,61 +473,14 @@
         }
       ]
     },
-    "read_component_properties": {
-      "category": "blueprint",
+    "read_procedural_foliage_spawner": {
+      "category": "foliage",
       "params": [
         {
-          "name": "assetPath",
+          "name": "spawnerPath",
           "type": "string",
           "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": true,
-          "description": "SCS or inherited component name"
-        }
-      ]
-    },
-    "read_node_property": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "nodeId",
-          "type": "string",
-          "required": true,
-          "description": "Node GUID, as get_connections and find_nodes report it, or the node name",
-          "aliases": [
-            "nodeName"
-          ]
-        },
-        {
-          "name": "propertyName",
-          "type": "string",
-          "required": true,
-          "description": "Pin or reflected node property name",
-          "aliases": [
-            "pinName"
-          ]
+          "description": "ProceduralFoliageSpawner asset path"
         }
       ]
     },
@@ -2418,173 +501,6 @@
           "type": "string",
           "required": true,
           "description": "State machine to read"
-        }
-      ]
-    },
-    "read_user_defined_enum": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "UserDefinedEnum asset path",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "read_user_defined_struct": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "UserDefinedStruct asset path",
-          "aliases": [
-            "path"
-          ]
-        }
-      ]
-    },
-    "reflect_class": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "className",
-          "type": "string",
-          "required": true,
-          "description": "Class to reflect: C++ spelling with or without the A/U/F/E prefix, /Script/Module.ClassName, or a Blueprint class path"
-        },
-        {
-          "name": "includeInherited",
-          "type": "boolean",
-          "required": false,
-          "description": "Walk superclass properties and functions too (default false)"
-        }
-      ]
-    },
-    "reflect_enum": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "enumName",
-          "type": "string",
-          "required": true,
-          "description": "UEnum by full path, short name, or short name without the E prefix"
-        }
-      ]
-    },
-    "reflect_instance": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "objectPath",
-          "type": "string",
-          "required": true,
-          "description": "The asset, CDO, actor or subobject to describe: an asset path, a full object path, a class path, or a Blueprint path (described as its generated-class defaults)"
-        },
-        {
-          "name": "propertyPath",
-          "type": "string",
-          "required": false,
-          "description": "Scope the read to one nested struct or object reference, dotted and indexable (Config.Traits[1].Params). Omit to describe the object itself"
-        },
-        {
-          "name": "filter",
-          "type": "string",
-          "required": false,
-          "description": "Case-insensitive substring of the property name"
-        },
-        {
-          "name": "includeInherited",
-          "type": "boolean",
-          "required": false,
-          "description": "Walk superclass properties too (default true)"
-        },
-        {
-          "name": "includeValues",
-          "type": "boolean",
-          "required": false,
-          "description": "Include each property's current value and valueText (default true)"
-        },
-        {
-          "name": "editableOnly",
-          "type": "boolean",
-          "required": false,
-          "description": "Return only the properties the details panel would let you edit on this object (default false, which returns every property with its reason)"
-        },
-        {
-          "name": "maxDepth",
-          "type": "integer",
-          "required": false,
-          "description": "How far to expand struct and container types, 0 to 5 (default 1). 0 names the types without expanding them"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows to return on this page (default 100, max 500)"
-        }
-      ]
-    },
-    "reflect_struct": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "structName",
-          "type": "string",
-          "required": true,
-          "description": "UScriptStruct to reflect, by name or path"
-        }
-      ]
-    },
-    "refresh_node": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "graphSelector",
-          "type": "string",
-          "required": false,
-          "description": "The exact selector list_graphs reports, which separates two graphs sharing a name. Wins over graphName"
-        },
-        {
-          "name": "nodeId",
-          "type": "string",
-          "required": true,
-          "description": "Node GUID, as get_connections and find_nodes report it, or the node name",
-          "aliases": [
-            "nodeName"
-          ]
-        },
-        {
-          "name": "breakOrphanedPins",
-          "type": "boolean",
-          "required": false,
-          "description": "Also break the links holding orphaned pins alive, which removes those pins"
         }
       ]
     },
@@ -2640,69 +556,81 @@
         }
       ]
     },
-    "remove_blueprint_interface": {
-      "category": "blueprint",
+    "remove_foliage_instances": {
+      "category": "foliage",
       "params": [
         {
-          "name": "assetPath",
+          "name": "foliageTypePath",
           "type": "string",
           "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "blueprintPath"
-          ]
+          "description": "FoliageType asset path, or the name of a type already placed in the open level"
         },
         {
-          "name": "interfacePath",
-          "type": "string",
-          "required": true,
-          "description": "Interface class path, as list_interfaces reports it"
+          "name": "instanceIndices",
+          "type": "array",
+          "required": false,
+          "description": "Instance indices from get_foliage_instances",
+          "items": "integer"
         },
         {
-          "name": "preserveFunctions",
+          "name": "transforms",
+          "type": "array",
+          "required": false,
+          "description": "Remove the instance nearest each location, within matchTolerance",
+          "items": "object"
+        },
+        {
+          "name": "center",
+          "type": "vec3",
+          "required": false,
+          "description": "Centre of the removal sphere"
+        },
+        {
+          "name": "radius",
+          "type": "number",
+          "required": false,
+          "description": "Removal sphere radius in centimetres"
+        },
+        {
+          "name": "all",
           "type": "boolean",
           "required": false,
-          "description": "Keep the implementations as ordinary Blueprint functions (default false)"
+          "description": "Remove every instance of the type"
+        },
+        {
+          "name": "matchTolerance",
+          "type": "number",
+          "required": false,
+          "description": "How close an instance must be to a transforms location, in centimetres (default 1)"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Only this InstancedFoliageActor"
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Report what would be removed without removing it"
         }
       ]
     },
-    "remove_component": {
-      "category": "blueprint",
+    "remove_foliage_type_from_level": {
+      "category": "foliage",
       "params": [
         {
-          "name": "assetPath",
+          "name": "foliageTypePath",
           "type": "string",
           "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
+          "description": "FoliageType asset path, or the name of a type already placed in the open level"
         },
         {
-          "name": "componentName",
-          "type": "string",
-          "required": true,
-          "description": "SCS or inherited component name"
-        }
-      ]
-    },
-    "remove_event_dispatcher": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "blueprintPath"
-          ]
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Dispatcher name"
+          "name": "force",
+          "type": "boolean",
+          "required": false,
+          "description": "Remove the type even though that destroys its instances"
         }
       ]
     },
@@ -2723,399 +651,20 @@
         }
       ]
     },
-    "rename_blueprint_variable": {
-      "category": "blueprint",
+    "sample_foliage": {
+      "category": "foliage",
       "params": [
         {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "oldName",
-          "type": "string",
-          "required": true,
-          "description": "Current name"
-        },
-        {
-          "name": "newName",
-          "type": "string",
-          "required": true,
-          "description": "New name"
-        }
-      ]
-    },
-    "rename_function": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "oldName",
-          "type": "string",
-          "required": true,
-          "description": "Current name"
-        },
-        {
-          "name": "newName",
-          "type": "string",
-          "required": true,
-          "description": "New name"
-        }
-      ]
-    },
-    "reorder_enum_values": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "UserDefinedEnum asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "order",
-          "type": "array",
-          "required": true,
-          "description": "The COMPLETE desired order, never a partial list"
-        }
-      ]
-    },
-    "reorder_struct_fields": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "UserDefinedStruct asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "order",
-          "type": "array",
-          "required": true,
-          "description": "The COMPLETE desired order, never a partial list"
-        }
-      ]
-    },
-    "reparent_blueprint": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "parentClass",
-          "type": "string",
-          "required": true,
-          "description": "New parent class: short name or full path"
-        }
-      ]
-    },
-    "reparent_component": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": true,
-          "description": "SCS or inherited component name"
-        },
-        {
-          "name": "newParent",
-          "type": "string",
-          "required": true,
-          "description": "New parent component name"
-        }
-      ]
-    },
-    "resolve_blueprint_graph": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": true,
-          "description": "Graph name to resolve"
-        }
-      ]
-    },
-    "run_construction_script": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "location",
+          "name": "center",
           "type": "vec3",
-          "required": false,
-          "description": "Spawn location for the temporary actor"
-        }
-      ]
-    },
-    "search_blueprint_call_sites": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "functionNames",
-          "type": "array",
           "required": true,
-          "description": "Function names to find call sites for, max 50 per request",
-          "items": "string"
+          "description": "Centre of the sample sphere"
         },
         {
-          "name": "className",
-          "type": "string",
-          "required": false,
-          "description": "Declaring class to narrow the functions to"
-        },
-        {
-          "name": "directory",
-          "type": "string",
-          "required": false,
-          "description": "Content path to search under (default /Game)"
-        },
-        {
-          "name": "includeNestedGraphs",
-          "type": "boolean",
-          "required": false,
-          "description": "Also walk collapsed and nested graphs (default true)"
-        },
-        {
-          "name": "includeLevelScripts",
-          "type": "boolean",
-          "required": false,
-          "description": "Also sweep the level script Blueprint of every map under the directory, at a full map load each (default false)"
-        },
-        {
-          "name": "includeNeighbours",
-          "type": "boolean",
-          "required": false,
-          "description": "Include each hit's immediate execution and data neighbours"
-        },
-        {
-          "name": "narrowByRegistry",
-          "type": "boolean",
-          "required": false,
-          "description": "Use Asset Registry dependencies to rule out Blueprints before loading them (default true)"
-        },
-        {
-          "name": "offset",
-          "type": "integer",
-          "required": false,
-          "description": "Row offset, the older non-resumable form of paging"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows to return on this page (default 200, max 1000)"
-        },
-        {
-          "name": "maxBlueprints",
-          "type": "integer",
-          "required": false,
-          "description": "Cap on Blueprints loaded (default 2000)"
-        },
-        {
-          "name": "dumpToFile",
-          "type": "boolean",
-          "required": false,
-          "description": "Write the whole result to a JSON file instead of returning it inline"
-        },
-        {
-          "name": "outputPath",
-          "type": "string",
-          "required": false,
-          "description": "Absolute or Saved-relative JSON path for the dump"
-        }
-      ]
-    },
-    "search_blueprint_nodes": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "blueprintPath"
-          ]
-        },
-        {
-          "name": "titles",
-          "type": "array",
-          "required": false,
-          "description": "Case-insensitive substrings matched against each node title",
-          "items": "string"
-        },
-        {
-          "name": "nodeClasses",
-          "type": "array",
-          "required": false,
-          "description": "Exact node class names, such as K2Node_VariableGet",
-          "items": "string"
-        },
-        {
-          "name": "variableName",
-          "type": "string",
-          "required": false,
-          "description": "The member a node reads or writes"
-        },
-        {
-          "name": "variableAccess",
-          "type": "string",
-          "required": false,
-          "description": "Narrow variableName to get, set or any (default any)"
-        },
-        {
-          "name": "includeNestedGraphs",
-          "type": "boolean",
-          "required": false,
-          "description": "Also walk collapsed and nested graphs (default true)"
-        },
-        {
-          "name": "authoredOnly",
-          "type": "boolean",
-          "required": false,
-          "description": "Leave out transient and generated compiler graphs (default true)"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows to return on this page (default 200, max 1000)"
-        }
-      ]
-    },
-    "search_node_types": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "query",
-          "type": "string",
-          "required": true,
-          "description": "Words to match against the C++ name, the palette label and Keywords metadata"
-        },
-        {
-          "name": "className",
-          "type": "string",
-          "required": false,
-          "description": "Narrow to one owning class, by short name or object path",
-          "aliases": [
-            "classFilter"
-          ]
-        },
-        {
-          "name": "includeGraphNodes",
-          "type": "boolean",
-          "required": false,
-          "description": "Include UEdGraphNode classes alongside function-library entries (default true)"
-        },
-        {
-          "name": "cursor",
-          "type": "string",
-          "required": false,
-          "description": "Resume a paged read: pass back the nextCursor from the previous page, unmodified"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "required": false,
-          "description": "Rows to return on this page (default 50, max 500)"
-        }
-      ]
-    },
-    "set_actor_tick_settings": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "bCanEverTick",
-          "type": "boolean",
-          "required": false,
-          "description": "PrimaryActorTick.bCanEverTick"
-        },
-        {
-          "name": "bStartWithTickEnabled",
-          "type": "boolean",
-          "required": false,
-          "description": "PrimaryActorTick.bStartWithTickEnabled"
-        },
-        {
-          "name": "TickInterval",
+          "name": "radius",
           "type": "number",
           "required": false,
-          "description": "PrimaryActorTick.TickInterval in seconds"
+          "description": "Sphere radius in centimetres (default 1000)"
         }
       ]
     },
@@ -3136,305 +685,23 @@
         }
       ]
     },
-    "set_blueprint_component_property": {
-      "category": "blueprint",
+    "set_foliage_type_settings": {
+      "category": "foliage",
       "params": [
         {
-          "name": "assetPath",
+          "name": "foliageTypePath",
           "type": "string",
           "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
+          "description": "FoliageType asset path, or the name of a type already placed in the open level",
           "aliases": [
-            "path"
+            "foliageTypeName"
           ]
         },
         {
-          "name": "componentName",
-          "type": "string",
-          "required": true,
-          "description": "SCS or inherited component name"
-        },
-        {
-          "name": "propertyName",
-          "type": "string",
-          "required": true,
-          "description": "Property name"
-        },
-        {
-          "name": "value",
-          "type": "any",
-          "required": true,
-          "description": "Value to write: a JSON value, or Unreal export text. null clears an object, class or interface reference"
-        }
-      ]
-    },
-    "set_blueprint_variable_metadata": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Variable name"
-        },
-        {
-          "name": "metadata",
+          "name": "settings",
           "type": "object",
           "required": true,
-          "description": "{key: 'value'} pairs; a null value removes that key. Unreal stores every metadata value as text"
-        },
-        {
-          "name": "functionName",
-          "type": "string",
-          "required": false,
-          "description": "The function owning a local variable; omit for a member variable"
-        }
-      ]
-    },
-    "set_capsule_size": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": true,
-          "description": "SCS or inherited component name"
-        },
-        {
-          "name": "halfHeight",
-          "type": "number",
-          "required": false,
-          "description": "Capsule half height (unscaled)"
-        },
-        {
-          "name": "radius",
-          "type": "number",
-          "required": false,
-          "description": "Capsule radius (unscaled)"
-        }
-      ]
-    },
-    "set_cdo_property": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "className",
-          "type": "string",
-          "required": true,
-          "description": "C++ class name or path"
-        },
-        {
-          "name": "propertyName",
-          "type": "string",
-          "required": true,
-          "description": "Property name"
-        },
-        {
-          "name": "value",
-          "type": "any",
-          "required": true,
-          "description": "Value to write: a JSON value, or Unreal export text. null clears an object, class or interface reference"
-        }
-      ]
-    },
-    "set_class_default": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "propertyName",
-          "type": "string",
-          "required": true,
-          "description": "Property name"
-        },
-        {
-          "name": "value",
-          "type": "any",
-          "required": true,
-          "description": "Value to write: a JSON value, or Unreal export text. null clears an object, class or interface reference"
-        }
-      ]
-    },
-    "set_component_override_materials": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": true,
-          "description": "SCS or inherited component name"
-        },
-        {
-          "name": "materialPaths",
-          "type": "array",
-          "required": true,
-          "description": "Material asset paths; an empty array clears",
-          "items": "string"
-        }
-      ]
-    },
-    "set_enum_entries": {
-      "category": "reflection",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Existing UserDefinedEnum asset path"
-        },
-        {
-          "name": "entries",
-          "type": "array",
-          "required": true,
-          "description": "The complete new entry list: strings, or {name, displayName?} objects"
-        }
-      ]
-    },
-    "set_enum_metadata": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "UserDefinedEnum asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "bitflags",
-          "type": "boolean",
-          "required": false,
-          "description": "Mark the enum as a bitflags type"
-        },
-        {
-          "name": "entries",
-          "type": "array",
-          "required": false,
-          "description": "[{name or index, tooltip}] per-enumerator tooltips",
-          "items": "object"
-        }
-      ]
-    },
-    "set_function_properties": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "functionName",
-          "type": "string",
-          "required": true,
-          "description": "Function name"
-        },
-        {
-          "name": "pure",
-          "type": "boolean",
-          "required": false,
-          "description": "BlueprintPure: no side effects, and the node loses its exec pins"
-        },
-        {
-          "name": "isConst",
-          "type": "boolean",
-          "required": false,
-          "description": "const: the function only reads state"
-        },
-        {
-          "name": "accessSpecifier",
-          "type": "string",
-          "required": false,
-          "description": "public, protected or private"
-        },
-        {
-          "name": "category",
-          "type": "string",
-          "required": false,
-          "description": "Category"
-        },
-        {
-          "name": "tooltip",
-          "type": "string",
-          "required": false,
-          "description": "Tooltip"
-        },
-        {
-          "name": "keywords",
-          "type": "string",
-          "required": false,
-          "description": "Extra palette search keywords"
-        },
-        {
-          "name": "compactNodeTitle",
-          "type": "string",
-          "required": false,
-          "description": "Render the node in compact form under this title"
-        },
-        {
-          "name": "callInEditor",
-          "type": "boolean",
-          "required": false,
-          "description": "Expose a details-panel button that runs it on a selected instance"
-        },
-        {
-          "name": "threadSafe",
-          "type": "boolean",
-          "required": false,
-          "description": "Safe to call off the game thread"
-        },
-        {
-          "name": "deprecated",
-          "type": "boolean",
-          "required": false,
-          "description": "Mark the function deprecated so its call sites warn"
-        },
-        {
-          "name": "deprecationMessage",
-          "type": "string",
-          "required": false,
-          "description": "Text shown at a deprecated function's call sites"
+          "description": "Property name to value; each is imported as text onto the FoliageType"
         }
       ]
     },
@@ -3502,91 +769,33 @@
         }
       ]
     },
-    "set_node_position": {
-      "category": "blueprint",
+    "set_procedural_foliage_spawner_types": {
+      "category": "foliage",
       "params": [
         {
-          "name": "assetPath",
+          "name": "spawnerPath",
           "type": "string",
           "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
+          "description": "ProceduralFoliageSpawner asset path"
         },
         {
-          "name": "graphName",
+          "name": "foliageTypePaths",
+          "type": "array",
+          "required": true,
+          "description": "FoliageType assets, or Blueprints whose class derives from FoliageType",
+          "items": "string"
+        },
+        {
+          "name": "mode",
           "type": "string",
           "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
+          "description": "replace (default) | add | remove"
         },
         {
-          "name": "nodeId",
-          "type": "string",
-          "required": true,
-          "description": "Node GUID, as get_connections and find_nodes report it, or the node name",
-          "aliases": [
-            "nodeName"
-          ]
-        },
-        {
-          "name": "posX",
-          "type": "number",
+          "name": "save",
+          "type": "boolean",
           "required": false,
-          "description": "Node X position in the graph"
-        },
-        {
-          "name": "posY",
-          "type": "number",
-          "required": false,
-          "description": "Node Y position in the graph"
-        }
-      ]
-    },
-    "set_node_property": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "graphName",
-          "type": "string",
-          "required": false,
-          "description": "Graph name or the selector list_graphs reports (default EventGraph)"
-        },
-        {
-          "name": "nodeId",
-          "type": "string",
-          "required": true,
-          "description": "Node GUID, as get_connections and find_nodes report it, or the node name",
-          "aliases": [
-            "nodeName"
-          ]
-        },
-        {
-          "name": "propertyName",
-          "type": "string",
-          "required": true,
-          "description": "Pin or struct property name",
-          "aliases": [
-            "pinName"
-          ]
-        },
-        {
-          "name": "value",
-          "type": "any",
-          "required": true,
-          "description": "New pin default or property value, as a string",
-          "aliases": [
-            "defaultValue"
-          ]
+          "description": "Save the spawner package after a change (default true)"
         }
       ]
     },
@@ -3628,131 +837,38 @@
         }
       ]
     },
-    "set_struct_field_default": {
-      "category": "blueprint",
+    "simulate_procedural_foliage": {
+      "category": "foliage",
       "params": [
         {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "UserDefinedStruct asset path",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "defaultValue",
-          "type": "any",
-          "required": true,
-          "description": "Default value as Unreal export text; an empty string clears it"
-        },
-        {
-          "name": "fieldName",
+          "name": "actorLabel",
           "type": "string",
           "required": false,
-          "description": "Resolve the member by its display or internal name"
+          "description": "Label of a ProceduralFoliageVolume, or of any actor with a ProceduralFoliageComponent"
         },
         {
-          "name": "fieldGuid",
+          "name": "actorPath",
           "type": "string",
           "required": false,
-          "description": "Resolve the member by its GUID, which is stable across renames"
-        }
-      ]
-    },
-    "set_variable_default": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
+          "description": "Object path of that actor"
         },
         {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Variable name"
-        },
-        {
-          "name": "value",
-          "type": "any",
-          "required": true,
-          "description": "New default value, as a string"
-        }
-      ]
-    },
-    "set_variable_properties": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Variable name"
-        },
-        {
-          "name": "editFlag",
+          "name": "spawnerPath",
           "type": "string",
           "required": false,
-          "description": "EditAnywhere, EditDefaultsOnly, EditInstanceOnly or none: the value list_variables reports"
+          "description": "Run every volume in the open level bound to this ProceduralFoliageSpawner"
         },
         {
-          "name": "instanceEditable",
+          "name": "clearExisting",
           "type": "boolean",
           "required": false,
-          "description": "Two-state shorthand for editFlag; mutually exclusive with it"
+          "description": "Remove what the component spawned before simulating again (default true)"
         },
         {
-          "name": "private",
+          "name": "skipCollision",
           "type": "boolean",
           "required": false,
-          "description": "The Blueprint editor's Private checkbox, independent of editFlag"
-        },
-        {
-          "name": "category",
-          "type": "string",
-          "required": false,
-          "description": "Category"
-        },
-        {
-          "name": "tooltip",
-          "type": "string",
-          "required": false,
-          "description": "Tooltip"
-        },
-        {
-          "name": "exposeOnSpawn",
-          "type": "boolean",
-          "required": false,
-          "description": "ExposeOnSpawn flag"
-        }
-      ]
-    },
-    "validate_blueprint": {
-      "category": "blueprint",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint",
-          "aliases": [
-            "path"
-          ]
+          "description": "Skip the type's CollisionWithWorld test (default false)"
         }
       ]
     }

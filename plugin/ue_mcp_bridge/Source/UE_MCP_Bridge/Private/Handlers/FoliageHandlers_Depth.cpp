@@ -394,22 +394,31 @@ TSharedPtr<FJsonValue> FFoliageHandlers::AddFoliageInstances(const TSharedPtr<FJ
 	FString TypeSpec;
 	if (auto Err = RequireString(Params, TEXT("foliageTypePath"), TypeSpec)) return Err;
 
-	REQUIRE_EDITOR_WORLD(World);
-
-	UFoliageType* Type = FoliageDepthResolveType(World, TypeSpec);
-	if (!Type) return FoliageDepthTypeNotFound(World, TypeSpec);
-
+	// Every parameter is read before anything can fail (#1057).
 	const bool bApplyTypeRules = OptionalBool(Params, TEXT("applyTypeRules"), true);
 	const bool bSkipCollision = OptionalBool(Params, TEXT("skipCollision"), false);
 	const bool bProjectToGround = OptionalBool(Params, TEXT("projectToGround"), true);
 	const double TraceUp = OptionalNumber(Params, TEXT("traceUp"), 10000.0);
 	const double TraceDown = OptionalNumber(Params, TEXT("traceDown"), 100000.0);
+	const TArray<TSharedPtr<FJsonValue>>* TransformsArr = nullptr;
+	const bool bHasTransformsParam = TryGetArrayParam(Params, TEXT("transforms"), TransformsArr) && TransformsArr;
+	FVector Center = FVector::ZeroVector;
+	const bool bHasCenter = HasParam(Params, TEXT("center"));
+	TSharedPtr<FJsonValue> CenterErr;
+	if (bHasCenter) CenterErr = RequireVec3(Params, TEXT("center"), Center);
+	const double Radius = OptionalNumber(Params, TEXT("radius"), 0.0);
+	const int32 ScatterCount = OptionalInt(Params, TEXT("count"), 0);
+	const int32 Seed = OptionalInt(Params, TEXT("seed"), 0);
+
+	REQUIRE_EDITOR_WORLD(World);
+
+	UFoliageType* Type = FoliageDepthResolveType(World, TypeSpec);
+	if (!Type) return FoliageDepthTypeNotFound(World, TypeSpec);
 
 	// ── Build the candidate list, validating everything before mutating ──
 	TArray<FTransform> Explicit;
 	bool bHasExplicit = false;
-	const TArray<TSharedPtr<FJsonValue>>* TransformsArr = nullptr;
-	if (TryGetArrayParam(Params, TEXT("transforms"), TransformsArr) && TransformsArr)
+	if (bHasTransformsParam)
 	{
 		bHasExplicit = true;
 		for (int32 i = 0; i < TransformsArr->Num(); ++i)
@@ -424,14 +433,7 @@ TSharedPtr<FJsonValue> FFoliageHandlers::AddFoliageInstances(const TSharedPtr<FJ
 		}
 	}
 
-	FVector Center = FVector::ZeroVector;
-	const bool bHasCenter = HasParam(Params, TEXT("center"));
-	if (bHasCenter)
-	{
-		if (auto Err = RequireVec3(Params, TEXT("center"), Center)) return Err;
-	}
-	const double Radius = OptionalNumber(Params, TEXT("radius"), 0.0);
-	const int32 ScatterCount = OptionalInt(Params, TEXT("count"), 0);
+	if (CenterErr) return CenterErr;
 
 	if (!bHasExplicit && ScatterCount <= 0)
 	{
@@ -467,7 +469,7 @@ TSharedPtr<FJsonValue> FFoliageHandlers::AddFoliageInstances(const TSharedPtr<FJ
 	}
 	else
 	{
-		FRandomStream Stream(OptionalInt(Params, TEXT("seed"), 0));
+		FRandomStream Stream(Seed);
 		for (int32 i = 0; i < Requested; ++i)
 		{
 			// Uniform over the disc: sqrt keeps the density even rather than
@@ -592,11 +594,7 @@ TSharedPtr<FJsonValue> FFoliageHandlers::RemoveFoliageInstances(const TSharedPtr
 	FString TypeSpec;
 	if (auto Err = RequireString(Params, TEXT("foliageTypePath"), TypeSpec)) return Err;
 
-	REQUIRE_EDITOR_WORLD(World);
-
-	UFoliageType* Type = FoliageDepthResolveType(World, TypeSpec);
-	if (!Type) return FoliageDepthTypeNotFound(World, TypeSpec);
-
+	// Every parameter is read before anything can fail (#1057).
 	const bool bAll = OptionalBool(Params, TEXT("all"), false);
 	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), false);
 	const double MatchTolerance = OptionalNumber(Params, TEXT("matchTolerance"), 1.0);
@@ -609,12 +607,20 @@ TSharedPtr<FJsonValue> FFoliageHandlers::RemoveFoliageInstances(const TSharedPtr
 
 	FVector Center = FVector::ZeroVector;
 	const bool bHasCenter = HasParam(Params, TEXT("center"));
-	if (bHasCenter)
-	{
-		if (auto Err = RequireVec3(Params, TEXT("center"), Center)) return Err;
-	}
+	TSharedPtr<FJsonValue> CenterErr;
+	if (bHasCenter) CenterErr = RequireVec3(Params, TEXT("center"), Center);
 	const double Radius = OptionalNumber(Params, TEXT("radius"), 0.0);
 	const bool bHasSphere = bHasCenter && Radius > 0.0;
+
+	// A caller may scope to one InstancedFoliageActor (the rollback of
+	// add_instances does). Without that, every actor holding the type is fair game.
+	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
+
+	REQUIRE_EDITOR_WORLD(World);
+
+	UFoliageType* Type = FoliageDepthResolveType(World, TypeSpec);
+	if (!Type) return FoliageDepthTypeNotFound(World, TypeSpec);
+	if (CenterErr) return CenterErr;
 
 	if (!bAll && !bHasIndices && !bHasTransforms && !bHasSphere)
 	{
@@ -636,10 +642,6 @@ TSharedPtr<FJsonValue> FFoliageHandlers::RemoveFoliageInstances(const TSharedPtr
 			WantedLocations.Add(T.GetLocation());
 		}
 	}
-
-	// A caller may scope to one InstancedFoliageActor (the rollback of
-	// add_instances does). Without that, every actor holding the type is fair game.
-	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
 
 	TArray<TSharedPtr<FJsonValue>> PerActor;
 	int32 TotalRemoved = 0;
@@ -778,28 +780,28 @@ TSharedPtr<FJsonValue> FFoliageHandlers::RemoveFoliageInstances(const TSharedPtr
 
 TSharedPtr<FJsonValue> FFoliageHandlers::GetFoliageInstances(const TSharedPtr<FJsonObject>& Params)
 {
-	REQUIRE_EDITOR_WORLD(World);
-
+	// Every parameter is read before anything can fail (#1057).
 	const FString TypeSpec = OptionalString(Params, TEXT("foliageTypePath"));
-	UFoliageType* Filter = nullptr;
-	if (!TypeSpec.IsEmpty())
-	{
-		Filter = FoliageDepthResolveType(World, TypeSpec);
-		if (!Filter) return FoliageDepthTypeNotFound(World, TypeSpec);
-	}
-
 	FVector Center = FVector::ZeroVector;
 	const bool bHasCenter = HasParam(Params, TEXT("center"));
-	if (bHasCenter)
-	{
-		if (auto Err = RequireVec3(Params, TEXT("center"), Center)) return Err;
-	}
+	TSharedPtr<FJsonValue> CenterErr;
+	if (bHasCenter) CenterErr = RequireVec3(Params, TEXT("center"), Center);
 	const double Radius = OptionalNumber(Params, TEXT("radius"), 0.0);
 	const bool bHasSphere = bHasCenter && Radius > 0.0;
 
 	const int32 Limit = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 200), 1, 20000);
 	const int32 StartIndex = FMath::Max(0, OptionalInt(Params, TEXT("startIndex"), 0));
 	const bool bIncludeTransforms = OptionalBool(Params, TEXT("includeTransforms"), true);
+
+	REQUIRE_EDITOR_WORLD(World);
+
+	UFoliageType* Filter = nullptr;
+	if (!TypeSpec.IsEmpty())
+	{
+		Filter = FoliageDepthResolveType(World, TypeSpec);
+		if (!Filter) return FoliageDepthTypeNotFound(World, TypeSpec);
+	}
+	if (CenterErr) return CenterErr;
 
 	TArray<TSharedPtr<FJsonValue>> TypesOut;
 	int32 TotalMatching = 0;
@@ -940,13 +942,12 @@ TSharedPtr<FJsonValue> FFoliageHandlers::RemoveFoliageTypeFromLevel(const TShare
 {
 	FString TypeSpec;
 	if (auto Err = RequireString(Params, TEXT("foliageTypePath"), TypeSpec)) return Err;
+	const bool bForce = OptionalBool(Params, TEXT("force"), false);
 
 	REQUIRE_EDITOR_WORLD(World);
 
 	UFoliageType* Type = FoliageDepthResolveType(World, TypeSpec);
 	if (!Type) return FoliageDepthTypeNotFound(World, TypeSpec);
-
-	const bool bForce = OptionalBool(Params, TEXT("force"), false);
 
 	// Count first, across every actor, so the refusal below is accurate before
 	// anything is touched.
@@ -1108,13 +1109,18 @@ TSharedPtr<FJsonValue> FFoliageHandlers::SetProceduralFoliageSpawnerTypes(const 
 	FString SpawnerPath;
 	if (auto Err = RequireString(Params, TEXT("spawnerPath"), SpawnerPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	const FString Mode = OptionalString(Params, TEXT("mode"), TEXT("replace"));
+	const TArray<TSharedPtr<FJsonValue>>* PathsArr = nullptr;
+	const bool bHasPaths = TryGetArrayParam(Params, TEXT("foliageTypePaths"), PathsArr) && PathsArr;
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
+
 	UProceduralFoliageSpawner* Spawner = LoadAssetByPath<UProceduralFoliageSpawner>(SpawnerPath);
 	if (!Spawner)
 	{
 		return MCPAssetLoadError(SpawnerPath, TEXT("ProceduralFoliageSpawner"));
 	}
 
-	const FString Mode = OptionalString(Params, TEXT("mode"), TEXT("replace"));
 	if (Mode != TEXT("replace") && Mode != TEXT("add") && Mode != TEXT("remove"))
 	{
 		return MCPError(FString::Printf(
@@ -1122,8 +1128,7 @@ TSharedPtr<FJsonValue> FFoliageHandlers::SetProceduralFoliageSpawnerTypes(const 
 			*Mode));
 	}
 
-	const TArray<TSharedPtr<FJsonValue>>* PathsArr = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("foliageTypePaths"), PathsArr) || !PathsArr)
+	if (!bHasPaths)
 	{
 		return MCPError(TEXT("Missing required parameter 'foliageTypePaths' (array of FoliageType asset paths, or Blueprint paths whose generated class derives from FoliageType)."));
 	}
@@ -1238,7 +1243,7 @@ TSharedPtr<FJsonValue> FFoliageHandlers::SetProceduralFoliageSpawnerTypes(const 
 	{
 		MCPSetUpdated(Result);
 		FString SaveReason;
-		const bool bSaved = OptionalBool(Params, TEXT("save"), true)
+		const bool bSaved = bSave
 			? SaveAssetPackageChecked(Spawner, SaveReason)
 			: false;
 		Result->SetBoolField(TEXT("persisted"), bSaved);
@@ -1275,13 +1280,14 @@ TSharedPtr<FJsonValue> FFoliageHandlers::SetProceduralFoliageSpawnerTypes(const 
 
 TSharedPtr<FJsonValue> FFoliageHandlers::SimulateProceduralFoliage(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
+	const bool bClearExisting = OptionalBool(Params, TEXT("clearExisting"), true);
+	const bool bSkipCollision = OptionalBool(Params, TEXT("skipCollision"), false);
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	TArray<UProceduralFoliageComponent*> Components;
 	if (auto Err = FoliageDepthCollectProceduralComponents(World, Params, Components)) return Err;
-
-	const bool bClearExisting = OptionalBool(Params, TEXT("clearExisting"), true);
-	const bool bSkipCollision = OptionalBool(Params, TEXT("skipCollision"), false);
 
 	// Validate every component before running any of them: a half-simulated set
 	// of volumes is worse than a refusal that names what is wrong.
