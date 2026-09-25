@@ -258,17 +258,7 @@ function aliasOf(method: string): string | undefined {
  * specs:record picks them up, convert the action to that category's specBp
  * and delete its entry here. The last test below fails when that is due.
  */
-const HAND_WRITTEN_CROSS_TOOL: ReadonlyMap<string, string> = new Map([
-  // mappingContext, inputAction and assetPath: aliases added to the
-  // add_imc_mapping spec in GameplayHandlers.cpp, not yet recorded.
-  ["asset.add_input_mapping", "add_imc_mapping"],
-  // mappingContext, inputAction and assetPath: aliases added to the
-  // remove_imc_mapping spec in GameplayHandlers.cpp, not yet recorded.
-  ["asset.remove_input_mapping", "remove_imc_mapping"],
-  // mappingContext and assetPath: aliases added to the read_imc spec in
-  // GameplayHandlers.cpp, not yet recorded.
-  ["asset.list_input_mappings", "read_imc"],
-]);
+const HAND_WRITTEN_CROSS_TOOL: ReadonlyMap<string, string> = new Map([]);
 
 // Every other recorded category is held to the same surface rules as the pilot.
 const OTHER_CATEGORIES = [...new Set(Object.values(SNAPSHOT.handlers).map((s) => s.category as string))]
@@ -354,26 +344,6 @@ describe.each(SPEC_TOOLS)("the %s tool", (toolName) => {
   });
 });
 
-describe("the hand-written cross-tool exceptions", () => {
-  it.each([...HAND_WRITTEN_CROSS_TOOL])("%s still dispatches %s, registered under another category", (qualified, method) => {
-    const [toolName, action] = qualified.split(".");
-    const tool = ALL_TOOLS.find((t) => t.name === toolName);
-    const spec = tool?.actions[action];
-    expect(spec?.kind === "bridge" && spec.bridge, qualified).toBe(method);
-    expect(SNAPSHOT.handlers[method]?.category, qualified).not.toBe(toolName);
-  });
-
-  it.each([...HAND_WRITTEN_CROSS_TOOL])("%s is still needed: the recorded %s spec lacks a name it advertises", (qualified, method) => {
-    const [toolName, action] = qualified.split(".");
-    const tool = ALL_TOOLS.find((t) => t.name === toolName)!;
-    const declared = new Set(SNAPSHOT.handlers[method].params.flatMap((p) => [p.name, ...(p.aliases ?? [])]));
-    const documented = parseParams(tool.actions[action].description ?? "", new Set(Object.keys(tool.schema))).params.map((p) => p.name);
-    expect(
-      documented.every((name) => declared.has(name)),
-      `${qualified}: the recording now declares every name it documents; convert it to specBp and drop the exception`,
-    ).toBe(false);
-  });
-});
 
 describe("drift against a connected editor", () => {
   const recorded: HandlerSpecs = {

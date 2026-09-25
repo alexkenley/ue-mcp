@@ -961,13 +961,20 @@
           "name": "imcPath",
           "type": "string",
           "required": true,
-          "description": "InputMappingContext asset path"
+          "description": "InputMappingContext asset path",
+          "aliases": [
+            "mappingContext",
+            "assetPath"
+          ]
         },
         {
           "name": "inputActionPath",
           "type": "string",
           "required": true,
-          "description": "InputAction asset path to map"
+          "description": "InputAction asset path to map",
+          "aliases": [
+            "inputAction"
+          ]
         },
         {
           "name": "key",
@@ -15451,7 +15458,11 @@
           "name": "imcPath",
           "type": "string",
           "required": true,
-          "description": "InputMappingContext asset path"
+          "description": "InputMappingContext asset path",
+          "aliases": [
+            "mappingContext",
+            "assetPath"
+          ]
         }
       ]
     },
@@ -16935,7 +16946,11 @@
           "name": "imcPath",
           "type": "string",
           "required": true,
-          "description": "InputMappingContext asset path"
+          "description": "InputMappingContext asset path",
+          "aliases": [
+            "mappingContext",
+            "assetPath"
+          ]
         },
         {
           "name": "mappingIndex",
@@ -16947,7 +16962,10 @@
           "name": "inputActionPath",
           "type": "string",
           "required": false,
-          "description": "Select the mapping by InputAction (with key)"
+          "description": "Select the mapping by InputAction (with key)",
+          "aliases": [
+            "inputAction"
+          ]
         },
         {
           "name": "key",

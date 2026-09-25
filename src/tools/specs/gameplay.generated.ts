@@ -153,13 +153,20 @@ export const handlerSpecs: HandlerSpecs = {
         "name": "imcPath",
         "type": "string",
         "required": true,
-        "description": "InputMappingContext asset path"
+        "description": "InputMappingContext asset path",
+        "aliases": [
+          "mappingContext",
+          "assetPath"
+        ]
       },
       {
         "name": "inputActionPath",
         "type": "string",
         "required": true,
-        "description": "InputAction asset path to map"
+        "description": "InputAction asset path to map",
+        "aliases": [
+          "inputAction"
+        ]
       },
       {
         "name": "key",
@@ -1342,7 +1349,11 @@ export const handlerSpecs: HandlerSpecs = {
         "name": "imcPath",
         "type": "string",
         "required": true,
-        "description": "InputMappingContext asset path"
+        "description": "InputMappingContext asset path",
+        "aliases": [
+          "mappingContext",
+          "assetPath"
+        ]
       }
     ]
   },
@@ -1485,7 +1496,11 @@ export const handlerSpecs: HandlerSpecs = {
         "name": "imcPath",
         "type": "string",
         "required": true,
-        "description": "InputMappingContext asset path"
+        "description": "InputMappingContext asset path",
+        "aliases": [
+          "mappingContext",
+          "assetPath"
+        ]
       },
       {
         "name": "mappingIndex",
@@ -1497,7 +1512,10 @@ export const handlerSpecs: HandlerSpecs = {
         "name": "inputActionPath",
         "type": "string",
         "required": false,
-        "description": "Select the mapping by InputAction (with key)"
+        "description": "Select the mapping by InputAction (with key)",
+        "aliases": [
+          "inputAction"
+        ]
       },
       {
         "name": "key",
@@ -2361,7 +2379,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   add_bt_node: "Params: assetPath (or path), nodeClass, nodeCategory?, parent?, index?, nodeName?, properties?, blackboardKeys?",
   add_eqs_generator: "Params: queryPath, generatorClass",
   add_eqs_test: "Params: queryPath, testClass, optionIndex?, purpose?",
-  add_imc_mapping: "Params: imcPath, inputActionPath, key, save?",
+  add_imc_mapping: "Params: imcPath (or mappingContext, or assetPath), inputActionPath (or inputAction), key, save?",
   add_perception_component: "Params: blueprintPath, senses?",
   add_smart_object_component: "Params: blueprintPath",
   add_smart_object_default_behavior: "Params: assetPath, behaviorClass, instanceProperties?",
@@ -2409,14 +2427,14 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   read_blackboard: "Params: blackboardPath (or assetPath)",
   read_bt_node_properties: "Params: assetPath (or path), nodeClass?, nodeName?, nodePath?, kind?, propertyNames?, includeInherited?",
   read_eqs_query: "Params: queryPath",
-  read_imc: "Params: imcPath",
+  read_imc: "Params: imcPath (or mappingContext, or assetPath)",
   read_input_action: "Params: inputActionPath",
   read_perception: "Params: blueprintPath?, actorLabel?, actorPath?, world?, pieInstance?, componentName?",
   remove_blackboard_key: "Params: blackboardPath, keyName",
   remove_bt_node: "Params: assetPath (or path), node (or nodePath)",
   remove_eqs_option: "Params: queryPath, optionIndex",
   remove_eqs_test: "Params: queryPath, testIndex, optionIndex?",
-  remove_imc_mapping: "Params: imcPath, mappingIndex?, inputActionPath?, key?, save?",
+  remove_imc_mapping: "Params: imcPath (or mappingContext, or assetPath), mappingIndex?, inputActionPath? (or inputAction), key?, save?",
   remove_mapping_context: "Params: mappingContext, pieInstance?, playerIndex?",
   remove_mass_trait: "Params: assetPath, traitClass?, index?",
   remove_sense: "Params: blueprintPath, index?, senseType?, componentName?",
@@ -2448,7 +2466,7 @@ export const schema: Record<string, z.ZodType> = {
   actorLabel: z.string().optional().describe("Live actor label or name (the pawn or its AIController) (get_bt_runtime, get_live_blackboard, get_perceived_actors, read_perception, run_behavior_tree, set_live_blackboard, stop_behavior_tree). Actor label, name or path. Pass actorLabel or actorPath (get_state_tree_runtime). Only this ZoneGraphData actor, by label or name (query_zone_graph)"),
   actorPath: z.string().optional().describe("Full actor object path; wins over actorLabel (get_bt_runtime, get_live_blackboard, get_perceived_actors, read_perception, run_behavior_tree, set_live_blackboard, stop_behavior_tree). Full actor object path; the unambiguous selector (get_state_tree_runtime). Only this ZoneGraphData actor, by full object path (query_zone_graph)"),
   amount: z.number().optional().describe("Damage amount (damage only, required there)"),
-  assetPath: z.string().optional().describe("BehaviorTree asset path (add_bt_node, get_behavior_tree_info, list_bt_graph_nodes, move_bt_node, read_behavior_tree_graph, read_bt_node_properties, remove_bt_node, set_bt_node_property, set_bt_task_property). SmartObjectDefinition asset path (add_smart_object_default_behavior, add_smart_object_slot, add_smart_object_slot_behavior, list_smart_object_slots, remove_smart_object_slot, set_smart_object_slot). BehaviorTree asset path; omit to sweep directory (list_bt_tasks). Alias for blackboardPath (read_blackboard). MassEntityConfigAsset path (remove_mass_trait, reorder_mass_traits, validate_mass_entity_config). BehaviorTree asset to run (run_behavior_tree)"),
+  assetPath: z.string().optional().describe("BehaviorTree asset path (add_bt_node, get_behavior_tree_info, list_bt_graph_nodes, move_bt_node, read_behavior_tree_graph, read_bt_node_properties, remove_bt_node, set_bt_node_property, set_bt_task_property). Alias for imcPath (add_imc_mapping, read_imc, remove_imc_mapping). SmartObjectDefinition asset path (add_smart_object_default_behavior, add_smart_object_slot, add_smart_object_slot_behavior, list_smart_object_slots, remove_smart_object_slot, set_smart_object_slot). BehaviorTree asset path; omit to sweep directory (list_bt_tasks). Alias for blackboardPath (read_blackboard). MassEntityConfigAsset path (remove_mass_trait, reorder_mass_traits, validate_mass_entity_config). BehaviorTree asset to run (run_behavior_tree)"),
   autoPruneDuplicateKeys: z.boolean().optional().describe("Remove own keys the parent chain already defines (default true)"),
   baseClass: z.string().optional().describe("Base class for an Object/Class key (e.g. /Script/Engine.Actor); for an Enum key, the enum when enumType is absent"),
   behaviorClass: z.string().optional().describe("Behavior definition asset path or class path (add_smart_object_default_behavior, add_smart_object_slot_behavior). Behavior definition class or asset path to give the slot (add_smart_object_slot)"),
@@ -2481,6 +2499,7 @@ export const schema: Record<string, z.ZodType> = {
   includeInherited: z.boolean().optional().describe("Keep the properties UBTNode itself declares (TreeAsset, ParentNode, NodeName), omitted by default"),
   includeProperties: z.boolean().optional().describe("Include each node's own UPROPERTY values"),
   index: z.number().optional().describe("Position among the parent's children, which is the execution order. For a decorator or service, its position in the parent's subnode list; on a SimpleParallel, the output pin (0 = main task, 1 = background) (add_bt_node, move_bt_node). Positional index into Config.Traits, as read_mass_entity_config reports it (remove_mass_trait). Index of the sense config to remove, as read_perception reports it (remove_sense)"),
+  inputAction: z.string().optional().describe("Alias for inputActionPath"),
   inputActionPath: z.string().optional().describe("InputAction asset path to map (add_imc_mapping). InputAction to read; omit for every action the player has bound (get_action_value). InputAction asset path (read_input_action, set_action_triggers, set_player_mappable_settings). Select the mapping by InputAction (with key) (remove_imc_mapping). Select the mapping by its current InputAction (set_imc_mapping_action). Select the mapping by its InputAction (set_imc_mapping_key)"),
   instanceProperties: z.record(z.unknown()).optional().describe("Property writes applied to a freshly-spawned behavior instance"),
   instigatorLabel: z.string().optional().describe("The actor that caused the event"),
@@ -2493,7 +2512,7 @@ export const schema: Record<string, z.ZodType> = {
   limit: z.number().optional().describe("Maximum agents to return (list_ai_agents). Rows on this page (default 200, max 2000) (list_behavior_trees, list_bt_node_classes, list_eqs_types, list_input_assets, list_state_trees). How many BehaviorTree assets a directory sweep loads (default 200) (list_bt_tasks). How many classes per kind (default 200) (list_mass_types). How many lanes to report (default 50) (query_zone_graph). How many scored items to return (default 50) (run_eqs_query). How many InputMappingContexts a sweep loads (default 200) (validate_input)"),
   location: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("World point to project onto the navmesh (project_point_to_navigation). Query point for queryMode=nearest (query_zone_graph). Event location; defaults to the instigator's (hearing) or the damaged actor's (damage) (report_noise_event)"),
   loudness: z.number().optional().describe("Noise loudness (default 1)"),
-  mappingContext: z.string().optional().describe("InputMappingContext asset path to apply to the live player (apply_mapping_context). Name or path of one context to answer yes/no about (get_applied_imcs, get_input_mapping_contexts). InputMappingContext asset path to remove from the live player (remove_mapping_context)"),
+  mappingContext: z.string().optional().describe("Alias for imcPath (add_imc_mapping, read_imc, remove_imc_mapping). InputMappingContext asset path to apply to the live player (apply_mapping_context). Name or path of one context to answer yes/no about (get_applied_imcs, get_input_mapping_contexts). InputMappingContext asset path to remove from the live player (remove_mapping_context)"),
   mappingIndex: z.number().optional().describe("Index of the mapping to remove (remove_imc_mapping). Index of the mapping to retarget (set_imc_mapping_action). Index of the mapping to rebind (set_imc_mapping_key). Index of the mapping in the IMC (default 0) (set_mapping_modifiers)"),
   mappingName: z.string().optional().describe("Stable FName saved with the player mapping; must be non-empty"),
   maxRange: z.number().optional().describe("Maximum range the noise carries (0 = unlimited)"),
