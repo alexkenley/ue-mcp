@@ -3901,8 +3901,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::AppendAssetArrayElements(const TSharedPtr
 				TEXT("array is not a working node. It has no pins, because only the graph's schema runs ")
 				TEXT("AllocateDefaultPins, so it can never be connected to anything, and its outer is wrong. The ")
 				TEXT("append would report success and leave the graph unable to open. Read the graph with ")
-				TEXT("asset(action=\"read_graph\"), and author nodes through the editor or an action that knows ")
-				TEXT("the schema for that graph type."),
+				TEXT("asset(action=\"read_graph\"), create nodes with asset(action=\"add_graph_node\") and wire them ")
+				TEXT("with asset(action=\"connect_graph_pins\"), which go through the graph's schema."),
 				*PropertyName));
 		}
 	}
