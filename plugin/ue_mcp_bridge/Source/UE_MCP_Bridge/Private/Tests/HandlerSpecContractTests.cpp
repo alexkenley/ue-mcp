@@ -117,7 +117,10 @@ namespace MCPHandlerSpecTests
 		{
 			for (const TArray<FString>& Branch : Choice.Branches)
 			{
-				InChoice.Append(Branch);
+				for (const FString& Name : Branch)
+				{
+					InChoice.Add(Name);
+				}
 			}
 		}
 		TArray<FString> Base;
