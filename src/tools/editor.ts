@@ -5,12 +5,29 @@ import { readEngineState, withBridgeSnapshot, type EngineSnapshot } from "../eng
 import { progressRenderingNote } from "../client-quirks.js";
 import { pushWorkaround, workaroundCount } from "../workaround-tracker.js";
 import { searchTools } from "../tool-search.js";
-import { evaluateGate, gateRefusalMessage } from "../python-gate.js";
+import { evaluateGate, gateRefusalMessage, type GateCandidate } from "../python-gate.js";
+import { checkBridgeParity } from "../bridge-parity.js";
+import { PLUGIN_UPGRADE_POINTER } from "../bridge.js";
 import { Vec3, Rotator } from "../schemas.js";
 import { FunctionArgs, normalizeFunctionArgs, normalizePythonArgs } from "../function-args.js";
 import { CURSOR_PARAM, paged } from "../pagination.js";
 import { DialogGuard } from "../dialog-guard.js";
 import { actions as epicActions, schema as epicSchema } from "./epic/editor.generated.js";
+
+/**
+ * Which gate candidates dispatch to a bridge method the connected plugin does
+ * not register, read from the parity check. Nothing is excluded when the
+ * plugin published no action list, since then nothing is known.
+ */
+async function notInRunningPlugin(ctx: ToolContext): Promise<(c: GateCandidate) => boolean> {
+  const graph = ctx.getToolGraph?.() ?? (await import("../tools.js")).getLiveToolGraph();
+  const missing = new Set(checkBridgeParity(graph, ctx.bridge.capabilities).missing);
+  if (missing.size === 0) return () => false;
+  return (c) => {
+    const spec = graph.find((t) => t.name === c.tool)?.actions[c.action];
+    return spec?.kind === "bridge" && missing.has(spec.bridge);
+  };
+}
 
 /** Where a caller declares a standing opt-in to the Blueprint-error bypass.
  *  Rides the normal global < project < env < local config cascade, so a
@@ -117,7 +134,7 @@ export const editorTool: ToolDef = categoryTool(
     execute_python: {
       kind: "handler",
       effect: "unknown",
-      description: "GATED LAST RESORT. execute_python is unreachable until a semantic tool search over your taskSummary has been run AND every candidate it returns is EXPLICITLY ruled out with a stated reason. Flow: (1) call with taskSummary (+code) - it returns the candidate actions AND the exact ruledOut array to send back; (2) re-call with the same taskSummary/code PLUS that ruledOut=[{action, reason}], each reason at least 12 characters saying why that candidate does not fit. The action field accepts the bare name, tool(action) or tool.action, and rulings are remembered for the session so rewording the taskSummary never asks you to justify the same action twice. Python runs only once every candidate is ruled out. Params: code, taskSummary (required), ruledOut?, resultVariable? (name of a top-level variable to return as `result`, separate from print()/log; #732) (#704, #938, #960)",
+      description: "GATED LAST RESORT. execute_python is unreachable until a semantic tool search over your taskSummary has been run AND every candidate it returns is EXPLICITLY ruled out with a stated reason. Flow: (1) call with taskSummary (+code) - it returns the candidate actions AND the exact ruledOut array to send back; (2) re-call with the same taskSummary/code PLUS that ruledOut=[{action, reason}], each reason at least 12 characters saying why that candidate does not fit. The action field accepts the bare name, tool(action) or tool.action, and rulings are remembered for the session so rewording the taskSummary never asks you to justify the same action twice. A candidate the running plugin does not register cannot do the task, so it needs no ruling: it is listed under notInRunningPlugin with the upgrade command instead. Python runs only once every candidate is ruled out. Params: code, taskSummary (required), ruledOut?, resultVariable? (name of a top-level variable to return as `result`, separate from print()/log; #732) (#704, #938, #960, #1167)",
       handler: async (ctx: ToolContext, params: Record<string, unknown>) => {
         const code = (params.code as string) ?? "";
         const taskSummary = ((params.taskSummary as string) ?? "").trim();
@@ -140,7 +157,9 @@ export const editorTool: ToolDef = categoryTool(
           // for the session, so the strings this refusal prints are exactly the
           // strings that satisfy it, and a reworded summary cannot reset the
           // work already done. See src/python-gate.ts.
-          const verdict = evaluateGate(candidates, params.ruledOut, ctx);
+          // #1167: a candidate whose bridge method the running plugin does not
+          // register cannot do the task, so it is owed no ruling.
+          const verdict = evaluateGate(candidates, params.ruledOut, ctx, await notInRunningPlugin(ctx));
           if (verdict.unresolved.length > 0) {
             pushWorkaround({ code, timestamp: new Date().toISOString(), taskSummary, suggestedTool: candidates.map((c) => `${c.tool}(${c.action})`).join(", ") }, ctx);
             return {
@@ -153,6 +172,12 @@ export const editorTool: ToolDef = categoryTool(
               // describing the shape was not enough to make the gate passable.
               sendThisBack: { ruledOut: verdict.ruledOutTemplate },
               alreadyRuledOut: verdict.satisfied,
+              ...(verdict.notInPlugin.length > 0
+                ? {
+                    notInRunningPlugin: verdict.notInPlugin.map((c) => `${c.tool}(${c.action})`),
+                    upgrade: PLUGIN_UPGRADE_POINTER,
+                  }
+                : {}),
               ignoredEntries: verdict.rejected,
               message: gateRefusalMessage(taskSummary, candidates, verdict),
             };

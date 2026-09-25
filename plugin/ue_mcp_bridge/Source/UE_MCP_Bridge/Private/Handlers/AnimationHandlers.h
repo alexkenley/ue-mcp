@@ -67,6 +67,9 @@ private:
 	static TSharedPtr<FJsonValue> CreateSequence(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetBoneKeyframes(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> BakeKeyframesBatch(const TSharedPtr<FJsonObject>& Params);
+	// #1162: time-reversed copy of an AnimSequence, or the sequence reversed in
+	// place. Lives in AnimationHandlers_Reverse.cpp.
+	static TSharedPtr<FJsonValue> ReverseSequence(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> GetBoneTransforms(const TSharedPtr<FJsonObject>& Params);
 	// #656: compare an animation/pose asset's curve names against a skeletal
 	// mesh's morph target names and report matches/mismatches.

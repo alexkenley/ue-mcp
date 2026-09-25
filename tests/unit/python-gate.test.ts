@@ -25,6 +25,8 @@ import {
 } from "../../src/python-gate.js";
 import { editorTool } from "../../src/tools/editor.js";
 import { resetAllWorkarounds } from "../../src/workaround-tracker.js";
+import { PLUGIN_UPGRADE_POINTER } from "../../src/bridge.js";
+import { getLiveToolGraph } from "../../src/tools.js";
 import type { IBridge, ToolContext } from "../../src/types.js";
 
 const CANDIDATES: GateCandidate[] = [
@@ -172,6 +174,31 @@ describe("gateRefusalMessage", () => {
   });
 });
 
+describe("candidates the running plugin does not register (#1167)", () => {
+  const absent = (c: GateCandidate) => c.action === "invoke_function";
+
+  it("does not require a ruling for them", () => {
+    const verdict = evaluateGate(CANDIDATES, undefined, { session: { key: "c:/proj/absent" } }, absent);
+    expect(verdict.unresolved.map((c) => c.action)).toEqual(["set_property"]);
+    expect(verdict.notInPlugin.map((c) => c.action)).toEqual(["invoke_function"]);
+    expect(verdict.ruledOutTemplate.map((e) => e.action)).toEqual(["asset(set_property)"]);
+  });
+
+  it("lists them apart with the upgrade pointer", () => {
+    const verdict = evaluateGate(CANDIDATES, undefined, { session: { key: "c:/proj/absent2" } }, absent);
+    const message = gateRefusalMessage("call a function", CANDIDATES, verdict);
+    expect(message).toContain("Advertised but not in the running plugin");
+    expect(message).toContain("editor(invoke_function)");
+    expect(message).toContain(PLUGIN_UPGRADE_POINTER);
+    expect(message).toContain("Still need a reason for: asset(set_property).");
+  });
+
+  it("passes the gate when every candidate is absent", () => {
+    const verdict = evaluateGate(CANDIDATES, undefined, { session: { key: "c:/proj/absent3" } }, () => true);
+    expect(verdict.unresolved).toEqual([]);
+  });
+});
+
 describe("editor.execute_python end to end", () => {
   const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
   const bridge = {
@@ -239,6 +266,48 @@ describe("editor.execute_python end to end", () => {
         (blocked.needReasonFor as string[]).map(ruledOutKey),
       );
       for (const action of outstanding) expect(alreadyDone.has(action)).toBe(false);
+    }
+  });
+
+  it("excludes candidates whose bridge method the running plugin lacks (#1167)", async () => {
+    const summary = "invoke a ufunction on an actor component";
+    const first = await run({ code: "print(1)", taskSummary: summary });
+    const candidates = (first.candidates as GateCandidate[]).map((c) => `${c.tool}(${c.action})`);
+    expect(candidates.length).toBeGreaterThan(0);
+    resetRulings();
+
+    // A plugin that registers every advertised method except the first
+    // bridge-backed candidate's.
+    const graph = getLiveToolGraph();
+    const methodOf = (qualified: string): string | undefined => {
+      const [tool, action] = qualified.replace(")", "").split("(");
+      const spec = graph.find((t) => t.name === tool)?.actions[action];
+      return spec?.kind === "bridge" ? spec.bridge : undefined;
+    };
+    const target = candidates.find((c) => methodOf(c));
+    expect(target).toBeDefined();
+    const dropped = methodOf(target!)!;
+    const registered = graph
+      .flatMap((t) => Object.values(t.actions))
+      .flatMap((spec) => (spec.kind === "bridge" ? [spec.bridge] : []))
+      .filter((m) => m !== dropped);
+    const lagging = {
+      ...ctx,
+      bridge: { ...bridge, capabilities: { protocolVersion: 2, legacy: false, actions: registered } },
+      getToolGraph: () => graph,
+    } as unknown as ToolContext;
+
+    const result = (await editorTool.actions.execute_python.handler!(lagging, {
+      code: "print(1)",
+      taskSummary: summary,
+    })) as Record<string, unknown>;
+    if (result.blocked) {
+      expect(result.needReasonFor as string[]).not.toContain(target);
+      expect(result.notInRunningPlugin as string[]).toContain(target);
+      expect(result.upgrade).toBe(PLUGIN_UPGRADE_POINTER);
+    } else {
+      // The absent method was the only candidate, so nothing was owed.
+      expect(candidates).toEqual([target]);
     }
   });
 

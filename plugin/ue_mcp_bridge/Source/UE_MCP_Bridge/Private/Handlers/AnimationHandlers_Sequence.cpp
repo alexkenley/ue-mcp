@@ -6,6 +6,7 @@
 #include "AnimationHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerPagination.h"
 #include "HandlerAssetCreate.h"
 #include "HandlerJsonProperty.h"
 #include "Curves/RichCurve.h"
@@ -30,6 +31,7 @@
 #include "UObject/UObjectGlobals.h"
 #include "UObject/SavePackage.h"
 #include "Misc/PackageName.h"
+#include "Misc/Crc.h"
 #include "EditorAssetLibrary.h"
 #include "Editor.h"
 #include "Dom/JsonObject.h"
@@ -39,115 +41,366 @@
 // ---------------------------------------------------------------------------
 // read_anim_sequence
 // ---------------------------------------------------------------------------
-TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimSequence(const TSharedPtr<FJsonObject>& Params)
+namespace
 {
-	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
-
-	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
-	UAnimSequence* AnimSeq = Cast<UAnimSequence>(LoadedAsset);
-	if (!AnimSeq)
+	// Every key AnimReadSeqFill writes. `fields` is validated against this list
+	// so a misspelt selector fails instead of returning rows without the column.
+	const TArray<FString>& AnimReadSeqFieldNames()
 	{
-		return LoadedAsset
-			? MCPAssetWrongTypeError(AssetPath, LoadedAsset, TEXT("AnimSequence"))
-			: MCPAssetNotFoundError(AssetPath);
+		static const TArray<FString> Names = {
+			TEXT("assetPath"), TEXT("name"), TEXT("class"), TEXT("sequenceLength"), TEXT("rateScale"),
+			TEXT("numberOfFrames"), TEXT("samplingFrameRate"), TEXT("skeleton"), TEXT("isAdditive"),
+			TEXT("additiveType"), TEXT("lengthSeconds"), TEXT("numFrames"), TEXT("frameRate"),
+			TEXT("rootMotionEnabled"), TEXT("rootMotionRootLock"), TEXT("forceRootLock"),
+			TEXT("useNormalizedRootMotionScale"), TEXT("targetSkeletonPath"), TEXT("boneCount"),
+			TEXT("hasNotifies"), TEXT("hasCurves"), TEXT("notifyCount"), TEXT("curveCount"),
+			TEXT("notifies"), TEXT("curveNames"),
+		};
+		return Names;
 	}
 
-	auto Result = MCPSuccess();
-
-	Result->SetStringField(TEXT("assetPath"), AssetPath);
-	Result->SetStringField(TEXT("name"), AnimSeq->GetName());
-	Result->SetStringField(TEXT("class"), AnimSeq->GetClass()->GetName());
-
-	// Sequence length
-	Result->SetNumberField(TEXT("sequenceLength"), AnimSeq->GetPlayLength());
-
-	// Rate scale
-	Result->SetNumberField(TEXT("rateScale"), AnimSeq->RateScale);
-
-	// Number of frames and sampling frame rate
-	Result->SetNumberField(TEXT("numberOfFrames"), AnimSeq->GetNumberOfSampledKeys());
-	double SamplingRate = AnimSeq->GetSamplingFrameRate().AsDecimal();
-	Result->SetNumberField(TEXT("samplingFrameRate"), SamplingRate);
-
-	// Skeleton
-	USkeleton* Skeleton = AnimSeq->GetSkeleton();
-	if (Skeleton)
+	// The batch row when `fields` is omitted: small enough that a page of
+	// sequences stays a compact table.
+	const TArray<FString>& AnimReadSeqDefaultBatchFields()
 	{
-		Result->SetStringField(TEXT("skeleton"), Skeleton->GetPathName());
+		static const TArray<FString> Names = {
+			TEXT("name"), TEXT("sequenceLength"), TEXT("rateScale"), TEXT("numberOfFrames"),
+			TEXT("samplingFrameRate"), TEXT("rootMotionEnabled"), TEXT("notifyCount"),
+		};
+		return Names;
+	}
+
+	void AnimReadSeqFill(UAnimSequence* AnimSeq, const FString& AssetPath, const TSharedPtr<FJsonObject>& Result)
+	{
+		Result->SetStringField(TEXT("assetPath"), AssetPath);
+		Result->SetStringField(TEXT("name"), AnimSeq->GetName());
+		Result->SetStringField(TEXT("class"), AnimSeq->GetClass()->GetName());
+		Result->SetNumberField(TEXT("sequenceLength"), AnimSeq->GetPlayLength());
+		Result->SetNumberField(TEXT("rateScale"), AnimSeq->RateScale);
+		Result->SetNumberField(TEXT("numberOfFrames"), AnimSeq->GetNumberOfSampledKeys());
+		const double SamplingRate = AnimSeq->GetSamplingFrameRate().AsDecimal();
+		Result->SetNumberField(TEXT("samplingFrameRate"), SamplingRate);
+
+		USkeleton* Skeleton = AnimSeq->GetSkeleton();
+		if (Skeleton)
+		{
+			Result->SetStringField(TEXT("skeleton"), Skeleton->GetPathName());
+		}
+		else
+		{
+			Result->SetField(TEXT("skeleton"), MakeShared<FJsonValueNull>());
+		}
+
+		Result->SetBoolField(TEXT("isAdditive"), AnimSeq->AdditiveAnimType != EAdditiveAnimationType::AAT_None);
+
+		// #432: explicit per-sequence QA fields, named as that issue requested.
+		const TCHAR* AdditiveType = TEXT("Unknown");
+		switch (AnimSeq->AdditiveAnimType)
+		{
+		case EAdditiveAnimationType::AAT_None:                    AdditiveType = TEXT("None"); break;
+		case EAdditiveAnimationType::AAT_LocalSpaceBase:          AdditiveType = TEXT("LocalSpaceBase"); break;
+		case EAdditiveAnimationType::AAT_RotationOffsetMeshSpace: AdditiveType = TEXT("RotationOffsetMeshSpace"); break;
+		default: break;
+		}
+		Result->SetStringField(TEXT("additiveType"), AdditiveType);
+		Result->SetNumberField(TEXT("lengthSeconds"), AnimSeq->GetPlayLength());
+		Result->SetNumberField(TEXT("numFrames"), AnimSeq->GetNumberOfSampledKeys());
+		Result->SetNumberField(TEXT("frameRate"), SamplingRate);
+		Result->SetBoolField(TEXT("rootMotionEnabled"), AnimSeq->bEnableRootMotion);
+		Result->SetStringField(TEXT("rootMotionRootLock"),
+			AnimSeq->RootMotionRootLock == ERootMotionRootLock::RefPose ? TEXT("RefPose")
+			: AnimSeq->RootMotionRootLock == ERootMotionRootLock::AnimFirstFrame ? TEXT("AnimFirstFrame")
+			: TEXT("Zero"));
+		Result->SetBoolField(TEXT("forceRootLock"), AnimSeq->bForceRootLock);
+		Result->SetBoolField(TEXT("useNormalizedRootMotionScale"), AnimSeq->bUseNormalizedRootMotionScale);
+		Result->SetStringField(TEXT("targetSkeletonPath"), Skeleton ? Skeleton->GetPathName() : FString());
+		Result->SetNumberField(TEXT("boneCount"), Skeleton ? Skeleton->GetReferenceSkeleton().GetNum() : 0);
+
+		const TArray<FFloatCurve>& Curves = AnimSeq->GetCurveData().FloatCurves;
+		Result->SetBoolField(TEXT("hasNotifies"), AnimSeq->Notifies.Num() > 0);
+		Result->SetBoolField(TEXT("hasCurves"), Curves.Num() > 0);
+		Result->SetNumberField(TEXT("notifyCount"), AnimSeq->Notifies.Num());
+		Result->SetNumberField(TEXT("curveCount"), Curves.Num());
+
+		TArray<TSharedPtr<FJsonValue>> NotifiesArray;
+		for (const FAnimNotifyEvent& NotifyEvent : AnimSeq->Notifies)
+		{
+			TSharedPtr<FJsonObject> NotifyObj = MakeShared<FJsonObject>();
+			NotifyObj->SetStringField(TEXT("name"), NotifyEvent.NotifyName.ToString());
+			NotifyObj->SetNumberField(TEXT("triggerTime"), NotifyEvent.GetTriggerTime());
+			NotifyObj->SetNumberField(TEXT("duration"), NotifyEvent.GetDuration());
+#if WITH_EDITORONLY_DATA
+			NotifyObj->SetNumberField(TEXT("trackIndex"), NotifyEvent.TrackIndex);
+			if (AnimSeq->AnimNotifyTracks.IsValidIndex(NotifyEvent.TrackIndex))
+			{
+				NotifyObj->SetStringField(TEXT("trackName"), AnimSeq->AnimNotifyTracks[NotifyEvent.TrackIndex].TrackName.ToString());
+			}
+#endif
+			if (NotifyEvent.Notify)
+			{
+				NotifyObj->SetStringField(TEXT("class"), NotifyEvent.Notify->GetClass()->GetName());
+			}
+			if (NotifyEvent.NotifyStateClass)
+			{
+				NotifyObj->SetStringField(TEXT("notifyStateClass"), NotifyEvent.NotifyStateClass->GetClass()->GetName());
+				NotifyObj->SetNumberField(TEXT("endTime"), NotifyEvent.GetEndTriggerTime());
+			}
+			NotifiesArray.Add(MakeShared<FJsonValueObject>(NotifyObj));
+		}
+		Result->SetArrayField(TEXT("notifies"), NotifiesArray);
+
+		TArray<TSharedPtr<FJsonValue>> CurvesArray;
+		for (const FFloatCurve& Curve : Curves)
+		{
+			CurvesArray.Add(MakeShared<FJsonValueString>(Curve.GetName().ToString()));
+		}
+		Result->SetArrayField(TEXT("curveNames"), CurvesArray);
+	}
+
+	// Copy the selected keys of `Full` onto `Out`. assetPath is always kept so
+	// a row can be matched back to its request.
+	void AnimReadSeqSelect(const TSharedPtr<FJsonObject>& Full, const TArray<FString>& Fields, const TSharedPtr<FJsonObject>& Out)
+	{
+		const TSharedPtr<FJsonValue> Path = Full->TryGetField(TEXT("assetPath"));
+		if (Path.IsValid())
+		{
+			Out->SetField(TEXT("assetPath"), Path);
+		}
+		for (const FString& Field : Fields)
+		{
+			const TSharedPtr<FJsonValue> Value = Full->TryGetField(Field);
+			if (Value.IsValid())
+			{
+				Out->SetField(Field, Value);
+			}
+		}
+	}
+
+	// One batch row. A sequence that does not load is reported on its own row
+	// so one bad path does not cost the caller the rest of the page.
+	TSharedPtr<FJsonObject> AnimReadSeqBatchRow(const FString& AssetPath, const TArray<FString>& Fields)
+	{
+		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+		UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
+		UAnimSequence* AnimSeq = Cast<UAnimSequence>(LoadedAsset);
+		if (!AnimSeq)
+		{
+			const TSharedPtr<FJsonValue> Error = LoadedAsset
+				? MCPAssetWrongTypeError(AssetPath, LoadedAsset, TEXT("AnimSequence"))
+				: MCPAssetNotFoundError(AssetPath);
+			Row->SetStringField(TEXT("assetPath"), AssetPath);
+			Row->SetBoolField(TEXT("success"), false);
+			FString Message = TEXT("Could not read this sequence");
+			if (Error.IsValid() && Error->Type == EJson::Object)
+			{
+				Error->AsObject()->TryGetStringField(TEXT("error"), Message);
+			}
+			Row->SetStringField(TEXT("error"), Message);
+			return Row;
+		}
+
+		TSharedPtr<FJsonObject> Full = MakeShared<FJsonObject>();
+		AnimReadSeqFill(AnimSeq, AssetPath, Full);
+		AnimReadSeqSelect(Full, Fields, Row);
+		Row->SetBoolField(TEXT("success"), true);
+		return Row;
+	}
+}
+
+TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimSequence(const TSharedPtr<FJsonObject>& Params)
+{
+	// `fields` narrows either form. Validated before anything loads.
+	TArray<FString> Fields;
+	bool bHasFields = false;
+	const TArray<TSharedPtr<FJsonValue>>* FieldsJson = nullptr;
+	if (TryGetArrayParam(Params, TEXT("fields"), FieldsJson))
+	{
+		bHasFields = true;
+		for (const TSharedPtr<FJsonValue>& Value : *FieldsJson)
+		{
+			FString Field;
+			if (!Value.IsValid() || !Value->TryGetString(Field) || Field.IsEmpty())
+			{
+				return MCPError(TEXT("'fields' must be an array of non-empty strings"));
+			}
+			if (!AnimReadSeqFieldNames().Contains(Field))
+			{
+				return MCPError(FString::Printf(
+					TEXT("Unknown field '%s' in 'fields'. Valid fields: %s"),
+					*Field, *FString::Join(AnimReadSeqFieldNames(), TEXT(", "))));
+			}
+			Fields.AddUnique(Field);
+		}
+	}
+
+	const bool bHasAssetPaths = HasParam(Params, TEXT("assetPaths"));
+	const bool bHasDirectory = HasParam(Params, TEXT("directory"));
+
+	if (!bHasAssetPaths && !bHasDirectory)
+	{
+		FString AssetPath;
+		if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+
+		UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
+		UAnimSequence* AnimSeq = Cast<UAnimSequence>(LoadedAsset);
+		if (!AnimSeq)
+		{
+			return LoadedAsset
+				? MCPAssetWrongTypeError(AssetPath, LoadedAsset, TEXT("AnimSequence"))
+				: MCPAssetNotFoundError(AssetPath);
+		}
+
+		TSharedPtr<FJsonObject> Full = MCPSuccess();
+		AnimReadSeqFill(AnimSeq, AssetPath, Full);
+		if (!bHasFields)
+		{
+			return MCPResult(Full);
+		}
+		TSharedPtr<FJsonObject> Result = MCPSuccess();
+		AnimReadSeqSelect(Full, Fields, Result);
+		return MCPResult(Result);
+	}
+
+	// Batch (#1163): one row per sequence, paged.
+	if (bHasAssetPaths && bHasDirectory)
+	{
+		return MCPError(TEXT("Pass either 'assetPaths' or 'directory', not both"));
+	}
+	if (HasParam(Params, TEXT("assetPath")) || HasParam(Params, TEXT("path")))
+	{
+		return MCPError(TEXT("'assetPath' reads one sequence; with 'assetPaths' or 'directory' put every path in the batch instead"));
+	}
+	if (!bHasFields)
+	{
+		Fields = AnimReadSeqDefaultBatchFields();
+	}
+
+	static constexpr int32 MaxAssetPaths = 1000;
+	const bool bRecursive = OptionalBool(Params, TEXT("recursive"), true);
+	const FString NameFilter = OptionalString(Params, TEXT("nameFilter"));
+	FString Directory = OptionalString(Params, TEXT("directory"));
+	while (Directory.Len() > 1 && Directory.EndsWith(TEXT("/")))
+	{
+		Directory.LeftChopInline(1);
+	}
+
+	TArray<FString> AssetPaths;
+	if (bHasAssetPaths)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* PathsJson = nullptr;
+		if (!TryGetArrayParam(Params, TEXT("assetPaths"), PathsJson))
+		{
+			return MCPError(TEXT("'assetPaths' must be an array of AnimSequence paths"));
+		}
+		if (PathsJson->Num() > MaxAssetPaths)
+		{
+			return MCPError(FString::Printf(
+				TEXT("'assetPaths' holds %d paths and the cap is %d. Split the request, or use 'directory' and page through it."),
+				PathsJson->Num(), MaxAssetPaths));
+		}
+		for (int32 Index = 0; Index < PathsJson->Num(); ++Index)
+		{
+			FString Path;
+			const TSharedPtr<FJsonValue>& Value = (*PathsJson)[Index];
+			if (!Value.IsValid() || !Value->TryGetString(Path) || Path.TrimStartAndEnd().IsEmpty())
+			{
+				return MCPError(FString::Printf(TEXT("'assetPaths[%d]' must be a non-empty string"), Index));
+			}
+			// Duplicates collapse: a row's path is its paging identity.
+			AssetPaths.AddUnique(Path.TrimStartAndEnd());
+		}
 	}
 	else
 	{
-		Result->SetField(TEXT("skeleton"), MakeShared<FJsonValueNull>());
+		if (Directory.IsEmpty() || !Directory.StartsWith(TEXT("/")))
+		{
+			return MCPError(TEXT("'directory' must be a content path such as '/Game/Characters/Anims'"));
+		}
+		IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TArray<FAssetData> AssetDataList;
+		AssetRegistry.GetAssetsByClass(FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("AnimSequence")), AssetDataList, true);
+		const FString DirectoryPrefix = Directory + TEXT("/");
+		const bool bWildcard = NameFilter.Contains(TEXT("*")) || NameFilter.Contains(TEXT("?"));
+		for (const FAssetData& AssetData : AssetDataList)
+		{
+			const FString PackagePath = AssetData.PackagePath.ToString();
+			const bool bInDirectory = bRecursive
+				? (PackagePath == Directory || PackagePath.StartsWith(DirectoryPrefix))
+				: PackagePath == Directory;
+			if (!bInDirectory)
+			{
+				continue;
+			}
+			if (!NameFilter.IsEmpty())
+			{
+				const FString AssetName = AssetData.AssetName.ToString();
+				const bool bMatches = bWildcard
+					? AssetName.MatchesWildcard(NameFilter, ESearchCase::IgnoreCase)
+					: AssetName.Contains(NameFilter, ESearchCase::IgnoreCase);
+				if (!bMatches)
+				{
+					continue;
+				}
+			}
+			AssetPaths.Add(AssetData.GetObjectPathString());
+		}
+		// The registry promises no order; sorting keeps page boundaries stable.
+		AssetPaths.Sort();
 	}
 
-	// Additive animation type
-	Result->SetBoolField(TEXT("isAdditive"), AnimSeq->AdditiveAnimType != EAdditiveAnimationType::AAT_None);
+	// The key binds a cursor to the collection it paged. `fields` changes the
+	// columns, not the rows, so it stays out.
+	const FString CollectionKey = bHasAssetPaths
+		? FString::Printf(TEXT("read_anim_sequence|assetPaths=%d:%08x"),
+			AssetPaths.Num(), FCrc::StrCrc32(*FString::Join(AssetPaths, TEXT("|"))))
+		: FString::Printf(TEXT("read_anim_sequence|directory=%s|recursive=%d|nameFilter=%s"),
+			*Directory, bRecursive ? 1 : 0, *NameFilter);
 
-	// #432: explicit per-sequence QA fields. Mirror the property names the
-	// agent-feedback issue requested so callers don't have to derive them.
-	auto AdditiveTypeName = [&]() -> const TCHAR* {
-		switch (AnimSeq->AdditiveAnimType)
-		{
-		case EAdditiveAnimationType::AAT_None:                 return TEXT("None");
-		case EAdditiveAnimationType::AAT_LocalSpaceBase:       return TEXT("LocalSpaceBase");
-		case EAdditiveAnimationType::AAT_RotationOffsetMeshSpace: return TEXT("RotationOffsetMeshSpace");
-		default: return TEXT("Unknown");
-		}
-	};
-	Result->SetStringField(TEXT("additiveType"), AdditiveTypeName());
-	Result->SetNumberField(TEXT("lengthSeconds"), AnimSeq->GetPlayLength());
-	Result->SetNumberField(TEXT("numFrames"), AnimSeq->GetNumberOfSampledKeys());
-	Result->SetNumberField(TEXT("frameRate"), SamplingRate);
-	Result->SetBoolField(TEXT("rootMotionEnabled"), AnimSeq->bEnableRootMotion);
-	Result->SetStringField(TEXT("rootMotionRootLock"),
-		AnimSeq->RootMotionRootLock == ERootMotionRootLock::RefPose ? TEXT("RefPose")
-		: AnimSeq->RootMotionRootLock == ERootMotionRootLock::AnimFirstFrame ? TEXT("AnimFirstFrame")
-		: TEXT("Zero"));
-	Result->SetBoolField(TEXT("forceRootLock"), AnimSeq->bForceRootLock);
-	Result->SetBoolField(TEXT("useNormalizedRootMotionScale"), AnimSeq->bUseNormalizedRootMotionScale);
-	Result->SetStringField(TEXT("targetSkeletonPath"), Skeleton ? Skeleton->GetPathName() : FString());
-	Result->SetNumberField(TEXT("boneCount"), Skeleton ? Skeleton->GetReferenceSkeleton().GetNum() : 0);
-	Result->SetBoolField(TEXT("hasNotifies"), AnimSeq->Notifies.Num() > 0);
-	Result->SetBoolField(TEXT("hasCurves"), AnimSeq->GetCurveData().FloatCurves.Num() > 0);
-
-	// Notifies
-	TArray<TSharedPtr<FJsonValue>> NotifiesArray;
-	for (const FAnimNotifyEvent& NotifyEvent : AnimSeq->Notifies)
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(Params, CollectionKey, /*DefaultLimit*/ 50, /*MaxLimit*/ 200, Page))
 	{
-		TSharedPtr<FJsonObject> NotifyObj = MakeShared<FJsonObject>();
-		NotifyObj->SetStringField(TEXT("name"), NotifyEvent.NotifyName.ToString());
-		NotifyObj->SetNumberField(TEXT("triggerTime"), NotifyEvent.GetTriggerTime());
-		NotifyObj->SetNumberField(TEXT("duration"), NotifyEvent.GetDuration());
-#if WITH_EDITORONLY_DATA
-		NotifyObj->SetNumberField(TEXT("trackIndex"), NotifyEvent.TrackIndex);
-		if (AnimSeq->AnimNotifyTracks.IsValidIndex(NotifyEvent.TrackIndex))
-		{
-			NotifyObj->SetStringField(TEXT("trackName"), AnimSeq->AnimNotifyTracks[NotifyEvent.TrackIndex].TrackName.ToString());
-		}
-#endif
-		if (NotifyEvent.Notify)
-		{
-			NotifyObj->SetStringField(TEXT("class"), NotifyEvent.Notify->GetClass()->GetName());
-		}
-		if (NotifyEvent.NotifyStateClass)
-		{
-			NotifyObj->SetStringField(TEXT("notifyStateClass"), NotifyEvent.NotifyStateClass->GetClass()->GetName());
-			NotifyObj->SetNumberField(TEXT("endTime"), NotifyEvent.GetEndTriggerTime());
-		}
-		NotifiesArray.Add(MakeShared<FJsonValueObject>(NotifyObj));
+		return Err;
 	}
-	Result->SetArrayField(TEXT("notifies"), NotifiesArray);
 
-	// Curve names
-	TArray<TSharedPtr<FJsonValue>> CurvesArray;
-	const TArray<FFloatCurve>& Curves = AnimSeq->GetCurveData().FloatCurves;
-	for (const FFloatCurve& Curve : Curves)
+	// Rows carry only their path until the page is sliced, so sequences off the
+	// page are never loaded.
+	TArray<MCPPagination::FPageRow> Rows;
+	Rows.Reserve(AssetPaths.Num());
+	for (const FString& Path : AssetPaths)
 	{
-		CurvesArray.Add(MakeShared<FJsonValueString>(Curve.GetName().ToString()));
+		Rows.Add({ Path, MakeShared<FJsonValueString>(Path) });
 	}
-	Result->SetArrayField(TEXT("curveNames"), CurvesArray);
 
+	TSharedPtr<FJsonObject> Result = MCPSuccess();
+	if (bHasDirectory)
+	{
+		Result->SetStringField(TEXT("directory"), Directory);
+		Result->SetBoolField(TEXT("recursive"), bRecursive);
+		if (!NameFilter.IsEmpty()) Result->SetStringField(TEXT("nameFilter"), NameFilter);
+	}
+	Result->SetArrayField(TEXT("fields"), MCPStringListToJson(Fields));
+	MCPPagination::EmitPage(Page, Rows, TEXT("sequences"), Result);
+
+	TArray<TSharedPtr<FJsonValue>> PagePaths = Result->GetArrayField(TEXT("sequences"));
+	TArray<TSharedPtr<FJsonValue>> Sequences;
+	Sequences.Reserve(PagePaths.Num());
+	int32 FailedCount = 0;
+	for (const TSharedPtr<FJsonValue>& PathValue : PagePaths)
+	{
+		FString Path;
+		if (!PathValue.IsValid() || !PathValue->TryGetString(Path))
+		{
+			continue;
+		}
+		TSharedPtr<FJsonObject> Row = AnimReadSeqBatchRow(Path, Fields);
+		if (!Row->GetBoolField(TEXT("success")))
+		{
+			++FailedCount;
+		}
+		Sequences.Add(MakeShared<FJsonValueObject>(Row));
+	}
+	Result->SetArrayField(TEXT("sequences"), Sequences);
+	Result->SetNumberField(TEXT("failedCount"), FailedCount);
 	return MCPResult(Result);
 }
 
@@ -919,7 +1172,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetBoneTransforms(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FAnimationHandlers::AddCurve(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString CurveName;
 	if (auto Err = RequireString(Params, TEXT("curveName"), CurveName)) return Err;
@@ -1331,7 +1584,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateAnimComposite(const TSharedPtr<
 TSharedPtr<FJsonValue> FAnimationHandlers::ListAnimModifiers(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UAnimSequence* Seq = LoadAssetByPath<UAnimSequence>(AssetPath);
 	if (!Seq) return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *AssetPath));
@@ -1388,6 +1641,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadBoneTrack(const TSharedPtr<FJsonO
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString BoneName;
 	if (auto Err = RequireString(Params, TEXT("boneName"), BoneName)) return Err;
+	// Read before anything can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* FramesArr = nullptr;
+	const bool bHasFrames = TryGetArrayParam(Params, TEXT("frames"), FramesArr) && FramesArr != nullptr;
 
 	UAnimSequence* Seq = LoadAssetByPath<UAnimSequence>(AssetPath);
 	if (!Seq) return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *AssetPath));
@@ -1400,8 +1656,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadBoneTrack(const TSharedPtr<FJsonO
 
 	// Frame selection
 	TArray<int32> FramesToSample;
-	const TArray<TSharedPtr<FJsonValue>>* FramesArr = nullptr;
-	if (TryGetArrayParam(Params, TEXT("frames"), FramesArr))
+	if (bHasFrames)
 	{
 		for (const auto& V : *FramesArr)
 		{

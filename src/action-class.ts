@@ -294,6 +294,8 @@ const OVERRIDES: Readonly<Record<string, ActionClass>> = {
   "material.render_preview": "mutate",
   "asset.export": "mutate",
   "asset.export_texture": "mutate",
+  // Writes a JSON file (and optionally T3D files) per Blueprint to disk (#1166).
+  "blueprint.export_batch": "mutate",
   "level.export_actor_fbx": "mutate",
   // Writes a 16-bit heightmap to a path the caller chose. It changes no
   // terrain, but a file appearing on disk is an external side effect and the

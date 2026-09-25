@@ -72,33 +72,6 @@
 namespace
 {
 	constexpr int32 DefaultSafeReadGraphLimit = 128;
-
-	// #743: a hand-typed literal on an FText pin lives in DefaultTextValue, not
-	// DefaultValue, so reporting DefaultValue alone made every such pin look
-	// empty - indistinguishable from a genuinely unset one. Any UI string typed
-	// straight into a node was invisible to the read path. Emit the text value
-	// (and the object ref) alongside so a caller sees the whole default.
-	void WritePinDefaults(const TSharedPtr<FJsonObject>& PinObj, const UEdGraphPin* Pin)
-	{
-		if (!PinObj.IsValid() || !Pin) return;
-
-		const bool bHasText = !Pin->DefaultTextValue.IsEmpty();
-		if (bHasText)
-		{
-			PinObj->SetStringField(TEXT("defaultTextValue"), Pin->DefaultTextValue.ToString());
-		}
-		// Prefer the literal that actually holds the value so callers reading
-		// only defaultValue stop silently under-reporting the graph.
-		PinObj->SetStringField(TEXT("defaultValue"),
-			Pin->DefaultValue.IsEmpty() && bHasText
-				? Pin->DefaultTextValue.ToString()
-				: Pin->DefaultValue);
-
-		if (Pin->DefaultObject)
-		{
-			PinObj->SetStringField(TEXT("defaultObject"), Pin->DefaultObject->GetPathName());
-		}
-	}
 }
 
 
@@ -863,37 +836,11 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReadBlueprintGraph(const TSharedPtr<F
 			UEdGraphNode* Node = FilteredNodes[Index];
 			if (!Node) continue;
 
-			TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
-			NodeObj->SetStringField(TEXT("id"), Node->NodeGuid.ToString());
-			NodeObj->SetStringField(TEXT("class"), Node->GetClass()->GetName());
-			NodeObj->SetStringField(TEXT("title"), Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
-			NodeObj->SetNumberField(TEXT("posX"), Node->NodePosX);
-			NodeObj->SetNumberField(TEXT("posY"), Node->NodePosY);
-			if (bIncludeComments)
-			{
-				NodeObj->SetStringField(TEXT("comment"), Node->NodeComment);
-			}
-
-			if (bIncludePins)
-			{
-				TArray<TSharedPtr<FJsonValue>> Pins;
-				for (UEdGraphPin* Pin : Node->Pins)
-				{
-					if (!Pin) continue;
-					TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
-					PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
-					PinObj->SetStringField(TEXT("type"), Pin->PinType.PinCategory.ToString());
-					PinObj->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("Input") : TEXT("Output"));
-					if (bIncludeDefaults)
-					{
-						WritePinDefaults(PinObj, Pin);
-					}
-					PinObj->SetBoolField(TEXT("connected"), Pin->LinkedTo.Num() > 0);
-					Pins.Add(MakeShared<FJsonValueObject>(PinObj));
-				}
-				NodeObj->SetArrayField(TEXT("pins"), Pins);
-			}
-
+			FMCPGraphNodeJsonOptions NodeOptions;
+			NodeOptions.bPins = bIncludePins;
+			NodeOptions.bDefaults = bIncludeDefaults;
+			NodeOptions.bComments = bIncludeComments;
+			TSharedPtr<FJsonObject> NodeObj = MCPDescribeGraphNode(Node, NodeOptions);
 			Nodes.Add(MakeShared<FJsonValueObject>(NodeObj));
 		}
 
@@ -2284,7 +2231,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReadNodeProperty(const TSharedPtr<FJs
 		if (Pin && Pin->PinName.ToString() == PinOrProp)
 		{
 			Result->SetStringField(TEXT("pinName"), PinOrProp);
-			WritePinDefaults(Result, Pin);
+			MCPWritePinDefaults(Result, Pin);
 			return MCPResult(Result);
 		}
 	}
@@ -2418,8 +2365,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJson
 	// Node->GetClass() == UK2Node_Tunnel::StaticClass() with the comment
 	// "Intentional that we check for exact class here!"
 	// (K2Node_Composite.cpp:116-121).
-	TSet<UObject*> NodeSet;
-	int32 SkippedCount = 0;
 	TArray<TSharedPtr<FJsonValue>> SingularNodes;
 	for (UEdGraphNode* Node : SelectedNodes)
 	{
@@ -2467,18 +2412,12 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJson
 			Singular->SetStringField(TEXT("reason"), SingularReason);
 			SingularNodes.Add(MakeShared<FJsonValueObject>(Singular));
 		}
-		if (Node && Node->CanDuplicateNode())
-		{
-			Node->PrepareForCopying();
-			NodeSet.Add(Node);
-		}
-		else
-		{
-			++SkippedCount;
-		}
 	}
 
-	if (NodeSet.Num() == 0)
+	FString ExportedText;
+	int32 SkippedCount = 0;
+	const int32 ExportedCount = MCPExportNodesToT3D(SelectedNodes, ExportedText, SkippedCount);
+	if (ExportedCount == 0)
 	{
 		// Not "entry/return nodes cannot be exported", which this said before and
 		// which the comment above disproves: those report CanDuplicateNode true
@@ -2490,14 +2429,11 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJson
 			"result, transition result, state machine entry) answer false."));
 	}
 
-	FString ExportedText;
-	FEdGraphUtilities::ExportNodesToText(NodeSet, ExportedText);
-
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("path"), AssetPath);
 	Result->SetStringField(TEXT("graphName"), GraphName);
 	Result->SetStringField(TEXT("t3d"), ExportedText);
-	Result->SetNumberField(TEXT("count"), NodeSet.Num());
+	Result->SetNumberField(TEXT("count"), ExportedCount);
 	Result->SetNumberField(TEXT("skipped"), SkippedCount);
 	Result->SetArrayField(TEXT("singularNodes"), SingularNodes);
 	if (SingularNodes.Num() > 0)

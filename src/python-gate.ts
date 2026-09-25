@@ -23,7 +23,12 @@
  * A reason shorter than MIN_REASON_LENGTH used to be dropped in silence, which
  * left the caller re-sending an entry the gate had thrown away without saying
  * so. Those are now reported back by name.
+ *
+ * A candidate the connected plugin does not register cannot do the task, so
+ * it is never owed a ruling. It is listed apart with the upgrade pointer
+ * instead (#1167).
  */
+import { PLUGIN_UPGRADE_POINTER } from "./bridge.js";
 import { workaroundScope, type WorkaroundScopeSource } from "./workaround-tracker.js";
 
 /** A ruling has to say something. Twelve characters is the long-standing bar. */
@@ -168,6 +173,8 @@ export function resetRulings(): void {
 export interface GateVerdict {
   /** Candidates with no accepted ruling. Empty means Python may run. */
   unresolved: GateCandidate[];
+  /** Advertised candidates the running plugin does not register. Owed no ruling. */
+  notInPlugin: GateCandidate[];
   /** Entries the caller sent that did not count, with the reason they did not. */
   rejected: RejectedRuling[];
   /** Candidates already covered, in the spelling the caller will recognise. */
@@ -184,17 +191,20 @@ export function evaluateGate(
   candidates: GateCandidate[],
   rawRuledOut: unknown,
   ctx?: WorkaroundScopeSource,
+  notRegistered: (c: GateCandidate) => boolean = () => false,
 ): GateVerdict {
   const parsed = parseRulings(rawRuledOut);
   const known = recordRulings(ctx, parsed.accepted);
 
-  const unresolved = candidates.filter((c) => !known.has(ruledOutKey(c.action)));
+  const notInPlugin = candidates.filter((c) => notRegistered(c));
+  const unresolved = candidates.filter((c) => !notRegistered(c) && !known.has(ruledOutKey(c.action)));
   const satisfied = candidates
     .filter((c) => known.has(ruledOutKey(c.action)))
     .map((c) => `${c.tool}(${c.action})`);
 
   return {
     unresolved,
+    notInPlugin,
     rejected: parsed.rejected,
     satisfied,
     ruledOutTemplate: unresolved.map((c) => ({
@@ -218,6 +228,11 @@ export function gateRefusalMessage(
     `execute_python is GATED. A tool search for "${taskSummary}" returned ${candidates.length} candidate action(s).`,
     `Still need a reason for: ${verdict.unresolved.map((c) => `${c.tool}(${c.action})`).join(", ")}.`,
   ];
+  if (verdict.notInPlugin.length > 0) {
+    lines.push(
+      `Advertised but not in the running plugin, so no reason is needed: ${verdict.notInPlugin.map((c) => `${c.tool}(${c.action})`).join(", ")}. ${PLUGIN_UPGRADE_POINTER}`,
+    );
+  }
   if (verdict.satisfied.length > 0) {
     lines.push(`Already ruled out this session (no need to repeat): ${verdict.satisfied.join(", ")}.`);
   }

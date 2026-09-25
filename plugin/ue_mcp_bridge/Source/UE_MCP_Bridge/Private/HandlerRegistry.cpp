@@ -4,6 +4,7 @@
 #include "Misc/Paths.h"
 #include "HandlerUtils.h"
 #include "MCPHandlerRegistration.h"
+#include "UE_MCP_BridgeModule.h"
 
 FMCPHandlerRegistry::FMCPHandlerRegistry()
 {
@@ -42,6 +43,157 @@ void FMCPHandlerRegistry::RegisterHandler(const FString& MethodName, FHandlerFun
 {
 	CppHandlers.Add(MethodName, Handler);
 	TagCategory(MethodName);
+	HandlerSpecs.Remove(MethodName);
+}
+
+bool FMCPHandlerRegistry::RegisterHandler(const FString& MethodName, FHandlerFunction Handler, const TArray<FMCPParamSpec>& Params)
+{
+	RegisterHandler(MethodName, MoveTemp(Handler));
+	const FString Problem = ValidateParamSpecs(Params);
+	if (!Problem.IsEmpty())
+	{
+		HandlerSpecs.Remove(MethodName);
+		UE_LOG(LogMCPBridge, Error, TEXT("[UE-MCP] Parameter spec for '%s' refused: %s"), *MethodName, *Problem);
+		return false;
+	}
+	FMCPHandlerSpec Spec;
+	Spec.Params = Params;
+	HandlerSpecs.Add(MethodName, MoveTemp(Spec));
+	return true;
+}
+
+FString FMCPHandlerRegistry::ValidateParamSpecs(const TArray<FMCPParamSpec>& Params)
+{
+	auto IsIdentifier = [](const FString& Name)
+	{
+		if (Name.IsEmpty() || FChar::IsDigit(Name[0])) return false;
+		for (const TCHAR C : Name)
+		{
+			if (!FChar::IsAlnum(C) && C != TEXT('_')) return false;
+		}
+		return true;
+	};
+
+	TSet<FString> Seen;
+	auto Claim = [&](const FString& Name, const FString& Owner) -> FString
+	{
+		if (!IsIdentifier(Name))
+		{
+			return FString::Printf(TEXT("'%s' (on '%s') is not an identifier"), *Name, *Owner);
+		}
+		if (MCPRoutingParamNames().Contains(Name))
+		{
+			return FString::Printf(TEXT("'%s' (on '%s') is a routing name the dispatcher consumes before any handler runs"), *Name, *Owner);
+		}
+		if (Seen.Contains(Name))
+		{
+			return FString::Printf(TEXT("'%s' (on '%s') is declared twice"), *Name, *Owner);
+		}
+		Seen.Add(Name);
+		return FString();
+	};
+
+	for (const FMCPParamSpec& Param : Params)
+	{
+		FString Problem = Claim(Param.Name, Param.Name);
+		for (int32 Index = 0; Problem.IsEmpty() && Index < Param.Aliases.Num(); ++Index)
+		{
+			Problem = Claim(Param.Aliases[Index], Param.Name);
+		}
+		if (Problem.IsEmpty() && Param.Type != EMCPParamType::Array && Param.ItemType != EMCPParamType::Any)
+		{
+			Problem = FString::Printf(TEXT("'%s' declares an item type but is not an array"), *Param.Name);
+		}
+		if (!Problem.IsEmpty()) return Problem;
+	}
+	return FString();
+}
+
+const TCHAR* FMCPHandlerRegistry::ParamTypeName(EMCPParamType Type)
+{
+	switch (Type)
+	{
+	case EMCPParamType::String:  return TEXT("string");
+	case EMCPParamType::Number:  return TEXT("number");
+	case EMCPParamType::Integer: return TEXT("integer");
+	case EMCPParamType::Boolean: return TEXT("boolean");
+	case EMCPParamType::Object:  return TEXT("object");
+	case EMCPParamType::Array:   return TEXT("array");
+	case EMCPParamType::Vec3:    return TEXT("vec3");
+	case EMCPParamType::Rotator: return TEXT("rotator");
+	default:                     return TEXT("any");
+	}
+}
+
+TSharedPtr<FJsonObject> FMCPHandlerRegistry::BuildHandlerSpecsJson() const
+{
+	TArray<FString> Methods;
+	HandlerSpecs.GetKeys(Methods);
+	Methods.Sort();
+
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	for (const FString& Method : Methods)
+	{
+		const FMCPHandlerSpec& Spec = HandlerSpecs.FindChecked(Method);
+		TArray<TSharedPtr<FJsonValue>> ParamValues;
+		for (const FMCPParamSpec& Param : Spec.Params)
+		{
+			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetStringField(TEXT("name"), Param.Name);
+			Entry->SetStringField(TEXT("type"), ParamTypeName(Param.Type));
+			Entry->SetBoolField(TEXT("required"), Param.bRequired);
+			Entry->SetStringField(TEXT("description"), Param.Description);
+			if (Param.Aliases.Num() > 0)
+			{
+				Entry->SetArrayField(TEXT("aliases"), MCPStringListToJson(Param.Aliases));
+			}
+			if (Param.Type == EMCPParamType::Array && Param.ItemType != EMCPParamType::Any)
+			{
+				Entry->SetStringField(TEXT("items"), ParamTypeName(Param.ItemType));
+			}
+			ParamValues.Add(MakeShared<FJsonValueObject>(Entry));
+		}
+
+		TSharedPtr<FJsonObject> MethodEntry = MakeShared<FJsonObject>();
+		if (const FString* Category = HandlerCategories.Find(Method))
+		{
+			MethodEntry->SetStringField(TEXT("category"), *Category);
+		}
+		MethodEntry->SetArrayField(TEXT("params"), ParamValues);
+		Out->SetObjectField(Method, MethodEntry);
+	}
+	return Out;
+}
+
+TSharedPtr<FJsonObject> FMCPHandlerRegistry::ResolveParamAliases(const FMCPHandlerSpec& Spec, const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid()) return Params;
+
+	TSharedPtr<FJsonObject> Resolved;
+	for (const FMCPParamSpec& Param : Spec.Params)
+	{
+		if (Param.Aliases.Num() == 0 || Params->HasField(Param.Name)) continue;
+		for (const FString& Alias : Param.Aliases)
+		{
+			const TSharedPtr<FJsonValue> Value = Params->TryGetField(Alias);
+			if (!Value.IsValid()) continue;
+			if (!Resolved.IsValid())
+			{
+				// Copied rather than edited: the caller's object is also what the
+				// parameter echo recorded.
+				Resolved = MakeShared<FJsonObject>();
+				for (const auto& JsonEntry : Params->Values)
+				{
+					const TPair<FString, TSharedPtr<FJsonValue>> Pair(JsonEntry.Key, JsonEntry.Value);
+					Resolved->SetField(Pair.Key, Pair.Value);
+				}
+			}
+			Resolved->RemoveField(Alias);
+			Resolved->SetField(Param.Name, Value);
+			break;
+		}
+	}
+	return Resolved.IsValid() ? Resolved : Params;
 }
 
 void FMCPHandlerRegistry::RegisterHandlerWithTimeout(const FString& MethodName, FHandlerFunction Handler, float TimeoutSeconds)
@@ -83,14 +235,18 @@ TSharedPtr<FJsonValue> FMCPHandlerRegistry::ExecuteHandler(const FString& Method
 	// Try C++ handler first
 	if (const FHandlerFunction* Handler = CppHandlers.Find(MethodName))
 	{
+		// #1057: a spec'd handler reads its parameters by their declared names only.
+		const FMCPHandlerSpec* Spec = HandlerSpecs.Find(MethodName);
+		const TSharedPtr<FJsonObject> Effective = Spec ? ResolveParamAliases(*Spec, Params) : Params;
+
 		const FString* Category = HandlerCategories.Find(MethodName);
-		if (!Category || !ReportsUnreadParams(*Category) || !Params.IsValid())
+		if (!Category || !ReportsUnreadParams(*Category) || !Effective.IsValid())
 		{
-			return (*Handler)(Params);
+			return (*Handler)(Effective);
 		}
 		// #1057: a key the handler never read had no effect, so say so.
-		FMCPParamReadScope ReadScope(Params);
-		TSharedPtr<FJsonValue> Result = (*Handler)(Params);
+		FMCPParamReadScope ReadScope(Effective);
+		TSharedPtr<FJsonValue> Result = (*Handler)(Effective);
 		MCPAttachParamsNotRead(Result, ReadScope.Unread());
 		return Result;
 	}
@@ -146,6 +302,7 @@ void FMCPHandlerRegistry::Clear()
 	PythonHandlers.Empty();
 	HandlerTimeouts.Empty();
 	HandlerCategories.Empty();
+	HandlerSpecs.Empty();
 }
 
 TSharedPtr<FJsonValue> FMCPHandlerRegistry::ExecutePythonHandler(const FString& MethodName, const TSharedPtr<FJsonObject>& /*Params*/)

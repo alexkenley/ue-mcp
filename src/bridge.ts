@@ -35,8 +35,29 @@ export interface BridgeCapabilities {
   features?: string[];
   actions?: string[];
   actionCount?: number;
+  /**
+   * Declared parameter contract of every handler registered with one (#1057),
+   * keyed by method. The surface is generated from a recording of this; the
+   * live answer is only compared against it.
+   */
+  handlerSpecs?: Record<string, unknown>;
   /** True when the bridge did not answer the handshake at all. */
   legacy: boolean;
+}
+
+/**
+ * How to bring the deployed plugin up to this package. `ue-mcp update` deploys
+ * and rebuilds by default, so it is the one command to name.
+ */
+export const PLUGIN_UPGRADE_POINTER =
+  "Run `ue-mcp update` in the project directory (it deploys the plugin from this package and rebuilds it), then restart the editor.";
+
+/**
+ * An "Unknown method" for a method this server dispatched means the running
+ * plugin lacks a handler the package advertises. Say so, with the fix (#1167).
+ */
+export function describeUnregisteredMethod(method: string): string {
+  return `'${method}' is advertised by this ue-mcp package but not registered by the running plugin. ${PLUGIN_UPGRADE_POINTER}`;
 }
 
 /** What a bridge that predates the handshake looks like. */
@@ -762,8 +783,12 @@ export class EditorBridge implements IBridge {
         if (msg.error) {
           // #821: -32601 against an older plugin used to read as a typo. Say
           // which side is behind, and name both versions.
+          // #1167: with the protocols in agreement it is still a missing
+          // handler, so the upgrade pointer goes on either way.
           const mismatch =
-            msg.error.code === -32601 ? describeProtocolMismatch(this.capabilities, pending.method) : null;
+            msg.error.code === -32601
+              ? describeProtocolMismatch(this.capabilities, pending.method) ?? describeUnregisteredMethod(pending.method)
+              : null;
           pending.reject(
             new McpError(
               ErrorCode.BRIDGE_ERROR,
