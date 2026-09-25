@@ -340,6 +340,43 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AnalyzeAnimation(const TSharedPtr<FJs
 		return MCPError(TEXT("analyze_animation supports at most 256 selected bones per call"));
 	}
 
+	// facingBones (#1163): yaw of the boneA->boneB vector in root space, per
+	// sample and summarised over the clip. Generic: any two bones, any rig.
+	int32 FacingBoneA = INDEX_NONE;
+	int32 FacingBoneB = INDEX_NONE;
+	const TArray<TSharedPtr<FJsonValue>>* FacingBonesJson = nullptr;
+	if (TryGetArrayParam(Params, TEXT("facingBones"), FacingBonesJson))
+	{
+		if (FacingBonesJson->Num() != 2)
+		{
+			return MCPError(TEXT("'facingBones' must name exactly two bones: [boneA, boneB]"));
+		}
+		int32 FacingIndices[2] = { INDEX_NONE, INDEX_NONE };
+		for (int32 Slot = 0; Slot < 2; ++Slot)
+		{
+			FString BoneName;
+			const TSharedPtr<FJsonValue>& Value = (*FacingBonesJson)[Slot];
+			if (!Value.IsValid() || !Value->TryGetString(BoneName) || BoneName.IsEmpty())
+			{
+				return MCPError(TEXT("'facingBones' must contain two bone name strings"));
+			}
+			FacingIndices[Slot] = RefSkeleton.FindBoneIndex(FName(*BoneName));
+			if (FacingIndices[Slot] == INDEX_NONE)
+			{
+				return MCPError(FString::Printf(TEXT("facingBones: bone not found on skeleton: %s"), *BoneName));
+			}
+		}
+		if (FacingIndices[0] == FacingIndices[1])
+		{
+			return MCPError(TEXT("'facingBones' must name two different bones"));
+		}
+		FacingBoneA = FacingIndices[0];
+		FacingBoneB = FacingIndices[1];
+	}
+	const bool bFacing = FacingBoneA != INDEX_NONE;
+	TArray<double> FacingYaws;
+	int32 FacingDegenerateCount = 0;
+
 	const bool bLoop = OptionalBool(Params, TEXT("loop"), false);
 	TArray<int32> Frames;
 	const TArray<TSharedPtr<FJsonValue>>* FramesJson = nullptr;
@@ -526,6 +563,32 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AnalyzeAnimation(const TSharedPtr<FJs
 		const FCompactPoseBoneIndex RootIndex = CompactFromReferenceIndex(0);
 		const FTransform RootTransform = ComponentPose.GetComponentSpaceTransform(RootIndex);
 		SampleObject->SetObjectField(TEXT("rootComponent"), AnimQaTransformJson(RootTransform));
+		if (bFacing)
+		{
+			const FCompactPoseBoneIndex CompactA = CompactFromReferenceIndex(FacingBoneA);
+			const FCompactPoseBoneIndex CompactB = CompactFromReferenceIndex(FacingBoneB);
+			if (CompactA == INDEX_NONE || CompactB == INDEX_NONE)
+			{
+				return MCPError(TEXT("facingBones could not be mapped into the evaluated compact pose"));
+			}
+			const FVector Between =
+				ComponentPose.GetComponentSpaceTransform(CompactB).GetTranslation()
+				- ComponentPose.GetComponentSpaceTransform(CompactA).GetTranslation();
+			const FVector InRootSpace = RootTransform.GetRotation().UnrotateVector(Between);
+			if (FMath::Sqrt(InRootSpace.X * InRootSpace.X + InRootSpace.Y * InRootSpace.Y) < KINDA_SMALL_NUMBER)
+			{
+				// Vertical or coincident: the vector has no yaw to report.
+				++FacingDegenerateCount;
+				SampleObject->SetField(TEXT("facingYawDegrees"), MakeShared<FJsonValueNull>());
+			}
+			else
+			{
+				const double Yaw = FMath::RadiansToDegrees(FMath::Atan2(
+					static_cast<double>(InRootSpace.Y), static_cast<double>(InRootSpace.X)));
+				FacingYaws.Add(Yaw);
+				SampleObject->SetNumberField(TEXT("facingYawDegrees"), Yaw);
+			}
+		}
 		const FVector RootPosition = RootTransform.GetTranslation();
 		if (!bHasPreviousRoot)
 		{
@@ -611,6 +674,51 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AnalyzeAnimation(const TSharedPtr<FJs
 	LoopSummary->SetNumberField(TEXT("jointAngleMaxDegrees"), bLoop ? LoopMaxAngle : 0.0);
 	LoopSummary->SetObjectField(TEXT("cycleRootMotion"), AnimQaTransformJson(CycleRootMotion));
 	Summary->SetObjectField(TEXT("loopSeam"), LoopSummary);
+	if (bFacing)
+	{
+		// Circular statistics: a plain mean of -179 and 179 would read as 0.
+		// min and max are offsets from the circular mean, so they stay
+		// continuous across the +/-180 seam and may leave that range.
+		TSharedPtr<FJsonObject> Facing = MakeShared<FJsonObject>();
+		Facing->SetStringField(TEXT("boneA"), RefSkeleton.GetBoneName(FacingBoneA).ToString());
+		Facing->SetStringField(TEXT("boneB"), RefSkeleton.GetBoneName(FacingBoneB).ToString());
+		Facing->SetStringField(TEXT("vector"), TEXT("boneA to boneB, component space, rotated into the root bone's frame; yaw 0 is root +X, 90 is root +Y"));
+		Facing->SetNumberField(TEXT("sampleCount"), FacingYaws.Num());
+		Facing->SetNumberField(TEXT("degenerateSampleCount"), FacingDegenerateCount);
+		if (FacingYaws.Num() > 0)
+		{
+			double SumSin = 0.0;
+			double SumCos = 0.0;
+			for (const double Yaw : FacingYaws)
+			{
+				SumSin += FMath::Sin(FMath::DegreesToRadians(Yaw));
+				SumCos += FMath::Cos(FMath::DegreesToRadians(Yaw));
+			}
+			const double MeanYaw = FMath::RadiansToDegrees(FMath::Atan2(SumSin, SumCos));
+			double MinOffset = 0.0;
+			double MaxOffset = 0.0;
+			for (const double Yaw : FacingYaws)
+			{
+				const double Offset = FMath::Fmod(Yaw - MeanYaw + 540.0, 360.0) - 180.0;
+				MinOffset = FMath::Min(MinOffset, Offset);
+				MaxOffset = FMath::Max(MaxOffset, Offset);
+			}
+			Facing->SetNumberField(TEXT("averageYawDegrees"), MeanYaw);
+			Facing->SetNumberField(TEXT("minYawDegrees"), MeanYaw + MinOffset);
+			Facing->SetNumberField(TEXT("maxYawDegrees"), MeanYaw + MaxOffset);
+			Facing->SetNumberField(TEXT("spreadDegrees"), MaxOffset - MinOffset);
+			// 1 when every sample agrees, towards 0 as they scatter.
+			Facing->SetNumberField(TEXT("resultantLength"),
+				FMath::Sqrt(SumSin * SumSin + SumCos * SumCos) / static_cast<double>(FacingYaws.Num()));
+		}
+		else
+		{
+			Facing->SetField(TEXT("averageYawDegrees"), MakeShared<FJsonValueNull>());
+			Facing->SetField(TEXT("minYawDegrees"), MakeShared<FJsonValueNull>());
+			Facing->SetField(TEXT("maxYawDegrees"), MakeShared<FJsonValueNull>());
+		}
+		Summary->SetObjectField(TEXT("facing"), Facing);
+	}
 
 	FString OutputDirectory;
 	FString OutputError;

@@ -468,6 +468,18 @@ the raw duration divided by the rate magnitude. Each `notifies` record includes
 `rawTriggerTimeSeconds` and its rate-scaled `effectiveTriggerTimeSeconds`. A
 zero asset rate reports null effective times because playback does not advance.
 
+`facingBones=[boneA, boneB]` adds a heading metric for any two bones. At every
+sampled frame the component-space vector from boneA to boneB is rotated into
+the root bone's frame and its yaw is reported as `facingYawDegrees` (0 is root
++X, 90 is root +Y). `summary.facing` gives the clip's circular mean
+(`averageYawDegrees`), `minYawDegrees`, `maxYawDegrees`, `spreadDegrees`,
+`resultantLength` (1 when every sample agrees) and `degenerateSampleCount` for
+samples where the vector is vertical. A hip or shoulder pair tells a clip that
+faces its direction of travel from one that moves sideways.
+
+To compare length, rate scale and frame counts across many clips first, use
+`read_sequence` with `assetPaths` or `directory` and a `fields` selector.
+
 Derive motion-specific assertions from the samples rather than screenshots:
 
 - wrist height relative to shoulder and the elbow-to-wrist direction
