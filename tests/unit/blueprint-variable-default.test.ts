@@ -4,7 +4,7 @@ import { classifyActionClass } from "../../src/action-class.js";
 import type { ToolContext } from "../../src/types.js";
 
 describe("blueprint.get_variable_default (#902)", () => {
-  it("forwards assetPath as the handler's path and the variable name unchanged", async () => {
+  it("forwards assetPath and the variable name unchanged", async () => {
     const call = vi.fn().mockResolvedValue({ success: true });
     const ctx = { bridge: { call } } as unknown as ToolContext;
 
@@ -16,7 +16,7 @@ describe("blueprint.get_variable_default (#902)", () => {
 
     expect(call).toHaveBeenCalledWith(
       "get_blueprint_variable_default",
-      { path: "/Game/Test/BP_Test", name: "TestHealth" },
+      { assetPath: "/Game/Test/BP_Test", name: "TestHealth" },
       undefined,
     );
   });
@@ -42,7 +42,7 @@ describe("blueprint.list_variables includeValues (#902)", () => {
 
     expect(call).toHaveBeenCalledWith(
       "list_blueprint_variables",
-      { path: "/Game/Test/BP_Test", includeValues: true },
+      { assetPath: "/Game/Test/BP_Test", includeValues: true },
       undefined,
     );
   });
@@ -58,7 +58,7 @@ describe("blueprint.list_variables includeValues (#902)", () => {
 
     expect(call).toHaveBeenCalledWith(
       "list_blueprint_variables",
-      { path: "/Game/Test/BP_Test", includeValues: undefined },
+      { assetPath: "/Game/Test/BP_Test" },
       undefined,
     );
   });

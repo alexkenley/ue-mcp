@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { animationTool } from "../../src/tools/animation.js";
+import { handlerSpecs } from "../../src/tools/specs/animation.generated.js";
 import type { ToolContext } from "../../src/types.js";
 
 const HANDLERS = new URL("../../plugin/ue_mcp_bridge/Source/UE_MCP_Bridge/Private/Handlers/", import.meta.url);
@@ -21,13 +22,15 @@ describe("animation.reverse_sequence (#1162)", () => {
     expect(action.bridge).toBe("reverse_sequence");
     expect(action.effect).toBe("mutate");
     expect(action.description).toContain("delete_asset rollback");
-    expect(action.description).toContain("Params: sourcePath, destinationPath? | name? + packagePath?, inPlace?");
+    expect(action.description).toContain("Params: sourcePath, destinationPath?, name?, packagePath?, inPlace?");
   });
 
-  it("forwards only the reversal parameters", async () => {
+  it("takes the reversal parameters from its C++ spec (#1057)", async () => {
+    expect(animationTool.actions.reverse_sequence.mapParams).toBeUndefined();
+    expect(handlerSpecs.reverse_sequence.params.map((p) => p.name).sort()).toEqual([...PARAMS].sort());
+
     const call = vi.fn().mockResolvedValue({ success: true });
     const context = { bridge: { call } } as unknown as ToolContext;
-
     await animationTool.handler(context, {
       action: "reverse_sequence",
       sourcePath: "/Game/Anims/A_Walk",
@@ -35,17 +38,12 @@ describe("animation.reverse_sequence (#1162)", () => {
       packagePath: "/Game/Anims/Reversed",
       cycleOffsetFrames: 4,
       onConflict: "error",
-      assetPath: "/Game/ShouldNotLeak",
     });
-
     expect(call).toHaveBeenCalledWith("reverse_sequence", {
       sourcePath: "/Game/Anims/A_Walk",
-      destinationPath: undefined,
       name: "A_Walk_Back",
       packagePath: "/Game/Anims/Reversed",
-      inPlace: undefined,
       cycleOffsetFrames: 4,
-      cycleOffsetSeconds: undefined,
       onConflict: "error",
     }, undefined);
   });

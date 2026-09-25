@@ -112,18 +112,10 @@ TSharedPtr<FJsonValue> FWidgetHandlers::InspectRuntimeInstances(const TSharedPtr
 	// instances and label them with a PIE net mode. Refuse anything that is not
 	// a live play world instead.
 	UWorld* World = ResolveWorldFromParams(Params, TEXT("pie"));
-	if (!World || (World->WorldType != EWorldType::PIE && World->WorldType != EWorldType::Game))
-	{
-		return MCPError(TEXT("No live PIE/Game world. Runtime widget inspection reads a running session only: start PIE, or pass a pieInstance that exists. 'world' accepts pie (the default), game or auto; any other value resolves to the editor world, which is never a valid target here."));
-	}
 
+	// Every parameter is read before anything can fail (#1057).
 	const FString WidgetName = OptionalString(Params, TEXT("widgetName"));
 	const FString ClassFilter = OptionalString(Params, TEXT("classFilter"));
-	if (WidgetName.IsEmpty() && ClassFilter.IsEmpty())
-	{
-		return MCPError(TEXT("Provide widgetName (exact instance name) or classFilter (class-name substring)."));
-	}
-
 	const bool bViewportOnly = OptionalBool(Params, TEXT("viewportOnly"), false);
 	const FString ChildName = OptionalString(Params, TEXT("childName"));
 	const FString ChildClassFilter = OptionalString(Params, TEXT("childClassFilter"));
@@ -135,6 +127,15 @@ TSharedPtr<FJsonValue> FWidgetHandlers::InspectRuntimeInstances(const TSharedPtr
 	const int32 MaxInstances = FMath::Clamp(OptionalInt(Params, TEXT("maxInstances"), 100), 1, 500);
 	const int32 MaxNodesPerInstance = FMath::Clamp(OptionalInt(Params, TEXT("maxNodesPerInstance"), 250), 1, 2000);
 	const TArray<FString> PropertyNames = ReadStringArray(Params, TEXT("propertyNames"));
+
+	if (!World || (World->WorldType != EWorldType::PIE && World->WorldType != EWorldType::Game))
+	{
+		return MCPError(TEXT("No live PIE/Game world. Runtime widget inspection reads a running session only: start PIE, or pass a pieInstance that exists. 'world' accepts pie (the default), game or auto; any other value resolves to the editor world, which is never a valid target here."));
+	}
+	if (WidgetName.IsEmpty() && ClassFilter.IsEmpty())
+	{
+		return MCPError(TEXT("Provide widgetName (exact instance name) or classFilter (class-name substring)."));
+	}
 
 	TArray<UUserWidget*> Matches;
 	for (TObjectIterator<UUserWidget> It; It; ++It)

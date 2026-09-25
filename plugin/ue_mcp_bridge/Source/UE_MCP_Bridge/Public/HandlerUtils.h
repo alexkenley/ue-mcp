@@ -1395,6 +1395,18 @@ inline bool TryGetObjectParam(const TSharedPtr<FJsonObject>& Params, const TCHAR
 	return Params.IsValid() && Params->TryGetObjectField(Key, Out);
 }
 
+/** #1057: a spec'd handler whose shared helpers read some of its parameters only
+ *  on the path that uses them names those keys here, before its first early
+ *  return, so its read set is its declared set whatever path a call takes. The
+ *  helpers still read each key where they use it. */
+inline void MCPReadParamsAhead(const TSharedPtr<FJsonObject>& Params, std::initializer_list<const TCHAR*> Keys)
+{
+	for (const TCHAR* Key : Keys)
+	{
+		MCPNoteParamRead(Params, Key);
+	}
+}
+
 /**
  * Why an actor filter matched nothing, in terms of what it WOULD have matched.
  *

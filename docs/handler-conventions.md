@@ -388,7 +388,10 @@ A handler can declare its parameters at registration instead of having them writ
 
 - **Read the declared names, and only those.** The registry renames each alias to its parameter before the handler runs, so a spec'd handler calls `RequireString(Params, TEXT("assetPath"), ...)`, never `RequireStringAlt` with the alias. A second spelling belongs in the spec as `.Alias(TEXT("path"))`.
 - **Read every parameter before anything can fail.** `UE.MCP.Bridge.HandlerSpec.Contract` calls each spec'd handler with every declared parameter pointing at an asset that does not exist, and asserts the read set equals the spec. A parameter read after the asset load is never reached, and fails the test as a declared parameter the handler does not read.
+- **Never spec a handler the contract call could let write.** Every string the contract test sends is the same missing asset path, so a create handler is only safe to spec when something those values fail (an unresolvable class or struct, a name holding `/`, an invalid package name, a missing source file) refuses the call before anything is created. A handler that would create a folder, a package or a file from them stays unspecced until its checks run first.
 - **Declare what the handler reads, not what the old surface documented.** Migrating `add_curve` dropped `curveType?`, which the TS side advertised and the handler never read.
+- **A key a shared helper reads only on some paths is read ahead.** `MCPReadParamsAhead(Params, { ... })` at the top of the handler names every declared key, so the read set is the spec whatever path a call takes; the helpers still read each key where they use it.
+- **A timeout override takes the spec too.** `RegisterHandlerWithTimeout(name, fn, seconds, { ... })` registers both, and the TS action spreads `specBp(...)` and adds its `timeoutMs`.
 - **Never a routing name.** `action`, `timeoutMs`, `select`, `omit`, `editor` and `toEditor` are refused at registration and again by the generator.
 - **Change a spec, then re-record.** `npm run specs:record` against `tests/ue_mcp`, then `npm run specs:generate`, and commit the recording and the generated module together with the C++.
 

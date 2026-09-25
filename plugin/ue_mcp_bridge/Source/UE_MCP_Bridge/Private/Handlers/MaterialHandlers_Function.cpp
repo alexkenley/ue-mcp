@@ -71,10 +71,23 @@ TSharedPtr<FJsonValue> FMaterialHandlers::CreateMaterialFunction(const TSharedPt
 TSharedPtr<FJsonValue> FMaterialHandlers::AddMaterialFunctionExpression(const TSharedPtr<FJsonObject>& Params)
 {
 	FString FunctionPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("functionPath"), TEXT("materialFunctionPath"), FunctionPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("functionPath"), FunctionPath)) return Err;
 
 	FString ExpressionType;
 	if (auto Err = RequireString(Params, TEXT("expressionType"), ExpressionType)) return Err;
+
+	// Every parameter is read before anything can fail (#1057). `name` is the
+	// fallback for inputName on a FunctionInput and outputName on a FunctionOutput.
+	const int32 PosX = (int32)OptionalNumber(Params, TEXT("positionX"), 0.0);
+	const int32 PosY = (int32)OptionalNumber(Params, TEXT("positionY"), 0.0);
+	FString InputName;
+	const bool bHasInputName = TryGetStringParam(Params, TEXT("inputName"), InputName);
+	FString InputTypeStr;
+	const bool bHasInputType = TryGetStringParam(Params, TEXT("inputType"), InputTypeStr);
+	FString OutputName;
+	const bool bHasOutputName = TryGetStringParam(Params, TEXT("outputName"), OutputName);
+	FString FallbackName;
+	const bool bHasFallbackName = TryGetStringParam(Params, TEXT("name"), FallbackName);
 
 	UMaterialFunction* MF = LoadMaterialFunction(FunctionPath);
 	if (!MF) return MCPError(FString::Printf(TEXT("MaterialFunction not found: %s"), *FunctionPath));
@@ -82,22 +95,17 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddMaterialFunctionExpression(const TS
 	UClass* ExprClass = ResolveExpressionClass(ExpressionType);
 	if (!ExprClass) return MCPError(FString::Printf(TEXT("Unknown expression type: '%s'"), *ExpressionType));
 
-	int32 PosX = (int32)OptionalNumber(Params, TEXT("positionX"), 0.0);
-	int32 PosY = (int32)OptionalNumber(Params, TEXT("positionY"), 0.0);
-
 	UMaterialExpression* NewExpr = UMaterialEditingLibrary::CreateMaterialExpressionInFunction(MF, ExprClass, PosX, PosY);
 	if (!NewExpr) return MCPError(TEXT("CreateMaterialExpressionInFunction returned null"));
 
 	// Input/Output expressions: name them so callers can reference them by name.
 	if (UMaterialExpressionFunctionInput* AsInput = Cast<UMaterialExpressionFunctionInput>(NewExpr))
 	{
-		FString InputName;
-		if (TryGetStringParam(Params, TEXT("inputName"), InputName) || TryGetStringParam(Params, TEXT("name"), InputName))
+		if (bHasInputName || bHasFallbackName)
 		{
-			AsInput->InputName = FName(*InputName);
+			AsInput->InputName = FName(bHasInputName ? *InputName : *FallbackName);
 		}
-		FString InputTypeStr;
-		if (TryGetStringParam(Params, TEXT("inputType"), InputTypeStr))
+		if (bHasInputType)
 		{
 			static const TMap<FString, EFunctionInputType> Map = {
 				{TEXT("Scalar"), FunctionInput_Scalar},
@@ -117,10 +125,9 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddMaterialFunctionExpression(const TS
 	}
 	if (UMaterialExpressionFunctionOutput* AsOutput = Cast<UMaterialExpressionFunctionOutput>(NewExpr))
 	{
-		FString OutputName;
-		if (TryGetStringParam(Params, TEXT("outputName"), OutputName) || TryGetStringParam(Params, TEXT("name"), OutputName))
+		if (bHasOutputName || bHasFallbackName)
 		{
-			AsOutput->OutputName = FName(*OutputName);
+			AsOutput->OutputName = FName(bHasOutputName ? *OutputName : *FallbackName);
 		}
 	}
 
@@ -151,23 +158,44 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddMaterialFunctionExpression(const TS
 TSharedPtr<FJsonValue> FMaterialHandlers::ConnectMaterialFunctionExpressions(const TSharedPtr<FJsonObject>& Params)
 {
 	FString FunctionPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("functionPath"), TEXT("materialFunctionPath"), FunctionPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("functionPath"), FunctionPath)) return Err;
+
+	// Every parameter is read before anything can fail (#1057). An expression
+	// is named or indexed, so each reference keeps both readings.
+	struct FExpressionRef
+	{
+		bool bHasIndex = false;
+		int32 Index = -1;
+		bool bHasName = false;
+		FString Name;
+	};
+	auto ReadRef = [&Params](const TCHAR* Key) -> FExpressionRef
+	{
+		FExpressionRef Ref;
+		Ref.bHasIndex = TryGetNumberParam(Params, Key, Ref.Index);
+		if (!Ref.bHasIndex) Ref.bHasName = TryGetStringParam(Params, Key, Ref.Name);
+		return Ref;
+	};
+	const FExpressionRef SourceRef = ReadRef(TEXT("sourceExpression"));
+	const FExpressionRef TargetRef = ReadRef(TEXT("targetExpression"));
+	const FString SourceOutput = OptionalString(Params, TEXT("sourceOutput"));
+	const FString TargetInput = OptionalString(Params, TEXT("targetInput"));
 
 	UMaterialFunction* MF = LoadMaterialFunction(FunctionPath);
 	if (!MF) return MCPError(FString::Printf(TEXT("MaterialFunction not found: %s"), *FunctionPath));
 
-	auto ResolveExpr = [&](const TCHAR* Key) -> UMaterialExpression*
+	auto ResolveExpr = [&](const FExpressionRef& Ref) -> UMaterialExpression*
 	{
 		// Numeric index?
-		int32 Idx = -1;
-		if (TryGetNumberParam(Params, Key, Idx))
+		if (Ref.bHasIndex)
 		{
+			const int32 Idx = Ref.Index;
 			if (Idx >= 0 && Idx < MF->GetExpressions().Num()) return MF->GetExpressions()[Idx];
 			return nullptr;
 		}
-		FString Str;
-		if (TryGetStringParam(Params, Key, Str))
+		if (Ref.bHasName)
 		{
+			const FString& Str = Ref.Name;
 			// FunctionInput/Output exposes InputName/OutputName; everything else uses Desc.
 			for (UMaterialExpression* Expr : MF->GetExpressions())
 			{
@@ -193,13 +221,10 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ConnectMaterialFunctionExpressions(con
 		return nullptr;
 	};
 
-	UMaterialExpression* From = ResolveExpr(TEXT("sourceExpression"));
-	UMaterialExpression* To = ResolveExpr(TEXT("targetExpression"));
+	UMaterialExpression* From = ResolveExpr(SourceRef);
+	UMaterialExpression* To = ResolveExpr(TargetRef);
 	if (!From) return MCPError(TEXT("sourceExpression not found in function"));
 	if (!To) return MCPError(TEXT("targetExpression not found in function"));
-
-	FString SourceOutput = OptionalString(Params, TEXT("sourceOutput"));
-	FString TargetInput = OptionalString(Params, TEXT("targetInput"));
 
 	// Snapshot every input on the target BEFORE the write, then diff after it.
 	// The engine decides which pin a targetInput name lands on, and guessing at
@@ -346,7 +371,7 @@ TSharedPtr<FJsonValue> FMaterialHandlers::ConnectMaterialFunctionExpressions(con
 TSharedPtr<FJsonValue> FMaterialHandlers::ListMaterialFunctionExpressions(const TSharedPtr<FJsonObject>& Params)
 {
 	FString FunctionPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("functionPath"), TEXT("materialFunctionPath"), FunctionPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("functionPath"), FunctionPath)) return Err;
 
 	UMaterialFunction* MF = LoadMaterialFunction(FunctionPath);
 	if (!MF) return MCPError(FString::Printf(TEXT("MaterialFunction not found: %s"), *FunctionPath));

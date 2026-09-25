@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseParamsClause } from "../../src/action-schema.js";
 import { assetTool } from "../../src/tools/asset.js";
+import { handlerSpecs } from "../../src/tools/specs/asset.generated.js";
 
 describe("asset cloth section binding (#1139)", () => {
   it("routes bind and unbind to their bridge handlers", () => {
@@ -16,26 +17,14 @@ describe("asset cloth section binding (#1139)", () => {
     const params = parseParamsClause(assetTool.actions.bind_cloth_to_section.description ?? "").map((p) => p.name);
     expect(params).toEqual(expect.arrayContaining(["skeletalMeshPath", "lodIndex", "sectionIndex", "clothingAsset", "assetLodIndex"]));
 
-    expect(assetTool.actions.bind_cloth_to_section.mapParams?.({
-      skeletalMeshPath: "/Game/SK_Hair",
-      lodIndex: 1,
-      sectionIndex: 0,
-      clothingAsset: "SK_Hair_Clothing_0",
-      assetLodIndex: 0,
-      properties: { ignored: true },
-    })).toEqual({
-      skeletalMeshPath: "/Game/SK_Hair",
-      lodIndex: 1,
-      sectionIndex: 0,
-      clothingAsset: "SK_Hair_Clothing_0",
-      assetLodIndex: 0,
-    });
-
-    expect(assetTool.actions.unbind_cloth_from_section.mapParams?.({
-      skeletalMeshPath: "/Game/SK_Hair",
-      lodIndex: 0,
-      sectionIndex: 2,
-    })).toMatchObject({ skeletalMeshPath: "/Game/SK_Hair", lodIndex: 0, sectionIndex: 2 });
+    // #1057: both handlers declare the section address themselves, and the
+    // actions forward the bag as sent.
+    expect(assetTool.actions.bind_cloth_to_section.mapParams).toBeUndefined();
+    expect(assetTool.actions.unbind_cloth_from_section.mapParams).toBeUndefined();
+    const required = (method: string) =>
+      handlerSpecs[method].params.filter((p) => p.required).map((p) => p.name);
+    expect(required("bind_cloth_to_section")).toEqual(["skeletalMeshPath", "lodIndex", "sectionIndex"]);
+    expect(required("unbind_cloth_from_section")).toEqual(["skeletalMeshPath", "lodIndex", "sectionIndex"]);
   });
 
   it("accepts a LOD 0 section address in the schema", () => {

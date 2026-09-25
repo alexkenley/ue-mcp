@@ -445,6 +445,11 @@ namespace
 // sits in the details panel while the engine ignores it.
 TSharedPtr<FJsonValue> FLevelHandlers::SetPostProcessSettings(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("propertyName"), TEXT("settings"),
+		TEXT("enableOverrides"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	AActor* Actor = nullptr;
@@ -532,6 +537,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetPostProcessSettings(const TSharedPtr<F
 // FPostProcessSettings as one ExportText blob for the caller to parse.
 TSharedPtr<FJsonValue> FLevelHandlers::GetPostProcessSettings(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("propertyName"), TEXT("onlyOverridden"),
+		TEXT("nameContains"), TEXT("names"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	AActor* Actor = nullptr;
@@ -615,6 +625,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetPostProcessSettings(const TSharedPtr<F
 // two-value-plus-two-bit write is what "fixed exposure" actually means.
 TSharedPtr<FJsonValue> FLevelHandlers::SetFixedExposure(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("propertyName"), TEXT("exposure"),
+		TEXT("bias"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	AActor* Actor = nullptr;
@@ -622,13 +637,12 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetFixedExposure(const TSharedPtr<FJsonOb
 	TSharedPtr<FJsonValue> ResolveError;
 	if (!ResolveActorAndPostProcessTarget(World, Params, Actor, Target, ResolveError)) return ResolveError;
 
-	if (!HasParam(Params, TEXT("exposure")) && !HasParam(Params, TEXT("brightness")))
+	// brightness is a spec alias, renamed to exposure before this runs (#1057).
+	if (!HasParam(Params, TEXT("exposure")))
 	{
 		return MCPError(TEXT("Missing 'exposure' (the fixed adaptation brightness written to both AutoExposureMinBrightness and AutoExposureMaxBrightness)"));
 	}
-	const double Exposure = HasParam(Params, TEXT("exposure"))
-		? OptionalNumber(Params, TEXT("exposure"), 1.0)
-		: OptionalNumber(Params, TEXT("brightness"), 1.0);
+	const double Exposure = OptionalNumber(Params, TEXT("exposure"), 1.0);
 
 	TArray<TPair<FString, TSharedPtr<FJsonValue>>> Writes;
 	Writes.Add(TPair<FString, TSharedPtr<FJsonValue>>(

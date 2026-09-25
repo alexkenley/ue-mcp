@@ -259,12 +259,10 @@ static FString FieldTypeSpec(const FStructVariableDescription& Desc, bool& bOutR
 /** Resolve a member by "fieldGuid" or by "fieldName" against the friendly name
  *  or the internal VarName - the same two spellings the shipped
  *  edit_user_defined_struct accepts, so one addressing rule serves both. */
-static bool ResolveField(const TSharedPtr<FJsonObject>& Params, const UUserDefinedStruct* Struct, FGuid& OutGuid)
+static bool ResolveFieldBy(const FString& GuidStr, const FString& FieldName, const UUserDefinedStruct* Struct, FGuid& OutGuid)
 {
-	const FString GuidStr = OptionalString(Params, TEXT("fieldGuid"));
 	if (!GuidStr.IsEmpty()) return FGuid::Parse(GuidStr, OutGuid);
 
-	const FString FieldName = OptionalString(Params, TEXT("fieldName"));
 	if (FieldName.IsEmpty()) return false;
 	for (const FStructVariableDescription& Desc : FStructureEditorUtils::GetVarDesc(Struct))
 	{
@@ -275,6 +273,11 @@ static bool ResolveField(const TSharedPtr<FJsonObject>& Params, const UUserDefin
 		}
 	}
 	return false;
+}
+
+static bool ResolveField(const TSharedPtr<FJsonObject>& Params, const UUserDefinedStruct* Struct, FGuid& OutGuid)
+{
+	return ResolveFieldBy(OptionalString(Params, TEXT("fieldGuid")), OptionalString(Params, TEXT("fieldName")), Struct, OutGuid);
 }
 
 /** Every member, spelled the way the errors and rollbacks spell them. */
@@ -495,7 +498,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReadUserDefinedEnum(const TSharedPtr<
 	using namespace MCPUserTypes;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UEnum* Enum = LoadAssetByPath<UEnum>(AssetPath);
 	if (!Enum) return MCPAssetLoadError(AssetPath, TEXT("UEnum"));
@@ -536,7 +539,10 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReorderEnumValues(const TSharedPtr<FJ
 	using namespace MCPUserTypes;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Read before the load can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* Order = nullptr;
+	TryGetArrayParam(Params, TEXT("order"), Order);
 
 	UUserDefinedEnum* Enum = LoadAssetByPath<UUserDefinedEnum>(AssetPath);
 	if (!Enum)
@@ -546,8 +552,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReorderEnumValues(const TSharedPtr<FJ
 			*AssetPath));
 	}
 
-	const TArray<TSharedPtr<FJsonValue>>* Order = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("order"), Order) || !Order)
+	if (!Order)
 	{
 		return MCPError(FString::Printf(
 			TEXT("Missing required parameter 'order': the COMPLETE list of enumerators in their desired order, by display name, authored name or index. This enum has %d: %s"),
@@ -667,7 +672,12 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetEnumMetadata(const TSharedPtr<FJso
 	using namespace MCPUserTypes;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Read before the load can fail (#1057).
+	bool bBitflags = false;
+	const bool bHasBitflags = TryGetBoolParam(Params, TEXT("bitflags"), bBitflags);
+	const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
+	TryGetArrayParam(Params, TEXT("entries"), Entries);
 
 	UUserDefinedEnum* Enum = LoadAssetByPath<UUserDefinedEnum>(AssetPath);
 	if (!Enum)
@@ -676,9 +686,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetEnumMetadata(const TSharedPtr<FJso
 			TEXT("UserDefinedEnum not found: %s. Native UEnums carry their metadata in C++ and cannot be edited here."),
 			*AssetPath));
 	}
-
-	bool bBitflags = false;
-	const bool bHasBitflags = TryGetBoolParam(Params, TEXT("bitflags"), bBitflags);
 
 	// Validate every entry against the enum BEFORE the first write, so a bad
 	// entry at position nine does not leave the first eight applied.
@@ -691,8 +698,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetEnumMetadata(const TSharedPtr<FJso
 	};
 	TArray<FPlannedTooltip> Planned;
 
-	const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
-	if (TryGetArrayParam(Params, TEXT("entries"), Entries) && Entries)
+	if (Entries)
 	{
 		for (int32 Slot = 0; Slot < Entries->Num(); ++Slot)
 		{
@@ -808,7 +814,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReadUserDefinedStruct(const TSharedPt
 	using namespace MCPUserTypes;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UUserDefinedStruct* Struct = LoadAssetByPath<UUserDefinedStruct>(AssetPath);
 	if (!Struct)
@@ -857,7 +863,12 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetStructFieldDefault(const TSharedPt
 	using namespace MCPUserTypes;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	FString DefaultValue;
+	const bool bHasDefaultValue = TryGetStringParam(Params, TEXT("defaultValue"), DefaultValue);
+	const FString FieldGuid = OptionalString(Params, TEXT("fieldGuid"));
+	const FString FieldName = OptionalString(Params, TEXT("fieldName"));
 
 	UUserDefinedStruct* Struct = LoadAssetByPath<UUserDefinedStruct>(AssetPath);
 	if (!Struct)
@@ -867,14 +878,13 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetStructFieldDefault(const TSharedPt
 			*AssetPath));
 	}
 
-	FString DefaultValue;
-	if (!TryGetStringParam(Params, TEXT("defaultValue"), DefaultValue))
+	if (!bHasDefaultValue)
 	{
 		return MCPError(TEXT("Missing required parameter 'defaultValue': the member's default as Unreal export text (e.g. '5', 'true', 'Hello', '(X=1.000000,Y=2.000000,Z=0.000000)'). Pass an empty string to clear it."));
 	}
 
 	FGuid Guid;
-	if (!ResolveField(Params, Struct, Guid))
+	if (!ResolveFieldBy(FieldGuid, FieldName, Struct, Guid))
 	{
 		return MCPError(FString::Printf(
 			TEXT("Could not resolve the field (pass 'fieldGuid', or 'fieldName' matching a display or internal name). Fields: %s"),
@@ -944,7 +954,10 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReorderStructFields(const TSharedPtr<
 	using namespace MCPUserTypes;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Read before the load can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* Order = nullptr;
+	TryGetArrayParam(Params, TEXT("order"), Order);
 
 	UUserDefinedStruct* Struct = LoadAssetByPath<UUserDefinedStruct>(AssetPath);
 	if (!Struct)
@@ -954,8 +967,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReorderStructFields(const TSharedPtr<
 			*AssetPath));
 	}
 
-	const TArray<TSharedPtr<FJsonValue>>* Order = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("order"), Order) || !Order)
+	if (!Order)
 	{
 		return MCPError(FString::Printf(
 			TEXT("Missing required parameter 'order': the COMPLETE list of members in their desired order, by display name, internal name or GUID. This struct has %d: %s"),
@@ -1105,7 +1117,12 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditStructMetadata(const TSharedPtr<F
 	using namespace MCPUserTypes;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Read before the load can fail (#1057).
+	FString StructTooltip;
+	const bool bHasStructTooltip = TryGetStringParam(Params, TEXT("tooltip"), StructTooltip);
+	const TArray<TSharedPtr<FJsonValue>>* Fields = nullptr;
+	TryGetArrayParam(Params, TEXT("fields"), Fields);
 
 	UUserDefinedStruct* Struct = LoadAssetByPath<UUserDefinedStruct>(AssetPath);
 	if (!Struct)
@@ -1114,8 +1131,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditStructMetadata(const TSharedPtr<F
 			TEXT("UserDefinedStruct not found: %s. A native struct's metadata is declared in C++."), *AssetPath));
 	}
 
-	FString StructTooltip;
-	const bool bHasStructTooltip = TryGetStringParam(Params, TEXT("tooltip"), StructTooltip);
 	const FString PreviousStructTooltip = FStructureEditorUtils::GetTooltip(Struct);
 
 	// One planned edit per member. Everything is resolved and validated here,
@@ -1137,8 +1152,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditStructMetadata(const TSharedPtr<F
 	};
 	TArray<FPlannedField> Planned;
 
-	const TArray<TSharedPtr<FJsonValue>>* Fields = nullptr;
-	if (TryGetArrayParam(Params, TEXT("fields"), Fields) && Fields)
+	if (Fields)
 	{
 		TSet<FGuid> SeenFields;
 		for (int32 Slot = 0; Slot < Fields->Num(); ++Slot)

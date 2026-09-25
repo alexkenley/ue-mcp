@@ -175,7 +175,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddBlueprintInterface(const TSharedPt
 TSharedPtr<FJsonValue> FBlueprintHandlers::CreateFunction(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString FunctionName;
 	if (auto Err = RequireString(Params, TEXT("functionName"), FunctionName)) return Err;
@@ -308,7 +308,7 @@ namespace
 TSharedPtr<FJsonValue> FBlueprintHandlers::ListBlueprintFunctions(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	// Off by default: the inherited surface is large and list_overridable_functions
 	// already owns it. Opt in when one combined view of the callable surface is wanted.
@@ -540,6 +540,9 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddEventDispatcher(const TSharedPtr<F
 
 	FString DispatcherName;
 	if (auto Err = RequireString(Params, TEXT("name"), DispatcherName)) return Err;
+	// Read before the load can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* ParamsArr = nullptr;
+	TryGetArrayParam(Params, TEXT("parameters"), ParamsArr);
 
 	UBlueprint* Blueprint = LoadBlueprint(BlueprintPath);
 	if (!Blueprint)
@@ -582,8 +585,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddEventDispatcher(const TSharedPtr<F
 	// type refuses the call instead of leaving a wildcard pin that fails the
 	// next compile. Types share ParsePinTypeSpec with add_function_parameter.
 	TArray<TPair<FName, FEdGraphPinType>> SignaturePins;
-	const TArray<TSharedPtr<FJsonValue>>* ParamsArr = nullptr;
-	if (TryGetArrayParam(Params, TEXT("parameters"), ParamsArr) && ParamsArr)
+	if (ParamsArr)
 	{
 		for (int32 Index = 0; Index < ParamsArr->Num(); ++Index)
 		{
@@ -680,7 +682,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddEventDispatcher(const TSharedPtr<F
 TSharedPtr<FJsonValue> FBlueprintHandlers::RenameFunction(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString OldName;
 	if (auto Err = RequireString(Params, TEXT("oldName"), OldName)) return Err;
@@ -735,7 +737,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RenameFunction(const TSharedPtr<FJson
 TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteFunction(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString FunctionName;
 	if (auto Err = RequireString(Params, TEXT("functionName"), FunctionName)) return Err;
@@ -863,7 +865,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CreateBlueprintInterface(const TShare
 TSharedPtr<FJsonValue> FBlueprintHandlers::OverrideFunction(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString FunctionName;
 	if (auto Err = RequireString(Params, TEXT("functionName"), FunctionName)) return Err;
@@ -875,6 +877,8 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::OverrideFunction(const TSharedPtr<FJs
 	// Force the function-graph form even when the function could be placed as an
 	// event (e.g. you need an explicit function body with locals / a return path).
 	const bool bPreferFunction = OptionalBool(Params, TEXT("preferFunction"), false);
+	// Read before the load can fail (#1057).
+	const FString InterfacePathStr = OptionalString(Params, TEXT("interfacePath"));
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -887,8 +891,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::OverrideFunction(const TSharedPtr<FJs
 	// If the caller names an interface that is not yet implemented on this
 	// Blueprint (nor inherited), implement it first so its functions become
 	// overridable. Inherited-via-parent interfaces need no such step.
-	FString InterfacePathStr;
-	if (TryGetStringParam(Params, TEXT("interfacePath"), InterfacePathStr) && !InterfacePathStr.IsEmpty())
+	if (!InterfacePathStr.IsEmpty())
 	{
 		if (UClass* InterfaceClass = LoadObject<UClass>(nullptr, *InterfacePathStr))
 		{
@@ -1121,7 +1124,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::OverrideFunction(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FBlueprintHandlers::ListOverridableFunctions(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)

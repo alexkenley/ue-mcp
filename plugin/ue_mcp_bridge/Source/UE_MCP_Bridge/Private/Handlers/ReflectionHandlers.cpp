@@ -38,22 +38,75 @@ void FReflectionHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("reflection"));
-	Registry.RegisterHandler(TEXT("reflect_class"), &ReflectClass);
-	Registry.RegisterHandler(TEXT("reflect_struct"), &ReflectStruct);
-	Registry.RegisterHandler(TEXT("reflect_enum"), &ReflectEnum);
-	Registry.RegisterHandler(TEXT("list_classes"), &ListClasses);
-	Registry.RegisterHandler(TEXT("list_structs"), &ListStructs);
-	Registry.RegisterHandler(TEXT("list_gameplay_tags"), &ListGameplayTags);
+
+	// #1057: a spec'd handler declares its parameters here and nowhere else; the
+	// TS surface is generated from a recording of them. create_gameplay_tag and
+	// create_enum have no spec: the contract test would write the ini entry and
+	// create the asset it is handed.
+	using EType = EMCPParamType;
+	const FMCPParamSpec CursorParam = MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the nextCursor from the previous page, unmodified"));
+
+	Registry.RegisterHandler(TEXT("reflect_class"), &ReflectClass, {
+		MCPParam::Required(TEXT("className"), EType::String, TEXT("Class to reflect: C++ spelling with or without the A/U/F/E prefix, /Script/Module.ClassName, or a Blueprint class path")),
+		MCPParam::Optional(TEXT("includeInherited"), EType::Boolean, TEXT("Walk superclass properties and functions too (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("reflect_struct"), &ReflectStruct, {
+		MCPParam::Required(TEXT("structName"), EType::String, TEXT("UScriptStruct to reflect, by name or path")),
+	});
+	Registry.RegisterHandler(TEXT("reflect_enum"), &ReflectEnum, {
+		MCPParam::Required(TEXT("enumName"), EType::String, TEXT("UEnum by full path, short name, or short name without the E prefix")),
+	});
+	Registry.RegisterHandler(TEXT("list_classes"), &ListClasses, {
+		MCPParam::Optional(TEXT("parentFilter"), EType::String, TEXT("List classes deriving from this one; with or without the C++ A/U/F/E prefix")),
+		CursorParam,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 100, max 1000)")),
+	});
+	Registry.RegisterHandler(TEXT("list_structs"), &ListStructs, {
+		MCPParam::Optional(TEXT("package"), EType::String, TEXT("Narrow to one package or content folder: /Script/Engine, a bare module name (Engine), or /Game/Data")),
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring of the struct name or cppName")),
+		CursorParam,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 200, max 5000)")),
+	});
+	Registry.RegisterHandler(TEXT("list_gameplay_tags"), &ListGameplayTags, {
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Only tags starting with this prefix")),
+		CursorParam,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 500, max 5000)")),
+	});
 	Registry.RegisterHandler(TEXT("create_gameplay_tag"), &CreateGameplayTag);
 	Registry.RegisterHandler(TEXT("create_enum"), &CreateEnum);
-	Registry.RegisterHandler(TEXT("set_enum_entries"), &SetEnumEntries);
+	Registry.RegisterHandler(TEXT("set_enum_entries"), &SetEnumEntries, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Existing UserDefinedEnum asset path")),
+		MCPParam::Required(TEXT("entries"), EType::Array, TEXT("The complete new entry list: strings, or {name, displayName?} objects")),
+	});
 	// #689: load-state probes.
-	Registry.RegisterHandler(TEXT("is_class_loaded"), &IsClassLoaded);
-	Registry.RegisterHandler(TEXT("is_module_loaded"), &IsModuleLoaded);
-	Registry.RegisterHandler(TEXT("list_loaded_modules"), &ListLoadedModules);
-	Registry.RegisterHandler(TEXT("inspect_save_game"), &InspectSaveGame);
+	Registry.RegisterHandler(TEXT("is_class_loaded"), &IsClassLoaded, {
+		MCPParam::Required(TEXT("className"), EType::String, TEXT("Class to probe: short name, /Script/Module.Class, or a Blueprint class path")).Alias(TEXT("class")),
+	});
+	Registry.RegisterHandler(TEXT("is_module_loaded"), &IsModuleLoaded, {
+		MCPParam::Required(TEXT("moduleName"), EType::String, TEXT("Module name to probe")).Alias(TEXT("module")),
+	});
+	Registry.RegisterHandler(TEXT("list_loaded_modules"), &ListLoadedModules, {
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring of the module name")),
+		MCPParam::Optional(TEXT("loadedOnly"), EType::Boolean, TEXT("Only modules that are loaded (default false)")),
+		CursorParam,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 500, max 5000)")),
+	});
+	Registry.RegisterHandler(TEXT("inspect_save_game"), &InspectSaveGame, {
+		MCPParam::Required(TEXT("slotName"), EType::String, TEXT("Logical save slot name, a plain filename without a path")),
+		MCPParam::Optional(TEXT("userIndex"), EType::Integer, TEXT("Platform user index (default 0)")),
+	});
 	// T1: per-instance writable schema (ReflectionHandlers_Schema.cpp).
-	Registry.RegisterHandler(TEXT("reflect_instance"), &ReflectInstance);
+	Registry.RegisterHandler(TEXT("reflect_instance"), &ReflectInstance, {
+		MCPParam::Required(TEXT("objectPath"), EType::String, TEXT("The asset, CDO, actor or subobject to describe: an asset path, a full object path, a class path, or a Blueprint path (described as its generated-class defaults)")),
+		MCPParam::Optional(TEXT("propertyPath"), EType::String, TEXT("Scope the read to one nested struct or object reference, dotted and indexable (Config.Traits[1].Params). Omit to describe the object itself")),
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring of the property name")),
+		MCPParam::Optional(TEXT("includeInherited"), EType::Boolean, TEXT("Walk superclass properties too (default true)")),
+		MCPParam::Optional(TEXT("includeValues"), EType::Boolean, TEXT("Include each property's current value and valueText (default true)")),
+		MCPParam::Optional(TEXT("editableOnly"), EType::Boolean, TEXT("Return only the properties the details panel would let you edit on this object (default false, which returns every property with its reason)")),
+		MCPParam::Optional(TEXT("maxDepth"), EType::Integer, TEXT("How far to expand struct and container types, 0 to 5 (default 1). 0 names the types without expanding them")),
+		CursorParam,
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 100, max 500)")),
+	});
 }
 
 // #689: report whether a UClass is currently loaded, and (separately) whether
@@ -62,7 +115,7 @@ void FReflectionHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 TSharedPtr<FJsonValue> FReflectionHandlers::IsClassLoaded(const TSharedPtr<FJsonObject>& Params)
 {
 	FString ClassName;
-	if (auto Err = RequireStringAlt(Params, TEXT("className"), TEXT("class"), ClassName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("className"), ClassName)) return Err;
 
 	// FindClass does NOT load - a hit means the class is already in memory.
 	UClass* Found = FindClass(ClassName);
@@ -106,7 +159,7 @@ TSharedPtr<FJsonValue> FReflectionHandlers::IsClassLoaded(const TSharedPtr<FJson
 TSharedPtr<FJsonValue> FReflectionHandlers::IsModuleLoaded(const TSharedPtr<FJsonObject>& Params)
 {
 	FString ModuleName;
-	if (auto Err = RequireStringAlt(Params, TEXT("moduleName"), TEXT("module"), ModuleName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("moduleName"), ModuleName)) return Err;
 	const bool bLoaded = FModuleManager::Get().IsModuleLoaded(FName(*ModuleName));
 
 	auto Result = MCPSuccess();
@@ -427,6 +480,8 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ReflectClass(const TSharedPtr<FJsonO
 {
 	FString ClassName;
 	if (auto Err = RequireString(Params, TEXT("className"), ClassName)) return Err;
+	// Read before the lookup can fail (#1057).
+	const bool bIncludeInherited = OptionalBool(Params, TEXT("includeInherited"), false);
 
 	UClass* Class = FindClass(ClassName);
 	// #823: reflection is a read, so it is worth loading a class the caller
@@ -436,8 +491,6 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ReflectClass(const TSharedPtr<FJsonO
 	{
 		return MCPClassNotFoundError(ClassName);
 	}
-
-	bool bIncludeInherited = OptionalBool(Params, TEXT("includeInherited"), false);
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("className"), Class->GetName());
@@ -1327,15 +1380,15 @@ TSharedPtr<FJsonValue> FReflectionHandlers::SetEnumEntries(const TSharedPtr<FJso
 {
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
-
-	UUserDefinedEnum* Enum = Cast<UUserDefinedEnum>(LoadObject<UObject>(nullptr, *AssetPath));
-	if (!Enum) return MCPError(FString::Printf(TEXT("UserDefinedEnum not found: %s"), *AssetPath));
-
+	// Read before the load can fail (#1057).
 	const TArray<TSharedPtr<FJsonValue>>* EntriesArr = nullptr;
 	if (!TryGetArrayParam(Params, TEXT("entries"), EntriesArr) || !EntriesArr)
 	{
 		return MCPError(TEXT("Missing 'entries' (array of strings or {name, displayName})"));
 	}
+
+	UUserDefinedEnum* Enum = Cast<UUserDefinedEnum>(LoadObject<UObject>(nullptr, *AssetPath));
+	if (!Enum) return MCPError(FString::Printf(TEXT("UserDefinedEnum not found: %s"), *AssetPath));
 
 	// The list as it stands, read before the clear loop destroys it. This is
 	// the payload of the inverse call: set_enum_entries replaces the whole list,

@@ -24,32 +24,130 @@ void FFoliageHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("foliage"));
-	Registry.RegisterHandler(TEXT("list_foliage_types"), &ListFoliageTypes);
-	Registry.RegisterHandler(TEXT("sample_foliage"), &SampleFoliage);
-	Registry.RegisterHandler(TEXT("get_foliage_type_settings"), &GetFoliageSettings);
-	Registry.RegisterHandler(TEXT("set_foliage_type_settings"), &SetFoliageTypeSettings);
-	Registry.RegisterHandler(TEXT("create_foliage_type"), &CreateFoliageType);
+
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else; the TS surface for it is generated from a recording of these.
+	using EType = EMCPParamType;
+	auto TypePath = [](const TCHAR* Description)
+	{
+		return MCPParam::Required(TEXT("foliageTypePath"), EType::String, Description);
+	};
+	const TCHAR* const TypePathOrName = TEXT("FoliageType asset path, or the name of a type already placed in the open level");
+	auto Center = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("center"), EType::Vec3, Description);
+	};
+	auto Transforms = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("transforms"), EType::Array, Description).Items(EType::Object);
+	};
+
+	Registry.RegisterHandler(TEXT("list_foliage_types"), &ListFoliageTypes, {
+		MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the nextCursor from the previous page, unmodified")),
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows on this page (default 200, max 2000)")),
+	});
+	Registry.RegisterHandler(TEXT("sample_foliage"), &SampleFoliage, {
+		MCPParam::Required(TEXT("center"), EType::Vec3, TEXT("Centre of the sample sphere")),
+		MCPParam::Optional(TEXT("radius"), EType::Number, TEXT("Sphere radius in centimetres (default 1000)")),
+	});
+	Registry.RegisterHandler(TEXT("get_foliage_type_settings"), &GetFoliageSettings, {
+		TypePath(TEXT("FoliageType asset path")).Alias(TEXT("foliageTypeName")),
+	});
+	Registry.RegisterHandler(TEXT("set_foliage_type_settings"), &SetFoliageTypeSettings, {
+		TypePath(TypePathOrName).Alias(TEXT("foliageTypeName")),
+		MCPParam::Required(TEXT("settings"), EType::Object, TEXT("Property name to value; each is imported as text onto the FoliageType")),
+	});
+	Registry.RegisterHandler(TEXT("create_foliage_type"), &CreateFoliageType, {
+		MCPParam::Required(TEXT("meshPath"), EType::String, TEXT("StaticMesh the foliage type places")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Asset name (default FT_<mesh name>)")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Content folder for the asset (default /Game/Foliage)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the asset already exists: skip (default) | error")),
+		MCPParam::Optional(TEXT("settings"), EType::Object, TEXT("Property name to value, applied to the new FoliageType")),
+	});
 	// #988: predicate-driven batch. Scanning and saving hundreds of FoliageType
 	// assets outlives the default handler timeout.
 	Registry.RegisterHandlerWithTimeout(
-		TEXT("batch_set_foliage_settings_where"), &BatchSetFoliageSettingsWhere, 300.0f);
+		TEXT("batch_set_foliage_settings_where"), &BatchSetFoliageSettingsWhere, 300.0f, {
+		MCPParam::Required(TEXT("settings"), EType::Object, TEXT("Property name to value, dotted paths supported")),
+		MCPParam::Required(TEXT("where"), EType::Array, TEXT("Predicate over each type's current values: [{field, op, value}]")).Items(EType::Object),
+		MCPParam::Optional(TEXT("whereMode"), EType::String, TEXT("all (default) | any")),
+		MCPParam::Optional(TEXT("foliageTypePaths"), EType::Array, TEXT("Explicit FoliageType asset paths")).Items(EType::String),
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content directory to scan for FoliageType assets")),
+		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Scan directory recursively (default true)")),
+		MCPParam::Optional(TEXT("fromLevel"), EType::Boolean, TEXT("Take the foliage types placed in the open level")),
+		MCPParam::Optional(TEXT("propertyNames"), EType::Array, TEXT("Extra properties to report on each row without filtering on them")).Items(EType::String),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Preview without writing (default TRUE)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save each changed FoliageType package (default true)")),
+		MCPParam::Optional(TEXT("maxTypes"), EType::Integer, TEXT("Refuse to scan more than this many types (default 2000)")),
+	});
 
 	// V12 depth (FoliageHandlers_Depth.cpp): the surface above could create and
 	// configure a FoliageType and count instances inside a sphere, but could not
 	// place one, remove one, say where any of them are, or put a type into the
 	// level's palette at all.
-	Registry.RegisterHandler(TEXT("add_foliage_instances"), &AddFoliageInstances);
-	Registry.RegisterHandler(TEXT("remove_foliage_instances"), &RemoveFoliageInstances);
-	Registry.RegisterHandler(TEXT("get_foliage_instances"), &GetFoliageInstances);
-	Registry.RegisterHandler(TEXT("add_foliage_type_to_level"), &AddFoliageTypeToLevel);
-	Registry.RegisterHandler(TEXT("remove_foliage_type_from_level"), &RemoveFoliageTypeFromLevel);
-	Registry.RegisterHandler(TEXT("read_procedural_foliage_spawner"), &ReadProceduralFoliageSpawner);
-	Registry.RegisterHandler(TEXT("set_procedural_foliage_spawner_types"), &SetProceduralFoliageSpawnerTypes);
+	Registry.RegisterHandler(TEXT("add_foliage_instances"), &AddFoliageInstances, {
+		TypePath(TypePathOrName),
+		Transforms(TEXT("Place one instance per entry at exactly {location, rotation?, scale?}")),
+		Center(TEXT("Centre of the scatter disc")),
+		MCPParam::Optional(TEXT("radius"), EType::Number, TEXT("Scatter disc radius in centimetres")),
+		MCPParam::Optional(TEXT("count"), EType::Integer, TEXT("Instances to scatter over the disc")),
+		MCPParam::Optional(TEXT("seed"), EType::Integer, TEXT("Random seed for scatter placement (default 0)")),
+		MCPParam::Optional(TEXT("projectToGround"), EType::Boolean, TEXT("Trace each candidate onto the geometry beneath it (default true)")),
+		MCPParam::Optional(TEXT("traceUp"), EType::Number, TEXT("How far above each candidate the ground trace starts, in centimetres (default 10000)")),
+		MCPParam::Optional(TEXT("traceDown"), EType::Number, TEXT("How far below each candidate the ground trace ends, in centimetres (default 100000)")),
+		MCPParam::Optional(TEXT("applyTypeRules"), EType::Boolean, TEXT("Apply the FoliageType's own scale, rotation, align, slope, height and collision rules (default true)")),
+		MCPParam::Optional(TEXT("skipCollision"), EType::Boolean, TEXT("Skip the type's CollisionWithWorld test (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("remove_foliage_instances"), &RemoveFoliageInstances, {
+		TypePath(TypePathOrName),
+		MCPParam::Optional(TEXT("instanceIndices"), EType::Array, TEXT("Instance indices from get_foliage_instances")).Items(EType::Integer),
+		Transforms(TEXT("Remove the instance nearest each location, within matchTolerance")),
+		Center(TEXT("Centre of the removal sphere")),
+		MCPParam::Optional(TEXT("radius"), EType::Number, TEXT("Removal sphere radius in centimetres")),
+		MCPParam::Optional(TEXT("all"), EType::Boolean, TEXT("Remove every instance of the type")),
+		MCPParam::Optional(TEXT("matchTolerance"), EType::Number, TEXT("How close an instance must be to a transforms location, in centimetres (default 1)")),
+		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Only this InstancedFoliageActor")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report what would be removed without removing it")),
+	});
+	Registry.RegisterHandler(TEXT("get_foliage_instances"), &GetFoliageInstances, {
+		MCPParam::Optional(TEXT("foliageTypePath"), EType::String, TypePathOrName),
+		Center(TEXT("Centre of the filter sphere")),
+		MCPParam::Optional(TEXT("radius"), EType::Number, TEXT("Filter sphere radius in centimetres")),
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Maximum instances to return (default 200, max 20000)")),
+		MCPParam::Optional(TEXT("startIndex"), EType::Integer, TEXT("Skip this many matching instances first")),
+		MCPParam::Optional(TEXT("includeTransforms"), EType::Boolean, TEXT("Return each instance's location, rotation and scale (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("add_foliage_type_to_level"), &AddFoliageTypeToLevel, {
+		TypePath(TEXT("FoliageType asset path")),
+	});
+	Registry.RegisterHandler(TEXT("remove_foliage_type_from_level"), &RemoveFoliageTypeFromLevel, {
+		TypePath(TypePathOrName),
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Remove the type even though that destroys its instances")),
+	});
+	Registry.RegisterHandler(TEXT("read_procedural_foliage_spawner"), &ReadProceduralFoliageSpawner, {
+		MCPParam::Required(TEXT("spawnerPath"), EType::String, TEXT("ProceduralFoliageSpawner asset path")),
+	});
+	Registry.RegisterHandler(TEXT("set_procedural_foliage_spawner_types"), &SetProceduralFoliageSpawnerTypes, {
+		MCPParam::Required(TEXT("spawnerPath"), EType::String, TEXT("ProceduralFoliageSpawner asset path")),
+		MCPParam::Required(TEXT("foliageTypePaths"), EType::Array, TEXT("FoliageType assets, or Blueprints whose class derives from FoliageType")).Items(EType::String),
+		MCPParam::Optional(TEXT("mode"), EType::String, TEXT("replace (default) | add | remove")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the spawner package after a change (default true)")),
+	});
 	// A tile simulation over a large volume plus a world trace per generated
 	// point outlives the default handler timeout on anything but a small volume.
 	Registry.RegisterHandlerWithTimeout(
-		TEXT("simulate_procedural_foliage"), &SimulateProceduralFoliage, 600.0f);
-	Registry.RegisterHandler(TEXT("clear_procedural_foliage"), &ClearProceduralFoliage);
+		TEXT("simulate_procedural_foliage"), &SimulateProceduralFoliage, 600.0f, {
+		MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Label of a ProceduralFoliageVolume, or of any actor with a ProceduralFoliageComponent")),
+		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Object path of that actor")),
+		MCPParam::Optional(TEXT("spawnerPath"), EType::String, TEXT("Run every volume in the open level bound to this ProceduralFoliageSpawner")),
+		MCPParam::Optional(TEXT("clearExisting"), EType::Boolean, TEXT("Remove what the component spawned before simulating again (default true)")),
+		MCPParam::Optional(TEXT("skipCollision"), EType::Boolean, TEXT("Skip the type's CollisionWithWorld test (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("clear_procedural_foliage"), &ClearProceduralFoliage, {
+		MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Label of a ProceduralFoliageVolume, or of any actor with a ProceduralFoliageComponent")),
+		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Object path of that actor")),
+		MCPParam::Optional(TEXT("spawnerPath"), EType::String, TEXT("Clear every volume in the open level bound to this ProceduralFoliageSpawner")),
+	});
 }
 
 TSharedPtr<FJsonValue> FFoliageHandlers::ListFoliageTypes(const TSharedPtr<FJsonObject>& Params)
@@ -122,10 +220,10 @@ TSharedPtr<FJsonValue> FFoliageHandlers::ListFoliageTypes(const TSharedPtr<FJson
 
 TSharedPtr<FJsonValue> FFoliageHandlers::SampleFoliage(const TSharedPtr<FJsonObject>& Params)
 {
+	double Radius = OptionalNumber(Params, TEXT("radius"), 1000.0);
 	FVector Center;
 	if (auto Err = RequireVec3(Params, TEXT("center"), Center)) return Err;
 
-	double Radius = OptionalNumber(Params, TEXT("radius"), 1000.0);
 	double RadiusSq = Radius * Radius;
 
 	REQUIRE_EDITOR_WORLD(World);
@@ -270,19 +368,17 @@ TSharedPtr<FJsonValue> FFoliageHandlers::GetFoliageSettings(const TSharedPtr<FJs
 
 TSharedPtr<FJsonValue> FFoliageHandlers::SetFoliageTypeSettings(const TSharedPtr<FJsonObject>& Params)
 {
-	// Accept either foliageTypePath or foliageTypeName for lookup
+	// foliageTypeName is a spec alias, renamed to foliageTypePath before this runs.
 	FString FoliageTypePath;
-	if (!TryGetStringParam(Params, TEXT("foliageTypePath"), FoliageTypePath))
-	{
-		TryGetStringParam(Params, TEXT("foliageTypeName"), FoliageTypePath);
-	}
+	TryGetStringParam(Params, TEXT("foliageTypePath"), FoliageTypePath);
+	const TSharedPtr<FJsonObject>* SettingsObj = nullptr;
+	const bool bHasSettings = TryGetObjectParam(Params, TEXT("settings"), SettingsObj) && SettingsObj && (*SettingsObj).IsValid();
 	if (FoliageTypePath.IsEmpty())
 	{
 		return MCPError(TEXT("Missing 'foliageTypePath' or 'foliageTypeName' parameter. To write the same settings to every type matching a predicate on an existing value, use foliage(batch_set_settings_where) instead of calling this once per asset (#988)."));
 	}
 
-	const TSharedPtr<FJsonObject>* SettingsObj = nullptr;
-	if (!TryGetObjectParam(Params, TEXT("settings"), SettingsObj) || !SettingsObj || !(*SettingsObj).IsValid())
+	if (!bHasSettings)
 	{
 		return MCPError(TEXT("Missing 'settings' parameter (object with property name/value pairs)"));
 	}
@@ -479,20 +575,23 @@ TSharedPtr<FJsonValue> FFoliageHandlers::CreateFoliageType(const TSharedPtr<FJso
 	FString MeshPath;
 	if (auto Err = RequireString(Params, TEXT("meshPath"), MeshPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	FString AssetName = OptionalString(Params, TEXT("name"));
+	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/Foliage"));
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	const TSharedPtr<FJsonObject>* SettingsObj = nullptr;
+	const bool bHasSettings = TryGetObjectParam(Params, TEXT("settings"), SettingsObj) && SettingsObj && (*SettingsObj).IsValid();
+
 	UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *MeshPath);
 	if (!Mesh)
 	{
 		return MCPError(FString::Printf(TEXT("Static mesh not found: %s"), *MeshPath));
 	}
 
-	FString AssetName = OptionalString(Params, TEXT("name"));
 	if (AssetName.IsEmpty())
 	{
 		AssetName = FString::Printf(TEXT("FT_%s"), *Mesh->GetName());
 	}
-
-	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/Foliage"));
-	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
 	if (auto Existing = MCPCheckAssetExists(PackagePath, AssetName, OnConflict, TEXT("FoliageType")))
 	{
@@ -516,8 +615,7 @@ TSharedPtr<FJsonValue> FFoliageHandlers::CreateFoliageType(const TSharedPtr<FJso
 	FoliageType->Mesh = Mesh;
 
 	// Apply optional settings if provided
-	const TSharedPtr<FJsonObject>* SettingsObj = nullptr;
-	if (TryGetObjectParam(Params, TEXT("settings"), SettingsObj) && SettingsObj && (*SettingsObj).IsValid())
+	if (bHasSettings)
 	{
 		for (const auto& KV : (*SettingsObj)->Values)
 		{

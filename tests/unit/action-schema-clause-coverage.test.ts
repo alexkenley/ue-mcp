@@ -75,14 +75,6 @@ const ROUTING: ReadonlySet<string> = ROUTING_PARAMS;
  * waved through.
  */
 const ENGLISH_NOT_A_PARAMETER: Record<string, string[]> = {
-  // "renames[] where each entry is {sourcePath, destinationPath} OR ..."
-  "asset.bulk_rename": ["where"],
-  // "parameters?: [{name, type}] where type is bool/int/float/..."
-  "blueprint.add_event_dispatcher": ["type"],
-  // "... OR pathfindingContextPath? (object path) - uses its agent + filter"
-  "gameplay.find_nav_path": ["filter"],
-  // "parameters[] ({name, type}) where type is float|int32|bool|string|name|double"
-  "statetree.set_root_parameters": ["name"],
   // "... onConflict? (skip | overwrite), override? ..." reads as prose here:
   // the word is English in this clause and became a collision only once the
   // wrapped engine tools declared `override` as a real material parameter.

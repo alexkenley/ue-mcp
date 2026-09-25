@@ -49,15 +49,14 @@ static TSharedPtr<FJsonObject> EnumeratorToJson(const UEnum* Enum, int32 Index)
 
 // Resolve an enumerator index from an explicit "index" param, or by matching a
 // "name" param against either the authored short name or the display name.
+// Both are read by the caller before the enum loads (#1057).
 // Returns INDEX_NONE if unresolved.
-static int32 ResolveEnumeratorIndex(const TSharedPtr<FJsonObject>& Params, const UEnum* Enum)
+static int32 ResolveEnumeratorIndex(bool bHasIndex, int32 Index, const FString& Name, const UEnum* Enum)
 {
-	int32 Index = INDEX_NONE;
-	if (TryGetNumberParam(Params, TEXT("index"), Index))
+	if (bHasIndex)
 	{
 		return Index;
 	}
-	const FString Name = OptionalString(Params, TEXT("name"));
 	if (Name.IsEmpty()) return INDEX_NONE;
 	for (int32 i = 0; i < Enum->NumEnums(); ++i)
 	{
@@ -134,7 +133,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateUserDefinedEnum(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FAssetHandlers::ListEnumValues(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UEnum* Enum = LoadAssetByPath<UEnum>(AssetPath);
 	if (!Enum) return MCPError(FString::Printf(TEXT("Enum not found: %s"), *AssetPath));
@@ -158,9 +157,14 @@ TSharedPtr<FJsonValue> FAssetHandlers::ListEnumValues(const TSharedPtr<FJsonObje
 TSharedPtr<FJsonValue> FAssetHandlers::EditUserDefinedEnum(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString Op;
 	if (auto Err = RequireString(Params, TEXT("op"), Op)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const FString DisplayNameParam = OptionalString(Params, TEXT("displayName"));
+	const FString NameParam = OptionalString(Params, TEXT("name"));
+	int32 IndexParam = INDEX_NONE;
+	const bool bHasIndexParam = TryGetNumberParam(Params, TEXT("index"), IndexParam);
 
 	UUserDefinedEnum* Enum = LoadAssetByPath<UUserDefinedEnum>(AssetPath);
 	if (!Enum) return MCPError(FString::Printf(TEXT("UserDefinedEnum not found (native UEnums cannot be edited): %s"), *AssetPath));
@@ -181,8 +185,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::EditUserDefinedEnum(const TSharedPtr<FJso
 		if (NewIndex < 0) return MCPError(TEXT("Failed to add enumerator"));
 
 		// Prefer an explicit displayName; fall back to `name` so a single param works.
-		FString DisplayName = OptionalString(Params, TEXT("displayName"));
-		if (DisplayName.IsEmpty()) DisplayName = OptionalString(Params, TEXT("name"));
+		FString DisplayName = DisplayNameParam;
+		if (DisplayName.IsEmpty()) DisplayName = NameParam;
 		if (!DisplayName.IsEmpty())
 		{
 			if (!FEnumEditorUtils::SetEnumeratorDisplayName(Enum, NewIndex, FText::FromString(DisplayName)))
@@ -205,9 +209,9 @@ TSharedPtr<FJsonValue> FAssetHandlers::EditUserDefinedEnum(const TSharedPtr<FJso
 	}
 	else if (Op == TEXT("rename_value"))
 	{
-		FString DisplayName;
-		if (auto Err = RequireString(Params, TEXT("displayName"), DisplayName)) return Err;
-		const int32 Index = ResolveEnumeratorIndex(Params, Enum);
+		const FString& DisplayName = DisplayNameParam;
+		if (DisplayName.IsEmpty()) return MCPError(TEXT("Missing required parameter 'displayName'"));
+		const int32 Index = ResolveEnumeratorIndex(bHasIndexParam, IndexParam, NameParam, Enum);
 		if (Index == INDEX_NONE || IsEnumMaxSentinel(Enum, Index))
 			return MCPError(TEXT("Could not resolve enumerator (pass 'index', or 'name' matching a short or display name)"));
 
@@ -225,7 +229,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::EditUserDefinedEnum(const TSharedPtr<FJso
 	}
 	else if (Op == TEXT("remove_value"))
 	{
-		const int32 Index = ResolveEnumeratorIndex(Params, Enum);
+		const int32 Index = ResolveEnumeratorIndex(bHasIndexParam, IndexParam, NameParam, Enum);
 		if (Index == INDEX_NONE || IsEnumMaxSentinel(Enum, Index))
 			return MCPError(TEXT("Could not resolve enumerator (pass 'index', or 'name' matching a short or display name)"));
 		if (CountRealEnumerators(Enum) <= 1)

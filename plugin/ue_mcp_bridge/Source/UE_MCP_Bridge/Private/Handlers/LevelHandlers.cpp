@@ -103,141 +103,500 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("level"));
-	Registry.RegisterHandler(TEXT("get_world_outliner"), &GetOutliner);
+
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else; the TS surface for it is generated from a recording of these.
+	// A handler registered without one is either one the contract test cannot
+	// call safely (its values would reach a write before anything fails), or one
+	// whose surface the spec types cannot express yet; the comment at each says
+	// which.
+	using EType = EMCPParamType;
+	const FMCPParamSpec SpecActorLabel = MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Actor editor label; pass actorLabel or actorPath"));
+	const FMCPParamSpec SpecActorPath = MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path; the unambiguous selector, and it wins over actorLabel"));
+	const FMCPParamSpec SpecWorld = MCPParam::Optional(TEXT("world"), EType::String, TEXT("World scope: editor (default) | pie"));
+	const FMCPParamSpec SpecPieInstance = MCPParam::Optional(TEXT("pieInstance"), EType::Integer, TEXT("Which PIE world when world is pie: 0 = server or primary, 1..N = clients"));
+	const FMCPParamSpec SpecCursor = MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the nextCursor from the previous page, unmodified"));
+	const FMCPParamSpec SpecLimit = MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows on this page"));
+	const FMCPParamSpec SpecLocation = MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("World location"));
+	const FMCPParamSpec SpecRotation = MCPParam::Optional(TEXT("rotation"), EType::Rotator, TEXT("World rotation"));
+	const FMCPParamSpec SpecScale = MCPParam::Optional(TEXT("scale"), EType::Vec3, TEXT("Actor scale"));
+	const FMCPParamSpec SpecComponentName = MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Component instance name"));
+	const FMCPParamSpec SpecLabel = MCPParam::Optional(TEXT("label"), EType::String, TEXT("Actor label; an existing actor with this label is reported rather than duplicated"));
+	const FMCPParamSpec SpecOnConflict = MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("When the label or name is taken: skip (default) | error"));
+	const FMCPParamSpec SpecPropertyName = MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Property name, dotted paths supported"));
+	const FMCPParamSpec SpecWorldSpace = MCPParam::Optional(TEXT("worldSpace"), EType::Boolean, TEXT("Treat transforms as world space (default true)"));
+	const FMCPParamSpec SpecIndex = MCPParam::Required(TEXT("index"), EType::Integer, TEXT("Instance index"));
+	const FMCPParamSpec SpecTag = MCPParam::Required(TEXT("tag"), EType::String, TEXT("Actor tag"));
+	const FMCPParamSpec SpecChildLabel = MCPParam::Optional(TEXT("childLabel"), EType::String, TEXT("Child actor label; pass childLabel or childPath"));
+	const FMCPParamSpec SpecChildPath = MCPParam::Optional(TEXT("childPath"), EType::String, TEXT("Child actor object path"));
+	const FMCPParamSpec SpecParentLabel = MCPParam::Optional(TEXT("parentLabel"), EType::String, TEXT("Parent actor label; pass parentLabel or parentPath"));
+	const FMCPParamSpec SpecParentPath = MCPParam::Optional(TEXT("parentPath"), EType::String, TEXT("Parent actor object path"));
+	const FMCPParamSpec SpecAttachRule = MCPParam::Optional(TEXT("attachRule"), EType::String, TEXT("KeepWorld | KeepRelative | SnapToTarget"));
+	const FMCPParamSpec SpecSocketName = MCPParam::Optional(TEXT("socketName"), EType::String, TEXT("Socket or bone on the resolved parent component"));
+	const FMCPParamSpec SpecLevelName = MCPParam::Required(TEXT("levelName"), EType::String, TEXT("Streaming sub-level name or package path")).Alias(TEXT("levelPath"));
+	const FMCPParamSpec SpecMobility = MCPParam::Optional(TEXT("mobility"), EType::String, TEXT("static | stationary | movable"));
+	const FMCPParamSpec SpecIntensity = MCPParam::Optional(TEXT("intensity"), EType::Number, TEXT("Light intensity"));
+	const FMCPParamSpec SpecColor = MCPParam::Optional(TEXT("color"), EType::Object, TEXT("Colour {r, g, b} in 0-255"));
+	const FMCPParamSpec SpecPostProcessComponent = MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Component holding the post-process settings, when the actor is not a PostProcessVolume"));
+	const FMCPParamSpec SpecPostProcessProperty = MCPParam::Optional(TEXT("propertyName"), EType::String, TEXT("FPostProcessSettings property on that component"));
+	const FMCPParamSpec SpecDryRun = MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report what would change without writing"));
+	const FMCPParamSpec SpecTransactionLabel = MCPParam::Optional(TEXT("transactionLabel"), EType::String, TEXT("Undo-stack entry name"));
+	const FMCPParamSpec SpecActorLabels = MCPParam::Optional(TEXT("actorLabels"), EType::Array, TEXT("Exact actor editor labels")).Items(EType::String);
+	const FMCPParamSpec SpecLabelPrefix = MCPParam::Optional(TEXT("labelPrefix"), EType::String, TEXT("Case-sensitive prefix over the actor's editor label"));
+	const FMCPParamSpec SpecLabelContains = MCPParam::Optional(TEXT("labelContains"), EType::String, TEXT("Case-insensitive substring over the actor's editor label"));
+	const FMCPParamSpec SpecSelectorTag = MCPParam::Optional(TEXT("tag"), EType::String, TEXT("Actor must carry this tag"));
+	const FMCPParamSpec SpecFolderPath = MCPParam::Optional(TEXT("folderPath"), EType::String, TEXT("World Outliner folder, matched exactly"));
+	const FMCPParamSpec SpecFolderPathPrefix = MCPParam::Optional(TEXT("folderPathPrefix"), EType::String, TEXT("World Outliner folder prefix"));
+	const FMCPParamSpec SpecMatchSubclasses = MCPParam::Optional(TEXT("matchSubclasses"), EType::Boolean, TEXT("Match subclasses of the class filter (default true)"));
+
+	Registry.RegisterHandler(TEXT("get_world_outliner"), &GetOutliner, {
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Case-sensitive substring over the class name")),
+		MCPParam::Optional(TEXT("exactClass"), EType::Boolean, TEXT("Require classFilter to be the exact class name")),
+		MCPParam::Optional(TEXT("nameFilter"), EType::String, TEXT("Case-sensitive substring over the internal name or the label")),
+		SpecFolderPath, SpecFolderPathPrefix,
+		MCPParam::Optional(TEXT("editorHidden"), EType::Boolean, TEXT("Only editor-hidden (true) or only visible (false) actors")),
+		MCPParam::Optional(TEXT("includeStreaming"), EType::Boolean, TEXT("Include World Partition streaming-proxy and HLOD actors (default false)")),
+		SpecWorld, SpecPieInstance, SpecCursor, SpecLimit,
+	});
 	// #717: query/set per-actor editor-only visibility (temporarily hidden).
-	Registry.RegisterHandler(TEXT("set_editor_visibility"), &SetEditorVisibility);
-	Registry.RegisterHandler(TEXT("place_actor"), &PlaceActor);
-	Registry.RegisterHandler(TEXT("delete_actor"), &DeleteActor);
-	Registry.RegisterHandler(TEXT("get_actor_details"), &GetActorDetails);
-	Registry.RegisterHandler(TEXT("get_component_tree"), &GetComponentTree);
-	Registry.RegisterHandler(TEXT("get_relative_transform"), &GetRelativeTransform);
-	Registry.RegisterHandler(TEXT("get_current_level"), &GetCurrentLevel);
+	Registry.RegisterHandler(TEXT("set_editor_visibility"), &SetEditorVisibility, {
+		MCPParam::Required(TEXT("hidden"), EType::Boolean, TEXT("true hides the actors in the editor, false shows them")),
+		SpecActorLabels,
+		MCPParam::Optional(TEXT("all"), EType::Boolean, TEXT("Target every actor")),
+	});
+	Registry.RegisterHandler(TEXT("place_actor"), &PlaceActor, {
+		MCPParam::Required(TEXT("actorClass"), EType::String, TEXT("Actor class: short name, /Script path or Blueprint class path")),
+		SpecLabel, SpecOnConflict, SpecLocation, SpecRotation, SpecScale,
+		MCPParam::Optional(TEXT("staticMesh"), EType::String, TEXT("Static mesh for a StaticMeshActor")),
+		MCPParam::Optional(TEXT("material"), EType::String, TEXT("Material applied at slot 0")),
+		SpecWorld, SpecPieInstance,
+	});
+	Registry.RegisterHandler(TEXT("delete_actor"), &DeleteActor, {
+		SpecActorLabel, SpecActorPath,
+	});
+	Registry.RegisterHandler(TEXT("get_actor_details"), &GetActorDetails, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("includeProperties"), EType::Boolean, TEXT("Include reflected UPROPERTY values")),
+		MCPParam::Optional(TEXT("propertyName"), EType::String, TEXT("Only this property, with includeProperties")),
+		SpecWorld, SpecPieInstance,
+	});
+	Registry.RegisterHandler(TEXT("get_component_tree"), &GetComponentTree, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("includeProperties"), EType::Boolean, TEXT("Include reflected UPROPERTY values")),
+		MCPParam::Optional(TEXT("componentClass"), EType::String, TEXT("Case-insensitive substring over the component class name")),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Only this component, by instance name")),
+		SpecWorld, SpecPieInstance,
+	});
+	Registry.RegisterHandler(TEXT("get_relative_transform"), &GetRelativeTransform, {
+		MCPParam::Optional(TEXT("targetLabel"), EType::String, TEXT("Target actor label; pass targetLabel or targetPath")).Alias(TEXT("target")),
+		MCPParam::Optional(TEXT("targetPath"), EType::String, TEXT("Target actor object path")),
+		MCPParam::Optional(TEXT("referenceLabel"), EType::String, TEXT("Reference actor label; pass referenceLabel or referencePath")).Alias(TEXT("reference")),
+		MCPParam::Optional(TEXT("referencePath"), EType::String, TEXT("Reference actor object path")),
+		SpecWorld, SpecPieInstance,
+	});
+	Registry.RegisterHandler(TEXT("get_current_level"), &GetCurrentLevel, {});
 	// #964: LevelHandlers_Save.cpp. Saves through the same package path
 	// editor(save_dirty) uses, so the two cannot disagree about one package,
 	// and reports the package, the file and the engine's own reason on failure.
+	// Unspecced: it saves, and the contract test must not.
 	Registry.RegisterHandler(TEXT("save_level"), &SaveLevel);
-	Registry.RegisterHandler(TEXT("list_levels"), &ListLevels);
-	Registry.RegisterHandler(TEXT("get_selected_actors"), &GetSelectedActors);
-	Registry.RegisterHandler(TEXT("list_volumes"), &ListVolumes);
-	Registry.RegisterHandler(TEXT("move_actor"), &MoveActor);
-	Registry.RegisterHandler(TEXT("aim_actor_at"), &AimActorAt);
-	Registry.RegisterHandler(TEXT("nav_project_point"), &NavProjectPoint);
+	Registry.RegisterHandler(TEXT("list_levels"), &ListLevels, {
+		SpecCursor, SpecLimit,
+	});
+	Registry.RegisterHandler(TEXT("get_selected_actors"), &GetSelectedActors, {});
+	Registry.RegisterHandler(TEXT("list_volumes"), &ListVolumes, {
+		MCPParam::Optional(TEXT("volumeType"), EType::String, TEXT("Substring over the volume class name")),
+		SpecCursor, SpecLimit,
+	});
+	Registry.RegisterHandler(TEXT("move_actor"), &MoveActor, {
+		SpecActorLabel, SpecActorPath, SpecLocation, SpecRotation, SpecScale, SpecWorld, SpecPieInstance,
+	});
+	Registry.RegisterHandler(TEXT("aim_actor_at"), &AimActorAt, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("targetPoint"), EType::Vec3, TEXT("World point to look at")),
+		MCPParam::Optional(TEXT("targetActor"), EType::String, TEXT("Label of the actor to look at")),
+		MCPParam::Optional(TEXT("targetActorPath"), EType::String, TEXT("Object path of the actor to look at")),
+		MCPParam::Optional(TEXT("roll"), EType::Number, TEXT("Roll in degrees (default 0)")),
+		SpecWorld, SpecPieInstance,
+	});
+	Registry.RegisterHandler(TEXT("nav_project_point"), &NavProjectPoint, {
+		MCPParam::Required(TEXT("point"), EType::Vec3, TEXT("World point to project onto the navmesh")),
+		MCPParam::Optional(TEXT("extent"), EType::Vec3, TEXT("Query extent (default 100, 100, 100)")),
+		SpecWorld, SpecPieInstance,
+	});
+	// Unspecced: the contract's empty lists would clear the editor selection.
 	Registry.RegisterHandler(TEXT("select_actors"), &SelectActors);
-	Registry.RegisterHandler(TEXT("spawn_light"), &SpawnLight);
-	Registry.RegisterHandler(TEXT("set_light_properties"), &SetLightProperties);
-	Registry.RegisterHandler(TEXT("spawn_volume"), &SpawnVolume);
-	Registry.RegisterHandler(TEXT("add_component_to_actor"), &AddComponentToActor);
-	Registry.RegisterHandler(TEXT("remove_component_from_actor"), &RemoveComponentFromActor);
+	Registry.RegisterHandler(TEXT("spawn_light"), &SpawnLight, {
+		MCPParam::Required(TEXT("lightType"), EType::String, TEXT("point | spot | directional | rect | sky")),
+		SpecOnConflict, SpecLabel, SpecLocation, SpecRotation, SpecIntensity, SpecColor, SpecMobility,
+		MCPParam::Optional(TEXT("attenuationRadius"), EType::Number, TEXT("Point, spot and rect lights only")),
+	});
+	Registry.RegisterHandler(TEXT("set_light_properties"), &SetLightProperties, {
+		SpecActorLabel, SpecActorPath, SpecIntensity, SpecColor,
+		MCPParam::Optional(TEXT("rotation"), EType::Rotator, TEXT("DirectionalLight sun angle")),
+		SpecMobility,
+		MCPParam::Optional(TEXT("recaptureSky"), EType::Boolean, TEXT("Recapture a SkyLight after the change")),
+		MCPParam::Optional(TEXT("volumetricScatteringIntensity"), EType::Number, TEXT("Volumetric scattering intensity")),
+		MCPParam::Optional(TEXT("sourceRadius"), EType::Number, TEXT("Point or spot light source radius")),
+		MCPParam::Optional(TEXT("innerConeAngle"), EType::Number, TEXT("Spot light inner cone angle")),
+		MCPParam::Optional(TEXT("outerConeAngle"), EType::Number, TEXT("Spot light outer cone angle")),
+	});
+	Registry.RegisterHandler(TEXT("spawn_volume"), &SpawnVolume, {
+		MCPParam::Required(TEXT("volumeType"), EType::String, TEXT("Volume class, by short name or alias such as trigger, blocking, postprocess, navmesh")),
+		SpecOnConflict, SpecLabel, SpecLocation,
+		MCPParam::Optional(TEXT("extent"), EType::Vec3, TEXT("Half extent of the cube brush (default 100, 100, 100)")),
+		MCPParam::Optional(TEXT("graphPath"), EType::String, TEXT("PCG graph for a PCGVolume")),
+	});
+	Registry.RegisterHandler(TEXT("add_component_to_actor"), &AddComponentToActor, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Required(TEXT("componentClass"), EType::String, TEXT("Component class: short name or full path")),
+		MCPParam::Required(TEXT("componentName"), EType::String, TEXT("Name of the new component")),
+		SpecOnConflict,
+	});
+	Registry.RegisterHandler(TEXT("remove_component_from_actor"), &RemoveComponentFromActor, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Required(TEXT("componentName"), EType::String, TEXT("Component to remove")),
+	});
+	// Unspecced: it loads a map, and the contract test must not.
 	Registry.RegisterHandler(TEXT("load_level"), &LoadLevel);
+	// Unspecced: the contract's dryRun=false would clear the Level Blueprint.
 	Registry.RegisterHandler(TEXT("clear_level_script"), &ClearLevelScript);
-	Registry.RegisterHandler(TEXT("set_component_property"), &SetComponentProperty);
+	Registry.RegisterHandler(TEXT("set_component_property"), &SetComponentProperty, {
+		SpecActorLabel, SpecActorPath, SpecComponentName, SpecPropertyName,
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Value to write; null clears an object reference")),
+		SpecWorld, SpecPieInstance,
+	});
+	// Unspecced: it reads _restoreRelative, an internal rollback key the surface must not advertise.
 	Registry.RegisterHandler(TEXT("nudge_component"), &NudgeComponent);
-	Registry.RegisterHandler(TEXT("get_component_details"), &GetComponentDetails);
-	Registry.RegisterHandler(TEXT("set_actor_material"), &SetActorMaterial);
-	Registry.RegisterHandler(TEXT("set_volume_properties"), &SetVolumeProperties);
-	Registry.RegisterHandler(TEXT("get_world_settings"), &GetWorldSettings);
+	Registry.RegisterHandler(TEXT("get_component_details"), &GetComponentDetails, {
+		SpecActorLabel, SpecActorPath, SpecComponentName,
+		MCPParam::Optional(TEXT("includeValues"), EType::Boolean, TEXT("Dump UPROPERTY values")),
+		MCPParam::Optional(TEXT("propertyNames"), EType::Array, TEXT("Restrict includeValues to these properties")).Items(EType::String),
+		SpecWorld, SpecPieInstance,
+	});
+	Registry.RegisterHandler(TEXT("set_actor_material"), &SetActorMaterial, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Required(TEXT("materialPath"), EType::String, TEXT("Material asset path")),
+		MCPParam::Optional(TEXT("slotIndex"), EType::Integer, TEXT("Material slot (default 0)")),
+	});
+	Registry.RegisterHandler(TEXT("set_volume_properties"), &SetVolumeProperties, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Required(TEXT("properties"), EType::Object, TEXT("Property name to value")),
+	});
+	Registry.RegisterHandler(TEXT("get_world_settings"), &GetWorldSettings, {});
+	// Unspecced: it writes each setting as it reads it, before anything can fail.
 	Registry.RegisterHandler(TEXT("set_world_settings"), &SetWorldSettings);
-	Registry.RegisterHandler(TEXT("set_fog_properties"), &SetFogProperties);
-	Registry.RegisterHandler(TEXT("get_actors_by_class"), &GetActorsByClass);
-	Registry.RegisterHandler(TEXT("get_actors_by_component_class"), &GetActorsByComponentClass);
+	Registry.RegisterHandler(TEXT("set_fog_properties"), &SetFogProperties, {
+		SpecActorLabel, SpecActorPath, SpecWorld, SpecPieInstance,
+		MCPParam::Optional(TEXT("fogDensity"), EType::Number, TEXT("Fog density")),
+		MCPParam::Optional(TEXT("fogHeightFalloff"), EType::Number, TEXT("Fog height falloff")),
+		MCPParam::Optional(TEXT("startDistance"), EType::Number, TEXT("Fog start distance")),
+		MCPParam::Optional(TEXT("fogInscatteringColor"), EType::Object, TEXT("Inscattering colour {r, g, b} in 0-255")).Alias(TEXT("color")),
+		MCPParam::Optional(TEXT("enableVolumetricFog"), EType::Boolean, TEXT("Enable volumetric fog")),
+		MCPParam::Optional(TEXT("volumetricFogScatteringDistribution"), EType::Number, TEXT("Volumetric fog scattering distribution")),
+		MCPParam::Optional(TEXT("volumetricFogExtinctionScale"), EType::Number, TEXT("Volumetric fog extinction scale")),
+		MCPParam::Optional(TEXT("volumetricFogDistance"), EType::Number, TEXT("Volumetric fog distance")),
+		MCPParam::Optional(TEXT("volumetricFogAlbedo"), EType::Object, TEXT("Volumetric fog albedo {r, g, b} in 0-255")),
+	});
+	Registry.RegisterHandler(TEXT("get_actors_by_class"), &GetActorsByClass, {
+		MCPParam::Optional(TEXT("className"), EType::String, TEXT("Class name, /Script path or Blueprint class path; required without labelPrefix")),
+		SpecLabelPrefix, SpecWorld, SpecPieInstance, SpecMatchSubclasses,
+		MCPParam::Optional(TEXT("includeTransforms"), EType::Boolean, TEXT("Include each actor's location, rotation and scale (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("get_actors_by_component_class"), &GetActorsByComponentClass, {
+		MCPParam::Required(TEXT("componentClass"), EType::String, TEXT("Component class name, exact or substring")).Alias(TEXT("className")),
+		SpecWorld, SpecPieInstance,
+	});
 	// Same budget as query_components, and for the same reason: this is a full
 	// TActorIterator pass on the game thread. It additionally sorts every actor
 	// by path name and sorts each actor's components, so it is the heavier of
 	// the two whole-map scans and had no business inheriting the 30 second
 	// default. Mirrored in src/bridge-timeouts.ts, which a parity test checks.
-	Registry.RegisterHandlerWithTimeout(TEXT("summarize_static_mesh_usage"), &SummarizeStaticMeshUsage, 300.0f);
-	Registry.RegisterHandler(TEXT("count_actors_by_class"), &CountActorsByClass);
-	Registry.RegisterHandler(TEXT("get_runtime_virtual_texture_summary"), &GetRVTSummary);
-	Registry.RegisterHandler(TEXT("set_water_body_property"), &SetWaterBodyProperty);
-	Registry.RegisterHandlerWithTimeout(TEXT("rebuild_water_zone"), &RebuildWaterZone, 120.0f);
-	Registry.RegisterHandler(TEXT("get_water_state"), &GetWaterState);
-	Registry.RegisterHandler(TEXT("get_actor_bounds"), &GetActorBounds);
-	Registry.RegisterHandler(TEXT("resolve_actor"), &ResolveActor);
-	Registry.RegisterHandler(TEXT("set_actor_property"), &SetActorProperty);
-	Registry.RegisterHandler(TEXT("line_trace"), &LineTrace);
+	Registry.RegisterHandlerWithTimeout(TEXT("summarize_static_mesh_usage"), &SummarizeStaticMeshUsage, 300.0f, {
+		SpecWorld, SpecPieInstance,
+		MCPParam::Optional(TEXT("maxResults"), EType::Integer, TEXT("Cap on result rows; full-scan totals are still reported")),
+		MCPParam::Optional(TEXT("includeOccurrences"), EType::Boolean, TEXT("Include example actor and component occurrences per mesh")),
+		MCPParam::Optional(TEXT("maxOccurrences"), EType::Integer, TEXT("Cap on occurrence examples per mesh")),
+	});
+	Registry.RegisterHandler(TEXT("count_actors_by_class"), &CountActorsByClass, {
+		SpecWorld, SpecPieInstance,
+		MCPParam::Optional(TEXT("topN"), EType::Integer, TEXT("Only the N most common classes")),
+	});
+	Registry.RegisterHandler(TEXT("get_runtime_virtual_texture_summary"), &GetRVTSummary, {
+		SpecWorld, SpecPieInstance,
+	});
+	Registry.RegisterHandler(TEXT("set_water_body_property"), &SetWaterBodyProperty, {
+		SpecActorLabel, SpecActorPath, SpecPropertyName,
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Value to write: string, number or boolean")),
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("rebuild_water_zone"), &RebuildWaterZone, 120.0f, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("zoneExtent"), EType::Any, TEXT("New WaterZone ZoneExtent in cm, {x, y} or [x, y]")),
+		MCPParam::Optional(TEXT("tileSize"), EType::Number, TEXT("New WaterMesh TileSize in cm")),
+		MCPParam::Optional(TEXT("maxPasses"), EType::Integer, TEXT("Rebuild passes before giving up on a stable QuadTreeResolution, 2..8 (default 4)")),
+	});
+	Registry.RegisterHandler(TEXT("get_water_state"), &GetWaterState, {
+		SpecActorLabel, SpecActorPath,
+	});
+	Registry.RegisterHandler(TEXT("get_actor_bounds"), &GetActorBounds, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("onlyColliding"), EType::Boolean, TEXT("Only colliding components contribute to the bounds")),
+		SpecWorld, SpecPieInstance,
+	});
+	Registry.RegisterHandler(TEXT("resolve_actor"), &ResolveActor, {
+		MCPParam::Required(TEXT("internalName"), EType::String, TEXT("Internal UObject name, such as StaticMeshActor_141")),
+	});
+	Registry.RegisterHandler(TEXT("set_actor_property"), &SetActorProperty, {
+		SpecActorLabel, SpecActorPath, SpecPropertyName,
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Value to write")),
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Bypass EditDefaultsOnly to write a per-instance override")),
+		SpecWorld, SpecPieInstance,
+	});
+	Registry.RegisterHandler(TEXT("line_trace"), &LineTrace, {
+		MCPParam::Optional(TEXT("start"), EType::Vec3, TEXT("Ray start")),
+		MCPParam::Optional(TEXT("end"), EType::Vec3, TEXT("Ray end; pass end or direction and distance")),
+		MCPParam::Optional(TEXT("direction"), EType::Vec3, TEXT("Ray direction, normalised internally")),
+		MCPParam::Optional(TEXT("distance"), EType::Number, TEXT("Ray length when direction is given (default 200000)")),
+		MCPParam::Optional(TEXT("traceComplex"), EType::Boolean, TEXT("Trace per-triangle collision (default false)")),
+		MCPParam::Optional(TEXT("channel"), EType::String, TEXT("Collision channel (default Visibility)")),
+		MCPParam::Optional(TEXT("ignoreActors"), EType::Array, TEXT("Actor labels to skip")).Items(EType::String),
+		SpecWorld, SpecPieInstance,
+	});
+	// Unspecced: its traces entries carry a per-field shape the spec types cannot express yet.
 	Registry.RegisterHandler(TEXT("bulk_line_trace"), &BulkLineTrace);
 	// #453: per-actor motion snapshot for telemetry probes. Reads location,
 	// rotation, velocity, angular velocity, scale, and ground state in one
 	// call. Caller is expected to invoke at the desired sample interval.
-	Registry.RegisterHandler(TEXT("read_actor_motion"), &ReadActorMotion);
+	Registry.RegisterHandler(TEXT("read_actor_motion"), &ReadActorMotion, {
+		SpecActorLabel, SpecActorLabels, SpecActorPath,
+		MCPParam::Optional(TEXT("actorPaths"), EType::Array, TEXT("Full actor object paths")).Items(EType::String),
+		MCPParam::Optional(TEXT("world"), EType::String, TEXT("World scope: auto (default, PIE when running) | editor | pie")),
+		SpecPieInstance,
+	});
 	// #434: bulk-add transforms to a HISMC / ISMC component (Python crashes).
-	Registry.RegisterHandler(TEXT("add_hismc_instances"), &AddHismcInstances);
-	Registry.RegisterHandler(TEXT("add_ismc_instances"), &AddHismcInstances);
-	Registry.RegisterHandler(TEXT("add_instances"), &AddHismcInstances);
+	const FMCPParamSpec SpecTransforms = MCPParam::Required(TEXT("transforms"), EType::Array, TEXT("Transforms {location, rotation?, scale?} to add")).Items(EType::Object);
+	Registry.RegisterHandler(TEXT("add_hismc_instances"), &AddHismcInstances, {
+		SpecActorLabel, SpecActorPath, SpecComponentName, SpecTransforms, SpecWorldSpace,
+	});
+	Registry.RegisterHandler(TEXT("add_ismc_instances"), &AddHismcInstances, {
+		SpecActorLabel, SpecActorPath, SpecComponentName, SpecTransforms, SpecWorldSpace,
+	});
+	Registry.RegisterHandler(TEXT("add_instances"), &AddHismcInstances, {
+		SpecActorLabel, SpecActorPath, SpecComponentName, SpecTransforms, SpecWorldSpace,
+	});
 	// #697: read/update/remove existing instances on an ISMC/HISMC.
-	Registry.RegisterHandler(TEXT("get_instance_transforms"), &GetInstanceTransforms);
-	Registry.RegisterHandler(TEXT("update_instance_transform"), &UpdateInstanceTransform);
-	Registry.RegisterHandler(TEXT("remove_instance"), &RemoveInstance);
+	Registry.RegisterHandler(TEXT("get_instance_transforms"), &GetInstanceTransforms, {
+		SpecActorLabel, SpecActorPath, SpecComponentName, SpecWorldSpace,
+	});
+	Registry.RegisterHandler(TEXT("update_instance_transform"), &UpdateInstanceTransform, {
+		SpecActorLabel, SpecActorPath, SpecComponentName, SpecIndex, SpecWorldSpace, SpecLocation, SpecRotation, SpecScale,
+	});
+	Registry.RegisterHandler(TEXT("remove_instance"), &RemoveInstance, {
+		SpecActorLabel, SpecActorPath, SpecComponentName, SpecIndex,
+	});
 	// Native bridge method only in this plugin-scoped change. It appears in
 	// get_bridge_capabilities.actions and can be called directly over JSON-RPC
 	// (or a UeMcpTask bridge.call). A first-class category action also requires a
 	// server schema wrapper, which intentionally lives outside this plugin.
-	Registry.RegisterHandlerWithTimeout(TEXT("snap_instances_to_surface"), &SnapInstancesToSurface, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("snap_instances_to_surface"), &SnapInstancesToSurface, 300.0f, {
+		SpecActorLabel, SpecActorPath, SpecComponentName,
+		MCPParam::Optional(TEXT("instanceIndices"), EType::Array, TEXT("Instance indices to project; omit for every instance")).Items(EType::Integer),
+		MCPParam::Optional(TEXT("maxInstances"), EType::Integer, TEXT("Cap on instances processed in one call")),
+		MCPParam::Optional(TEXT("direction"), EType::Vec3, TEXT("Trace direction (default straight down)")),
+		MCPParam::Optional(TEXT("traceStartOffset"), EType::Number, TEXT("Height above each instance to begin the trace")),
+		MCPParam::Optional(TEXT("traceDistance"), EType::Number, TEXT("Maximum trace length")),
+		MCPParam::Optional(TEXT("surfaceOffset"), EType::Number, TEXT("Offset along the surface normal after the hit")),
+		MCPParam::Optional(TEXT("onMiss"), EType::String, TEXT("error (default, aborts the batch) | skip")),
+		MCPParam::Optional(TEXT("surfaceActorClass"), EType::String, TEXT("Only accept hits on actors of this class")),
+		MCPParam::Optional(TEXT("surfaceActorLabels"), EType::Array, TEXT("Only accept hits on actors with these labels")).Items(EType::String),
+		MCPParam::Optional(TEXT("channel"), EType::String, TEXT("Collision channel (default Visibility)")),
+		MCPParam::Optional(TEXT("traceComplex"), EType::Boolean, TEXT("Trace per-triangle collision (default false)")),
+		SpecDryRun,
+	});
 	// #696: enable + force-build Nanite on a static mesh.
-	Registry.RegisterHandler(TEXT("set_nanite_settings"), &SetNaniteSettings);
-	Registry.RegisterHandler(TEXT("get_nanite_info"), &GetNaniteInfo);
+	Registry.RegisterHandler(TEXT("set_nanite_settings"), &SetNaniteSettings, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh asset path")).Alias(TEXT("meshPath")),
+		MCPParam::Optional(TEXT("enabled"), EType::Boolean, TEXT("Enable Nanite (default true)")),
+		MCPParam::Optional(TEXT("positionPrecision"), EType::Integer, TEXT("Nanite position precision")),
+	});
+	Registry.RegisterHandler(TEXT("get_nanite_info"), &GetNaniteInfo, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh asset path")).Alias(TEXT("meshPath")),
+	});
 	// #679/#677: spawn a SkeletalMeshActor for visual/deform verification.
+	// Unspecced: materials entries and skeletalMesh take null, which the spec types cannot express yet.
 	Registry.RegisterHandler(TEXT("spawn_skeletal_mesh_actor"), &SpawnSkeletalMeshActor);
 	Registry.RegisterHandler(TEXT("place_skeletal_actor"), &SpawnSkeletalMeshActor);
 	Registry.RegisterHandler(TEXT("set_component_skeletal_mesh"), &SetComponentSkeletalMesh);
 	// #666: add a material blendable to a PostProcessVolume.
-	Registry.RegisterHandler(TEXT("add_post_process_blendable"), &AddPostProcessBlendable);
+	Registry.RegisterHandler(TEXT("add_post_process_blendable"), &AddPostProcessBlendable, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Required(TEXT("materialPath"), EType::String, TEXT("Material to add as a blendable")).Alias(TEXT("material")),
+		MCPParam::Optional(TEXT("weight"), EType::Number, TEXT("Blend weight (default 1)")),
+	});
 	// #950: LevelHandlers_PostProcess.cpp. The value half and the bOverride_ half
 	// of FPostProcessSettings, written together.
-	Registry.RegisterHandler(TEXT("set_post_process_settings"), &SetPostProcessSettings);
-	Registry.RegisterHandler(TEXT("get_post_process_settings"), &GetPostProcessSettings);
-	Registry.RegisterHandler(TEXT("set_fixed_exposure"), &SetFixedExposure);
+	Registry.RegisterHandler(TEXT("set_post_process_settings"), &SetPostProcessSettings, {
+		SpecActorLabel, SpecActorPath, SpecPostProcessComponent, SpecPostProcessProperty,
+		MCPParam::Required(TEXT("settings"), EType::Object, TEXT("Setting name to value; each setting's bOverride flag is enabled too")),
+		MCPParam::Optional(TEXT("enableOverrides"), EType::Boolean, TEXT("Enable each written setting's bOverride flag (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("get_post_process_settings"), &GetPostProcessSettings, {
+		SpecActorLabel, SpecActorPath, SpecPostProcessComponent, SpecPostProcessProperty,
+		MCPParam::Optional(TEXT("onlyOverridden"), EType::Boolean, TEXT("Only settings whose bOverride flag is on")),
+		MCPParam::Optional(TEXT("nameContains"), EType::String, TEXT("Substring over the setting name")),
+		MCPParam::Optional(TEXT("names"), EType::Array, TEXT("Exact setting names to return")).Items(EType::String),
+	});
+	Registry.RegisterHandler(TEXT("set_fixed_exposure"), &SetFixedExposure, {
+		SpecActorLabel, SpecActorPath, SpecPostProcessComponent, SpecPostProcessProperty,
+		MCPParam::Required(TEXT("exposure"), EType::Number, TEXT("Fixed adaptation brightness, written to both min and max")).Alias(TEXT("brightness")),
+		MCPParam::Optional(TEXT("bias"), EType::Number, TEXT("AutoExposureBias (exposure compensation)")),
+	});
 	// #637: export a selected actor's mesh to FBX + metadata sidecar.
-	Registry.RegisterHandler(TEXT("export_actor_fbx"), &ExportActorFbx);
-	Registry.RegisterHandler(TEXT("snap_actor_to_floor"), &SnapActorToFloor);
+	Registry.RegisterHandler(TEXT("export_actor_fbx"), &ExportActorFbx, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Required(TEXT("outputPath"), EType::String, TEXT("Output .fbx path")).Alias(TEXT("filePath")),
+	});
+	Registry.RegisterHandler(TEXT("snap_actor_to_floor"), &SnapActorToFloor, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("floorOffset"), EType::Number, TEXT("Vertical offset added to the impact Z")),
+		MCPParam::Optional(TEXT("maxDistance"), EType::Number, TEXT("Downward trace length (default 100000)")),
+		SpecWorld, SpecPieInstance,
+	});
+	// Unspecced, like every selector-driven batch write here: the contract
+	// values match nothing, but nothing fails before the write path runs.
 	Registry.RegisterHandler(TEXT("delete_actors"), &DeleteActors);
 	Registry.RegisterHandlerWithTimeout(TEXT("delete_exact_labeled_actors_in_levels"), &DeleteExactLabeledActorsInLevels, 300.0f);
 	Registry.RegisterHandler(TEXT("set_actor_folder_path"), &SetActorFolderPath);
-	Registry.RegisterHandler(TEXT("list_actor_descs"), &ListActorDescs);
+	Registry.RegisterHandler(TEXT("list_actor_descs"), &ListActorDescs, {
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring over label, name, class and path")),
+		MCPParam::Optional(TEXT("className"), EType::String, TEXT("Actor class filter")),
+		MCPParam::Optional(TEXT("guids"), EType::Array, TEXT("Exact actor GUIDs")).Items(EType::String),
+		MCPParam::Optional(TEXT("bounds"), EType::Object, TEXT("{min:{x,y,z}, max:{x,y,z}} intersection test")),
+		MCPParam::Optional(TEXT("loadedOnly"), EType::Boolean, TEXT("Only actors currently streamed in")),
+		MCPParam::Optional(TEXT("unloadedOnly"), EType::Boolean, TEXT("Only actors on disk that are not streamed in")),
+		SpecCursor, SpecLimit,
+	});
+	// Unspecced: it pins actors into the editor world, which the contract test must not.
 	Registry.RegisterHandlerWithTimeout(TEXT("load_actor_descs"), &LoadActorDescs, 300.0f);
 	// #985: LevelHandlers_WorldPartitionSettings.cpp. The streaming knobs and
 	// the runtime cell transformer stack live with the other World Partition
 	// actions rather than in a category of their own.
-	Registry.RegisterHandler(TEXT("get_world_partition_settings"), &GetWorldPartitionSettings);
+	Registry.RegisterHandler(TEXT("get_world_partition_settings"), &GetWorldPartitionSettings, {});
+	// Unspecced: both write the world partition, and on 5.4 the transformer class is not checked before the write.
 	Registry.RegisterHandler(TEXT("set_world_partition_settings"), &SetWorldPartitionSettings);
 	Registry.RegisterHandler(TEXT("add_runtime_cell_transformer"), &AddRuntimeCellTransformer);
 	// #985: bulk HLOD layer assignment. A whole-map selector, so it takes the
 	// same 300 second budget as the other batch writes. Mirrored in
 	// src/bridge-timeouts.ts, which a parity test checks.
+	// Unspecced: hlodLayer takes null, which the spec types cannot express yet.
 	Registry.RegisterHandlerWithTimeout(TEXT("set_actor_hlod_layer"), &SetActorHLODLayer, 300.0f);
-	Registry.RegisterHandler(TEXT("add_actor_tag"), &AddActorTag);
-	Registry.RegisterHandler(TEXT("remove_actor_tag"), &RemoveActorTag);
-	Registry.RegisterHandler(TEXT("set_actor_tags"), &SetActorTags);
-	Registry.RegisterHandler(TEXT("list_actor_tags"), &ListActorTags);
-	Registry.RegisterHandler(TEXT("attach_actor"), &AttachActor);
-	Registry.RegisterHandler(TEXT("detach_actor"), &DetachActor);
-	Registry.RegisterHandler(TEXT("attach_component"), &AttachComponent);
-	Registry.RegisterHandler(TEXT("detach_component"), &DetachComponent);
-	Registry.RegisterHandler(TEXT("set_actor_mobility"), &SetActorMobility);
-	Registry.RegisterHandler(TEXT("get_current_edit_level"), &GetCurrentEditLevel);
-	Registry.RegisterHandler(TEXT("set_current_edit_level"), &SetCurrentEditLevel);
-	Registry.RegisterHandler(TEXT("list_streaming_sublevels"), &ListStreamingSublevels);
+	Registry.RegisterHandler(TEXT("add_actor_tag"), &AddActorTag, {
+		SpecActorLabel, SpecActorPath, SpecTag,
+	});
+	Registry.RegisterHandler(TEXT("remove_actor_tag"), &RemoveActorTag, {
+		SpecActorLabel, SpecActorPath, SpecTag,
+	});
+	Registry.RegisterHandler(TEXT("set_actor_tags"), &SetActorTags, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Required(TEXT("tags"), EType::Array, TEXT("The actor's complete tag list")).Items(EType::String),
+	});
+	Registry.RegisterHandler(TEXT("list_actor_tags"), &ListActorTags, {
+		SpecActorLabel, SpecActorPath, SpecCursor, SpecLimit,
+	});
+	Registry.RegisterHandler(TEXT("attach_actor"), &AttachActor, {
+		SpecChildLabel, SpecChildPath, SpecParentLabel, SpecParentPath, SpecAttachRule, SpecSocketName,
+	});
+	Registry.RegisterHandler(TEXT("detach_actor"), &DetachActor, {
+		SpecChildLabel, SpecChildPath,
+	});
+	Registry.RegisterHandler(TEXT("attach_component"), &AttachComponent, {
+		SpecChildLabel, SpecChildPath, SpecParentLabel, SpecParentPath,
+		MCPParam::Optional(TEXT("childComponentName"), EType::String, TEXT("Child SceneComponent instance name; omitted selects the actor root")),
+		MCPParam::Optional(TEXT("parentComponentName"), EType::String, TEXT("Parent SceneComponent instance name; omitted selects the actor root")),
+		SpecAttachRule,
+		MCPParam::Optional(TEXT("weldSimulatedBodies"), EType::Boolean, TEXT("Weld simulated bodies during attachment (default false)")),
+		SpecSocketName,
+	});
+	Registry.RegisterHandler(TEXT("detach_component"), &DetachComponent, {
+		SpecChildLabel, SpecChildPath,
+		MCPParam::Optional(TEXT("childComponentName"), EType::String, TEXT("Child SceneComponent instance name; omitted selects the actor root")),
+	});
+	Registry.RegisterHandler(TEXT("set_actor_mobility"), &SetActorMobility, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Required(TEXT("mobility"), EType::String, TEXT("static | stationary | movable")),
+	});
+	Registry.RegisterHandler(TEXT("get_current_edit_level"), &GetCurrentEditLevel, {});
+	Registry.RegisterHandler(TEXT("set_current_edit_level"), &SetCurrentEditLevel, {
+		MCPParam::Required(TEXT("levelName"), EType::String, TEXT("Loaded sub-level to make current")).Alias(TEXT("levelPath")),
+	});
+	Registry.RegisterHandler(TEXT("list_streaming_sublevels"), &ListStreamingSublevels, {});
+	// Unspecced: it loads the sub-level package, which the contract test must not.
 	Registry.RegisterHandler(TEXT("add_streaming_sublevel"), &AddStreamingSublevel);
-	Registry.RegisterHandler(TEXT("remove_streaming_sublevel"), &RemoveStreamingSublevel);
-	Registry.RegisterHandler(TEXT("set_streaming_sublevel_properties"), &SetStreamingSublevelProperties);
-	Registry.RegisterHandler(TEXT("spawn_grid"), &SpawnGrid);
+	Registry.RegisterHandler(TEXT("remove_streaming_sublevel"), &RemoveStreamingSublevel, {
+		SpecLevelName,
+	});
+	Registry.RegisterHandler(TEXT("set_streaming_sublevel_properties"), &SetStreamingSublevelProperties, {
+		SpecLevelName,
+		MCPParam::Optional(TEXT("initiallyLoaded"), EType::Boolean, TEXT("Load the sub-level with the persistent level")),
+		MCPParam::Optional(TEXT("initiallyVisible"), EType::Boolean, TEXT("Make the sub-level visible when loaded")),
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("Sub-level offset")),
+		MCPParam::Optional(TEXT("editorVisible"), EType::Boolean, TEXT("Editor viewport visibility")),
+	});
+	Registry.RegisterHandler(TEXT("spawn_grid"), &SpawnGrid, {
+		MCPParam::Required(TEXT("staticMesh"), EType::String, TEXT("Static mesh to place")),
+		MCPParam::Required(TEXT("min"), EType::Vec3, TEXT("Grid lower bound")),
+		MCPParam::Required(TEXT("max"), EType::Vec3, TEXT("Grid upper bound")),
+		MCPParam::Optional(TEXT("countX"), EType::Integer, TEXT("Actors along X (default 4)")),
+		MCPParam::Optional(TEXT("countY"), EType::Integer, TEXT("Actors along Y (default 4)")),
+		MCPParam::Optional(TEXT("countZ"), EType::Integer, TEXT("Actors along Z (default 1)")),
+		MCPParam::Optional(TEXT("jitter"), EType::Number, TEXT("Per-axis location jitter")),
+		MCPParam::Optional(TEXT("labelPrefix"), EType::String, TEXT("Label prefix for the spawned actors (default Grid)")),
+	});
 	Registry.RegisterHandler(TEXT("batch_translate"), &BatchTranslate);
 	Registry.RegisterHandler(TEXT("place_actors_batch"), &PlaceActorsBatch);
 	// #910/#943/#912: the general editor-side component query. A whole-map
 	// scan with a projection can take a while on a 4,000 actor level, so it
 	// gets its own timeout rather than the 30 second default.
+	// Unspecced: levelPath temporarily opens another map, which the contract test must not.
 	Registry.RegisterHandlerWithTimeout(TEXT("query_components"), &QueryComponents, 300.0f);
 	// #984/#941/#907/#987: level-wide writes driven by an editor-side selector.
 	// Each can touch thousands of actors, so each gets its own timeout.
-	Registry.RegisterHandlerWithTimeout(TEXT("batch_set_actor_properties"), &BatchSetActorProperties, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("batch_set_actor_properties"), &BatchSetActorProperties, 300.0f, {
+		MCPParam::Required(TEXT("properties"), EType::Object, TEXT("Property name to value, dotted paths supported")),
+		SpecActorLabels, SpecLabelPrefix, SpecLabelContains, SpecSelectorTag,
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Actor class, resolved as a class or matched as a substring")),
+		SpecFolderPath, SpecFolderPathPrefix, SpecMatchSubclasses, SpecDryRun,
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Bypass EditDefaultsOnly to write per-instance overrides")),
+		SpecTransactionLabel,
+	});
 	Registry.RegisterHandlerWithTimeout(TEXT("bulk_set_component_property"), &BulkSetComponentProperty, 300.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("remove_components_by_class"), &RemoveComponentsByClass, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("remove_components_by_class"), &RemoveComponentsByClass, 300.0f, {
+		MCPParam::Required(TEXT("componentClass"), EType::String, TEXT("Component class to remove")),
+		MCPParam::Optional(TEXT("matchComponentSubclasses"), EType::Boolean, TEXT("Also match subclasses of componentClass (default true)")),
+		MCPParam::Optional(TEXT("componentNameContains"), EType::String, TEXT("Case-insensitive substring over the component instance name")),
+		SpecActorLabels, SpecLabelPrefix, SpecLabelContains, SpecSelectorTag,
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Restrict to actors of this class")).Alias(TEXT("actorClassFilter")),
+		SpecFolderPath, SpecFolderPathPrefix, SpecMatchSubclasses,
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report what would be removed without removing it (default TRUE)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the level after a committed removal (default false)")),
+		SpecTransactionLabel,
+	});
+	// Unspecced: instances, fromComponents and alongSpline carry per-field shapes the spec types cannot express yet.
 	Registry.RegisterHandlerWithTimeout(TEXT("spawn_actors_batch"), &SpawnActorsBatch, 300.0f);
 	// #944/#915/#914: refresh state the editor is caching, and read the bounds
 	// a caller needs to check the result.
 	Registry.RegisterHandlerWithTimeout(TEXT("rerun_construction_scripts"), &RerunConstruction, 300.0f);
 	Registry.RegisterHandlerWithTimeout(TEXT("recreate_physics_state"), &RecreatePhysicsState, 300.0f);
-	Registry.RegisterHandler(TEXT("test_component_overlap"), &TestComponentOverlap);
+	Registry.RegisterHandler(TEXT("test_component_overlap"), &TestComponentOverlap, {
+		MCPParam::Optional(TEXT("actorLabelA"), EType::String, TEXT("First actor label; pass actorLabelA or actorPathA")),
+		MCPParam::Optional(TEXT("actorPathA"), EType::String, TEXT("First actor object path")),
+		MCPParam::Optional(TEXT("actorLabelB"), EType::String, TEXT("Second actor label; pass actorLabelB or actorPathB")),
+		MCPParam::Optional(TEXT("actorPathB"), EType::String, TEXT("Second actor object path")),
+		MCPParam::Optional(TEXT("componentNameA"), EType::String, TEXT("Component on actor A; omitted selects its root")),
+		MCPParam::Optional(TEXT("componentNameB"), EType::String, TEXT("Component on actor B; omitted selects its root")),
+		MCPParam::Optional(TEXT("method"), EType::String, TEXT("OBB (oriented, default) | AABB (axis-aligned world bounds)")),
+		SpecWorld, SpecPieInstance,
+	});
 	// #911: BSP to StaticMesh. Generating meshes for hundreds of brushes takes
 	// far longer than the default handler timeout.
 	Registry.RegisterHandlerWithTimeout(TEXT("convert_brushes_to_static_mesh"), &ConvertBrushesToStaticMesh, 600.0f);
@@ -245,13 +604,34 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandlerWithTimeout(TEXT("set_component_materials"), &SetComponentMaterials, 300.0f);
 	// #956: a transient verification subject, and the two actions that keep it
 	// from being left behind.
-	Registry.RegisterHandler(TEXT("spawn_transient_actor"), &SpawnTransientActor);
-	Registry.RegisterHandler(TEXT("destroy_transient_actor"), &DestroyTransientActor);
-	Registry.RegisterHandler(TEXT("list_transient_actors"), &ListTransientActors);
+	Registry.RegisterHandler(TEXT("spawn_transient_actor"), &SpawnTransientActor, {
+		SpecWorld, SpecPieInstance,
+		MCPParam::Required(TEXT("actorClass"), EType::String, TEXT("Actor class: short name, /Script path or Blueprint class path")),
+		SpecLocation, SpecRotation, SpecScale,
+		MCPParam::Optional(TEXT("label"), EType::String, TEXT("Actor label")),
+		MCPParam::Optional(TEXT("hideFromOutliner"), EType::Boolean, TEXT("Keep the actor out of the World Outliner (default false)")),
+		MCPParam::Optional(TEXT("initialize"), EType::String, TEXT("none | construction (default) | beginPlay")),
+		MCPParam::Optional(TEXT("properties"), EType::Object, TEXT("Property name to value, applied before initialisation")),
+	});
+	Registry.RegisterHandler(TEXT("destroy_transient_actor"), &DestroyTransientActor, {
+		SpecWorld, SpecPieInstance,
+		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Transient actor object path")),
+		MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Transient actor label")),
+		MCPParam::Optional(TEXT("all"), EType::Boolean, TEXT("Destroy every transient verification actor in the world")),
+	});
+	Registry.RegisterHandler(TEXT("list_transient_actors"), &ListTransientActors, {
+		SpecWorld, SpecPieInstance, SpecCursor, SpecLimit,
+	});
 }
 
 TSharedPtr<FJsonValue> FLevelHandlers::GetOutliner(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("classFilter"), TEXT("exactClass"), TEXT("nameFilter"), TEXT("folderPath"), TEXT("folderPathPrefix"),
+		TEXT("editorHidden"), TEXT("includeStreaming"), TEXT("world"), TEXT("pieInstance"), TEXT("cursor"),
+		TEXT("limit"),
+	});
+
 	FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));
 	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
 	if (!World) return MCPError(FString::Printf(TEXT("World not available for scope '%s'"), *WorldScope));
@@ -426,6 +806,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetOutliner(const TSharedPtr<FJsonObject>
 // actors still render in game, so unhiding them is a common cleanup step.
 TSharedPtr<FJsonValue> FLevelHandlers::SetEditorVisibility(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("hidden"), TEXT("actorLabels"), TEXT("all"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	bool bHidden = false;
@@ -496,6 +880,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetEditorVisibility(const TSharedPtr<FJso
 
 TSharedPtr<FJsonValue> FLevelHandlers::PlaceActor(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorClass"), TEXT("label"), TEXT("onConflict"), TEXT("location"), TEXT("rotation"), TEXT("scale"),
+		TEXT("staticMesh"), TEXT("material"), TEXT("world"), TEXT("pieInstance"),
+	});
+
 	FString ActorClass;
 	if (auto Err = RequireString(Params, TEXT("actorClass"), ActorClass)) return Err;
 
@@ -612,6 +1001,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::PlaceActor(const TSharedPtr<FJsonObject>&
 
 TSharedPtr<FJsonValue> FLevelHandlers::DeleteActor(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"),
+	});
+
 	FString Selector;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), Selector)) return Err;
 
@@ -695,6 +1088,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::DeleteActor(const TSharedPtr<FJsonObject>
 
 TSharedPtr<FJsonValue> FLevelHandlers::GetActorDetails(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("includeProperties"), TEXT("propertyName"), TEXT("world"),
+		TEXT("pieInstance"),
+	});
+
 	FString Selector;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), Selector)) return Err;
 
@@ -838,6 +1236,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetActorDetails(const TSharedPtr<FJsonObj
 //   - reflected UPROPERTY name/type/value when includeProperties=true
 TSharedPtr<FJsonValue> FLevelHandlers::GetComponentTree(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("includeProperties"), TEXT("componentClass"), TEXT("componentName"),
+		TEXT("world"), TEXT("pieInstance"),
+	});
+
 	FString Selector;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), Selector)) return Err;
 
@@ -1077,6 +1480,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetComponentTree(const TSharedPtr<FJsonOb
 // required execute_python with MathLibrary.inverse_transform_location.
 TSharedPtr<FJsonValue> FLevelHandlers::GetRelativeTransform(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("targetLabel"), TEXT("targetPath"), TEXT("referenceLabel"), TEXT("referencePath"), TEXT("world"),
+		TEXT("pieInstance"),
+	});
+
 	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));
 	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
 	if (!World) return MCPError(FString::Printf(TEXT("World '%s' not available"), *WorldScope));
@@ -1087,7 +1495,7 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetRelativeTransform(const TSharedPtr<FJs
 	FMCPActorSelector TargetSel;
 	TargetSel.LabelKey = TEXT("targetLabel");
 	TargetSel.PathKey = TEXT("targetPath");
-	TargetSel.AltLabelKey = TEXT("target");
+	// target and reference are spec aliases, renamed before this runs (#1057).
 	TSharedPtr<FJsonValue> ActorErr;
 	AActor* TargetActor = MCPResolveActor(World, Params, ActorErr, TargetSel);
 	if (!TargetActor) return ActorErr;
@@ -1095,7 +1503,6 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetRelativeTransform(const TSharedPtr<FJs
 	FMCPActorSelector ReferenceSel;
 	ReferenceSel.LabelKey = TEXT("referenceLabel");
 	ReferenceSel.PathKey = TEXT("referencePath");
-	ReferenceSel.AltLabelKey = TEXT("reference");
 	AActor* ReferenceActor = MCPResolveActor(World, Params, ActorErr, ReferenceSel);
 	if (!ReferenceActor) return ActorErr;
 
@@ -1158,6 +1565,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetCurrentLevel(const TSharedPtr<FJsonObj
 
 TSharedPtr<FJsonValue> FLevelHandlers::ListLevels(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("cursor"), TEXT("limit"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	// T3: paged. A streaming-heavy map carries hundreds of sublevels, and this
@@ -1243,6 +1654,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetSelectedActors(const TSharedPtr<FJsonO
 }
 TSharedPtr<FJsonValue> FLevelHandlers::MoveActor(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("location"), TEXT("rotation"), TEXT("scale"), TEXT("world"),
+		TEXT("pieInstance"),
+	});
+
 	FString Selector;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), Selector)) return Err;
 
@@ -1310,6 +1726,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::MoveActor(const TSharedPtr<FJsonObject>& 
 // reading two transforms and computing the look-at client-side.
 TSharedPtr<FJsonValue> FLevelHandlers::AimActorAt(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("targetPoint"), TEXT("targetActor"), TEXT("targetActorPath"),
+		TEXT("roll"), TEXT("world"), TEXT("pieInstance"),
+	});
+
 	FString Selector;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), Selector)) return Err;
 
@@ -1333,13 +1754,15 @@ TSharedPtr<FJsonValue> FLevelHandlers::AimActorAt(const TSharedPtr<FJsonObject>&
 		if (!TargetActor) return ActorErr;
 		TargetLocation = TargetActor->GetActorLocation();
 	}
-	else if (HasParam(Params, TEXT("target")))
+	else if (HasParam(Params, TEXT("targetPoint")))
 	{
-		TargetLocation = OptionalVec3(Params, TEXT("target"), FVector::ZeroVector);
+		// targetPoint, not target: get_relative_transform takes target as a
+		// label, and one category key has one type (#1057).
+		TargetLocation = OptionalVec3(Params, TEXT("targetPoint"), FVector::ZeroVector);
 	}
 	else
 	{
-		return MCPError(TEXT("Supply 'target' (Vec3), 'targetActor' (label) or 'targetActorPath' (object path)"));
+		return MCPError(TEXT("Supply 'targetPoint' (Vec3), 'targetActor' (label) or 'targetActorPath' (object path)"));
 	}
 
 	const FVector ActorLocation = Actor->GetActorLocation();
@@ -1378,6 +1801,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::AimActorAt(const TSharedPtr<FJsonObject>&
 // editor or PIE (navmesh must be built/generated for the world).
 TSharedPtr<FJsonValue> FLevelHandlers::NavProjectPoint(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("point"), TEXT("extent"), TEXT("world"), TEXT("pieInstance"),
+	});
+
 	if (!HasParam(Params, TEXT("point"))) return MCPError(TEXT("Missing 'point' (Vec3)"));
 	const FVector Point = OptionalVec3(Params, TEXT("point"), FVector::ZeroVector);
 
@@ -1507,6 +1934,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::SelectActors(const TSharedPtr<FJsonObject
 }
 TSharedPtr<FJsonValue> FLevelHandlers::AddComponentToActor(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentClass"), TEXT("componentName"), TEXT("onConflict"),
+	});
+
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
@@ -1605,6 +2036,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::AddComponentToActor(const TSharedPtr<FJso
 // alreadyDeleted=true when the actor has no component with that name).
 TSharedPtr<FJsonValue> FLevelHandlers::RemoveComponentFromActor(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"),
+	});
+
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 	FString ComponentName;
@@ -2048,6 +2483,11 @@ static UActorComponent* FindNamedComponentOnActor(AActor* Actor, const FString& 
 
 TSharedPtr<FJsonValue> FLevelHandlers::SetComponentProperty(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("propertyName"), TEXT("value"),
+		TEXT("world"), TEXT("pieInstance"),
+	});
+
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
@@ -2355,6 +2795,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetComponentProperty(const TSharedPtr<FJs
 // callers can read a lid's open-pose rotation without execute_python. (#539)
 TSharedPtr<FJsonValue> FLevelHandlers::GetComponentDetails(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("includeValues"), TEXT("propertyNames"),
+		TEXT("world"), TEXT("pieInstance"),
+	});
+
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
@@ -2585,6 +3030,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetWorldSettings(const TSharedPtr<FJsonOb
 
 TSharedPtr<FJsonValue> FLevelHandlers::SetActorMaterial(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("materialPath"), TEXT("slotIndex"),
+	});
+
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
@@ -2647,6 +3096,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetActorMaterial(const TSharedPtr<FJsonOb
 }
 TSharedPtr<FJsonValue> FLevelHandlers::GetActorsByClass(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("className"), TEXT("labelPrefix"), TEXT("world"), TEXT("pieInstance"), TEXT("matchSubclasses"),
+		TEXT("includeTransforms"),
+	});
+
 	// #1113: labelPrefix is a case-sensitive prefix over the editor label, and
 	// with it className may be omitted to match every actor class.
 	const FString LabelPrefix = OptionalString(Params, TEXT("labelPrefix"));
@@ -2723,8 +3177,13 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetActorsByClass(const TSharedPtr<FJsonOb
 // matched component name(s) so callers can target them directly afterwards.
 TSharedPtr<FJsonValue> FLevelHandlers::GetActorsByComponentClass(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("componentClass"), TEXT("world"), TEXT("pieInstance"),
+	});
+
 	FString ComponentClass;
-	if (auto Err = RequireStringAlt(Params, TEXT("componentClass"), TEXT("className"), ComponentClass)) return Err;
+	// className is a spec alias, renamed to componentClass before this runs (#1057).
+	if (auto Err = RequireString(Params, TEXT("componentClass"), ComponentClass)) return Err;
 
 	FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));
 	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
@@ -2771,6 +3230,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetActorsByComponentClass(const TSharedPt
 // the caller only needs counts (e.g. "how many PCGVolume are loaded?").
 TSharedPtr<FJsonValue> FLevelHandlers::CountActorsByClass(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("world"), TEXT("pieInstance"), TEXT("topN"),
+	});
+
 	FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));
 	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
 	if (!World) return MCPError(TEXT("World not available"));
@@ -2822,6 +3285,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::CountActorsByClass(const TSharedPtr<FJson
 // property-name variants and reflected get_editor_property by class name.
 TSharedPtr<FJsonValue> FLevelHandlers::GetRVTSummary(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("world"), TEXT("pieInstance"),
+	});
+
 	FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));
 	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
 	if (!World) return MCPError(TEXT("World not available"));
@@ -2893,6 +3360,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetRVTSummary(const TSharedPtr<FJsonObjec
 // a clear error rather than failing to link.
 TSharedPtr<FJsonValue> FLevelHandlers::SetWaterBodyProperty(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("propertyName"), TEXT("value"),
+	});
+
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 	FString PropertyName;
@@ -3001,6 +3472,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetWaterBodyProperty(const TSharedPtr<FJs
 // named by its editor label or its object path.
 TSharedPtr<FJsonValue> FLevelHandlers::GetActorBounds(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("onlyColliding"), TEXT("world"), TEXT("pieInstance"),
+	});
+
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
@@ -3057,6 +3532,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetActorBounds(const TSharedPtr<FJsonObje
 // "StaticMeshActor_141") and returns its label, path, class, and location.
 TSharedPtr<FJsonValue> FLevelHandlers::ResolveActor(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("internalName"),
+	});
+
 	FString InternalName;
 	if (auto Err = RequireString(Params, TEXT("internalName"), InternalName)) return Err;
 
@@ -3100,6 +3579,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::ResolveActor(const TSharedPtr<FJsonObject
 // UI just hides it).
 TSharedPtr<FJsonValue> FLevelHandlers::SetActorProperty(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("propertyName"), TEXT("value"), TEXT("force"), TEXT("world"),
+		TEXT("pieInstance"),
+	});
+
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
@@ -3427,6 +3911,11 @@ namespace
 //   pieInstance?: which PIE world when several are running
 TSharedPtr<FJsonValue> FLevelHandlers::ReadActorMotion(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorLabels"), TEXT("actorPath"), TEXT("actorPaths"), TEXT("world"),
+		TEXT("pieInstance"),
+	});
+
 	// Shared resolver so pieInstance selects the client, matching every other
 	// PIE-aware read. Bare GetPIEWorld() always returned the first (server)
 	// context, which reads as success while sampling the wrong actor.
@@ -3575,6 +4064,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::ReadActorMotion(const TSharedPtr<FJsonObj
 //   worldSpace? (default true)
 TSharedPtr<FJsonValue> FLevelHandlers::AddHismcInstances(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("transforms"), TEXT("worldSpace"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
@@ -3715,6 +4208,10 @@ namespace
 // #697: read back every instance transform on an actor's ISMC/HISMC.
 TSharedPtr<FJsonValue> FLevelHandlers::GetInstanceTransforms(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("worldSpace"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
@@ -3755,6 +4252,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetInstanceTransforms(const TSharedPtr<FJ
 // #697: update a single instance transform on an ISMC/HISMC by index.
 TSharedPtr<FJsonValue> FLevelHandlers::UpdateInstanceTransform(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("index"), TEXT("worldSpace"),
+		TEXT("location"), TEXT("rotation"), TEXT("scale"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
@@ -3833,6 +4335,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::UpdateInstanceTransform(const TSharedPtr<
 // #697: remove a single instance on an ISMC/HISMC by index.
 TSharedPtr<FJsonValue> FLevelHandlers::RemoveInstance(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("index"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
@@ -3897,9 +4403,13 @@ TSharedPtr<FJsonValue> FLevelHandlers::RemoveInstance(const TSharedPtr<FJsonObje
 // #696: enable + force-build Nanite on a UStaticMesh asset.
 TSharedPtr<FJsonValue> FLevelHandlers::SetNaniteSettings(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("assetPath"), TEXT("enabled"), TEXT("positionPrecision"),
+	});
+
 #if WITH_EDITOR
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("meshPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err; // meshPath is a spec alias (#1057).
 	REQUIRE_ASSET(UStaticMesh, Mesh, AssetPath);
 
 	const bool bEnabled = OptionalBool(Params, TEXT("enabled"), true);
@@ -3992,8 +4502,12 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetNaniteSettings(const TSharedPtr<FJsonO
 // #696: read a UStaticMesh's Nanite state.
 TSharedPtr<FJsonValue> FLevelHandlers::GetNaniteInfo(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("assetPath"),
+	});
+
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("meshPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err; // meshPath is a spec alias (#1057).
 	REQUIRE_ASSET(UStaticMesh, Mesh, AssetPath);
 
 	const FMeshNaniteSettings Settings = MCPGetNaniteSettings(Mesh);
@@ -4010,11 +4524,15 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetNaniteInfo(const TSharedPtr<FJsonObjec
 // downstream bridge (e.g. MetaTailor) can consume alongside the FBX.
 TSharedPtr<FJsonValue> FLevelHandlers::ExportActorFbx(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("outputPath"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 	FString OutputPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("outputPath"), TEXT("filePath"), OutputPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("outputPath"), OutputPath)) return Err; // filePath is a spec alias (#1057).
 
 	FMCPActorSelector ActorSel;
 	ActorSel.Match = EMCPActorMatch::LabelNameOrPath;
@@ -4592,6 +5110,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::DeleteActors(const TSharedPtr<FJsonObject
 
 TSharedPtr<FJsonValue> FLevelHandlers::AddActorTag(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("tag"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ActorLabel; if (auto E = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return E;
 	FString Tag; if (auto E = RequireString(Params, TEXT("tag"), Tag)) return E;
@@ -4633,6 +5155,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::AddActorTag(const TSharedPtr<FJsonObject>
 
 TSharedPtr<FJsonValue> FLevelHandlers::RemoveActorTag(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("tag"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ActorLabel; if (auto E = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return E;
 	FString Tag; if (auto E = RequireString(Params, TEXT("tag"), Tag)) return E;
@@ -4673,6 +5199,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::RemoveActorTag(const TSharedPtr<FJsonObje
 
 TSharedPtr<FJsonValue> FLevelHandlers::SetActorTags(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("tags"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ActorLabel; if (auto E = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return E;
 
@@ -4741,6 +5271,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetActorTags(const TSharedPtr<FJsonObject
 
 TSharedPtr<FJsonValue> FLevelHandlers::ListActorTags(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("cursor"), TEXT("limit"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ActorLabel; if (auto E = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return E;
 
@@ -4781,6 +5315,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::ListActorTags(const TSharedPtr<FJsonObjec
 // #205: attach an actor's root component to a parent actor.
 TSharedPtr<FJsonValue> FLevelHandlers::AttachActor(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("childLabel"), TEXT("childPath"), TEXT("parentLabel"), TEXT("parentPath"), TEXT("attachRule"),
+		TEXT("socketName"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ChildLabel; if (auto E = RequireStringAlt(Params, TEXT("childLabel"), TEXT("childPath"), ChildLabel)) return E;
 	FString ParentLabel; if (auto E = RequireStringAlt(Params, TEXT("parentLabel"), TEXT("parentPath"), ParentLabel)) return E;
@@ -4826,6 +5365,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::AttachActor(const TSharedPtr<FJsonObject>
 
 TSharedPtr<FJsonValue> FLevelHandlers::DetachActor(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("childLabel"), TEXT("childPath"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ChildLabel; if (auto E = RequireStringAlt(Params, TEXT("childLabel"), TEXT("childPath"), ChildLabel)) return E;
 
@@ -4888,6 +5431,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::DetachActor(const TSharedPtr<FJsonObject>
 // that component's hierarchy; it does not parent or replicate the owning actor.
 TSharedPtr<FJsonValue> FLevelHandlers::AttachComponent(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("childLabel"), TEXT("childPath"), TEXT("parentLabel"), TEXT("parentPath"), TEXT("childComponentName"),
+		TEXT("parentComponentName"), TEXT("attachRule"), TEXT("weldSimulatedBodies"), TEXT("socketName"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ChildLabel; if (auto E = RequireStringAlt(Params, TEXT("childLabel"), TEXT("childPath"), ChildLabel)) return E;
 	FString ParentLabel; if (auto E = RequireStringAlt(Params, TEXT("parentLabel"), TEXT("parentPath"), ParentLabel)) return E;
@@ -5128,6 +5676,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::AttachComponent(const TSharedPtr<FJsonObj
 
 TSharedPtr<FJsonValue> FLevelHandlers::DetachComponent(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("childLabel"), TEXT("childPath"), TEXT("childComponentName"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ChildLabel; if (auto E = RequireStringAlt(Params, TEXT("childLabel"), TEXT("childPath"), ChildLabel)) return E;
 
@@ -5211,6 +5763,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::DetachComponent(const TSharedPtr<FJsonObj
 // #205: set USceneComponent::Mobility on the actor's root component.
 TSharedPtr<FJsonValue> FLevelHandlers::SetActorMobility(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("mobility"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ActorLabel; if (auto E = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return E;
 	FString MobilityStr; if (auto E = RequireString(Params, TEXT("mobility"), MobilityStr)) return E;
@@ -5269,12 +5825,14 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetCurrentEditLevel(const TSharedPtr<FJso
 
 TSharedPtr<FJsonValue> FLevelHandlers::SetCurrentEditLevel(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("levelName"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
+	// levelPath is a spec alias, renamed to levelName before this runs (#1057).
 	FString LevelName;
-	if (!TryGetStringParam(Params, TEXT("levelName"), LevelName))
-	{
-		TryGetStringParam(Params, TEXT("levelPath"), LevelName);
-	}
+	TryGetStringParam(Params, TEXT("levelName"), LevelName);
 	if (LevelName.IsEmpty()) return MCPError(TEXT("Missing levelName (or levelPath)"));
 
 	ULevelEditorSubsystem* LES = GEditor ? GEditor->GetEditorSubsystem<ULevelEditorSubsystem>() : nullptr;
@@ -5441,9 +5999,13 @@ TSharedPtr<FJsonValue> FLevelHandlers::AddStreamingSublevel(const TSharedPtr<FJs
 
 TSharedPtr<FJsonValue> FLevelHandlers::RemoveStreamingSublevel(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("levelName"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString Name;
-	if (!TryGetStringParam(Params, TEXT("levelName"), Name)) TryGetStringParam(Params, TEXT("levelPath"), Name);
+	TryGetStringParam(Params, TEXT("levelName"), Name); // levelPath is a spec alias (#1057).
 	if (Name.IsEmpty()) return MCPError(TEXT("Missing levelName (or levelPath)"));
 
 	ULevelStreaming* SL = FindStreamingByName(World, Name);
@@ -5512,9 +6074,13 @@ TSharedPtr<FJsonValue> FLevelHandlers::RemoveStreamingSublevel(const TSharedPtr<
 
 TSharedPtr<FJsonValue> FLevelHandlers::SetStreamingSublevelProperties(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("levelName"), TEXT("initiallyLoaded"), TEXT("initiallyVisible"), TEXT("location"), TEXT("editorVisible"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString Name;
-	if (!TryGetStringParam(Params, TEXT("levelName"), Name)) TryGetStringParam(Params, TEXT("levelPath"), Name);
+	TryGetStringParam(Params, TEXT("levelName"), Name); // levelPath is a spec alias (#1057).
 	if (Name.IsEmpty()) return MCPError(TEXT("Missing levelName (or levelPath)"));
 
 	ULevelStreaming* SL = FindStreamingByName(World, Name);
@@ -5608,6 +6174,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetStreamingSublevelProperties(const TSha
 // drives count along each axis.
 TSharedPtr<FJsonValue> FLevelHandlers::SpawnGrid(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("staticMesh"), TEXT("min"), TEXT("max"), TEXT("countX"), TEXT("countY"), TEXT("countZ"),
+		TEXT("jitter"), TEXT("labelPrefix"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	FString MeshPath; if (auto E = RequireString(Params, TEXT("staticMesh"), MeshPath)) return E;

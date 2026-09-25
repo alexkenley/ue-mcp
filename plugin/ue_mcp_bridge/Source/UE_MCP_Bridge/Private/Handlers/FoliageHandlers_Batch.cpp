@@ -74,9 +74,26 @@ TSharedPtr<FJsonValue> FFoliageHandlers::BatchSetFoliageSettingsWhere(const TSha
 {
 	MCP_CHECK_GAME_THREAD();
 
-	// ── What to write ───────────────────────────────────────────────────────
+	// Every parameter is read before anything can fail (#1057).
 	const TSharedPtr<FJsonObject>* SettingsObject = nullptr;
-	if (!TryGetObjectParam(Params, TEXT("settings"), SettingsObject) ||
+	const bool bHasSettings = TryGetObjectParam(Params, TEXT("settings"), SettingsObject);
+	const TArray<TSharedPtr<FJsonValue>>* WhereValues = nullptr;
+	TryGetArrayParam(Params, TEXT("where"), WhereValues);
+	const FString WhereMode = OptionalString(Params, TEXT("whereMode"), TEXT("all")).ToLower();
+	const TArray<TSharedPtr<FJsonValue>>* ExtraValues = nullptr;
+	const bool bHasExtraValues = TryGetArrayParam(Params, TEXT("propertyNames"), ExtraValues) && ExtraValues;
+	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), true);
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
+	const int32 MaxTypes = FMath::Clamp(
+		OptionalInt(Params, TEXT("maxTypes"), MCPFoliageBatchMaxTypes), 1, MCPFoliageBatchMaxTypes);
+	const TArray<TSharedPtr<FJsonValue>>* PathValues = nullptr;
+	const bool bHasPathValues = TryGetArrayParam(Params, TEXT("foliageTypePaths"), PathValues) && PathValues;
+	const FString Directory = OptionalString(Params, TEXT("directory"));
+	const bool bRecursive = OptionalBool(Params, TEXT("recursive"), true);
+	const bool bFromLevel = OptionalBool(Params, TEXT("fromLevel"), false);
+
+	// ── What to write ───────────────────────────────────────────────────────
+	if (!bHasSettings ||
 		!SettingsObject || !(*SettingsObject).IsValid() || (*SettingsObject)->Values.Num() == 0)
 	{
 		return MCPError(TEXT("Missing 'settings' (an object of propertyName -> value; dotted paths such as 'CullDistance.Max' are supported)"));
@@ -90,8 +107,6 @@ TSharedPtr<FJsonValue> FFoliageHandlers::BatchSetFoliageSettingsWhere(const TSha
 	// ── The predicate, which is the point of the action ─────────────────────
 	TArray<MCPQuery::FPredicate> Predicates;
 	{
-		const TArray<TSharedPtr<FJsonValue>>* WhereValues = nullptr;
-		TryGetArrayParam(Params, TEXT("where"), WhereValues);
 		FString ParseError;
 		if (!MCPQuery::ParsePredicates(WhereValues, MCPFoliageBatchMaxPredicates, Predicates, ParseError))
 		{
@@ -105,7 +120,6 @@ TSharedPtr<FJsonValue> FFoliageHandlers::BatchSetFoliageSettingsWhere(const TSha
 		// conditional batch and is not worth guessing at.
 		return MCPError(TEXT("Missing 'where' ([{field, op, value}] over the current property values, e.g. [{field:'props.CullDistance.Max', op:'gt', value:0}]). Use foliage(set_settings) for a single known asset."));
 	}
-	const FString WhereMode = OptionalString(Params, TEXT("whereMode"), TEXT("all")).ToLower();
 	if (WhereMode != TEXT("all") && WhereMode != TEXT("any"))
 	{
 		return MCPError(TEXT("'whereMode' must be either 'all' or 'any'"));
@@ -128,33 +142,22 @@ TSharedPtr<FJsonValue> FFoliageHandlers::BatchSetFoliageSettingsWhere(const TSha
 		ReadPaths.AddUnique(Predicate.Field);
 		Predicate.Field = FString::Printf(TEXT("props.%s"), *Predicate.Field);
 	}
+	if (bHasExtraValues)
 	{
-		const TArray<TSharedPtr<FJsonValue>>* ExtraValues = nullptr;
-		if (TryGetArrayParam(Params, TEXT("propertyNames"), ExtraValues) && ExtraValues)
+		for (const FString& Path : JsonArrayToStringList(ExtraValues))
 		{
-			for (const FString& Path : JsonArrayToStringList(ExtraValues))
-			{
-				ReadPaths.AddUnique(Path);
-			}
+			ReadPaths.AddUnique(Path);
 		}
 	}
-
-	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), true);
-	const bool bSave = OptionalBool(Params, TEXT("save"), true);
-	const int32 MaxTypes = FMath::Clamp(
-		OptionalInt(Params, TEXT("maxTypes"), MCPFoliageBatchMaxTypes), 1, MCPFoliageBatchMaxTypes);
 
 	// ── Candidates ──────────────────────────────────────────────────────────
 	TArray<FMCPFoliageBatchCandidate> Candidates;
 	TSet<FString> Seen;
 
 	TArray<FString> ExplicitPaths;
+	if (bHasPathValues)
 	{
-		const TArray<TSharedPtr<FJsonValue>>* PathValues = nullptr;
-		if (TryGetArrayParam(Params, TEXT("foliageTypePaths"), PathValues) && PathValues)
-		{
-			ExplicitPaths = JsonArrayToStringList(PathValues);
-		}
+		ExplicitPaths = JsonArrayToStringList(PathValues);
 	}
 	TArray<FString> UnloadablePaths;
 	for (const FString& Path : ExplicitPaths)
@@ -168,8 +171,6 @@ TSharedPtr<FJsonValue> FFoliageHandlers::BatchSetFoliageSettingsWhere(const TSha
 		MCPFoliageBatchAddCandidate(Candidates, Seen, Type, TEXT("explicit"));
 	}
 
-	const FString Directory = OptionalString(Params, TEXT("directory"));
-	const bool bFromLevel = OptionalBool(Params, TEXT("fromLevel"), false);
 	if (ExplicitPaths.IsEmpty() && Directory.IsEmpty() && !bFromLevel)
 	{
 		return MCPError(TEXT("Pass one of 'foliageTypePaths' (explicit), 'directory' (scan FoliageType assets) or fromLevel=true (types placed in the open level)"));
@@ -183,7 +184,7 @@ TSharedPtr<FJsonValue> FFoliageHandlers::BatchSetFoliageSettingsWhere(const TSha
 
 		FARFilter Filter;
 		Filter.PackagePaths.Add(FName(*Directory));
-		Filter.bRecursivePaths = OptionalBool(Params, TEXT("recursive"), true);
+		Filter.bRecursivePaths = bRecursive;
 		Filter.ClassPaths.Add(UFoliageType::StaticClass()->GetClassPathName());
 		Filter.bRecursiveClasses = true;
 

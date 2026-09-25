@@ -114,8 +114,17 @@ void FDemoHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("demo"));
-	Registry.RegisterHandler(TEXT("demo_step"),      &DemoStep);
-	Registry.RegisterHandler(TEXT("demo_get_steps"), &DemoGetSteps);
+
+	// #1057: a spec'd handler declares its parameters here and nowhere else; the
+	// TS surface is generated from a recording of them. demo_step's spec is safe
+	// under the contract test because step 0 is refused before anything is built.
+	// demo_cleanup and demo_go_home take no parameters and act unconditionally,
+	// so they have no spec: the contract test would run them.
+	using EType = EMCPParamType;
+	Registry.RegisterHandler(TEXT("demo_step"), &DemoStep, {
+		MCPParam::Optional(TEXT("step"), EType::Integer, TEXT("Step index to execute, 1 to 19. Omit for the step list")).Alias(TEXT("stepIndex")),
+	});
+	Registry.RegisterHandler(TEXT("demo_get_steps"), &DemoGetSteps, {});
 	Registry.RegisterHandler(TEXT("demo_cleanup"),   &DemoCleanup);
 	Registry.RegisterHandler(TEXT("demo_go_home"),   &DemoGoHome);
 }

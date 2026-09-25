@@ -231,98 +231,308 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// Install log capture ring buffer (#82)
 	FMCPLogCapture::Get().Install();
 
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else. The TS surface for it is generated from a recording of these
+	// (npm run specs:record, then npm run specs:generate), and each alias is
+	// renamed to its parameter by the registry before the handler runs.
+	// Handlers that run commands, Python, builds, PIE or processes, and ones
+	// that would act on the contract test's values, stay unspecified.
+	using EType = EMCPParamType;
+	const TArray<FMCPParamSpec> NoParams;
+	auto ObjectPathParam = [](const TCHAR* Description)
+	{
+		return MCPParam::Required(TEXT("objectPath"), EType::String, Description).Alias(TEXT("path")).Alias(TEXT("assetPath"));
+	};
+	auto PropertyNameParam = []()
+	{
+		return MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Property name; dotted and indexed paths reach component and struct fields"));
+	};
+	auto ActorLabelParam = []()
+	{
+		return MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Actor label. Editor labels are not unique, so a label naming several actors is refused"));
+	};
+	auto ActorPathParam = []()
+	{
+		return MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path, the unambiguous selector. Wins over actorLabel"));
+	};
+	auto WorldParam = []()
+	{
+		return MCPParam::Optional(TEXT("world"), EType::String, TEXT("World scope: editor | pie | auto. Each action names its own default"));
+	};
+	auto PieInstanceParam = []()
+	{
+		return MCPParam::Optional(TEXT("pieInstance"), EType::Number, TEXT("PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"));
+	};
+	auto ViewportIndexParam = []()
+	{
+		return MCPParam::Optional(TEXT("viewportIndex"), EType::Number, TEXT("Level viewport to act on (default the active one)"));
+	};
+	auto CursorParam = []()
+	{
+		return MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the nextCursor from the previous page, unmodified"));
+	};
+	auto LimitParam = [](const TCHAR* Description)
+	{
+		return MCPParam::Optional(TEXT("limit"), EType::Number, Description);
+	};
+	auto RuntimeTargetParams = []()
+	{
+		return TArray<FMCPParamSpec>{
+			MCPParam::Optional(TEXT("objectPath"), EType::String, TEXT("Object path of the live instance. Wins over target")),
+			MCPParam::Optional(TEXT("target"), EType::String, TEXT("gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem")),
+			MCPParam::Optional(TEXT("subsystemClass"), EType::String, TEXT("Subsystem class name or /Script path, with target=subsystem")),
+			MCPParam::Optional(TEXT("playerIndex"), EType::Number, TEXT("Player index for target=playercontroller or playerpawn (default 0)")),
+		};
+	};
+
 	Registry.RegisterHandler(TEXT("execute_command"), &ExecuteCommand);
 	Registry.RegisterHandler(TEXT("execute_python"), &ExecutePython);
 	Registry.RegisterHandler(TEXT("run_python_file"), &RunPythonFile);
-	Registry.RegisterHandler(TEXT("set_property"), &SetProperty);
-	Registry.RegisterHandler(TEXT("get_property"), &GetProperty);
-	Registry.RegisterHandler(TEXT("describe_object"), &DescribeObject);
+	Registry.RegisterHandler(TEXT("set_property"), &SetProperty, {
+		ObjectPathParam(TEXT("Object, asset, class or Blueprint path. A class or Blueprint resolves to its default object")),
+		PropertyNameParam(),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("New value as structured JSON, the form get_property returns under value")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the package to disk after the write (default true; false leaves it dirty)")),
+	});
+	Registry.RegisterHandler(TEXT("get_property"), &GetProperty, {
+		ObjectPathParam(TEXT("Object, asset, class or Blueprint path. A class or Blueprint resolves to its default object")),
+		PropertyNameParam(),
+	});
+	Registry.RegisterHandler(TEXT("describe_object"), &DescribeObject, {
+		ObjectPathParam(TEXT("Object, asset, class or Blueprint path. A class or Blueprint resolves to its default object")),
+		MCPParam::Optional(TEXT("includeProperties"), EType::Boolean, TEXT("Include reflected property metadata (default true)")),
+		MCPParam::Optional(TEXT("includeValues"), EType::Boolean, TEXT("Include current property values (default false)")),
+		MCPParam::Optional(TEXT("propertyNames"), EType::Array, TEXT("Dotted or indexed property paths to report instead of every property")).Items(EType::String),
+	});
 	Registry.RegisterHandler(TEXT("set_config"), &SetConfig);
-	Registry.RegisterHandler(TEXT("get_viewport_info"), &GetViewportInfo);
-	Registry.RegisterHandler(TEXT("hit_test_viewport_pixel"), &HitTestViewportPixel);
-	Registry.RegisterHandler(TEXT("get_runtime_values"), &GetRuntimeValues);
-	Registry.RegisterHandler(TEXT("get_editor_performance_stats"), &GetEditorPerformanceStats);
-	Registry.RegisterHandler(TEXT("get_output_log"), &GetOutputLog);
-	Registry.RegisterHandler(TEXT("search_log"), &SearchLog);
-	Registry.RegisterHandler(TEXT("get_message_log"), &GetMessageLog);
-	Registry.RegisterHandler(TEXT("get_build_status"), &GetBuildStatus);
+	Registry.RegisterHandler(TEXT("get_viewport_info"), &GetViewportInfo, NoParams);
+	Registry.RegisterHandler(TEXT("hit_test_viewport_pixel"), &HitTestViewportPixel, {
+		MCPParam::Required(TEXT("x"), EType::Number, TEXT("Viewport pixel X")),
+		MCPParam::Required(TEXT("y"), EType::Number, TEXT("Viewport pixel Y")),
+		MCPParam::Optional(TEXT("width"), EType::Number, TEXT("Viewport width to read x against, when picking from a screenshot of another resolution")),
+		MCPParam::Optional(TEXT("height"), EType::Number, TEXT("Viewport height to read y against, when picking from a screenshot of another resolution")),
+		MCPParam::Optional(TEXT("maxDistance"), EType::Number, TEXT("Max ray length in cm (default 200000)")),
+		MCPParam::Optional(TEXT("ignoreActors"), EType::Array, TEXT("Actor labels to skip")).Items(EType::String),
+	});
+	Registry.RegisterHandler(TEXT("get_runtime_values"), &GetRuntimeValues, {
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Actor or component class name substring; omit to match every actor")),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Root every path at the component with this instance name")),
+		MCPParam::Required(TEXT("paths"), EType::Array, TEXT("Dotted property or function paths to evaluate per match. A function segment may carry literal arguments, e.g. GetBalance(gold, 2)")).Items(EType::String),
+		WorldParam(),
+		PieInstanceParam(),
+	});
+	Registry.RegisterHandler(TEXT("get_editor_performance_stats"), &GetEditorPerformanceStats, NoParams);
+	Registry.RegisterHandler(TEXT("get_output_log"), &GetOutputLog, {
+		MCPParam::Optional(TEXT("maxLines"), EType::Integer, TEXT("How far back into the ring buffer to read (default 100)")),
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring the message must contain")),
+		MCPParam::Optional(TEXT("category"), EType::String, TEXT("Case-insensitive substring the log category must contain")),
+		CursorParam(),
+		LimitParam(TEXT("Lines on this page (default 200, max 4096)")),
+	});
+	Registry.RegisterHandler(TEXT("search_log"), &SearchLog, {
+		MCPParam::Required(TEXT("query"), EType::String, TEXT("Case-insensitive substring to search the captured log for")),
+		MCPParam::Optional(TEXT("maxResults"), EType::Integer, TEXT("Cap on matching lines collected out of the 4096-line ring buffer (default 4096)")),
+		CursorParam(),
+		LimitParam(TEXT("Matches on this page (default 100, max 4096)")),
+	});
+	Registry.RegisterHandler(TEXT("get_message_log"), &GetMessageLog, {
+		MCPParam::Optional(TEXT("logName"), EType::String, TEXT("Listing to read (MapCheck, AssetCheck, PIE, LoadErrors...); omit to list the registered ones")),
+		MCPParam::Optional(TEXT("maxLines"), EType::Integer, TEXT("Messages to return (default 200)")),
+		MCPParam::Optional(TEXT("severity"), EType::String, TEXT("Severity-name substring: Error | Warning | PerformanceWarning | Info")),
+	});
+	Registry.RegisterHandler(TEXT("get_build_status"), &GetBuildStatus, NoParams);
 	Registry.RegisterHandler(TEXT("pie_control"), &PieControl);
 	Registry.RegisterHandler(TEXT("capture_screenshot"), &CaptureScreenshot);
-	Registry.RegisterHandler(TEXT("set_viewport_camera"), &SetViewportCamera);
+	Registry.RegisterHandler(TEXT("set_viewport_camera"), &SetViewportCamera, {
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("Camera location")),
+		MCPParam::Optional(TEXT("rotation"), EType::Rotator, TEXT("Camera rotation")),
+		MCPParam::Optional(TEXT("projection"), EType::String, TEXT("perspective | top | bottom | left | right | front | back | orthoFreelook. Switched before the pose is applied")),
+		MCPParam::Optional(TEXT("viewportType"), EType::String, TEXT("Perspective | Top | Bottom | Left | Right | Front | Back | OrthoFreelook")),
+		MCPParam::Optional(TEXT("orthoZoom"), EType::Number, TEXT("Orthographic zoom, within the engine's own limits")),
+	});
 	Registry.RegisterHandler(TEXT("undo"), &Undo);
 	Registry.RegisterHandler(TEXT("redo"), &Redo);
-	Registry.RegisterHandler(TEXT("get_viewport_state"), &GetViewportState);
-	Registry.RegisterHandler(TEXT("set_view_mode"), &SetViewMode);
-	Registry.RegisterHandler(TEXT("set_viewport_exposure"), &SetViewportExposure);
-	Registry.RegisterHandler(TEXT("set_viewport_view"), &SetViewportView);
+	Registry.RegisterHandler(TEXT("get_viewport_state"), &GetViewportState, {
+		ViewportIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("set_view_mode"), &SetViewMode, {
+		MCPParam::Required(TEXT("viewMode"), EType::String, TEXT("Lit | Unlit | Wireframe | LightingOnly | DetailLighting | ShaderComplexity | ... get_viewport_state lists what this build supports")),
+		ViewportIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("set_viewport_exposure"), &SetViewportExposure, {
+		MCPParam::Optional(TEXT("ev100"), EType::Number, TEXT("Fixed EV100 to pin the viewport to; implies fixed exposure")),
+		MCPParam::Optional(TEXT("fixed"), EType::Boolean, TEXT("Use a fixed exposure rather than eye adaptation")),
+		MCPParam::Optional(TEXT("mode"), EType::String, TEXT("fixed | auto")),
+		ViewportIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("set_viewport_view"), &SetViewportView, {
+		MCPParam::Optional(TEXT("fov"), EType::Number, TEXT("Field of view in degrees, greater than 0 and less than 180")),
+		MCPParam::Optional(TEXT("nearClip"), EType::Number, TEXT("Near clip plane; negative clears the override")),
+		MCPParam::Optional(TEXT("farClip"), EType::Number, TEXT("Far clip plane override")),
+		MCPParam::Optional(TEXT("viewportType"), EType::String, TEXT("Perspective | Top | Bottom | Left | Right | Front | Back | OrthoFreelook")),
+		MCPParam::Optional(TEXT("cameraSpeed"), EType::Number, TEXT("Viewport camera speed, greater than 0")),
+		ViewportIndexParam(),
+	});
 	Registry.RegisterHandler(TEXT("set_game_view"), &SetGameView);
-	Registry.RegisterHandler(TEXT("redraw_viewport"), &RedrawViewport);
+	Registry.RegisterHandler(TEXT("redraw_viewport"), &RedrawViewport, {
+		MCPParam::Optional(TEXT("allViewports"), EType::Boolean, TEXT("Redraw every level viewport rather than one (default false)")),
+		MCPParam::Optional(TEXT("invalidateHitProxies"), EType::Boolean, TEXT("Also invalidate hit proxies, needed before a hit test (default true)")),
+		ViewportIndexParam(),
+	});
 	Registry.RegisterHandler(TEXT("begin_editor_transaction"), &BeginEditorTransaction);
 	Registry.RegisterHandler(TEXT("end_editor_transaction"), &EndEditorTransaction);
 	Registry.RegisterHandler(TEXT("cancel_editor_transaction"), &CancelEditorTransaction);
-	Registry.RegisterHandler(TEXT("get_undo_state"), &GetUndoState);
-	Registry.RegisterHandler(TEXT("undo_redo_steps"), &UndoRedoSteps);
-	Registry.RegisterHandler(TEXT("get_transaction_history"), &GetTransactionHistory);
+	Registry.RegisterHandler(TEXT("get_undo_state"), &GetUndoState, NoParams);
+	Registry.RegisterHandler(TEXT("undo_redo_steps"), &UndoRedoSteps, {
+		MCPParam::Optional(TEXT("steps"), EType::Integer, TEXT("How many steps to apply (default 1)")),
+		MCPParam::Optional(TEXT("direction"), EType::String, TEXT("undo (default) | redo")),
+	});
+	Registry.RegisterHandler(TEXT("get_transaction_history"), &GetTransactionHistory, {
+		MCPParam::Optional(TEXT("maxEntries"), EType::Number, TEXT("Cap on entries returned (default 50)")),
+	});
 	// Insights trace control, frame timing and standalone runs, in
 	// EditorHandlers_Profiling.cpp.
 	Registry.RegisterHandler(TEXT("start_insights_trace"), &StartInsightsTrace);
 	Registry.RegisterHandler(TEXT("stop_insights_trace"), &StopInsightsTrace);
 	Registry.RegisterHandler(TEXT("pause_insights_trace"), &PauseInsightsTrace);
-	Registry.RegisterHandler(TEXT("get_insights_trace_status"), &GetInsightsTraceStatus);
-	Registry.RegisterHandler(TEXT("list_trace_channels"), &ListTraceChannels);
+	Registry.RegisterHandler(TEXT("get_insights_trace_status"), &GetInsightsTraceStatus, NoParams);
+	Registry.RegisterHandler(TEXT("list_trace_channels"), &ListTraceChannels, {
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring over channel name and description")),
+		MCPParam::Optional(TEXT("enabledOnly"), EType::Boolean, TEXT("Only channels that are currently on (default false)")),
+	});
 	Registry.RegisterHandler(TEXT("set_trace_channels"), &SetTraceChannels);
 	Registry.RegisterHandler(TEXT("begin_profile_region"), &BeginProfileRegion);
-	Registry.RegisterHandler(TEXT("end_profile_region"), &EndProfileRegion);
+	Registry.RegisterHandler(TEXT("end_profile_region"), &EndProfileRegion, {
+		MCPParam::Required(TEXT("regionName"), EType::String, TEXT("Name the region was opened under")),
+	});
 	Registry.RegisterHandler(TEXT("add_trace_bookmark"), &AddTraceBookmark);
-	Registry.RegisterHandler(TEXT("get_frame_timing"), &GetFrameTiming);
+	Registry.RegisterHandler(TEXT("get_frame_timing"), &GetFrameTiming, {
+		MCPParam::Optional(TEXT("cpuGpuMarginPercent"), EType::Number, TEXT("How far ahead one side must be before the frame is called bound by it (default 10)")),
+	});
 	// trigger_hitch blocks the game thread for up to 5 seconds by design, which
 	// is longer than a default handler budget allows for.
 	Registry.RegisterHandlerWithTimeout(TEXT("trigger_hitch"), &TriggerHitch, 30.0f);
 	Registry.RegisterHandler(TEXT("launch_standalone_game"), &LaunchStandaloneGame);
-	Registry.RegisterHandler(TEXT("get_standalone_status"), &GetStandaloneStatus);
+	Registry.RegisterHandler(TEXT("get_standalone_status"), &GetStandaloneStatus, NoParams);
 	Registry.RegisterHandler(TEXT("stop_standalone_game"), &StopStandaloneGame);
 	Registry.RegisterHandler(TEXT("reload_handlers"), &ReloadHandlers);
 	// save_asset is owned by FAssetHandlers (#768: adds force, file size, mtime).
 	// Registering it here too meant the winner was decided by registration
 	// order in BridgeServer.cpp, which is not a contract.
 	Registry.RegisterHandler(TEXT("save_dirty"), &SaveDirty);
-	Registry.RegisterHandler(TEXT("list_dirty_packages"), &ListDirtyPackages);
-	Registry.RegisterHandler(TEXT("get_world_state"), &GetWorldState);
+	Registry.RegisterHandler(TEXT("list_dirty_packages"), &ListDirtyPackages, NoParams);
+	Registry.RegisterHandler(TEXT("get_world_state"), &GetWorldState, NoParams);
 	Registry.RegisterHandler(TEXT("request_editor_shutdown"), &RequestEditorShutdown);
-	Registry.RegisterHandler(TEXT("list_pie_instances"), &ListPIEInstances);
+	Registry.RegisterHandler(TEXT("list_pie_instances"), &ListPIEInstances, NoParams);
 	Registry.RegisterHandler(TEXT("invoke_object_function"), &InvokeObjectFunction);
 	Registry.RegisterHandlerWithTimeout(TEXT("invoke_object_functions"), &InvokeObjectFunctions, 300.0f);
-	Registry.RegisterHandler(TEXT("get_object_properties"), &GetObjectProperties);
-	Registry.RegisterHandler(TEXT("read_bone_transforms"), &ReadBoneTransforms);
-	Registry.RegisterHandler(TEXT("teleport_runtime_actor"), &TeleportRuntimeActor);
-	Registry.RegisterHandler(TEXT("set_movement_mode"), &SetMovementMode);
+	{
+		TArray<FMCPParamSpec> Spec = RuntimeTargetParams();
+		Spec.Append({
+			MCPParam::Optional(TEXT("propertyNames"), EType::Array, TEXT("Only these properties. The Details-panel spelling is accepted")).Items(EType::String),
+			WorldParam(),
+			PieInstanceParam(),
+			LimitParam(TEXT("Max properties returned (default 200)")),
+			MCPParam::Optional(TEXT("maxValueLength"), EType::Number, TEXT("Truncate each exported value past this many characters (default 2000)")),
+		});
+		Registry.RegisterHandler(TEXT("get_object_properties"), &GetObjectProperties, Spec);
+	}
+	Registry.RegisterHandler(TEXT("read_bone_transforms"), &ReadBoneTransforms, {
+		ActorLabelParam(),
+		ActorPathParam(),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("SkeletalMeshComponent to read; omit for the first one")),
+		MCPParam::Optional(TEXT("bones"), EType::Array, TEXT("Bone or socket names; omit for every bone up to limit")).Items(EType::String),
+		MCPParam::Optional(TEXT("relativeTo"), EType::String, TEXT("Bone or socket whose live frame every sample is expressed in; supersedes space")),
+		MCPParam::Optional(TEXT("space"), EType::String, TEXT("world (default) | component")),
+		LimitParam(TEXT("Max bones when bones is omitted (default 200)")),
+		WorldParam(),
+		PieInstanceParam(),
+	});
+	Registry.RegisterHandler(TEXT("teleport_runtime_actor"), &TeleportRuntimeActor, {
+		ActorLabelParam(),
+		ActorPathParam(),
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("Destination; omit to keep the current location")),
+		MCPParam::Optional(TEXT("rotation"), EType::Rotator, TEXT("Destination rotation; omit to keep the current one")),
+		MCPParam::Optional(TEXT("stopMovement"), EType::Boolean, TEXT("Stop the movement component so the move is not undone (default true)")),
+		MCPParam::Optional(TEXT("sweep"), EType::Boolean, TEXT("Collide on the way (default false)")),
+		WorldParam(),
+		PieInstanceParam(),
+	});
+	Registry.RegisterHandler(TEXT("set_movement_mode"), &SetMovementMode, {
+		ActorLabelParam(),
+		ActorPathParam(),
+		MCPParam::Optional(TEXT("mode"), EType::String, TEXT("none | walking | navwalking | falling | swimming | flying | custom")),
+		MCPParam::Optional(TEXT("customMode"), EType::Integer, TEXT("0-255, only with mode=custom")),
+		MCPParam::Optional(TEXT("velocity"), EType::Vec3, TEXT("Velocity written to the CharacterMovementComponent")),
+		WorldParam(),
+		PieInstanceParam(),
+	});
 	Registry.RegisterHandler(TEXT("set_runtime_visibility"), &SetRuntimeVisibility);
-	Registry.RegisterHandler(TEXT("restore_runtime_visibility"), &RestoreRuntimeVisibility);
+	Registry.RegisterHandler(TEXT("restore_runtime_visibility"), &RestoreRuntimeVisibility, {
+		MCPParam::Required(TEXT("rollbackToken"), EType::String, TEXT("Token from a non-dry-run set_runtime_visibility, valid for that PIE session only")),
+		WorldParam(),
+		PieInstanceParam(),
+	});
 	// #802: resolve a live instance path, and write to a live instance.
 	Registry.RegisterHandler(TEXT("find_object"), &FindLiveObjects);
-	Registry.RegisterHandler(TEXT("set_object_property"), &SetObjectProperty);
+	{
+		TArray<FMCPParamSpec> Spec = {
+			PropertyNameParam(),
+			MCPParam::Required(TEXT("value"), EType::Any, TEXT("New value as structured JSON, the form get_property returns under value")),
+		};
+		Spec.Append(RuntimeTargetParams());
+		Spec.Append({
+			MCPParam::Optional(TEXT("postEditChange"), EType::Boolean, TEXT("Fire PostEditChangeProperty after the write (default false)")),
+			WorldParam(),
+			PieInstanceParam(),
+		});
+		Registry.RegisterHandler(TEXT("set_object_property"), &SetObjectProperty, Spec);
+	}
 	Registry.RegisterHandler(TEXT("build_lighting"), &BuildLighting);
 	Registry.RegisterHandler(TEXT("build_all"), &BuildAll);
 	Registry.RegisterHandler(TEXT("validate_assets"), &ValidateAssets);
 	Registry.RegisterHandler(TEXT("cook_content"), &CookContent);
-	Registry.RegisterHandler(TEXT("focus_viewport_on_actor"), &FocusViewportOnActor);
+	Registry.RegisterHandler(TEXT("focus_viewport_on_actor"), &FocusViewportOnActor, {
+		ActorLabelParam(),
+		ActorPathParam(),
+	});
 	Registry.RegisterHandler(TEXT("hot_reload"), &HotReload);
 	Registry.RegisterHandler(TEXT("create_new_level"), &CreateNewLevel);
 	Registry.RegisterHandler(TEXT("save_current_level"), &SaveCurrentLevel);
-	Registry.RegisterHandler(TEXT("open_asset"), &OpenAsset);
+	Registry.RegisterHandler(TEXT("open_asset"), &OpenAsset, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset to open in its editor")).Alias(TEXT("path")),
+	});
 	// #1112: the inverse of open_asset - what is already open, and what has focus.
-	Registry.RegisterHandler(TEXT("get_open_asset_editors"), &GetOpenAssetEditors);
-	Registry.RegisterHandler(TEXT("get_runtime_value"), &PieGetRuntimeValue);
+	Registry.RegisterHandler(TEXT("get_open_asset_editors"), &GetOpenAssetEditors, NoParams);
+	Registry.RegisterHandler(TEXT("get_runtime_value"), &PieGetRuntimeValue, {
+		ActorLabelParam(),
+		ActorPathParam(),
+		PropertyNameParam(),
+		WorldParam(),
+		PieInstanceParam(),
+	});
 	// New handlers
 	Registry.RegisterHandler(TEXT("run_stat_command"), &RunStatCommand);
-	Registry.RegisterHandler(TEXT("set_scalability"), &SetScalability);
+	Registry.RegisterHandler(TEXT("set_scalability"), &SetScalability, {
+		MCPParam::Optional(TEXT("level"), EType::String, TEXT("Low | Medium | High | Epic | Cinematic (default Epic)")),
+	});
 	Registry.RegisterHandler(TEXT("set_cvars"), &SetCVars);
-	Registry.RegisterHandler(TEXT("get_cvars"), &GetCVars);
+	Registry.RegisterHandler(TEXT("get_cvars"), &GetCVars, {
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Console variable to read")),
+		MCPParam::Optional(TEXT("names"), EType::Array, TEXT("Console variables to read")).Items(EType::String),
+		MCPParam::Optional(TEXT("pattern"), EType::String, TEXT("Substring matched against every registered console variable. Pass at least one of name, names and pattern")),
+		LimitParam(TEXT("Max rows for a pattern search (default 100, max 1000)")),
+	});
 	Registry.RegisterHandler(TEXT("build_geometry"), &BuildGeometry);
 	Registry.RegisterHandler(TEXT("build_hlod"), &BuildHlod);
-	Registry.RegisterHandler(TEXT("list_crashes"), &ListCrashes);
-	Registry.RegisterHandler(TEXT("get_crash_info"), &GetCrashInfo);
-	Registry.RegisterHandler(TEXT("check_for_crashes"), &CheckForCrashes);
+	Registry.RegisterHandler(TEXT("list_crashes"), &ListCrashes, {
+		CursorParam(),
+		LimitParam(TEXT("Crash folders on this page (default 50, max 500)")),
+	});
+	Registry.RegisterHandler(TEXT("get_crash_info"), &GetCrashInfo, {
+		MCPParam::Required(TEXT("crashFolder"), EType::String, TEXT("Crash folder name, as list_crashes reports it")),
+	});
+	Registry.RegisterHandler(TEXT("check_for_crashes"), &CheckForCrashes, NoParams);
 	// #693: headless automation test runner.
 	Registry.RegisterHandlerWithTimeout(TEXT("run_automation_tests"), &RunAutomationTests, 300.0f);
 	// #14: Build project
@@ -330,20 +540,27 @@ void FEditorHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// #49: Generate project files
 	Registry.RegisterHandler(TEXT("generate_project_files"), &GenerateProjectFiles);
 	// #126: fast-forward PIE game time
-	Registry.RegisterHandler(TEXT("set_pie_time_scale"), &SetPieTimeScale);
+	Registry.RegisterHandler(TEXT("set_pie_time_scale"), &SetPieTimeScale, {
+		MCPParam::Required(TEXT("factor"), EType::Number, TEXT("Time-scale factor, greater than 0 (e.g. 500)")),
+	});
 	Registry.RegisterHandler(TEXT("capture_scene_png"), &CaptureScenePng);
 	Registry.RegisterHandler(TEXT("set_realtime"), &SetRealtime);
-	Registry.RegisterHandler(TEXT("get_pie_pawn"), &GetPiePawn);
+	Registry.RegisterHandler(TEXT("get_pie_pawn"), &GetPiePawn, {
+		MCPParam::Optional(TEXT("playerIndex"), EType::Number, TEXT("0-based player index (default 0)")),
+	});
 	Registry.RegisterHandler(TEXT("invoke_function"), &InvokeFunction);
 	Registry.RegisterHandler(TEXT("invoke_static_function"), &InvokeStaticFunction);
 	Registry.RegisterHandler(TEXT("configure_pie"), &ConfigurePie);
-	Registry.RegisterHandler(TEXT("get_pie_config"), &GetPieConfig);
+	Registry.RegisterHandler(TEXT("get_pie_config"), &GetPieConfig, NoParams);
 	Registry.RegisterHandler(TEXT("pie_set_player_view"), &PieSetPlayerView);
 	Registry.RegisterHandler(TEXT("stage_game_input"), &StageGameInput);
 	// #455: discover UBlueprintFunctionLibrary classes (GeometryScript,
 	// Kismet, anything user-defined). Pair with editor.invoke_function to
 	// drive GeometryScript ops from MCP without hand-writing each handler.
-	Registry.RegisterHandler(TEXT("list_function_libraries"), &ListFunctionLibraries);
+	Registry.RegisterHandler(TEXT("list_function_libraries"), &ListFunctionLibraries, {
+		MCPParam::Optional(TEXT("pattern"), EType::String, TEXT("Case-insensitive substring of the library class name")),
+		MCPParam::Optional(TEXT("includeFunctions"), EType::Boolean, TEXT("Include each library's static BlueprintCallable functions (default true)")),
+	});
 	// #718: close the open Level Sequence editor before destructive actor ops.
 	Registry.RegisterHandler(TEXT("close_sequence"), &CloseSequence);
 	// #719: purge cached embedded-Python modules by prefix for tool-dev iteration.
@@ -962,17 +1179,20 @@ TSharedPtr<FJsonValue> FEditorHandlers::OpenSettings(const TSharedPtr<FJsonObjec
 
 TSharedPtr<FJsonValue> FEditorHandlers::SetProperty(const TSharedPtr<FJsonObject>& Params)
 {
-	// #221/#230: TS schema documents `objectPath` but the dispatcher only
-	// accepted `path`/`assetPath`. Take any of the three so callers using the
-	// schema as written don't bounce off "missing required parameter".
+	// #221/#230: `path` and `assetPath` are aliases of `objectPath` in the spec,
+	// renamed by the registry before this runs (#1057). Every parameter is read
+	// before anything can fail.
 	FString AssetPath;
-	if (!TryGetStringParam(Params, TEXT("objectPath"), AssetPath))
-	{
-		if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
-	}
+	TSharedPtr<FJsonValue> PathErr = RequireString(Params, TEXT("objectPath"), AssetPath);
 
 	FString PropertyName;
-	if (auto Err = RequireString(Params, TEXT("propertyName"), PropertyName)) return Err;
+	TSharedPtr<FJsonValue> PropertyErr = RequireString(Params, TEXT("propertyName"), PropertyName);
+
+	TSharedPtr<FJsonValue> ValueJsonRef = TryGetParam(Params, TEXT("value"));
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
+
+	if (PathErr) return PathErr;
+	if (PropertyErr) return PropertyErr;
 
 	UObject* Asset = nullptr;
 	FString ResolvedKind;
@@ -982,7 +1202,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetProperty(const TSharedPtr<FJsonObject
 		return MCPError(ResolveObjectErr);
 	}
 
-	TSharedPtr<FJsonValue> ValueJsonRef = TryGetParam(Params, TEXT("value"));
 	if (!ValueJsonRef.IsValid())
 	{
 		return MCPError(TEXT("Missing 'value' parameter"));
@@ -1015,7 +1234,7 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetProperty(const TSharedPtr<FJsonObject
 			return MCPError(FString::Printf(TEXT("Failed to set '%s': %s"), *PropertyName, *MeshErr));
 		}
 		Asset->MarkPackageDirty();
-		const bool bSaveMesh = OptionalBool(Params, TEXT("save"), true);
+		const bool bSaveMesh = bSave;
 		if (bSaveMesh)
 		{
 			UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty=*/true);
@@ -1127,7 +1346,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetProperty(const TSharedPtr<FJsonObject
 	// #674: opt out of the immediate disk save. Default true preserves the
 	// prior behavior; pass save=false to leave the package dirty in-memory
 	// (batch many writes, then save_dirty / save_asset once).
-	const bool bSave = OptionalBool(Params, TEXT("save"), true);
 	if (bSave)
 	{
 		UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty=*/true);
@@ -1215,14 +1433,15 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetProperty(const TSharedPtr<FJsonObject
 
 TSharedPtr<FJsonValue> FEditorHandlers::GetProperty(const TSharedPtr<FJsonObject>& Params)
 {
+	// `path` and `assetPath` arrive as `objectPath`, renamed by the registry (#1057).
 	FString ObjectPath;
-	if (!TryGetStringParam(Params, TEXT("objectPath"), ObjectPath))
-	{
-		if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), ObjectPath)) return Err;
-	}
+	TSharedPtr<FJsonValue> PathErr = RequireString(Params, TEXT("objectPath"), ObjectPath);
 
 	FString PropertyName;
-	if (auto Err = RequireString(Params, TEXT("propertyName"), PropertyName)) return Err;
+	TSharedPtr<FJsonValue> PropertyErr = RequireString(Params, TEXT("propertyName"), PropertyName);
+
+	if (PathErr) return PathErr;
+	if (PropertyErr) return PropertyErr;
 
 	UObject* Object = nullptr;
 	FString ResolvedKind;
@@ -1269,11 +1488,16 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetProperty(const TSharedPtr<FJsonObject
 
 TSharedPtr<FJsonValue> FEditorHandlers::DescribeObject(const TSharedPtr<FJsonObject>& Params)
 {
+	// `path` and `assetPath` arrive as `objectPath`, renamed by the registry.
+	// Every parameter is read before the object is resolved (#1057).
 	FString ObjectPath;
-	if (!TryGetStringParam(Params, TEXT("objectPath"), ObjectPath))
-	{
-		if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), ObjectPath)) return Err;
-	}
+	TSharedPtr<FJsonValue> PathErr = RequireString(Params, TEXT("objectPath"), ObjectPath);
+	const bool bIncludeProperties = OptionalBool(Params, TEXT("includeProperties"), true);
+	const bool bIncludeValues = OptionalBool(Params, TEXT("includeValues"), false);
+	const TArray<TSharedPtr<FJsonValue>>* PropertyNames = nullptr;
+	const bool bHasPropertyNames = TryGetArrayParam(Params, TEXT("propertyNames"), PropertyNames) && PropertyNames;
+
+	if (PathErr) return PathErr;
 
 	UObject* Object = nullptr;
 	FString ResolvedKind;
@@ -1282,9 +1506,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::DescribeObject(const TSharedPtr<FJsonObj
 	{
 		return MCPError(ResolveObjectErr);
 	}
-
-	const bool bIncludeProperties = OptionalBool(Params, TEXT("includeProperties"), true);
-	const bool bIncludeValues = OptionalBool(Params, TEXT("includeValues"), false);
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("path"), ObjectPath);
@@ -1303,8 +1524,7 @@ TSharedPtr<FJsonValue> FEditorHandlers::DescribeObject(const TSharedPtr<FJsonObj
 	}
 
 	TArray<TSharedPtr<FJsonValue>> Properties;
-	const TArray<TSharedPtr<FJsonValue>>* PropertyNames = nullptr;
-	if (TryGetArrayParam(Params, TEXT("propertyNames"), PropertyNames) && PropertyNames)
+	if (bHasPropertyNames)
 	{
 		for (const TSharedPtr<FJsonValue>& NameValue : *PropertyNames)
 		{
@@ -1610,13 +1830,23 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetViewportInfo(const TSharedPtr<FJsonOb
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FEditorHandlers::HitTestViewportPixel(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
+	double PixelX = 0, PixelY = 0;
+	const bool bHasX = TryGetNumberParam(Params, TEXT("x"), PixelX);
+	const bool bHasY = TryGetNumberParam(Params, TEXT("y"), PixelY);
+	double RequestedWidth = 0.0, RequestedHeight = 0.0;
+	const bool bHasWidth = TryGetNumberParam(Params, TEXT("width"), RequestedWidth);
+	const bool bHasHeight = TryGetNumberParam(Params, TEXT("height"), RequestedHeight);
+	const double MaxDistance = OptionalNumber(Params, TEXT("maxDistance"), 200000.0);
+	const TArray<TSharedPtr<FJsonValue>>* IgnoreArr = nullptr;
+	TryGetArrayParam(Params, TEXT("ignoreActors"), IgnoreArr);
+
 	if (!GEditor)
 	{
 		return MCPError(TEXT("Editor not available"));
 	}
 
-	double PixelX = 0, PixelY = 0;
-	if (!TryGetNumberParam(Params, TEXT("x"), PixelX) || !TryGetNumberParam(Params, TEXT("y"), PixelY))
+	if (!bHasX || !bHasY)
 	{
 		return MCPError(TEXT("Missing required parameters 'x' and 'y' (viewport pixel coordinates)"));
 	}
@@ -1636,10 +1866,8 @@ TSharedPtr<FJsonValue> FEditorHandlers::HitTestViewportPixel(const TSharedPtr<FJ
 	// screenshot pixel coordinate space that differs from the live viewport).
 	FViewport* Viewport = ViewportClient->Viewport;
 	const FIntPoint ViewportSize = Viewport->GetSizeXY();
-	double Width = ViewportSize.X;
-	double Height = ViewportSize.Y;
-	TryGetNumberParam(Params, TEXT("width"), Width);
-	TryGetNumberParam(Params, TEXT("height"), Height);
+	const double Width = bHasWidth ? RequestedWidth : static_cast<double>(ViewportSize.X);
+	const double Height = bHasHeight ? RequestedHeight : static_cast<double>(ViewportSize.Y);
 	if (Width <= 0 || Height <= 0)
 	{
 		return MCPError(FString::Printf(TEXT("Viewport size is zero (%dx%d) and no explicit width/height supplied. Focus the viewport, or pass width+height matching the screenshot used to pick the pixel."), ViewportSize.X, ViewportSize.Y));
@@ -1666,7 +1894,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::HitTestViewportPixel(const TSharedPtr<FJ
 	FVector RayOrigin, RayDirection;
 	SceneView->DeprojectFVector2D(ScreenPos, RayOrigin, RayDirection);
 
-	const double MaxDistance = OptionalNumber(Params, TEXT("maxDistance"), 200000.0);
 	const FVector RayEnd = RayOrigin + RayDirection * MaxDistance;
 
 	UWorld* World = ViewportClient->GetWorld();
@@ -1680,8 +1907,7 @@ TSharedPtr<FJsonValue> FEditorHandlers::HitTestViewportPixel(const TSharedPtr<FJ
 	Query.bReturnFaceIndex = true;
 
 	// Optional ignore list by actor label.
-	const TArray<TSharedPtr<FJsonValue>>* IgnoreArr = nullptr;
-	if (TryGetArrayParam(Params, TEXT("ignoreActors"), IgnoreArr) && IgnoreArr)
+	if (IgnoreArr)
 	{
 		for (const TSharedPtr<FJsonValue>& V : *IgnoreArr)
 		{
@@ -1911,7 +2137,13 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetMessageLog(const TSharedPtr<FJsonObje
 		TEXT("AnimBlueprintLog"), TEXT("WorldPartition"), TEXT("BlueprintCompiler"),
 	};
 
+	// Every parameter is read before the listing is looked up (#1057).
 	const FString LogName = OptionalString(Params, TEXT("logName"));
+	const int32 Limit = FMath::Max(1, OptionalInt(Params, TEXT("maxLines"), 200));
+	// Named `severity`, not `filter`: the editor tool's `filter` is a substring
+	// match on message text, and sharing the key made this look like one while
+	// silently matching only severity names.
+	const FString SeverityFilter = OptionalString(Params, TEXT("severity")).ToLower();
 	if (LogName.IsEmpty())
 	{
 		TArray<TSharedPtr<FJsonValue>> Available;
@@ -1942,11 +2174,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetMessageLog(const TSharedPtr<FJsonObje
 	}
 
 	TSharedRef<IMessageLogListing> Listing = MessageLogModule.GetLogListing(FName(*LogName));
-	const int32 Limit = FMath::Max(1, OptionalInt(Params, TEXT("maxLines"), 200));
-	// Named `severity`, not `filter`: the editor tool's `filter` is a substring
-	// match on message text, and sharing the key made this look like one while
-	// silently matching only severity names.
-	const FString SeverityFilter = OptionalString(Params, TEXT("severity")).ToLower();
 
 	auto SeverityName = [](EMessageSeverity::Type S) -> FString
 	{
@@ -2343,6 +2570,14 @@ TSharedPtr<FJsonValue> FEditorHandlers::CaptureScreenshot(const TSharedPtr<FJson
 
 TSharedPtr<FJsonValue> FEditorHandlers::SetViewportCamera(const TSharedPtr<FJsonObject>& Params)
 {
+	// Which parameters were sent is read before anything can fail (#1057); the
+	// values are validated below, before the viewport is touched.
+	const bool bHasProjection = HasParam(Params, TEXT("projection"));
+	const bool bHasViewportType = HasParam(Params, TEXT("viewportType"));
+	const bool bHasOrthoZoom = HasParam(Params, TEXT("orthoZoom"));
+	HasParam(Params, TEXT("location"));
+	HasParam(Params, TEXT("rotation"));
+
 	if (!GEditor)
 	{
 		return MCPError(TEXT("Editor not available"));
@@ -2405,8 +2640,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetViewportCamera(const TSharedPtr<FJson
 
 		FString RequestedProjection;
 		FString RequestedViewportType;
-		const bool bHasProjection = HasParam(Params, TEXT("projection"));
-		const bool bHasViewportType = HasParam(Params, TEXT("viewportType"));
 		if (bHasProjection && !TryGetStringParam(Params, TEXT("projection"), RequestedProjection))
 		{
 				return MCPError(TEXT("'projection' must be a string such as 'perspective' or 'top'"));
@@ -2449,7 +2682,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetViewportCamera(const TSharedPtr<FJson
 				}
 		}
 
-		const bool bHasOrthoZoom = HasParam(Params, TEXT("orthoZoom"));
 		double RequestedOrthoZoom = 0.0;
 		if (bHasOrthoZoom)
 		{
@@ -2871,15 +3103,12 @@ TSharedPtr<FJsonValue> FEditorHandlers::RequestEditorShutdown(const TSharedPtr<F
 
 TSharedPtr<FJsonValue> FEditorHandlers::FocusViewportOnActor(const TSharedPtr<FJsonObject>& Params)
 {
-	FString ActorLabel;
-	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
-
-	REQUIRE_EDITOR_WORLD(World);
-
+	// MCPResolveActor reads actorPath and actorLabel before it looks anything
+	// up, and refuses when neither was sent (#1057).
 	TSharedPtr<FJsonValue> ActorErr;
-	AActor* TargetActor = MCPResolveActor(World, Params, ActorErr);
+	AActor* TargetActor = MCPResolveActor(GetEditorWorld(), Params, ActorErr);
 	if (!TargetActor) return ActorErr;
-	ActorLabel = TargetActor->GetActorLabel();
+	const FString ActorLabel = TargetActor->GetActorLabel();
 
 	// Get the viewport client
 	FLevelEditorViewportClient* ViewportClient = GCurrentLevelEditingViewportClient;
@@ -3143,8 +3372,9 @@ TSharedPtr<FJsonValue> FEditorHandlers::SaveCurrentLevel(const TSharedPtr<FJsonO
 
 TSharedPtr<FJsonValue> FEditorHandlers::OpenAsset(const TSharedPtr<FJsonObject>& Params)
 {
+	// `path` arrives as `assetPath`, renamed by the registry (#1057).
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UObject* Asset = StaticLoadObject(UObject::StaticClass(), nullptr, *AssetPath);
 	if (!Asset)

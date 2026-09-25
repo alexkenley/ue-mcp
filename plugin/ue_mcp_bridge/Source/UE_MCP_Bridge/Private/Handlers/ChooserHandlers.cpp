@@ -247,14 +247,14 @@ static void MCPChooserSetRowDisabled(UChooserTable* Table, int32 RowIndex, bool 
 
 
 // Build a map ColumnIndex -> cell text from the caller's `cells` array and/or
-// `inputs` object (keyed by column index-as-string or column name).
-static TMap<int32, FString> CollectCellAssignments(const TSharedPtr<FJsonObject>& Params, UChooserTable* Table)
+// `inputs` object (keyed by column index-as-string or column name). The caller
+// reads both parameters before loading the table (#1057).
+static TMap<int32, FString> CollectCellAssignments(const TArray<TSharedPtr<FJsonValue>>* Cells, const TSharedPtr<FJsonObject>* Inputs, UChooserTable* Table)
 {
 	TMap<int32, FString> Assignments;
 
 	// cells: array aligned to column order.
-	const TArray<TSharedPtr<FJsonValue>>* Cells = nullptr;
-	if (TryGetArrayParam(Params, TEXT("cells"), Cells) && Cells)
+	if (Cells)
 	{
 		for (int32 i = 0; i < Cells->Num() && i < Table->ColumnsStructs.Num(); ++i)
 		{
@@ -267,8 +267,7 @@ static TMap<int32, FString> CollectCellAssignments(const TSharedPtr<FJsonObject>
 	}
 
 	// inputs: object keyed by column index-string or column name.
-	const TSharedPtr<FJsonObject>* Inputs = nullptr;
-	if (TryGetObjectParam(Params, TEXT("inputs"), Inputs) && Inputs)
+	if (Inputs && Inputs->IsValid())
 	{
 		for (const auto& Pair : (*Inputs)->Values)
 		{
@@ -410,7 +409,7 @@ TSharedPtr<FJsonValue> FChooserHandlers::Create(const TSharedPtr<FJsonObject>& P
 TSharedPtr<FJsonValue> FChooserHandlers::Describe(const TSharedPtr<FJsonObject>& Params)
 {
 	FString TablePath;
-	if (auto Err = RequireStringAlt(Params, TEXT("table"), TEXT("assetPath"), TablePath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("table"), TablePath)) return Err;
 	UChooserTable* Table = LoadChooserTable(TablePath);
 	if (!Table) return MCPError(FString::Printf(TEXT("ChooserTable not found: %s"), *TablePath));
 
@@ -460,12 +459,16 @@ TSharedPtr<FJsonValue> FChooserHandlers::AddColumn(const TSharedPtr<FJsonObject>
 {
 #if WITH_EDITOR
 	FString TablePath;
-	if (auto Err = RequireStringAlt(Params, TEXT("table"), TEXT("assetPath"), TablePath)) return Err;
-	UChooserTable* Table = LoadChooserTable(TablePath);
-	if (!Table) return MCPError(FString::Printf(TEXT("ChooserTable not found: %s"), *TablePath));
-
+	if (auto Err = RequireString(Params, TEXT("table"), TablePath)) return Err;
 	FString ColumnType;
 	if (auto Err = RequireString(Params, TEXT("columnType"), ColumnType)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const FString InputStruct = OptionalString(Params, TEXT("inputStruct"));
+	const FString BoundProperty = OptionalString(Params, TEXT("boundProperty"));
+	const FString EnumPath = OptionalString(Params, TEXT("enumPath"));
+
+	UChooserTable* Table = LoadChooserTable(TablePath);
+	if (!Table) return MCPError(FString::Printf(TEXT("ChooserTable not found: %s"), *TablePath));
 
 	UScriptStruct* ColStruct = ResolveChooserStruct(ColumnType);
 	if (!ColStruct)
@@ -482,10 +485,7 @@ TSharedPtr<FJsonValue> FChooserHandlers::AddColumn(const TSharedPtr<FJsonObject>
 	NewColumn.InitializeAs(ColStruct);
 	if (FChooserColumnBase* Col = NewColumn.GetMutablePtr<FChooserColumnBase>())
 	{
-		ConfigureColumnInput(Col,
-			OptionalString(Params, TEXT("inputStruct")),
-			OptionalString(Params, TEXT("boundProperty")),
-			OptionalString(Params, TEXT("enumPath")));
+		ConfigureColumnInput(Col, InputStruct, BoundProperty, EnumPath);
 		// Size the new column's per-row cell array to the existing row count.
 		Col->SetNumRows(GetChooserRowCount(Table));
 	}
@@ -527,7 +527,7 @@ TSharedPtr<FJsonValue> FChooserHandlers::AddColumn(const TSharedPtr<FJsonObject>
 TSharedPtr<FJsonValue> FChooserHandlers::ListRows(const TSharedPtr<FJsonObject>& Params)
 {
 	FString TablePath;
-	if (auto Err = RequireStringAlt(Params, TEXT("table"), TEXT("assetPath"), TablePath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("table"), TablePath)) return Err;
 	UChooserTable* Table = LoadChooserTable(TablePath);
 	if (!Table) return MCPError(FString::Printf(TEXT("ChooserTable not found: %s"), *TablePath));
 
@@ -571,18 +571,25 @@ TSharedPtr<FJsonValue> FChooserHandlers::AddRow(const TSharedPtr<FJsonObject>& P
 {
 #if WITH_EDITORONLY_DATA
 	FString TablePath;
-	if (auto Err = RequireStringAlt(Params, TEXT("table"), TEXT("assetPath"), TablePath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("table"), TablePath)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const FString OutputPath = OptionalString(Params, TEXT("output"));
+	const FString OutputType = OptionalString(Params, TEXT("outputType"), TEXT("asset"));
+	const TArray<TSharedPtr<FJsonValue>>* Cells = nullptr;
+	TryGetArrayParam(Params, TEXT("cells"), Cells);
+	const TSharedPtr<FJsonObject>* Inputs = nullptr;
+	TryGetObjectParam(Params, TEXT("inputs"), Inputs);
+
 	UChooserTable* Table = LoadChooserTable(TablePath);
 	if (!Table) return MCPError(FString::Printf(TEXT("ChooserTable not found: %s"), *TablePath));
 
 	// Build the output struct (optional - a row can start with no output).
 	FInstancedStruct OutputStruct;
 	OutputStruct.InitializeAs<FAssetChooser>();
-	const FString OutputPath = OptionalString(Params, TEXT("output"));
 	if (!OutputPath.IsEmpty())
 	{
 		FString BuildErr;
-		if (!BuildOutputStruct(OutputPath, OptionalString(Params, TEXT("outputType"), TEXT("asset")), OutputStruct, BuildErr))
+		if (!BuildOutputStruct(OutputPath, OutputType, OutputStruct, BuildErr))
 		{
 			return MCPError(BuildErr);
 		}
@@ -603,7 +610,7 @@ TSharedPtr<FJsonValue> FChooserHandlers::AddRow(const TSharedPtr<FJsonObject>& P
 	}
 
 	// Apply provided cell values.
-	TMap<int32, FString> Assignments = CollectCellAssignments(Params, Table);
+	TMap<int32, FString> Assignments = CollectCellAssignments(Cells, Inputs, Table);
 	TArray<FString> CellWarnings;
 	for (const auto& Pair : Assignments)
 	{
@@ -651,15 +658,26 @@ TSharedPtr<FJsonValue> FChooserHandlers::SetRow(const TSharedPtr<FJsonObject>& P
 {
 #if WITH_EDITORONLY_DATA
 	FString TablePath;
-	if (auto Err = RequireStringAlt(Params, TEXT("table"), TEXT("assetPath"), TablePath)) return Err;
-	UChooserTable* Table = LoadChooserTable(TablePath);
-	if (!Table) return MCPError(FString::Printf(TEXT("ChooserTable not found: %s"), *TablePath));
-
+	if (auto Err = RequireString(Params, TEXT("table"), TablePath)) return Err;
 	int32 RowIndex = INDEX_NONE;
-	if (!TryGetNumberParam(Params, TEXT("index"), RowIndex))
+	const bool bHasIndex = TryGetNumberParam(Params, TEXT("index"), RowIndex);
+	// Every parameter is read before anything can fail (#1057).
+	const FString OutputPath = OptionalString(Params, TEXT("output"));
+	const FString OutputType = OptionalString(Params, TEXT("outputType"), TEXT("asset"));
+	bool bDisabled = false;
+	const bool bHasDisabled = TryGetBoolParam(Params, TEXT("disabled"), bDisabled);
+	const TArray<TSharedPtr<FJsonValue>>* Cells = nullptr;
+	TryGetArrayParam(Params, TEXT("cells"), Cells);
+	const TSharedPtr<FJsonObject>* Inputs = nullptr;
+	TryGetObjectParam(Params, TEXT("inputs"), Inputs);
+	if (!bHasIndex)
 	{
 		return MCPError(TEXT("Missing required parameter 'index'"));
 	}
+
+	UChooserTable* Table = LoadChooserTable(TablePath);
+	if (!Table) return MCPError(FString::Printf(TEXT("ChooserTable not found: %s"), *TablePath));
+
 	if (!Table->ResultsStructs.IsValidIndex(RowIndex))
 	{
 		return MCPError(FString::Printf(TEXT("row index %d out of range (rowCount=%d)"), RowIndex, Table->ResultsStructs.Num()));
@@ -694,12 +712,11 @@ TSharedPtr<FJsonValue> FChooserHandlers::SetRow(const TSharedPtr<FJsonObject>& P
 	Table->Modify();
 
 	// Optional: replace the output object.
-	const FString OutputPath = OptionalString(Params, TEXT("output"));
 	if (!OutputPath.IsEmpty())
 	{
 		FInstancedStruct OutputStruct;
 		FString BuildErr;
-		if (!BuildOutputStruct(OutputPath, OptionalString(Params, TEXT("outputType"), TEXT("asset")), OutputStruct, BuildErr))
+		if (!BuildOutputStruct(OutputPath, OutputType, OutputStruct, BuildErr))
 		{
 			return MCPError(BuildErr);
 		}
@@ -707,8 +724,7 @@ TSharedPtr<FJsonValue> FChooserHandlers::SetRow(const TSharedPtr<FJsonObject>& P
 	}
 
 	// Optional: toggle disabled.
-	bool bDisabled;
-	if (TryGetBoolParam(Params, TEXT("disabled"), bDisabled))
+	if (bHasDisabled)
 	{
 		if (!MCPChooserRowDisableSupported())
 		{
@@ -718,7 +734,7 @@ TSharedPtr<FJsonValue> FChooserHandlers::SetRow(const TSharedPtr<FJsonObject>& P
 	}
 
 	// Optional: update cells.
-	TMap<int32, FString> Assignments = CollectCellAssignments(Params, Table);
+	TMap<int32, FString> Assignments = CollectCellAssignments(Cells, Inputs, Table);
 	TArray<FString> CellWarnings;
 	for (const auto& Pair : Assignments)
 	{
@@ -782,15 +798,16 @@ TSharedPtr<FJsonValue> FChooserHandlers::DeleteRow(const TSharedPtr<FJsonObject>
 {
 #if WITH_EDITOR
 	FString TablePath;
-	if (auto Err = RequireStringAlt(Params, TEXT("table"), TEXT("assetPath"), TablePath)) return Err;
-	UChooserTable* Table = LoadChooserTable(TablePath);
-	if (!Table) return MCPError(FString::Printf(TEXT("ChooserTable not found: %s"), *TablePath));
-
+	if (auto Err = RequireString(Params, TEXT("table"), TablePath)) return Err;
 	int32 RowIndex = INDEX_NONE;
 	if (!TryGetNumberParam(Params, TEXT("index"), RowIndex))
 	{
 		return MCPError(TEXT("Missing required parameter 'index'"));
 	}
+
+	UChooserTable* Table = LoadChooserTable(TablePath);
+	if (!Table) return MCPError(FString::Printf(TEXT("ChooserTable not found: %s"), *TablePath));
+
 	if (!Table->ResultsStructs.IsValidIndex(RowIndex))
 	{
 		return MCPError(FString::Printf(TEXT("row index %d out of range (rowCount=%d)"), RowIndex, Table->ResultsStructs.Num()));
@@ -899,13 +916,64 @@ void FChooserHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("chooser"));
+
+	// #1057: a spec'd handler declares its parameters here and nowhere else; the
+	// TS surface is generated from a recording of them. chooser_create has no
+	// spec: the contract test would create the asset it is handed.
+	using EType = EMCPParamType;
+	const FMCPParamSpec TableParam = MCPParam::Required(TEXT("table"), EType::String, TEXT("ChooserTable asset path, e.g. /Game/Path/CT_Locomotion")).Alias(TEXT("assetPath"));
+	const FMCPParamSpec OutputParam = MCPParam::Optional(TEXT("output"), EType::String, TEXT("Output asset path for the row (a PoseSearchDatabase, a nested ChooserTable, etc.)"));
+	const FMCPParamSpec OutputTypeParam = MCPParam::Optional(TEXT("outputType"), EType::String, TEXT("Output wrapper: 'asset' (hard ref, default) | 'soft_asset' | 'evaluate' (nested ChooserTable reference)"));
+	const FMCPParamSpec CellsParam = MCPParam::Optional(TEXT("cells"), EType::Array, TEXT("Per-column cell values aligned to column order; each is struct text like '(Value=2)', or a string, number or boolean. null leaves a column at its default"));
+	const FMCPParamSpec InputsParam = MCPParam::Optional(TEXT("inputs"), EType::Object, TEXT("Cell values keyed by column index (as string) or column name; same value format as cells"));
+	const FMCPParamSpec ChooserPathParam = MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("ChooserTable asset path")).Alias(TEXT("path"));
+
 	Registry.RegisterHandler(TEXT("chooser_create"), &Create);
-	Registry.RegisterHandler(TEXT("chooser_describe"), &Describe);
-	Registry.RegisterHandler(TEXT("chooser_add_column"), &AddColumn);
-	Registry.RegisterHandler(TEXT("chooser_list_rows"), &ListRows);
-	Registry.RegisterHandler(TEXT("chooser_add_row"), &AddRow);
-	Registry.RegisterHandler(TEXT("chooser_set_row"), &SetRow);
-	Registry.RegisterHandler(TEXT("chooser_delete_row"), &DeleteRow);
-	Registry.RegisterHandler(TEXT("chooser_list_object_references"), &ListObjectReferences);
-	Registry.RegisterHandler(TEXT("chooser_remap_object_references"), &RemapObjectReferences);
+	Registry.RegisterHandler(TEXT("chooser_describe"), &Describe, {
+		TableParam,
+	});
+	Registry.RegisterHandler(TEXT("chooser_add_column"), &AddColumn, {
+		TableParam,
+		MCPParam::Required(TEXT("columnType"), EType::String, TEXT("Chooser column struct short name (EnumColumn, BoolColumn, FloatRangeColumn, GameplayTagColumn, ObjectColumn, Output*Column and so on)")),
+		MCPParam::Optional(TEXT("inputStruct"), EType::String, TEXT("Parameter struct to bind the column input (e.g. EnumContextProperty, BoolContextProperty)")),
+		MCPParam::Optional(TEXT("boundProperty"), EType::String, TEXT("Context property name the column reads at evaluation time")),
+		MCPParam::Optional(TEXT("enumPath"), EType::String, TEXT("Enum asset path for an EnumColumn")),
+	});
+	Registry.RegisterHandler(TEXT("chooser_list_rows"), &ListRows, {
+		TableParam,
+	});
+	Registry.RegisterHandler(TEXT("chooser_add_row"), &AddRow, {
+		TableParam,
+		OutputParam,
+		OutputTypeParam,
+		CellsParam,
+		InputsParam,
+	});
+	Registry.RegisterHandler(TEXT("chooser_set_row"), &SetRow, {
+		TableParam,
+		MCPParam::Required(TEXT("index"), EType::Integer, TEXT("Row index, 0-based")),
+		OutputParam,
+		OutputTypeParam,
+		MCPParam::Optional(TEXT("disabled"), EType::Boolean, TEXT("Enable or disable the row without deleting it")),
+		CellsParam,
+		InputsParam,
+	});
+	Registry.RegisterHandler(TEXT("chooser_delete_row"), &DeleteRow, {
+		TableParam,
+		MCPParam::Required(TEXT("index"), EType::Integer, TEXT("Row index, 0-based")),
+	});
+	Registry.RegisterHandler(TEXT("chooser_list_object_references"), &ListObjectReferences, {
+		ChooserPathParam,
+		MCPParam::Optional(TEXT("classFilter"), EType::String, TEXT("Only references whose target class matches (substring)")),
+		MCPParam::Optional(TEXT("pathFilter"), EType::String, TEXT("Substring filter on the referenced object path")),
+	});
+	Registry.RegisterHandler(TEXT("chooser_remap_object_references"), &RemapObjectReferences, {
+		ChooserPathParam,
+		MCPParam::Optional(TEXT("from"), EType::String, TEXT("Exact object path to replace (with to)")),
+		MCPParam::Optional(TEXT("to"), EType::String, TEXT("Replacement object path (with from)")),
+		MCPParam::Optional(TEXT("fromPrefix"), EType::String, TEXT("Path prefix to rewrite, e.g. /Game/Vendor/ (with toPrefix)")),
+		MCPParam::Optional(TEXT("toPrefix"), EType::String, TEXT("Replacement prefix, e.g. /Game/MyProject/ (with fromPrefix)")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Preview without writing (default true)")),
+		MCPParam::Optional(TEXT("allowMissing"), EType::Boolean, TEXT("Write a soft reference even when the target does not exist yet (default false)")),
+	});
 }

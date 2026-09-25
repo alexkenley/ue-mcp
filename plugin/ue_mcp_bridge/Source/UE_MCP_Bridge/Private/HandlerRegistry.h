@@ -155,6 +155,9 @@ public:
 	// minutes. Pass TimeoutSeconds explicitly for those.
 	void RegisterHandlerWithTimeout(const FString& MethodName, FHandlerFunction Handler, float TimeoutSeconds);
 
+	// The same, with a parameter spec (#1057). Returns what RegisterHandler with a spec returns.
+	bool RegisterHandlerWithTimeout(const FString& MethodName, FHandlerFunction Handler, float TimeoutSeconds, const TArray<FMCPParamSpec>& Params);
+
 	// Look up a per-handler timeout. Returns 0 if no override registered,
 	// in which case the caller should use its default.
 	float GetHandlerTimeout(const FString& MethodName) const;

@@ -30,7 +30,7 @@ describe("graphSelector on graph writes", () => {
     it(`${action} forwards graphSelector`, async () => {
       const [method, params] = await route({ action, assetPath: BP, graphSelector: "Aim[1]", nodeId: NODE, pinName: "Pose" });
       expect(method).toBe(action);
-      expect(params).toMatchObject({ path: BP, graphSelector: "Aim[1]", nodeId: NODE });
+      expect(params).toMatchObject({ assetPath: BP, graphSelector: "Aim[1]", nodeId: NODE });
     });
   }
 });

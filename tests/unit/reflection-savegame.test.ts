@@ -3,7 +3,9 @@ import { reflectionTool } from "../../src/tools/reflection.js";
 import type { ToolContext } from "../../src/types.js";
 
 describe("reflection.inspect_save_game", () => {
-  it("maps the validated slot selector to the native handler", async () => {
+  // The action is spec'd (#1057): its bag goes to the bridge as sent, and a key
+  // the handler does not declare comes back from it as paramsNotRead.
+  it("forwards the slot selector to the native handler as sent", async () => {
     const call = vi.fn().mockResolvedValue({ success: true });
     const ctx = { bridge: { call } } as unknown as ToolContext;
 
@@ -16,7 +18,7 @@ describe("reflection.inspect_save_game", () => {
 
     expect(call).toHaveBeenCalledWith(
       "inspect_save_game",
-      { slotName: "UserSettings", userIndex: 2 },
+      { slotName: "UserSettings", userIndex: 2, className: "ignored" },
       undefined,
     );
   });

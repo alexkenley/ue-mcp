@@ -660,6 +660,13 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddRvtVolume(const TSharedPtr<FJsonObj
 {
 	MCP_CHECK_GAME_THREAD();
 
+	// Every parameter is read before anything can fail (#1057).
+	FString Label = OptionalString(Params, TEXT("actorLabel"));
+	FString BoundsMode;
+	const bool bHasBoundsMode = TryGetStringParam(Params, TEXT("boundsMode"), BoundsMode);
+	FString BoundsAlignActor;
+	const bool bHasBoundsAlignActor = TryGetStringParam(Params, TEXT("boundsAlignActor"), BoundsAlignActor);
+
 	TSharedPtr<FJsonValue> Error;
 	URuntimeVirtualTexture* Rvt = MCPRvtLoad(Params, Error);
 	if (!Rvt) return Error;
@@ -683,7 +690,6 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddRvtVolume(const TSharedPtr<FJsonObj
 		return MCPResult(Result);
 	}
 
-	FString Label = OptionalString(Params, TEXT("actorLabel"));
 	Label.TrimStartAndEndInline();
 	if (Label.IsEmpty()) Label = FString::Printf(TEXT("RVTVolume_%s"), *Rvt->GetName());
 
@@ -718,13 +724,13 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddRvtVolume(const TSharedPtr<FJsonObj
 	TSharedPtr<FJsonObject> FitParams = MakeShared<FJsonObject>();
 	FitParams->SetStringField(TEXT("rvtPath"), Rvt->GetPathName());
 	FitParams->SetStringField(TEXT("actorPath"), Volume->GetPathName());
-	if (HasParam(Params, TEXT("boundsMode")))
+	if (bHasBoundsMode)
 	{
-		FitParams->SetStringField(TEXT("boundsMode"), OptionalString(Params, TEXT("boundsMode")));
+		FitParams->SetStringField(TEXT("boundsMode"), BoundsMode);
 	}
-	if (HasParam(Params, TEXT("boundsAlignActor")))
+	if (bHasBoundsAlignActor)
 	{
-		FitParams->SetStringField(TEXT("boundsAlignActor"), OptionalString(Params, TEXT("boundsAlignActor")));
+		FitParams->SetStringField(TEXT("boundsAlignActor"), BoundsAlignActor);
 	}
 	TSharedPtr<FJsonValue> FitResult = SetRvtVolumeBounds(FitParams);
 	const TSharedPtr<FJsonObject>* FitObj = nullptr;
@@ -985,23 +991,28 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddRvtSampler(const TSharedPtr<FJsonOb
 	MCP_CHECK_GAME_THREAD();
 
 	FString MaterialPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("materialPath"), TEXT("assetPath"), MaterialPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("materialPath"), MaterialPath)) return Err;
+
+	// Every parameter is read before anything can fail (#1057), the RVT path
+	// included, so it is loaded ahead of the material.
+	FString ExpressionName = OptionalString(Params, TEXT("expressionName"));
+	const bool bConnectOutputs = OptionalBool(Params, TEXT("connectOutputs"), true);
+	const bool bRecompile = OptionalBool(Params, TEXT("recompile"), true);
+	const int32 PositionX = OptionalInt(Params, TEXT("positionX"), -600);
+	const int32 PositionY = OptionalInt(Params, TEXT("positionY"), 0);
+
+	TSharedPtr<FJsonValue> Error;
+	URuntimeVirtualTexture* Rvt = MCPRvtLoad(Params, Error);
+	if (!Rvt) return Error;
+
 	UMaterial* Material = LoadMaterialFromPath(MaterialPath);
 	if (!Material)
 	{
 		return MCPError(FString::Printf(TEXT("Failed to load a Material at '%s'. A MaterialInstance cannot hold graph nodes; sample wiring belongs on the parent Material."), *MaterialPath));
 	}
 
-	TSharedPtr<FJsonValue> Error;
-	URuntimeVirtualTexture* Rvt = MCPRvtLoad(Params, Error);
-	if (!Rvt) return Error;
-
-	FString ExpressionName = OptionalString(Params, TEXT("expressionName"));
 	ExpressionName.TrimStartAndEndInline();
 	if (ExpressionName.IsEmpty()) ExpressionName = FString::Printf(TEXT("RVTSample_%s"), *Rvt->GetName());
-
-	const bool bConnectOutputs = OptionalBool(Params, TEXT("connectOutputs"), true);
-	const bool bRecompile = OptionalBool(Params, TEXT("recompile"), true);
 
 	// Idempotency by the node's own name, which is the key FindExpressionByName
 	// resolves and therefore the key every other material action agrees on.
@@ -1025,8 +1036,8 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddRvtSampler(const TSharedPtr<FJsonOb
 	{
 		Sample = NewObject<UMaterialExpressionRuntimeVirtualTextureSample>(Material);
 		Sample->Desc = ExpressionName;
-		Sample->MaterialExpressionEditorX = OptionalInt(Params, TEXT("positionX"), -600);
-		Sample->MaterialExpressionEditorY = OptionalInt(Params, TEXT("positionY"), 0);
+		Sample->MaterialExpressionEditorX = PositionX;
+		Sample->MaterialExpressionEditorY = PositionY;
 		Material->GetExpressionCollection().AddExpression(Sample);
 		bCreated = true;
 	}
@@ -1157,19 +1168,23 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddRvtOutput(const TSharedPtr<FJsonObj
 	MCP_CHECK_GAME_THREAD();
 
 	FString MaterialPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("materialPath"), TEXT("assetPath"), MaterialPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("materialPath"), MaterialPath)) return Err;
+
+	// Every parameter is read before anything can fail (#1057).
+	FString ExpressionName = OptionalString(Params, TEXT("expressionName"));
+	const bool bMirror = OptionalBool(Params, TEXT("mirrorProperties"), true);
+	const bool bRecompile = OptionalBool(Params, TEXT("recompile"), true);
+	const int32 PositionX = OptionalInt(Params, TEXT("positionX"), 400);
+	const int32 PositionY = OptionalInt(Params, TEXT("positionY"), 400);
+
 	UMaterial* Material = LoadMaterialFromPath(MaterialPath);
 	if (!Material)
 	{
 		return MCPError(FString::Printf(TEXT("Failed to load a Material at '%s'. Only a Material holds a graph; a MaterialInstance cannot carry an RVT output node."), *MaterialPath));
 	}
 
-	FString ExpressionName = OptionalString(Params, TEXT("expressionName"));
 	ExpressionName.TrimStartAndEndInline();
 	if (ExpressionName.IsEmpty()) ExpressionName = TEXT("RVTOutput");
-
-	const bool bMirror = OptionalBool(Params, TEXT("mirrorProperties"), true);
-	const bool bRecompile = OptionalBool(Params, TEXT("recompile"), true);
 
 	UClass* const RvtOutputClass = MCPRvtOutputExpressionClass();
 	if (!RvtOutputClass)
@@ -1197,8 +1212,8 @@ TSharedPtr<FJsonValue> FMaterialHandlers::AddRvtOutput(const TSharedPtr<FJsonObj
 	{
 		Output = NewObject<UMaterialExpression>(Material, RvtOutputClass);
 		Output->Desc = ExpressionName;
-		Output->MaterialExpressionEditorX = OptionalInt(Params, TEXT("positionX"), 400);
-		Output->MaterialExpressionEditorY = OptionalInt(Params, TEXT("positionY"), 400);
+		Output->MaterialExpressionEditorX = PositionX;
+		Output->MaterialExpressionEditorY = PositionY;
 		Material->GetExpressionCollection().AddExpression(Output);
 		bCreated = true;
 	}

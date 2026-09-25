@@ -139,14 +139,96 @@ namespace
 void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("asset"));
+
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else. The TS surface for it is generated from a recording of these
+	// (npm run specs:record, then npm run specs:generate), and each alias is
+	// resolved to its parameter by the registry before the handler runs.
+	using EType = EMCPParamType;
 	Registry.RegisterHandler(TEXT("list_assets"), &ListAssets);
-	Registry.RegisterHandler(TEXT("read_uv_channels"), &ReadUvChannels);
-	Registry.RegisterHandler(TEXT("set_uv_channel_count"), &SetUvChannelCount);
-	Registry.RegisterHandler(TEXT("unwrap_uvs"), &UnwrapUvs);
-	Registry.RegisterHandler(TEXT("transform_uvs"), &TransformUvs);
-	Registry.RegisterHandler(TEXT("generate_lightmap_uvs"), &GenerateLightmapUvs);
-	Registry.RegisterHandler(TEXT("export_uv_layout"), &ExportUvLayout);
-	Registry.RegisterHandler(TEXT("check_uvs"), &CheckUvs);
+	Registry.RegisterHandler(TEXT("read_uv_channels"), &ReadUvChannels, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("Source LOD to act on (default 0)")),
+		MCPParam::Optional(TEXT("channels"), EType::Array, TEXT("Only these channels (omit for every channel)")).Items(EType::Number),
+		MCPParam::Optional(TEXT("includeIslands"), EType::Boolean, TEXT("Include the per-island breakdown (default true)")),
+		MCPParam::Optional(TEXT("includeOverlap"), EType::Boolean, TEXT("Compute the overlapping-area fraction (default true)")),
+		MCPParam::Optional(TEXT("rasterSize"), EType::Number, TEXT("Raster resolution for the coverage and overlap estimate (default 512)")),
+	});
+	Registry.RegisterHandler(TEXT("set_uv_channel_count"), &SetUvChannelCount, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("Source LOD to act on (default 0)")),
+		MCPParam::Optional(TEXT("op"), EType::String, TEXT("set (default) | add | remove | copy")),
+		MCPParam::Optional(TEXT("channelCount"), EType::Number, TEXT("Target channel count (op=set)")),
+		MCPParam::Optional(TEXT("count"), EType::Number, TEXT("Channels to add (op=add, default 1)")),
+		MCPParam::Optional(TEXT("channel"), EType::Number, TEXT("Channel to remove (op=remove)")),
+		MCPParam::Optional(TEXT("fromChannel"), EType::Number, TEXT("Source channel (op=copy)")),
+		MCPParam::Optional(TEXT("toChannel"), EType::Number, TEXT("Destination channel (op=copy)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the mesh (default true)")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report without writing")),
+	});
+	Registry.RegisterHandler(TEXT("unwrap_uvs"), &UnwrapUvs, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("Source LOD to act on (default 0)")),
+		MCPParam::Optional(TEXT("channel"), EType::Number, TEXT("Channel to write (default 0)")),
+		MCPParam::Optional(TEXT("method"), EType::String, TEXT("xatlas (default) | patchBuilder | expMap | conformal | spectralConformal | planar | box | cylinder")),
+		MCPParam::Optional(TEXT("pack"), EType::Boolean, TEXT("Repack the islands after unwrapping (default true)")),
+		MCPParam::Optional(TEXT("textureResolution"), EType::Number, TEXT("Resolution the packer targets (default 1024)")),
+		MCPParam::Optional(TEXT("maxIterations"), EType::Number, TEXT("Solver iteration cap")),
+		MCPParam::Optional(TEXT("initialPatchCount"), EType::Number, TEXT("Starting patch count for patchBuilder")),
+		MCPParam::Optional(TEXT("islandSource"), EType::String, TEXT("UVIslands (default) | PolyGroups")),
+		MCPParam::Optional(TEXT("projectionTransform"), EType::Object, TEXT("Transform for the planar, box and cylinder projections")),
+		MCPParam::Optional(TEXT("preserveVertexOrder"), EType::Boolean, TEXT("Keep the existing vertex order (default true)")),
+		MCPParam::Optional(TEXT("backupToChannel"), EType::Number, TEXT("Copy the existing UVs here first")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the mesh (default true)")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report without writing")),
+		MCPParam::Optional(TEXT("rasterSize"), EType::Number, TEXT("Raster resolution for the result's overlap estimate (default 512)")),
+	});
+	Registry.RegisterHandler(TEXT("transform_uvs"), &TransformUvs, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("Source LOD to act on (default 0)")),
+		MCPParam::Optional(TEXT("channel"), EType::Number, TEXT("Channel to transform (default 0)")),
+		MCPParam::Optional(TEXT("translate"), EType::Object, TEXT("UV-space offset {u, v}")),
+		MCPParam::Optional(TEXT("scale"), EType::Object, TEXT("UV-space scale {u, v}; a zero component is refused")),
+		MCPParam::Optional(TEXT("rotate"), EType::Number, TEXT("Rotation in degrees")),
+		MCPParam::Optional(TEXT("origin"), EType::Object, TEXT("Pivot for rotate and scale {u, v} (default 0.5, 0.5)")),
+		MCPParam::Optional(TEXT("flipU"), EType::Boolean, TEXT("Mirror across U")),
+		MCPParam::Optional(TEXT("flipV"), EType::Boolean, TEXT("Mirror across V")),
+		MCPParam::Optional(TEXT("order"), EType::String, TEXT("flipScaleRotateTranslate (default) | translateRotateScaleFlip")),
+		MCPParam::Optional(TEXT("selection"), EType::Object, TEXT("What to transform: {mode: all|island|normal|polygonGroup, islandIndices?, normalDirection?, normalAngleTolerance?, polygonGroups?, materialSlotNames?}")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the mesh (default true)")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report without writing")),
+	});
+	Registry.RegisterHandler(TEXT("generate_lightmap_uvs"), &GenerateLightmapUvs, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("Source LOD to act on (default 0)")),
+		MCPParam::Optional(TEXT("enable"), EType::Boolean, TEXT("Turn lightmap UV generation on (default) or off")),
+		MCPParam::Optional(TEXT("sourceChannel"), EType::Number, TEXT("Channel the generator reads (default: the current setting)")),
+		MCPParam::Optional(TEXT("destinationChannel"), EType::Number, TEXT("Channel it writes (default: the current setting, or the next free channel)")),
+		MCPParam::Optional(TEXT("minLightmapResolution"), EType::Number, TEXT("Packing resolution floor (default 64)")),
+		MCPParam::Optional(TEXT("lightmapResolution"), EType::Number, TEXT("The mesh's lightmap resolution")),
+		MCPParam::Optional(TEXT("setLightmapCoordinateIndex"), EType::Boolean, TEXT("Point LightMapCoordinateIndex at the destination channel (default true)")),
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Rebuild even when the settings already match")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the mesh (default true)")),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Report without writing")),
+		MCPParam::Optional(TEXT("rasterSize"), EType::Number, TEXT("Raster resolution for the result's overlap estimate (default 512)")),
+	});
+	Registry.RegisterHandler(TEXT("export_uv_layout"), &ExportUvLayout, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("Source LOD to act on (default 0)")),
+		MCPParam::Optional(TEXT("channel"), EType::Number, TEXT("Channel to draw (default 0)")),
+		MCPParam::Optional(TEXT("outputPath"), EType::String, TEXT("PNG to write (default under Saved/UVLayouts)")),
+		MCPParam::Optional(TEXT("imageSize"), EType::Number, TEXT("PNG edge length (default 1024, max 4096)")),
+		MCPParam::Optional(TEXT("showIslands"), EType::Boolean, TEXT("Colour each island separately (default true)")),
+		MCPParam::Optional(TEXT("showOverlaps"), EType::Boolean, TEXT("Highlight overlapping texels (default true)")),
+		MCPParam::Optional(TEXT("showGrid"), EType::Boolean, TEXT("Draw the unit-square border (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("check_uvs"), &CheckUvs, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("lodIndex"), EType::Integer, TEXT("Source LOD to act on (default 0)")),
+		MCPParam::Optional(TEXT("requireLightmapChannel"), EType::Boolean, TEXT("Treat a missing lightmap channel as a fault (default true for StaticMesh)")),
+		MCPParam::Optional(TEXT("maxOverlapFraction"), EType::Number, TEXT("Overlap above this fraction of the lightmap channel is a fault (default 0.001)")),
+		MCPParam::Optional(TEXT("rasterSize"), EType::Number, TEXT("Raster resolution for the overlap estimate (default 512)")),
+	});
 
 	// Procedural mesh operations (AssetHandlers_GeometryScript.cpp). Each one
 	// converts the LOD to a DynamicMesh, runs a solver over it and writes a
@@ -167,18 +249,50 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandlerWithTimeout(TEXT("fix_asset_hygiene"), &FixAssetHygiene, 300.0f);
 
 	Registry.RegisterHandler(TEXT("search_assets"), &SearchAssets);
-	Registry.RegisterHandler(TEXT("read_asset"), &ReadAsset);
+	Registry.RegisterHandler(TEXT("read_asset"), &ReadAsset, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset path")).Alias(TEXT("path")),
+	});
 	Registry.RegisterHandler(TEXT("read_asset_properties"), &ReadAssetProperties);
-	Registry.RegisterHandler(TEXT("duplicate_asset"), &DuplicateAsset);
-	Registry.RegisterHandler(TEXT("rename_asset"), &RenameAsset);
-	Registry.RegisterHandler(TEXT("move_asset"), &MoveAsset);
-	Registry.RegisterHandler(TEXT("delete_asset"), &DeleteAsset);
-	Registry.RegisterHandler(TEXT("delete_asset_batch"), &DeleteAssetBatch);
-	Registry.RegisterHandler(TEXT("bulk_rename_assets"), &BulkRename);
+	Registry.RegisterHandler(TEXT("duplicate_asset"), &DuplicateAsset, {
+		MCPParam::Required(TEXT("sourcePath"), EType::String, TEXT("Asset to duplicate")),
+		MCPParam::Required(TEXT("destinationPath"), EType::String, TEXT("Object path of the copy")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns an existing destination; error refuses")),
+	});
+	Registry.RegisterHandler(TEXT("rename_asset"), &RenameAsset, {
+		MCPParam::Optional(TEXT("sourcePath"), EType::String, TEXT("Asset to rename, together with destinationPath")),
+		MCPParam::Optional(TEXT("destinationPath"), EType::String, TEXT("New object path, together with sourcePath")),
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("Asset to rename in its own folder, together with newName")),
+		MCPParam::Optional(TEXT("newName"), EType::String, TEXT("New asset name, together with assetPath")),
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("World renames only: merge into a destination that already holds external packages (used by rollback)")),
+	});
+	Registry.RegisterHandler(TEXT("move_asset"), &MoveAsset, {
+		MCPParam::Optional(TEXT("sourcePath"), EType::String, TEXT("Asset to rename, together with destinationPath")),
+		MCPParam::Optional(TEXT("destinationPath"), EType::String, TEXT("New object path, together with sourcePath")),
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("Asset to rename in its own folder, together with newName")),
+		MCPParam::Optional(TEXT("newName"), EType::String, TEXT("New asset name, together with assetPath")),
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("World renames only: merge into a destination that already holds external packages (used by rollback)")),
+	});
+	Registry.RegisterHandler(TEXT("delete_asset"), &DeleteAsset, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset to delete")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Delete even when other packages reference it, closing open editors (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("delete_asset_batch"), &DeleteAssetBatch, {
+		MCPParam::Required(TEXT("assetPaths"), EType::Array, TEXT("Assets to delete")).Alias(TEXT("paths")).Items(EType::String),
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Delete referenced assets too, closing open editors (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("bulk_rename_assets"), &BulkRename, {
+		MCPParam::Required(TEXT("renames"), EType::Array, TEXT("Rename descriptors: {sourcePath, destinationPath}, {assetPath, newName} or {sourcePath, newPackagePath, newName}")).Items(EType::Object),
+	});
 	// #908: bounded redirector clean-up after a move. Timeout raised because a
 	// fix-up loads and resaves every referencing package.
 	Registry.RegisterHandlerWithTimeout(TEXT("fixup_redirectors"), &FixupRedirectors, 300.0f);
-	Registry.RegisterHandler(TEXT("create_data_asset"), &CreateDataAsset);
+	Registry.RegisterHandler(TEXT("create_data_asset"), &CreateDataAsset, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name")),
+		MCPParam::Required(TEXT("className"), EType::String, TEXT("UDataAsset subclass: class name with or without the C++ prefix, or a /Script/Module.Class path")).Alias(TEXT("class")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game)")),
+		MCPParam::Optional(TEXT("properties"), EType::Object, TEXT("Property values keyed by property name")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns an existing asset; error refuses")),
+	});
 	// Bounded batch upsert plus its rollback inverse. A 500-item batch that
 	// preflights every item on a transient copy before touching a package can
 	// legitimately outrun the default game-thread budget, so both carry an
@@ -187,139 +301,505 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandlerWithTimeout(TEXT("bulk_restore_data_assets"), &BulkRestoreDataAssets, 120.0f);
 	// #726: generic create-any-concrete-UObject-class asset (physical materials,
 	// curves, settings objects) - not restricted to UDataAsset subclasses.
-	Registry.RegisterHandler(TEXT("create_asset_by_class"), &CreateAssetByClass);
+	Registry.RegisterHandler(TEXT("create_asset_by_class"), &CreateAssetByClass, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name")),
+		MCPParam::Required(TEXT("className"), EType::String, TEXT("Concrete UObject class: class name with or without the C++ prefix, or a /Script/Module.Class path")).Alias(TEXT("class")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game)")),
+		MCPParam::Optional(TEXT("properties"), EType::Object, TEXT("Property values keyed by property name")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns an existing asset; error refuses")),
+	});
 	// #975: a named subobject inside an existing asset package, which
 	// create_asset_by_class cannot make because it always creates a package.
-	Registry.RegisterHandler(TEXT("create_subobject"), &CreateSubobject);
-	Registry.RegisterHandler(TEXT("read_asset_graph"), &ReadAssetGraph);
-	Registry.RegisterHandler(TEXT("connect_graph_pins"), &ConnectGraphPins);
-	Registry.RegisterHandler(TEXT("disconnect_graph_pins"), &DisconnectGraphPins);
-	Registry.RegisterHandler(TEXT("add_graph_node"), &AddGraphNode);
-	Registry.RegisterHandler(TEXT("remove_graph_node"), &RemoveGraphNode);
+	Registry.RegisterHandler(TEXT("create_subobject"), &CreateSubobject, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset that owns the new subobject")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("className"), EType::String, TEXT("Class to instantiate, e.g. a /Script/Module.Class path")),
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Subobject name")),
+		MCPParam::Optional(TEXT("properties"), EType::Object, TEXT("Property values, validated on a throwaway instance first")),
+		MCPParam::Optional(TEXT("outer"), EType::String, TEXT("asset (default) | package")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("reuse (default) | error")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the owning package (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("read_asset_graph"), &ReadAssetGraph, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("EdGraph-backed asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Only graphs whose name contains this")),
+		MCPParam::Optional(TEXT("includePins"), EType::Boolean, TEXT("Include each node's pins and links (default true)")),
+		MCPParam::Optional(TEXT("maxNodes"), EType::Number, TEXT("Nodes reported per graph (default 500, max 5000)")),
+	});
+	Registry.RegisterHandler(TEXT("connect_graph_pins"), &ConnectGraphPins, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("EdGraph-backed asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph to author in, by name or unique substring (required when the asset has several graphs)")),
+		MCPParam::Optional(TEXT("sourceNode"), EType::String, TEXT("Node of the source pin: nodeGuid, node path, name or unique title")),
+		MCPParam::Optional(TEXT("sourcePinId"), EType::String, TEXT("pinId of the source pin (preferred)")),
+		MCPParam::Optional(TEXT("sourcePin"), EType::String, TEXT("Source pin name, when no pinId is given")),
+		MCPParam::Optional(TEXT("sourcePinDirection"), EType::String, TEXT("input | output, to disambiguate sourcePin")),
+		MCPParam::Optional(TEXT("targetNode"), EType::String, TEXT("Node of the target pin")),
+		MCPParam::Optional(TEXT("targetPinId"), EType::String, TEXT("pinId of the target pin")),
+		MCPParam::Optional(TEXT("targetPin"), EType::String, TEXT("Target pin name, when no pinId is given")),
+		MCPParam::Optional(TEXT("targetPinDirection"), EType::String, TEXT("input | output, to disambiguate targetPin")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the asset after the edit (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("disconnect_graph_pins"), &DisconnectGraphPins, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("EdGraph-backed asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph to author in, by name or unique substring (required when the asset has several graphs)")),
+		MCPParam::Optional(TEXT("sourceNode"), EType::String, TEXT("Node of the source pin: nodeGuid, node path, name or unique title")),
+		MCPParam::Optional(TEXT("sourcePinId"), EType::String, TEXT("pinId of the source pin (preferred)")),
+		MCPParam::Optional(TEXT("sourcePin"), EType::String, TEXT("Source pin name, when no pinId is given")),
+		MCPParam::Optional(TEXT("sourcePinDirection"), EType::String, TEXT("input | output, to disambiguate sourcePin")),
+		MCPParam::Optional(TEXT("targetNode"), EType::String, TEXT("Node of the target pin")),
+		MCPParam::Optional(TEXT("targetPinId"), EType::String, TEXT("pinId of the target pin")),
+		MCPParam::Optional(TEXT("targetPin"), EType::String, TEXT("Target pin name, when no pinId is given")),
+		MCPParam::Optional(TEXT("targetPinDirection"), EType::String, TEXT("input | output, to disambiguate targetPin")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the asset after the edit (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("add_graph_node"), &AddGraphNode, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("EdGraph-backed asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph to author in, by name or unique substring (required when the asset has several graphs)")),
+		MCPParam::Optional(TEXT("nodeClass"), EType::String, TEXT("Class the node action spawns")),
+		MCPParam::Optional(TEXT("actionName"), EType::String, TEXT("Schema menu entry name, or 'category|name'")),
+		MCPParam::Optional(TEXT("spawnMode"), EType::String, TEXT("auto (default) | action | direct")),
+		MCPParam::Optional(TEXT("posX"), EType::Number, TEXT("Node X position")),
+		MCPParam::Optional(TEXT("posY"), EType::Number, TEXT("Node Y position")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the asset after the edit (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("remove_graph_node"), &RemoveGraphNode, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("EdGraph-backed asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("graphName"), EType::String, TEXT("Graph to author in, by name or unique substring (required when the asset has several graphs)")),
+		MCPParam::Required(TEXT("node"), EType::String, TEXT("Node to remove: nodeGuid, path, name or unique title")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the asset after the edit (default true)")),
+	});
 	Registry.RegisterHandlerWithTimeout(TEXT("compile_customizable_object"), &CompileCustomizableObject, 600.0f);
-	Registry.RegisterHandler(TEXT("create_customizable_object"), &CreateCustomizableObject);
-	Registry.RegisterHandler(TEXT("save_asset"), &SaveAsset);
-	Registry.RegisterHandler(TEXT("save_all_dirty"), &SaveAllDirty);
+	Registry.RegisterHandler(TEXT("create_customizable_object"), &CreateCustomizableObject, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) | error")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the new asset (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("save_asset"), &SaveAsset, {
+		MCPParam::Optional(TEXT("assetPath"), EType::String, TEXT("Asset to save; omit to save every dirty asset under /Game")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Write the package even when it is not dirty (needs assetPath)")),
+	});
+	Registry.RegisterHandler(TEXT("save_all_dirty"), &SaveAllDirty, {
+		MCPParam::Optional(TEXT("saveMapPackages"), EType::Boolean, TEXT("Include map packages (default true)")),
+		MCPParam::Optional(TEXT("saveContentPackages"), EType::Boolean, TEXT("Include content packages (default true)")),
+	});
 	Registry.RegisterHandler(TEXT("list_textures"), &ListTextures);
 
 	// FBX import handlers
-	Registry.RegisterHandler(TEXT("import_static_mesh"), &ImportStaticMesh);
-	Registry.RegisterHandler(TEXT("import_skeletal_mesh"), &ImportSkeletalMesh);
-	Registry.RegisterHandler(TEXT("import_animation"), &ImportAnimation);
-	Registry.RegisterHandler(TEXT("import_file"), &ImportFile);
+	Registry.RegisterHandler(TEXT("import_static_mesh"), &ImportStaticMesh, {
+		MCPParam::Required(TEXT("filePath"), EType::String, TEXT("Source file on disk")).Alias(TEXT("filename")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Asset name (default: the file name)")).Alias(TEXT("assetName")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Meshes)")).Alias(TEXT("destinationPath")),
+		MCPParam::Optional(TEXT("combineMeshes"), EType::Boolean, TEXT("Combine every mesh in the file into one (default false)")),
+		MCPParam::Optional(TEXT("importMaterials"), EType::Boolean, TEXT("Import materials (default true)")),
+		MCPParam::Optional(TEXT("importTextures"), EType::Boolean, TEXT("Import textures (default true)")),
+		MCPParam::Optional(TEXT("generateLightmapUVs"), EType::Boolean, TEXT("Generate lightmap UVs (default true)")),
+		MCPParam::Optional(TEXT("importUniformScale"), EType::Number, TEXT("Uniform import scale; 100 fixes metre-authored FBX")),
+	});
+	Registry.RegisterHandler(TEXT("import_skeletal_mesh"), &ImportSkeletalMesh, {
+		MCPParam::Required(TEXT("filePath"), EType::String, TEXT("Source file on disk")).Alias(TEXT("filename")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Asset name (default: the file name)")).Alias(TEXT("assetName")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Meshes)")).Alias(TEXT("destinationPath")),
+		MCPParam::Optional(TEXT("skeletonPath"), EType::String, TEXT("Existing Skeleton to import onto")),
+		MCPParam::Optional(TEXT("importMaterials"), EType::Boolean, TEXT("Import materials (default true)")),
+		MCPParam::Optional(TEXT("importTextures"), EType::Boolean, TEXT("Import textures (default true)")),
+		MCPParam::Optional(TEXT("importUniformScale"), EType::Number, TEXT("Uniform import scale (default 1.0); 100 fixes metre-authored FBX")),
+		MCPParam::Optional(TEXT("importMorphTargets"), EType::Boolean, TEXT("Import morph targets (default true)")),
+		MCPParam::Optional(TEXT("createPhysicsAsset"), EType::Boolean, TEXT("Create a PhysicsAsset (default false)")),
+		MCPParam::Optional(TEXT("replaceExisting"), EType::Boolean, TEXT("Replace an asset already at the destination (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("import_animation"), &ImportAnimation, {
+		MCPParam::Required(TEXT("filePath"), EType::String, TEXT("Source file on disk")).Alias(TEXT("filename")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Asset name (default: the file name)")).Alias(TEXT("assetName")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Animations)")).Alias(TEXT("destinationPath")),
+		MCPParam::Required(TEXT("skeletonPath"), EType::String, TEXT("Skeleton the animation targets")),
+		MCPParam::Optional(TEXT("importCustomAttribute"), EType::Boolean, TEXT("Import FBX custom attributes as curves (default true)")),
+		MCPParam::Optional(TEXT("removeRedundantKeys"), EType::Boolean, TEXT("Strip keys that do not change the value (default true)")),
+		MCPParam::Optional(TEXT("importSettings"), EType::Object, TEXT("FbxAnimSequenceImportData or FbxImportUI fields by UPROPERTY name or dotted path")),
+	});
+	Registry.RegisterHandler(TEXT("import_file"), &ImportFile, {
+		MCPParam::Required(TEXT("filePath"), EType::String, TEXT("Source file on disk")).Alias(TEXT("filename")),
+		MCPParam::Required(TEXT("packagePath"), EType::String, TEXT("Destination folder")).Alias(TEXT("destinationPath")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Asset name (default: the file name)")).Alias(TEXT("assetName")),
+		MCPParam::Optional(TEXT("factoryClass"), EType::String, TEXT("UFactory subclass by name or /Script path (default: picked by extension)")),
+		MCPParam::Optional(TEXT("factoryProperties"), EType::Object, TEXT("Factory properties by UPROPERTY name or dotted path, set before the import")),
+		MCPParam::Optional(TEXT("replaceExisting"), EType::Boolean, TEXT("Replace an asset already at the destination (default true)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the imported assets (default false)")),
+		MCPParam::Optional(TEXT("automated"), EType::Boolean, TEXT("Suppress interactive dialogs (default true)")),
+	});
 
 	// Texture handlers
-	Registry.RegisterHandler(TEXT("import_texture"), &ImportTexture);
+	Registry.RegisterHandler(TEXT("import_texture"), &ImportTexture, {
+		MCPParam::Required(TEXT("filePath"), EType::String, TEXT("Source file on disk")).Alias(TEXT("filename")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Asset name (default: the file name)")).Alias(TEXT("assetName")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/Textures)")).Alias(TEXT("destinationPath")),
+		MCPParam::Optional(TEXT("sRGB"), EType::Boolean, TEXT("Applied to the imported texture")),
+		MCPParam::Optional(TEXT("compressionSettings"), EType::String, TEXT("Compression setting such as Default, Normalmap, Grayscale, HDR or BC7, applied to the imported texture")),
+		MCPParam::Optional(TEXT("lodGroup"), EType::String, TEXT("Texture LOD group, applied to the imported texture")),
+		MCPParam::Optional(TEXT("neverStream"), EType::Boolean, TEXT("Applied to the imported texture")),
+		MCPParam::Optional(TEXT("noCompression"), EType::Boolean, TEXT("Factory option: import uncompressed")),
+		MCPParam::Optional(TEXT("noAlpha"), EType::Boolean, TEXT("Factory option: drop the alpha channel")),
+	});
 	Registry.RegisterHandler(TEXT("import_texture_batch"), &ImportTextureBatch);
-	Registry.RegisterHandler(TEXT("create_render_target_2d"), &CreateRenderTarget2D);
+	Registry.RegisterHandler(TEXT("create_render_target_2d"), &CreateRenderTarget2D, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name, without '/' or '.'")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game)")),
+		MCPParam::Optional(TEXT("width"), EType::Integer, TEXT("Pixel width, 1-8192 (default 512)")),
+		MCPParam::Optional(TEXT("height"), EType::Integer, TEXT("Pixel height, 1-8192 (default 512)")),
+		MCPParam::Optional(TEXT("format"), EType::String, TEXT("R8 | RG8 | RGBA8 | RGBA8_SRGB | R16F | RG16F | RGBA16F | R32F | RG32F | RGBA32F | RGB10A2 (default RGBA8_SRGB)")),
+		MCPParam::Optional(TEXT("clearColor"), EType::Object, TEXT("Linear clear color {r, g, b, a} (default transparent)")),
+		MCPParam::Optional(TEXT("generateMips"), EType::Boolean, TEXT("Generate mipmaps automatically (default false)")),
+		MCPParam::Optional(TEXT("targetGamma"), EType::Number, TEXT("Target gamma (default 0, the engine behavior)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns an existing asset; error refuses")),
+	});
 	// #697: texture export + compare.
-	Registry.RegisterHandler(TEXT("export_texture"), &ExportTexture);
-	Registry.RegisterHandler(TEXT("compare_textures"), &CompareTextures);
-	Registry.RegisterHandler(TEXT("get_texture_info"), &ListTextureProperties);
+	Registry.RegisterHandler(TEXT("export_texture"), &ExportTexture, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Texture2D asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("outputPath"), EType::String, TEXT("PNG file to write; a relative path resolves against the project directory")).Alias(TEXT("filePath")),
+	});
+	Registry.RegisterHandler(TEXT("compare_textures"), &CompareTextures, {
+		MCPParam::Required(TEXT("assetPathA"), EType::String, TEXT("First Texture2D")).Alias(TEXT("a")),
+		MCPParam::Required(TEXT("assetPathB"), EType::String, TEXT("Second Texture2D")).Alias(TEXT("b")),
+	});
+	Registry.RegisterHandler(TEXT("get_texture_info"), &ListTextureProperties, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Texture2D asset path")).Alias(TEXT("path")),
+	});
 	Registry.RegisterHandler(TEXT("set_texture_settings"), &SetTextureProperties);
 
 	// Mesh handlers
-	Registry.RegisterHandler(TEXT("set_mesh_material"), &SetMeshMaterial);
+	Registry.RegisterHandler(TEXT("set_mesh_material"), &SetMeshMaterial, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("materialPath"), EType::String, TEXT("Material to assign")),
+		MCPParam::Optional(TEXT("slotIndex"), EType::Number, TEXT("Material slot index (default 0)")),
+	});
 	Registry.RegisterHandler(TEXT("set_mesh_materials_batch"), &SetMeshMaterialsBatch);
 	Registry.RegisterHandler(TEXT("recenter_pivot"), &RecenterPivot);
 
 	// Socket handlers
-	Registry.RegisterHandler(TEXT("add_socket"), &AddSocket);
-	Registry.RegisterHandler(TEXT("set_socket_transform"), &SetSocketTransform);
-	Registry.RegisterHandler(TEXT("set_asset_property"), &SetAssetProperty);
-	Registry.RegisterHandler(TEXT("append_asset_array_elements"), &AppendAssetArrayElements);
+	Registry.RegisterHandler(TEXT("add_socket"), &AddSocket, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh, SkeletalMesh or Skeleton asset path")),
+		MCPParam::Required(TEXT("socketName"), EType::String, TEXT("Socket name")),
+		MCPParam::Optional(TEXT("boneName"), EType::String, TEXT("Bone to attach to (SkeletalMesh and Skeleton, default root)")),
+		MCPParam::Optional(TEXT("relativeLocation"), EType::Vec3, TEXT("Socket location relative to its parent")),
+		MCPParam::Optional(TEXT("relativeRotation"), EType::Rotator, TEXT("Socket rotation relative to its parent")),
+		MCPParam::Optional(TEXT("relativeScale"), EType::Vec3, TEXT("Socket scale")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) | update | error")),
+	});
+	Registry.RegisterHandler(TEXT("set_socket_transform"), &SetSocketTransform, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")),
+		MCPParam::Required(TEXT("socketName"), EType::String, TEXT("Socket to move")),
+		MCPParam::Optional(TEXT("relativeLocation"), EType::Vec3, TEXT("New relative location")),
+		MCPParam::Optional(TEXT("relativeRotation"), EType::Rotator, TEXT("New relative rotation")),
+		MCPParam::Optional(TEXT("relativeScale"), EType::Vec3, TEXT("New relative scale")),
+	});
+	Registry.RegisterHandler(TEXT("set_asset_property"), &SetAssetProperty, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset path; a Blueprint path writes its generated-class CDO")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Property path; dotted and indexed paths walk structs, arrays and instanced subobjects")),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Value to write: scalar, object, array or asset path")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the package after the write (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("append_asset_array_elements"), &AppendAssetArrayElements, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset path; a Blueprint path writes its generated-class CDO")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Path of the TArray property")),
+		MCPParam::Required(TEXT("elements"), EType::Array, TEXT("Values to append, validated before any is written")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the package after the write (default true)")),
+	});
 	Registry.RegisterHandler(TEXT("bulk_set_asset_properties"), &BulkSetAssetProperties);
-	Registry.RegisterHandler(TEXT("set_texture_settings_by_type"), &SetTextureSettingsByType);
+	Registry.RegisterHandler(TEXT("set_texture_settings_by_type"), &SetTextureSettingsByType, {
+		MCPParam::Required(TEXT("groups"), EType::Object, TEXT("Texture paths per profile: {normal?, grayscale?, baseColor?, hdr?}")),
+	});
 	Registry.RegisterHandler(TEXT("create_interchange_pipeline"), &CreateInterchangePipeline);
-	Registry.RegisterHandler(TEXT("remove_socket"), &RemoveSocket);
-	Registry.RegisterHandler(TEXT("list_sockets"), &ListSockets);
-	Registry.RegisterHandler(TEXT("list_asset_sockets"), &ListSockets);
-	Registry.RegisterHandler(TEXT("reload_package"), &ReloadPackage);
+	Registry.RegisterHandler(TEXT("remove_socket"), &RemoveSocket, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh, SkeletalMesh or Skeleton asset path")),
+		MCPParam::Required(TEXT("socketName"), EType::String, TEXT("Socket to remove")),
+	});
+	Registry.RegisterHandler(TEXT("list_sockets"), &ListSockets, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh, SkeletalMesh or Skeleton asset path")),
+	});
+	Registry.RegisterHandler(TEXT("list_asset_sockets"), &ListSockets, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh, SkeletalMesh or Skeleton asset path")),
+	});
+	Registry.RegisterHandler(TEXT("reload_package"), &ReloadPackage, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset whose package to reload")).Alias(TEXT("path")),
+	});
 	// #279: detect/recover stuck-unloadable assets
-	Registry.RegisterHandler(TEXT("asset_health_check"), &HealthCheck);
-	Registry.RegisterHandler(TEXT("force_reload_asset"), &ForceReload);
+	Registry.RegisterHandler(TEXT("asset_health_check"), &HealthCheck, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset to check")).Alias(TEXT("path")),
+	});
+	Registry.RegisterHandler(TEXT("force_reload_asset"), &ForceReload, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset to reload from disk")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("discardUnsaved"), EType::Boolean, TEXT("Reload even when the package has unsaved changes, discarding them (default false)")),
+	});
 
 	// Additional DataTable handlers
-	Registry.RegisterHandler(TEXT("create_datatable"), &CreateDataTable);
-	Registry.RegisterHandler(TEXT("read_datatable"), &ReadDataTable);
-	Registry.RegisterHandler(TEXT("reimport_datatable"), &ReimportDataTable);
+	Registry.RegisterHandler(TEXT("create_datatable"), &CreateDataTable, {
+		MCPParam::Required(TEXT("name"), EType::String, TEXT("Asset name")),
+		MCPParam::Required(TEXT("rowStruct"), EType::String, TEXT("Row struct, e.g. /Script/Module.MyRow or a UserDefinedStruct path")),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Destination folder (default /Game/DataTables)")),
+		MCPParam::Optional(TEXT("onConflict"), EType::String, TEXT("skip (default) returns an existing asset; error refuses")),
+	});
+	Registry.RegisterHandler(TEXT("read_datatable"), &ReadDataTable, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("rowFilter"), EType::String, TEXT("Case-insensitive substring filter on row names")),
+		MCPParam::Optional(TEXT("outputPath"), EType::String, TEXT("Write the rows to this JSON file instead of returning them; relative paths resolve under Saved/")),
+	});
+	Registry.RegisterHandler(TEXT("reimport_datatable"), &ReimportDataTable, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("jsonPath"), EType::String, TEXT("JSON file to replace the table from")),
+		MCPParam::Optional(TEXT("jsonString"), EType::String, TEXT("JSON text to replace the table from")),
+	});
 	// #437: single-row mutation. Append a new row or overwrite an existing one
 	// without exporting and re-importing the whole table.
-	Registry.RegisterHandler(TEXT("set_datatable_row"), &SetDataTableRow);
-	Registry.RegisterHandler(TEXT("add_datatable_row"), &SetDataTableRow);
-	Registry.RegisterHandler(TEXT("update_datatable_row"), &SetDataTableRow);
-	Registry.RegisterHandler(TEXT("remove_datatable_row"), &RemoveDataTableRow);
-	Registry.RegisterHandler(TEXT("delete_datatable_row"), &RemoveDataTableRow);
+	Registry.RegisterHandler(TEXT("set_datatable_row"), &SetDataTableRow, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Row to append or overwrite")),
+		MCPParam::Required(TEXT("row"), EType::Object, TEXT("Row-struct fields to write; fields not named keep their values")).Alias(TEXT("fields")).Alias(TEXT("data")),
+	});
+	Registry.RegisterHandler(TEXT("add_datatable_row"), &SetDataTableRow, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Row to append or overwrite")),
+		MCPParam::Required(TEXT("row"), EType::Object, TEXT("Row-struct fields to write; fields not named keep their values")).Alias(TEXT("fields")).Alias(TEXT("data")),
+	});
+	Registry.RegisterHandler(TEXT("update_datatable_row"), &SetDataTableRow, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Row to append or overwrite")),
+		MCPParam::Required(TEXT("row"), EType::Object, TEXT("Row-struct fields to write; fields not named keep their values")).Alias(TEXT("fields")).Alias(TEXT("data")),
+	});
+	Registry.RegisterHandler(TEXT("remove_datatable_row"), &RemoveDataTableRow, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Row to remove")),
+	});
+	Registry.RegisterHandler(TEXT("delete_datatable_row"), &RemoveDataTableRow, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Row to remove")),
+	});
 	// #535: single-row read, single-cell write, row rename, and bulk JSON fill.
-	Registry.RegisterHandler(TEXT("get_datatable_row"), &GetDataTableRow);
-	Registry.RegisterHandler(TEXT("set_datatable_cell"), &SetDataTableCell);
-	Registry.RegisterHandler(TEXT("rename_datatable_row"), &RenameDataTableRow);
-	Registry.RegisterHandler(TEXT("fill_datatable_from_json"), &FillDataTableFromJson);
+	Registry.RegisterHandler(TEXT("get_datatable_row"), &GetDataTableRow, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Row to read")),
+	});
+	Registry.RegisterHandler(TEXT("set_datatable_cell"), &SetDataTableCell, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Existing row to edit")),
+		MCPParam::Required(TEXT("fieldName"), EType::String, TEXT("Row-struct field to write")),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Value to write")),
+	});
+	Registry.RegisterHandler(TEXT("rename_datatable_row"), &RenameDataTableRow, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("oldName"), EType::String, TEXT("Row to rename")).Alias(TEXT("rowName")),
+		MCPParam::Required(TEXT("newName"), EType::String, TEXT("New row name")),
+	});
+	Registry.RegisterHandler(TEXT("fill_datatable_from_json"), &FillDataTableFromJson, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("rows"), EType::Object, TEXT("Rows to upsert: {rowName: {field: value}}")),
+		MCPParam::Optional(TEXT("jsonString"), EType::String, TEXT("The same rows object as JSON text, used when rows is omitted")),
+	});
 
 	// CurveTable handlers
 	Registry.RegisterHandler(TEXT("create_curvetable"), &CreateCurveTable);
-	Registry.RegisterHandler(TEXT("read_curvetable"), &ReadCurveTable);
-	Registry.RegisterHandler(TEXT("list_curvetable_rows"), &ReadCurveTable);
-	Registry.RegisterHandler(TEXT("import_curvetable"), &ImportCurveTable);
-	Registry.RegisterHandler(TEXT("add_curvetable_row"), &AddCurveTableRow);
-	Registry.RegisterHandler(TEXT("remove_curvetable_row"), &RemoveCurveTableRow);
-	Registry.RegisterHandler(TEXT("rename_curvetable_row"), &RenameCurveTableRow);
-	Registry.RegisterHandler(TEXT("get_curvetable_keys"), &GetCurveTableKeys);
-	Registry.RegisterHandler(TEXT("set_curvetable_keys"), &SetCurveTableKeys);
-	Registry.RegisterHandler(TEXT("add_curvetable_key"), &AddCurveTableKey);
+	Registry.RegisterHandler(TEXT("read_curvetable"), &ReadCurveTable, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("CurveTable asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("rowFilter"), EType::String, TEXT("Case-insensitive substring filter on row names")),
+	});
+	Registry.RegisterHandler(TEXT("list_curvetable_rows"), &ReadCurveTable, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("CurveTable asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("rowFilter"), EType::String, TEXT("Case-insensitive substring filter on row names")),
+	});
+	Registry.RegisterHandler(TEXT("import_curvetable"), &ImportCurveTable, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("CurveTable asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("jsonString"), EType::String, TEXT("JSON rows to replace the table from")),
+		MCPParam::Optional(TEXT("csvString"), EType::String, TEXT("CSV rows to replace the table from")),
+		MCPParam::Optional(TEXT("filePath"), EType::String, TEXT("JSON or CSV file to replace the table from")).Alias(TEXT("jsonPath")).Alias(TEXT("csvPath")),
+		MCPParam::Optional(TEXT("format"), EType::String, TEXT("json | csv (default: from the file extension)")),
+		MCPParam::Optional(TEXT("interpMode"), EType::String, TEXT("linear (default) | constant | cubic | none")),
+	});
+	Registry.RegisterHandler(TEXT("add_curvetable_row"), &AddCurveTableRow, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("CurveTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Row to add")),
+		MCPParam::Optional(TEXT("curveType"), EType::String, TEXT("simple | rich (default: the table's type, or rich for cubic)")).Alias(TEXT("mode")),
+		MCPParam::Optional(TEXT("interpMode"), EType::String, TEXT("linear (default) | constant | cubic | none")),
+	});
+	Registry.RegisterHandler(TEXT("remove_curvetable_row"), &RemoveCurveTableRow, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("CurveTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Row to remove")),
+	});
+	Registry.RegisterHandler(TEXT("rename_curvetable_row"), &RenameCurveTableRow, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("CurveTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("oldName"), EType::String, TEXT("Row to rename")).Alias(TEXT("rowName")),
+		MCPParam::Required(TEXT("newName"), EType::String, TEXT("New row name")),
+	});
+	Registry.RegisterHandler(TEXT("get_curvetable_keys"), &GetCurveTableKeys, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("CurveTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Row to read")),
+	});
+	Registry.RegisterHandler(TEXT("set_curvetable_keys"), &SetCurveTableKeys, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("CurveTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Row whose keys to replace")),
+		MCPParam::Required(TEXT("keys"), EType::Array, TEXT("Replacement keys: [{time, value, interpMode?, arriveTangent?, leaveTangent?}]")).Items(EType::Object),
+	});
+	Registry.RegisterHandler(TEXT("add_curvetable_key"), &AddCurveTableKey, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("CurveTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Row to key")),
+		MCPParam::Required(TEXT("time"), EType::Number, TEXT("Key time")),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Key value (a number)")),
+		MCPParam::Optional(TEXT("interpMode"), EType::String, TEXT("linear (default) | constant | cubic | none")),
+		MCPParam::Optional(TEXT("keyTimeTolerance"), EType::Number, TEXT("How close an existing key must be to be updated rather than added")),
+	});
 
 	// Generic reimport / export
-	Registry.RegisterHandler(TEXT("reimport_asset"), &ReimportAsset);
-	Registry.RegisterHandler(TEXT("export_asset"), &ExportAsset);
+	Registry.RegisterHandler(TEXT("reimport_asset"), &ReimportAsset, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Imported asset to rebuild from its source file")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("filePath"), EType::String, TEXT("New source file to record and reimport from")).Alias(TEXT("filename")),
+	});
+	Registry.RegisterHandler(TEXT("export_asset"), &ExportAsset, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Asset to export")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("outputPath"), EType::String, TEXT("File to write; a relative path resolves against the project directory")),
+	});
 
 	// StringTable handlers
 	Registry.RegisterHandler(TEXT("create_stringtable"), &CreateStringTable);
-	Registry.RegisterHandler(TEXT("read_stringtable"), &ReadStringTable);
-	Registry.RegisterHandler(TEXT("list_stringtable_keys"), &ListStringTableKeys);
-	Registry.RegisterHandler(TEXT("get_stringtable_entry"), &GetStringTableEntry);
-	Registry.RegisterHandler(TEXT("set_stringtable_entry"), &SetStringTableEntry);
-	Registry.RegisterHandler(TEXT("remove_stringtable_entry"), &RemoveStringTableEntry);
-	Registry.RegisterHandler(TEXT("import_stringtable"), &ImportStringTable);
-	Registry.RegisterHandler(TEXT("import_stringtable_csv"), &ImportStringTableCsv);
+	Registry.RegisterHandler(TEXT("read_stringtable"), &ReadStringTable, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StringTable asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("keyFilter"), EType::String, TEXT("Case-insensitive substring filter on keys")),
+	});
+	Registry.RegisterHandler(TEXT("list_stringtable_keys"), &ListStringTableKeys, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StringTable asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("keyFilter"), EType::String, TEXT("Case-insensitive substring filter on keys")),
+	});
+	Registry.RegisterHandler(TEXT("get_stringtable_entry"), &GetStringTableEntry, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StringTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("key"), EType::String, TEXT("Entry key")),
+	});
+	Registry.RegisterHandler(TEXT("set_stringtable_entry"), &SetStringTableEntry, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StringTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("key"), EType::String, TEXT("Entry key")),
+		MCPParam::Optional(TEXT("sourceString"), EType::String, TEXT("Source string to write")),
+		MCPParam::Optional(TEXT("value"), EType::Any, TEXT("Source string to write, when sourceString is omitted")),
+	});
+	Registry.RegisterHandler(TEXT("remove_stringtable_entry"), &RemoveStringTableEntry, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StringTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("key"), EType::String, TEXT("Entry key")),
+	});
+	Registry.RegisterHandler(TEXT("import_stringtable"), &ImportStringTable, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StringTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("filePath"), EType::String, TEXT("CSV file to merge into the table")).Alias(TEXT("filename")).Alias(TEXT("csvPath")),
+	});
+	Registry.RegisterHandler(TEXT("import_stringtable_csv"), &ImportStringTableCsv, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StringTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("csvPath"), EType::String, TEXT("CSV file; a relative path resolves against the project directory")).Alias(TEXT("filePath")),
+		MCPParam::Optional(TEXT("expectedKeys"), EType::Array, TEXT("Keys the CSV must carry, checked before the asset is touched")).Items(EType::String),
+		MCPParam::Optional(TEXT("requireExactKeys"), EType::Boolean, TEXT("Also fail when the CSV carries keys expectedKeys does not list (default false)")),
+		MCPParam::Optional(TEXT("replaceExisting"), EType::Boolean, TEXT("Remove entries the CSV does not carry (default false)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the table (default true)")),
+	});
 
 	// v0.7.8 stubs - FTS5-backed asset search
 	Registry.RegisterHandler(TEXT("search_assets_fts"), &SearchAssetsFTS);
-	Registry.RegisterHandler(TEXT("reindex_assets_fts"), &ReindexAssetsFTS);
+	Registry.RegisterHandler(TEXT("reindex_assets_fts"), &ReindexAssetsFTS, {
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content path to rescan (default /Game)")),
+	});
 
 	// v0.7.19 #150 - AssetRegistry referencers
-	Registry.RegisterHandler(TEXT("get_asset_referencers"), &GetReferencers);
-	Registry.RegisterHandler(TEXT("get_asset_dependencies"), &GetDependencies);
-	Registry.RegisterHandler(TEXT("list_skeleton_bones"), &ListSkeletonBones);
+	Registry.RegisterHandler(TEXT("get_asset_referencers"), &GetReferencers, {
+		MCPParam::Optional(TEXT("packages"), EType::Array, TEXT("Package paths to look up")).Items(EType::String),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("One package path, used when packages is omitted")),
+	});
+	Registry.RegisterHandler(TEXT("get_asset_dependencies"), &GetDependencies, {
+		MCPParam::Optional(TEXT("packages"), EType::Array, TEXT("Package paths to look up")).Items(EType::String),
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("One package path, used when packages is omitted")),
+		MCPParam::Optional(TEXT("hard"), EType::Boolean, TEXT("Include hard dependencies (default true)")),
+		MCPParam::Optional(TEXT("soft"), EType::Boolean, TEXT("Include soft dependencies (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("list_skeleton_bones"), &ListSkeletonBones, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("SkeletalMesh or Skeleton asset path")).Alias(TEXT("path")),
+		MCPParam::Optional(TEXT("includeTransforms"), EType::Boolean, TEXT("Include rest-pose transforms (default true)")),
+	});
 	// #595: Chaos cloth read/write.
-	Registry.RegisterHandler(TEXT("read_cloth_data"), &ReadClothData);
-	Registry.RegisterHandler(TEXT("set_cloth_config"), &SetClothConfig);
-	Registry.RegisterHandler(TEXT("bind_cloth_to_section"), &BindClothToSection);
-	Registry.RegisterHandler(TEXT("unbind_cloth_from_section"), &UnbindClothFromSection);
-	Registry.RegisterHandler(TEXT("get_primary_asset_ids"), &GetPrimaryAssetIds);
+	Registry.RegisterHandler(TEXT("read_cloth_data"), &ReadClothData, {
+		MCPParam::Required(TEXT("skeletalMeshPath"), EType::String, TEXT("SkeletalMesh asset path")).Alias(TEXT("assetPath")),
+	});
+	Registry.RegisterHandler(TEXT("set_cloth_config"), &SetClothConfig, {
+		MCPParam::Required(TEXT("skeletalMeshPath"), EType::String, TEXT("SkeletalMesh asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Required(TEXT("properties"), EType::Object, TEXT("Config properties to set by reflection")),
+		MCPParam::Optional(TEXT("clothingAsset"), EType::String, TEXT("Only the clothing asset with this name")),
+		MCPParam::Optional(TEXT("configType"), EType::String, TEXT("Only configs whose class or key contains this")),
+	});
+	Registry.RegisterHandler(TEXT("bind_cloth_to_section"), &BindClothToSection, {
+		MCPParam::Required(TEXT("skeletalMeshPath"), EType::String, TEXT("SkeletalMesh asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Required(TEXT("lodIndex"), EType::Integer, TEXT("Mesh LOD")),
+		MCPParam::Required(TEXT("sectionIndex"), EType::Integer, TEXT("Render section to bind")),
+		MCPParam::Optional(TEXT("clothingAsset"), EType::String, TEXT("Clothing asset by name (optional when the mesh has one)")),
+		MCPParam::Optional(TEXT("assetLodIndex"), EType::Integer, TEXT("LOD inside the clothing asset (default: lodIndex, clamped)")),
+	});
+	Registry.RegisterHandler(TEXT("unbind_cloth_from_section"), &UnbindClothFromSection, {
+		MCPParam::Required(TEXT("skeletalMeshPath"), EType::String, TEXT("SkeletalMesh asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Required(TEXT("lodIndex"), EType::Integer, TEXT("Mesh LOD")),
+		MCPParam::Required(TEXT("sectionIndex"), EType::Integer, TEXT("Render section to unbind")),
+		MCPParam::Optional(TEXT("clothingAsset"), EType::String, TEXT("Refuse unless the section is bound to this clothing asset")),
+	});
+	Registry.RegisterHandler(TEXT("get_primary_asset_ids"), &GetPrimaryAssetIds, {
+		MCPParam::Optional(TEXT("type"), EType::String, TEXT("FPrimaryAssetType to list (omit for every type)")),
+		MCPParam::Optional(TEXT("maxResults"), EType::Number, TEXT("Most ids to return (default 1000)")),
+	});
 
 	// v1.0.0-rc.2 - #155 (asset gaps)
-	Registry.RegisterHandler(TEXT("set_sk_material_slots"), &SetSkeletalMeshMaterialSlots);
-	Registry.RegisterHandler(TEXT("diagnose_registry"), &DiagnoseRegistry);
+	Registry.RegisterHandler(TEXT("set_sk_material_slots"), &SetSkeletalMeshMaterialSlots, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("SkeletalMesh asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("slots"), EType::Array, TEXT("Slot assignments: [{slotName? | slotIndex?, materialPath}]")).Items(EType::Object),
+	});
+	Registry.RegisterHandler(TEXT("diagnose_registry"), &DiagnoseRegistry, {
+		MCPParam::Required(TEXT("path"), EType::String, TEXT("Content path to diagnose")),
+		MCPParam::Optional(TEXT("recursive"), EType::Boolean, TEXT("Include subfolders (default true)")),
+		MCPParam::Optional(TEXT("reconcile"), EType::Boolean, TEXT("Force a synchronous rescan first, which evicts pending-kill ghosts")),
+	});
 
 	// v1.0.0-rc.3 - #177, #192, #193
-	Registry.RegisterHandler(TEXT("get_mesh_bounds"), &GetMeshBounds);
-	Registry.RegisterHandler(TEXT("get_mesh_info"), &GetMeshInfo);
-	Registry.RegisterHandler(TEXT("read_import_sources"), &ReadImportSources);
-	Registry.RegisterHandler(TEXT("get_mesh_collision"), &GetMeshCollision);
-	Registry.RegisterHandler(TEXT("set_mesh_nav"), &SetMeshNav);
-	Registry.RegisterHandler(TEXT("move_folder"), &MoveFolder);
+	Registry.RegisterHandler(TEXT("get_mesh_bounds"), &GetMeshBounds, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")),
+	});
+	Registry.RegisterHandler(TEXT("get_mesh_info"), &GetMeshInfo, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh or SkeletalMesh asset path")),
+	});
+	Registry.RegisterHandler(TEXT("read_import_sources"), &ReadImportSources, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("Imported asset path")).Alias(TEXT("path")),
+	});
+	Registry.RegisterHandler(TEXT("get_mesh_collision"), &GetMeshCollision, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh asset path")),
+	});
+	Registry.RegisterHandler(TEXT("set_mesh_nav"), &SetMeshNav, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("StaticMesh asset path")),
+		MCPParam::Optional(TEXT("bHasNavigationData"), EType::Boolean, TEXT("Whether the mesh generates navigation data")),
+		MCPParam::Optional(TEXT("clearNavCollision"), EType::Boolean, TEXT("Remove the mesh's NavCollision")),
+	});
+	Registry.RegisterHandler(TEXT("move_folder"), &MoveFolder, {
+		MCPParam::Required(TEXT("sourcePath"), EType::String, TEXT("Content folder to move")),
+		MCPParam::Required(TEXT("destinationPath"), EType::String, TEXT("Content folder to move it to")),
+	});
 	Registry.RegisterHandler(TEXT("create_folder"), &CreateFolder);
-	Registry.RegisterHandler(TEXT("delete_folder"), &DeleteFolder);
+	Registry.RegisterHandler(TEXT("delete_folder"), &DeleteFolder, {
+		MCPParam::Optional(TEXT("path"), EType::String, TEXT("Content folder to delete")),
+		MCPParam::Optional(TEXT("paths"), EType::Array, TEXT("Content folders to delete")).Items(EType::String),
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Also delete the assets inside (default false: only empty folders)")),
+	});
 	Registry.RegisterHandler(TEXT("migrate"), &MigrateAssets);
 
 	// #686 - UserDefinedEnum authoring
 	Registry.RegisterHandler(TEXT("create_user_defined_enum"), &CreateUserDefinedEnum);
-	Registry.RegisterHandler(TEXT("list_enum_values"), &ListEnumValues);
-	Registry.RegisterHandler(TEXT("edit_user_defined_enum"), &EditUserDefinedEnum);
+	Registry.RegisterHandler(TEXT("list_enum_values"), &ListEnumValues, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("UEnum or UserDefinedEnum asset path")).Alias(TEXT("path")),
+	});
+	Registry.RegisterHandler(TEXT("edit_user_defined_enum"), &EditUserDefinedEnum, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("UserDefinedEnum asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("op"), EType::String, TEXT("add_value | rename_value | remove_value")),
+		MCPParam::Optional(TEXT("displayName"), EType::String, TEXT("Display text for the enumerator (add_value, rename_value)")),
+		MCPParam::Optional(TEXT("name"), EType::String, TEXT("Enumerator to act on by short or display name; add_value uses it as the display name when displayName is omitted")),
+		MCPParam::Optional(TEXT("index"), EType::Number, TEXT("Enumerator index for rename_value and remove_value")),
+	});
 
 	// #735: UserDefinedStruct authoring
 	Registry.RegisterHandler(TEXT("create_user_defined_struct"), &CreateUserDefinedStruct);
-	Registry.RegisterHandler(TEXT("list_struct_fields"), &ListStructFields);
+	Registry.RegisterHandler(TEXT("list_struct_fields"), &ListStructFields, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("UserDefinedStruct asset path")).Alias(TEXT("path")),
+	});
 	Registry.RegisterHandler(TEXT("edit_user_defined_struct"), &EditUserDefinedStruct);
 }
 
@@ -655,7 +1135,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::SearchAssets(const TSharedPtr<FJsonObject
 TSharedPtr<FJsonValue> FAssetHandlers::ReadAsset(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	// The LoadAsset-then-LoadObject pair this action has always used now lives
 	// in MCPLoadAssetObject, so the type-specific readers resolve a path the
@@ -1634,15 +2114,20 @@ static TSharedPtr<FJsonValue> ReconcileOrphanExternals(const FString& SourceAsse
 
 TSharedPtr<FJsonValue> FAssetHandlers::RenameAsset(const TSharedPtr<FJsonObject>& Params)
 {
-	FString SourcePath, DestPath;
-	if (TryGetStringParam(Params, TEXT("sourcePath"), SourcePath) && TryGetStringParam(Params, TEXT("destinationPath"), DestPath))
+	// Every parameter is read before anything can fail (#1057).
+	FString SourcePath, DestPath, AssetPath, NewName;
+	const bool bHasSource = TryGetStringParam(Params, TEXT("sourcePath"), SourcePath);
+	const bool bHasDest = TryGetStringParam(Params, TEXT("destinationPath"), DestPath);
+	const bool bHasAssetPath = TryGetStringParam(Params, TEXT("assetPath"), AssetPath);
+	const bool bHasNewName = TryGetStringParam(Params, TEXT("newName"), NewName);
+	const bool bForce = OptionalBool(Params, TEXT("force"), false);
+	if (bHasSource && bHasDest)
 	{
 		// Use sourcePath/destinationPath directly
 	}
 	else
 	{
-		FString AssetPath, NewName;
-		if (TryGetStringParam(Params, TEXT("assetPath"), AssetPath) && TryGetStringParam(Params, TEXT("newName"), NewName))
+		if (bHasAssetPath && bHasNewName)
 		{
 			SourcePath = AssetPath;
 			FString PackageName, AssetName;
@@ -1707,7 +2192,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::RenameAsset(const TSharedPtr<FJsonObject>
 	// orphans at the destination left by a partial forward rename.
 	if (IsWorldAsset(SourcePath))
 	{
-		const bool bForce = OptionalBool(Params, TEXT("force"), false);
 		return RenameWorldWithExternals(SourcePath, DestPath, bForce);
 	}
 
@@ -1957,11 +2441,10 @@ namespace
 TSharedPtr<FJsonValue> FAssetHandlers::DeleteAsset(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const bool bForce = OptionalBool(Params, TEXT("force"), false);
 
 	if (MCPIsProtectedAssetPath(AssetPath)) return MCPProtectedPathError(AssetPath);
-
-	const bool bForce = OptionalBool(Params, TEXT("force"), false);
 
 	// Idempotent: if the asset doesn't exist, treat as already-deleted.
 	if (!UEditorAssetLibrary::DoesAssetExist(AssetPath))
@@ -2029,12 +2512,12 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAsset(const TSharedPtr<FJsonObject>
 TSharedPtr<FJsonValue> FAssetHandlers::DeleteAssetBatch(const TSharedPtr<FJsonObject>& Params)
 {
 	const TArray<TSharedPtr<FJsonValue>>* PathsArr = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("assetPaths"), PathsArr) && !TryGetArrayParam(Params, TEXT("paths"), PathsArr))
+	const bool bHasPaths = TryGetArrayParam(Params, TEXT("assetPaths"), PathsArr);
+	const bool bForce = OptionalBool(Params, TEXT("force"), false);
+	if (!bHasPaths || !PathsArr)
 	{
 		return MCPError(TEXT("Missing 'assetPaths' array parameter"));
 	}
-
-	const bool bForce = OptionalBool(Params, TEXT("force"), false);
 
 	TArray<TSharedPtr<FJsonValue>> PerPath;
 	int32 Deleted = 0;
@@ -2205,8 +2688,7 @@ static TSharedPtr<FJsonValue> MCPRefuseSplitPackages(const TArray<FAssetRenameDa
 TSharedPtr<FJsonValue> FAssetHandlers::BulkRename(const TSharedPtr<FJsonObject>& Params)
 {
 	const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("renames"), Items) &&
-		!TryGetArrayParam(Params, TEXT("items"), Items))
+	if (!TryGetArrayParam(Params, TEXT("renames"), Items) || !Items)
 	{
 		return MCPError(TEXT("Missing 'renames' array parameter"));
 	}
@@ -2462,7 +2944,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateDataAsset(const TSharedPtr<FJsonObj
 	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
 	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game"));
 	FString ClassName;
-	if (auto Err = RequireStringAlt(Params, TEXT("className"), TEXT("class"), ClassName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("className"), ClassName)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
+	const bool bHasProps = TryGetObjectParam(Params, TEXT("properties"), PropsObj);
 
 	// #823: shared resolution, so the prefixed C++ spelling ("UMyConfig",
 	// "/Script/MyGame.UMyConfig") resolves to the class UE registered as
@@ -2471,7 +2957,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateDataAsset(const TSharedPtr<FJsonObj
 	if (auto Err = MCPCheckClassUsable(ClassName, DataClass, UDataAsset::StaticClass())) return Err;
 
 	const FString FullPath = FString::Printf(TEXT("%s/%s.%s"), *PackagePath, *Name, *Name);
-	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
 	auto Created = MCPCreateAssetIdempotent<UObject>(Name, PackagePath, OnConflict, TEXT("DataAsset"), DataClass, nullptr);
 	if (Created.EarlyReturn) return Created.EarlyReturn;
@@ -2479,10 +2964,9 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateDataAsset(const TSharedPtr<FJsonObj
 
 	// Optional properties object - use recursive JSON-to-property setter so that
 	// TArray<FStruct> with nested UObject refs, FGameplayTag, etc. all work (#196, #199).
-	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
 	int32 SetCount = 0;
 	TArray<FString> PropErrors;
-	if (TryGetObjectParam(Params, TEXT("properties"), PropsObj) && PropsObj && (*PropsObj).IsValid())
+	if (bHasProps && PropsObj && (*PropsObj).IsValid())
 	{
 		for (const auto& Pair : (*PropsObj)->Values)
 		{
@@ -2540,7 +3024,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateAssetByClass(const TSharedPtr<FJson
 	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
 	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game"));
 	FString ClassName;
-	if (auto Err = RequireStringAlt(Params, TEXT("className"), TEXT("class"), ClassName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("className"), ClassName)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
+	const bool bHasProps = TryGetObjectParam(Params, TEXT("properties"), PropsObj);
 
 	// #823: shared resolution - same as create_data_asset, prefix tolerant.
 	UClass* AssetClass = MCPResolveClass(ClassName);
@@ -2553,17 +3041,15 @@ TSharedPtr<FJsonValue> FAssetHandlers::CreateAssetByClass(const TSharedPtr<FJson
 	}
 
 	const FString FullPath = FString::Printf(TEXT("%s/%s.%s"), *PackagePath, *Name, *Name);
-	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
 	auto Created = MCPCreateAssetIdempotent<UObject>(Name, PackagePath, OnConflict, AssetClass->GetName(), AssetClass, nullptr);
 	if (Created.EarlyReturn) return Created.EarlyReturn;
 	UObject* NewAsset = Created.Asset;
 
 	// Optional properties (recursive JSON-to-property setter), mirroring create_data_asset.
-	const TSharedPtr<FJsonObject>* PropsObj = nullptr;
 	int32 SetCount = 0;
 	TArray<FString> PropErrors;
-	if (TryGetObjectParam(Params, TEXT("properties"), PropsObj) && PropsObj && (*PropsObj).IsValid())
+	if (bHasProps && PropsObj && (*PropsObj).IsValid())
 	{
 		for (const auto& Pair : (*PropsObj)->Values)
 		{
@@ -2640,13 +3126,14 @@ namespace
 TSharedPtr<FJsonValue> FAssetHandlers::SaveAsset(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if ((TryGetStringParam(Params, TEXT("path"), AssetPath) || TryGetStringParam(Params, TEXT("assetPath"), AssetPath)) && !AssetPath.IsEmpty() && AssetPath != TEXT("all"))
+	const bool bHasAssetPath = TryGetStringParam(Params, TEXT("assetPath"), AssetPath);
+	// #768: force=true saves regardless of the dirty flag. Several reports
+	// hit edits that never marked their package dirty (OFPA level actors,
+	// property writes through some subsystems), so a dirty-only save
+	// skipped them and still returned success.
+	const bool bForce = OptionalBool(Params, TEXT("force"), false);
+	if (bHasAssetPath && !AssetPath.IsEmpty() && AssetPath != TEXT("all"))
 	{
-		// #768: force=true saves regardless of the dirty flag. Several reports
-		// hit edits that never marked their package dirty (OFPA level actors,
-		// property writes through some subsystems), so a dirty-only save
-		// skipped them and still returned success.
-		const bool bForce = OptionalBool(Params, TEXT("force"), false);
 		auto Result = MCPSuccess();
 		Result->SetStringField(TEXT("path"), AssetPath);
 		Result->SetBoolField(TEXT("force"), bForce);
@@ -2656,7 +3143,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAsset(const TSharedPtr<FJsonObject>& 
 		// every package is clean and a save that wrote nothing is
 		// indistinguishable from one that flushed an edit.
 		UObject* PreSaveAsset = MCPLoadAssetObject(AssetPath);
-		UPackage* PreSavePackage = PreSaveAsset ? PreSaveAsset->GetOutermost() : nullptr;
+		if (!PreSaveAsset)
+		{
+			return MCPAssetNotFoundError(AssetPath);
+		}
+		UPackage* PreSavePackage = PreSaveAsset->GetOutermost();
 		const bool bWasDirty = PreSavePackage && PreSavePackage->IsDirty();
 		Result->SetBoolField(TEXT("wasDirty"), bWasDirty);
 
@@ -2741,7 +3232,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::SaveAsset(const TSharedPtr<FJsonObject>& 
 		// No assetPath: this is the save-everything branch. 'force' has no
 		// meaning here (SaveDirectory is dirty-only), so say so rather than
 		// accepting a flag that silently does nothing.
-		if (OptionalBool(Params, TEXT("force"), false))
+		if (bForce)
 		{
 			return MCPError(TEXT("'force' requires an assetPath - it forces one package to disk. To flush everything, use asset(save_all_dirty), which reports exactly which packages were written."));
 		}
@@ -2891,7 +3382,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::ListTextures(const TSharedPtr<FJsonObject
 TSharedPtr<FJsonValue> FAssetHandlers::ReloadPackage(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	TSharedPtr<FJsonValue> LoadError;
 	UObject* Asset = MCPRequireAssetObject(AssetPath, LoadError);
@@ -2963,17 +3454,19 @@ TSharedPtr<FJsonValue> FAssetHandlers::GetReferencers(const TSharedPtr<FJsonObje
 {
 	TArray<FString> Packages;
 	const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-	if (TryGetArrayParam(Params, TEXT("packages"), Arr) && Arr)
+	const bool bHasArray = TryGetArrayParam(Params, TEXT("packages"), Arr) && Arr;
+	FString Single;
+	const bool bHasSingle = TryGetStringParam(Params, TEXT("packagePath"), Single);
+	if (bHasArray)
 	{
 		for (const TSharedPtr<FJsonValue>& V : *Arr)
 		{
 			FString S; if (V.IsValid() && V->TryGetString(S) && !S.IsEmpty()) Packages.Add(S);
 		}
 	}
-	else
+	else if (bHasSingle)
 	{
-		FString Single;
-		if (TryGetStringParam(Params, TEXT("packagePath"), Single)) Packages.Add(Single);
+		Packages.Add(Single);
 	}
 	if (Packages.Num() == 0) return MCPError(TEXT("Supply 'packages' (array) or 'packagePath'"));
 
@@ -3007,22 +3500,23 @@ TSharedPtr<FJsonValue> FAssetHandlers::GetDependencies(const TSharedPtr<FJsonObj
 {
 	TArray<FString> Packages;
 	const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-	if (TryGetArrayParam(Params, TEXT("packages"), Arr) && Arr)
+	const bool bHasArray = TryGetArrayParam(Params, TEXT("packages"), Arr) && Arr;
+	FString Single;
+	const bool bHasSingle = TryGetStringParam(Params, TEXT("packagePath"), Single);
+	const bool bHard = OptionalBool(Params, TEXT("hard"), true);
+	const bool bSoft = OptionalBool(Params, TEXT("soft"), true);
+	if (bHasArray)
 	{
 		for (const TSharedPtr<FJsonValue>& V : *Arr)
 		{
 			FString S; if (V.IsValid() && V->TryGetString(S) && !S.IsEmpty()) Packages.Add(S);
 		}
 	}
-	else
+	else if (bHasSingle)
 	{
-		FString Single;
-		if (TryGetStringParam(Params, TEXT("packagePath"), Single)) Packages.Add(Single);
+		Packages.Add(Single);
 	}
 	if (Packages.Num() == 0) return MCPError(TEXT("Supply 'packages' (array) or 'packagePath'"));
-
-	const bool bHard = OptionalBool(Params, TEXT("hard"), true);
-	const bool bSoft = OptionalBool(Params, TEXT("soft"), true);
 
 	using namespace UE::AssetRegistry;
 	EDependencyQuery QueryFlags = EDependencyQuery::NoRequirements;
@@ -3056,11 +3550,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::GetDependencies(const TSharedPtr<FJsonObj
 // Python. Each entry carries the id, type, name, and resolved asset path.
 TSharedPtr<FJsonValue> FAssetHandlers::GetPrimaryAssetIds(const TSharedPtr<FJsonObject>& Params)
 {
-	UAssetManager* AM = UAssetManager::GetIfInitialized();
-	if (!AM) return MCPError(TEXT("AssetManager is not initialized for this project"));
-
 	const FString TypeFilter = OptionalString(Params, TEXT("type"));
 	const int32 MaxResults = OptionalInt(Params, TEXT("maxResults"), 1000);
+
+	UAssetManager* AM = UAssetManager::GetIfInitialized();
+	if (!AM) return MCPError(TEXT("AssetManager is not initialized for this project"));
 
 	TArray<FPrimaryAssetType> Types;
 	if (!TypeFilter.IsEmpty())
@@ -3420,12 +3914,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteFolder(const TSharedPtr<FJsonObject
 	{
 		Paths.AddUnique(SinglePath);
 	}
+	const bool bForce = OptionalBool(Params, TEXT("force"), false);
 	if (Paths.Num() == 0)
 	{
 		return MCPError(TEXT("Provide either 'path' or 'paths' (array of /Game/... directories)."));
 	}
-
-	const bool bForce = OptionalBool(Params, TEXT("force"), false);
 
 	TArray<TSharedPtr<FJsonValue>> Entries;
 	int32 Deleted = 0, Absent = 0, Failed = 0;
@@ -3599,7 +4092,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteFolder(const TSharedPtr<FJsonObject
 TSharedPtr<FJsonValue> FAssetHandlers::HealthCheck(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	const FString PackageName = FPackageName::ObjectPathToPackageName(AssetPath);
 
@@ -3650,7 +4143,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::HealthCheck(const TSharedPtr<FJsonObject>
 TSharedPtr<FJsonValue> FAssetHandlers::ForceReload(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	const bool bDiscardUnsaved = OptionalBool(Params, TEXT("discardUnsaved"), false);
 
 	const FMCPAssetPathForms Forms = MCPAssetPathForms(AssetPath);
 	const FString PackageName = Forms.PackagePath;
@@ -3687,7 +4181,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::ForceReload(const TSharedPtr<FJsonObject>
 	UObject* PreviousObject = StaticFindObject(UObject::StaticClass(), nullptr, *Forms.ObjectPath);
 	const TWeakObjectPtr<UObject> PreviousWeak(PreviousObject);
 	const bool bWasDirty = ExistingPkg != nullptr && ExistingPkg->IsDirty();
-	const bool bDiscardUnsaved = OptionalBool(Params, TEXT("discardUnsaved"), false);
 	if (bWasDirty && !bDiscardUnsaved)
 	{
 		return MCPError(FString::Printf(
@@ -3795,18 +4288,17 @@ TSharedPtr<FJsonValue> FAssetHandlers::ForceReload(const TSharedPtr<FJsonObject>
 TSharedPtr<FJsonValue> FAssetHandlers::SetAssetProperty(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString PropertyName;
 	if (auto Err = RequireString(Params, TEXT("propertyName"), PropertyName)) return Err;
 	const TSharedPtr<FJsonValue> ValueField = TryGetParam(Params, TEXT("value"));
+	// #931: default to persisting. A write that only marked the package dirty
+	// was the whole defect, so opting out has to be deliberate.
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
 	if (!ValueField.IsValid())
 	{
 		return MCPError(TEXT("Missing 'value' parameter"));
 	}
-
-	// #931: default to persisting. A write that only marked the package dirty
-	// was the whole defect, so opting out has to be deliberate.
-	const bool bSave = OptionalBool(Params, TEXT("save"), true);
 
 	TSharedPtr<FJsonValue> LoadError;
 	UObject* Asset = MCPRequireAssetObject(AssetPath, LoadError);
@@ -3891,12 +4383,14 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetAssetProperty(const TSharedPtr<FJsonOb
 TSharedPtr<FJsonValue> FAssetHandlers::AppendAssetArrayElements(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString PropertyName;
 	if (auto Err = RequireString(Params, TEXT("propertyName"), PropertyName)) return Err;
 
 	const TArray<TSharedPtr<FJsonValue>>* Elements = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("elements"), Elements) || !Elements)
+	const bool bHasElements = TryGetArrayParam(Params, TEXT("elements"), Elements);
+	const bool bSave = OptionalBool(Params, TEXT("save"), true);
+	if (!bHasElements || !Elements)
 	{
 		return MCPError(TEXT("Missing 'elements' array parameter"));
 	}
@@ -3904,8 +4398,6 @@ TSharedPtr<FJsonValue> FAssetHandlers::AppendAssetArrayElements(const TSharedPtr
 	{
 		return MCPError(TEXT("'elements' must contain at least one value"));
 	}
-
-	const bool bSave = OptionalBool(Params, TEXT("save"), true);
 
 	TSharedPtr<FJsonValue> LoadError;
 	UObject* Asset = MCPRequireAssetObject(AssetPath, LoadError);

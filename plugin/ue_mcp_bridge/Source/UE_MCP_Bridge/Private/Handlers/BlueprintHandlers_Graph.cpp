@@ -78,12 +78,16 @@ namespace
 TSharedPtr<FJsonValue> FBlueprintHandlers::AddNode(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
 
 	FString NodeClass;
 	if (auto Err = RequireString(Params, TEXT("nodeClass"), NodeClass)) return Err;
+
+	// Get optional node params. Read before the load can fail (#1057).
+	const TSharedPtr<FJsonObject>* NodeParams = nullptr;
+	TryGetObjectParam(Params, TEXT("nodeParams"), NodeParams);
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -98,10 +102,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddNode(const TSharedPtr<FJsonObject>
 	{
 		return MCPError(FString::Printf(TEXT("Graph not found: %s"), *GraphName));
 	}
-
-	// Get optional node params
-	const TSharedPtr<FJsonObject>* NodeParams = nullptr;
-	TryGetObjectParam(Params, TEXT("nodeParams"), NodeParams);
 
 	// Resolve short aliases to full class names
 	FString ResolvedClass = NodeClass;
@@ -765,7 +765,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddNode(const TSharedPtr<FJsonObject>
 TSharedPtr<FJsonValue> FBlueprintHandlers::ReadBlueprintGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
 	const bool bIncludePins = OptionalBool(Params, TEXT("includePins"), true);
@@ -919,21 +919,21 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReadBlueprintGraph(const TSharedPtr<F
 TSharedPtr<FJsonValue> FBlueprintHandlers::ConnectPins(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString GraphName = ReadGraphNameOrSelector(Params, TEXT("EventGraph"));
 
 	FString SourceNodeId;
-	if (auto Err = RequireStringAlt(Params, TEXT("sourceNodeId"), TEXT("sourceNode"), SourceNodeId)) return Err;
+	if (auto Err = RequireString(Params, TEXT("sourceNodeId"), SourceNodeId)) return Err;
 
 	FString SourcePinName;
-	if (auto Err = RequireStringAlt(Params, TEXT("sourcePinName"), TEXT("sourcePin"), SourcePinName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("sourcePin"), SourcePinName)) return Err;
 
 	FString TargetNodeId;
-	if (auto Err = RequireStringAlt(Params, TEXT("targetNodeId"), TEXT("targetNode"), TargetNodeId)) return Err;
+	if (auto Err = RequireString(Params, TEXT("targetNodeId"), TargetNodeId)) return Err;
 
 	FString TargetPinName;
-	if (auto Err = RequireStringAlt(Params, TEXT("targetPinName"), TEXT("targetPin"), TargetPinName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("targetPin"), TargetPinName)) return Err;
 
 	bool bBreakExistingSource = false;
 	bool bBreakExistingTarget = false;
@@ -1214,12 +1214,12 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ConnectPins(const TSharedPtr<FJsonObj
 TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString GraphName = ReadGraphNameOrSelector(Params, TEXT("EventGraph"));
 
 	FString NodeId;
-	if (auto Err = RequireStringAlt(Params, TEXT("nodeId"), TEXT("nodeName"), NodeId)) return Err;
+	if (auto Err = RequireString(Params, TEXT("nodeId"), NodeId)) return Err;
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -1581,12 +1581,12 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteNode(const TSharedPtr<FJsonObje
 TSharedPtr<FJsonValue> FBlueprintHandlers::RefreshNode(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString GraphName = ReadGraphNameOrSelector(Params, TEXT("EventGraph"));
 
 	FString NodeId;
-	if (auto Err = RequireStringAlt(Params, TEXT("nodeId"), TEXT("nodeName"), NodeId)) return Err;
+	if (auto Err = RequireString(Params, TEXT("nodeId"), NodeId)) return Err;
 
 	const bool bBreakOrphanedPins = OptionalBool(Params, TEXT("breakOrphanedPins"), false);
 
@@ -1726,12 +1726,12 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RefreshNode(const TSharedPtr<FJsonObj
 TSharedPtr<FJsonValue> FBlueprintHandlers::DisconnectPins(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString GraphName = ReadGraphNameOrSelector(Params, TEXT("EventGraph"));
 
 	FString NodeId;
-	if (auto Err = RequireStringAlt(Params, TEXT("nodeId"), TEXT("nodeName"), NodeId)) return Err;
+	if (auto Err = RequireString(Params, TEXT("nodeId"), NodeId)) return Err;
 
 	FString PinName;
 	if (auto Err = RequireString(Params, TEXT("pinName"), PinName)) return Err;
@@ -1857,18 +1857,18 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DisconnectPins(const TSharedPtr<FJson
 TSharedPtr<FJsonValue> FBlueprintHandlers::SetNodeProperty(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
 
 	FString NodeId;
-	if (auto Err = RequireStringAlt(Params, TEXT("nodeId"), TEXT("nodeName"), NodeId)) return Err;
+	if (auto Err = RequireString(Params, TEXT("nodeId"), NodeId)) return Err;
 
 	FString PinName;
-	if (auto Err = RequireStringAlt(Params, TEXT("pinName"), TEXT("propertyName"), PinName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("propertyName"), PinName)) return Err;
 
 	FString DefaultValue;
-	if (auto Err = RequireStringAlt(Params, TEXT("defaultValue"), TEXT("value"), DefaultValue)) return Err;
+	if (auto Err = RequireString(Params, TEXT("value"), DefaultValue)) return Err;
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -2210,13 +2210,13 @@ UActorComponent* ResolveComponentTemplate(
 TSharedPtr<FJsonValue> FBlueprintHandlers::ReadNodeProperty(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
 	FString NodeId;
-	if (auto Err = RequireStringAlt(Params, TEXT("nodeId"), TEXT("nodeName"), NodeId)) return Err;
+	if (auto Err = RequireString(Params, TEXT("nodeId"), NodeId)) return Err;
 	FString PinOrProp;
-	if (auto Err = RequireStringAlt(Params, TEXT("propertyName"), TEXT("pinName"), PinOrProp)) return Err;
+	if (auto Err = RequireString(Params, TEXT("propertyName"), PinOrProp)) return Err;
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return MCPError(TEXT("Blueprint not found"));
@@ -2277,9 +2277,12 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReadNodeProperty(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
+	// Read before the load can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* IdsArrayPtr = nullptr;
+	TryGetArrayParam(Params, TEXT("nodeIds"), IdsArrayPtr);
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -2296,8 +2299,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJson
 	// Collect nodes to export. If nodeIds is omitted/empty, export all nodes
 	// in the graph (whole-subgraph round-trip).
 	TArray<UEdGraphNode*> SelectedNodes;
-	const TArray<TSharedPtr<FJsonValue>>* IdsArrayPtr = nullptr;
-	if (Params.IsValid() && TryGetArrayParam(Params, TEXT("nodeIds"), IdsArrayPtr) && IdsArrayPtr && IdsArrayPtr->Num() > 0)
+	if (IdsArrayPtr && IdsArrayPtr->Num() > 0)
 	{
 		for (const TSharedPtr<FJsonValue>& Val : *IdsArrayPtr)
 		{
@@ -2456,16 +2458,20 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportNodesT3D(const TSharedPtr<FJson
 TSharedPtr<FJsonValue> FBlueprintHandlers::ImportNodesT3D(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
 
 	FString T3D;
-	if (auto Err = RequireStringAlt(Params, TEXT("t3d"), TEXT("text"), T3D)) return Err;
+	if (auto Err = RequireString(Params, TEXT("t3d"), T3D)) return Err;
 	if (T3D.IsEmpty())
 	{
 		return MCPError(TEXT("t3d text is empty"));
 	}
+	// Re-center anchor, read before the load can fail (#1057).
+	double AnchorX = 0.0, AnchorY = 0.0;
+	const bool bHasAnchorX = TryGetNumberParam(Params, TEXT("posX"), AnchorX);
+	const bool bHasAnchorY = TryGetNumberParam(Params, TEXT("posY"), AnchorY);
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -2494,13 +2500,9 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ImportNodesT3D(const TSharedPtr<FJson
 
 	// Re-center pasted nodes around an explicit (posX, posY) anchor when given,
 	// otherwise keep their exported positions. Mirrors PasteNodesHere.
-	const bool bRecenter = Params.IsValid() && HasParam(Params, TEXT("posX")) && HasParam(Params, TEXT("posY"));
-	double AnchorX = 0.0, AnchorY = 0.0;
+	const bool bRecenter = bHasAnchorX && bHasAnchorY;
 	if (bRecenter)
 	{
-		TryGetNumberParam(Params, TEXT("posX"), AnchorX);
-		TryGetNumberParam(Params, TEXT("posY"), AnchorY);
-
 		double AvgX = 0.0, AvgY = 0.0;
 		for (UEdGraphNode* Node : PastedNodes)
 		{
@@ -2695,12 +2697,12 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CompileBlueprints(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FBlueprintHandlers::CleanupGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Read before the load can fail (#1057).
+	const FString GraphName = OptionalString(Params, TEXT("graphName"));
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
-
-	const FString GraphName = OptionalString(Params, TEXT("graphName"));
 
 	TArray<UEdGraph*> Graphs;
 	if (!GraphName.IsEmpty())
@@ -2806,7 +2808,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CleanupGraph(const TSharedPtr<FJsonOb
 TSharedPtr<FJsonValue> FBlueprintHandlers::ConnectPinsBatch(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
 
 	const TArray<TSharedPtr<FJsonValue>>* ConnectionsArray = nullptr;
@@ -2921,10 +2923,10 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ConnectPinsBatch(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FBlueprintHandlers::SetNodePosition(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
 	FString NodeId;
-	if (auto Err = RequireStringAlt(Params, TEXT("nodeId"), TEXT("nodeName"), NodeId)) return Err;
+	if (auto Err = RequireString(Params, TEXT("nodeId"), NodeId)) return Err;
 
 	int32 PosX = OptionalInt(Params, TEXT("posX"), 0);
 	int32 PosY = OptionalInt(Params, TEXT("posY"), 0);
@@ -2990,10 +2992,13 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetNodePosition(const TSharedPtr<FJso
 TSharedPtr<FJsonValue> FBlueprintHandlers::AutoLayoutGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
 	int32 ColumnGap = OptionalInt(Params, TEXT("columnGap"), 360);
 	int32 RowGap = OptionalInt(Params, TEXT("rowGap"), 200);
+	// Read before the load can fail (#1057); used by the capture step below.
+	const int32 PositionsLimit = FMath::Max(0, OptionalInt(Params, TEXT("previousPositionsLimit"), 200));
+	const bool bForcePositions = OptionalBool(Params, TEXT("capturePreviousPositions"), false);
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
@@ -3059,8 +3064,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AutoLayoutGraph(const TSharedPtr<FJso
 	// response. `capturePreviousPositions` forces it on, `previousPositionsLimit`
 	// raises the cap, and the result always says which of the two happened.
 	const int32 NodeCount = Order.Num();
-	const int32 PositionsLimit = FMath::Max(0, OptionalInt(Params, TEXT("previousPositionsLimit"), 200));
-	const bool bForcePositions = OptionalBool(Params, TEXT("capturePreviousPositions"), false);
 	const bool bCapturePositions = bForcePositions || NodeCount <= PositionsLimit;
 
 	int32 Repositioned = 0;

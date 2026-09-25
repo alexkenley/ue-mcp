@@ -459,6 +459,35 @@ TSharedPtr<FJsonValue> FEditorHandlers::PieControl(const TSharedPtr<FJsonObject>
 
 TSharedPtr<FJsonValue> FEditorHandlers::PieGetRuntimeValue(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail (#1057).
+	//
+	// This action shipped before #983 with 'actorPath' as a label|name|path
+	// token, not a strict path, and with 'actorLabel' as its fallback spelling.
+	// The shared resolver treats a path as precise, so the loose reading is
+	// kept here explicitly rather than silently dropped: a caller who has been
+	// passing a label in 'actorPath' for two releases must not start getting
+	// "no actor at that path".
+	FString ActorPath;
+	const bool bHasActorPath = TryGetStringParam(Params, TEXT("actorPath"), ActorPath);
+	FString ActorLabelToken;
+	const bool bHasActorLabel = TryGetStringParam(Params, TEXT("actorLabel"), ActorLabelToken);
+	if (!bHasActorPath && bHasActorLabel)
+	{
+		// Also accept actorLabel as a fallback
+		ActorPath = ActorLabelToken;
+	}
+
+	FString PropertyName;
+	TSharedPtr<FJsonValue> PropertyErr = RequireString(Params, TEXT("propertyName"), PropertyName);
+
+	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("pie"));
+	int32 PIEInstance = INDEX_NONE;
+	double RawPIEInstance = 0.0;
+	if (TryGetNumberParam(Params, TEXT("pieInstance"), RawPIEInstance))
+	{
+		PIEInstance = FMath::RoundToInt(RawPIEInstance);
+	}
+
 	if (!GEditor)
 	{
 		return MCPError(TEXT("Editor not available"));
@@ -470,30 +499,17 @@ TSharedPtr<FJsonValue> FEditorHandlers::PieGetRuntimeValue(const TSharedPtr<FJso
 		return MCPError(TEXT("PIE is not active. Start a PIE session first."));
 	}
 
-	// This action shipped before #983 with 'actorPath' as a label|name|path
-	// token, not a strict path, and with 'actorLabel' as its fallback spelling.
-	// The shared resolver treats a path as precise, so the loose reading is
-	// kept here explicitly rather than silently dropped: a caller who has been
-	// passing a label in 'actorPath' for two releases must not start getting
-	// "no actor at that path".
-	FString ActorPath;
-	if (!TryGetStringParam(Params, TEXT("actorPath"), ActorPath))
+	if (!bHasActorPath && !bHasActorLabel)
 	{
-		// Also accept actorLabel as a fallback
-		if (!TryGetStringParam(Params, TEXT("actorLabel"), ActorPath))
-		{
-			return MCPError(TEXT("Missing 'actorPath' parameter"));
-		}
+		return MCPError(TEXT("Missing 'actorPath' parameter"));
 	}
-
-	FString PropertyName;
-	if (auto Err = RequireString(Params, TEXT("propertyName"), PropertyName)) return Err;
+	if (PropertyErr) return PropertyErr;
 
 	// Search for the actor in the PIE world (accept label, name, or full path).
 	// #778: honour pieInstance so a client world is reachable.
 	// #983: through the shared resolver, so actorPath wins over actorLabel and
 	// a duplicated label is refused rather than read off one of the copies.
-	UWorld* PIEWorld = ResolveWorldFromParams(Params, TEXT("pie"));
+	UWorld* PIEWorld = ResolveWorldScope(WorldScope, PIEInstance);
 	FMCPActorSelector PieSel;
 	PieSel.Match = EMCPActorMatch::LabelNameOrPath;
 	PieSel.WorldLabel = TEXT("PIE");
@@ -985,12 +1001,23 @@ namespace
 
 TSharedPtr<FJsonValue> FEditorHandlers::GetRuntimeValues(const TSharedPtr<FJsonObject>& Params)
 {
-	if (!GEditor) return MCPError(TEXT("Editor not available"));
-
+	// Every parameter is read before anything can fail (#1057).
 	const FString ClassFilter = OptionalString(Params, TEXT("classFilter"));
 	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
 	const TArray<TSharedPtr<FJsonValue>>* PathsArr = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("paths"), PathsArr) || !PathsArr || PathsArr->Num() == 0)
+	const bool bHasPaths = TryGetArrayParam(Params, TEXT("paths"), PathsArr) && PathsArr && PathsArr->Num() > 0;
+	// #778: was GEditor->PlayWorld, which is always the primary/server world.
+	const FString WorldHint = OptionalString(Params, TEXT("world"), TEXT("auto"));
+	int32 PIEInstance = INDEX_NONE;
+	double RawPIEInstance = 0.0;
+	if (TryGetNumberParam(Params, TEXT("pieInstance"), RawPIEInstance))
+	{
+		PIEInstance = FMath::RoundToInt(RawPIEInstance);
+	}
+
+	if (!GEditor) return MCPError(TEXT("Editor not available"));
+
+	if (!bHasPaths)
 	{
 		return MCPError(TEXT("Missing 'paths' (array of dotted property/function paths)"));
 	}
@@ -1003,9 +1030,7 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetRuntimeValues(const TSharedPtr<FJsonO
 	}
 	if (Paths.Num() == 0) return MCPError(TEXT("'paths' must contain at least one non-empty string"));
 
-	// #778: was GEditor->PlayWorld, which is always the primary/server world.
-	const FString WorldHint = OptionalString(Params, TEXT("world"), TEXT("auto"));
-	UWorld* World = ResolveWorldFromParams(Params, *WorldHint);
+	UWorld* World = ResolveWorldScope(WorldHint, PIEInstance);
 	if (!World) World = (UWorld*)GEditor->GetEditorWorldContext().World();
 	if (!World) return MCPError(TEXT("No world available"));
 
@@ -1193,6 +1218,9 @@ TSharedPtr<FJsonValue> FEditorHandlers::SetPieTimeScale(const TSharedPtr<FJsonOb
 // labels not addressable through the editor outliner.
 TSharedPtr<FJsonValue> FEditorHandlers::GetPiePawn(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before PIE is checked, so the parameter counts either way (#1057).
+	const int32 PlayerIndex = OptionalInt(Params, TEXT("playerIndex"), 0);
+
 	if (!GEditor) return MCPError(TEXT("Editor not available"));
 
 	FWorldContext* PieCtx = GEditor->GetPIEWorldContext();
@@ -1202,7 +1230,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::GetPiePawn(const TSharedPtr<FJsonObject>
 		return MCPError(TEXT("PIE not running - start PIE before resolving the player pawn"));
 	}
 
-	const int32 PlayerIndex = OptionalInt(Params, TEXT("playerIndex"), 0);
 	APlayerController* PC = UGameplayStatics::GetPlayerController(PieWorld, PlayerIndex);
 	APawn* Pawn = PC ? PC->GetPawn() : nullptr;
 	if (!Pawn) return MCPError(FString::Printf(TEXT("No controlled pawn for player index %d"), PlayerIndex));

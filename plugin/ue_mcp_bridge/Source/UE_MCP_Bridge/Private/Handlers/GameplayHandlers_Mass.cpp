@@ -462,15 +462,15 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ListMassTypes(const TSharedPtr<FJsonOb
 {
 	using namespace MassZoneGraph_Internal;
 
+	// Every parameter is read before anything can fail (#1057).
 	const FString Kind = OptionalString(Params, TEXT("kind"), TEXT("all")).ToLower();
+	const FString Filter = OptionalString(Params, TEXT("filter"));
+	const int32 Limit = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 200), 1, 2000);
 	if (Kind != TEXT("all") && Kind != TEXT("traits") && Kind != TEXT("processors"))
 	{
 		return MCPError(FString::Printf(
 			TEXT("unknown kind '%s'; valid: all, traits, processors"), *Kind));
 	}
-
-	const FString Filter = OptionalString(Params, TEXT("filter"));
-	const int32 Limit = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 200), 1, 2000);
 
 	UClass* TraitBase = ResolveOptionalClass(MassTraitBaseClassPath);
 	UClass* ProcessorBase = ResolveOptionalClass(MassProcessorClassPath);
@@ -577,6 +577,11 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveMassTrait(const TSharedPtr<FJson
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	const FString TraitClassSpec = OptionalString(Params, TEXT("traitClass"));
+	const bool bHasIndex = HasParam(Params, TEXT("index"));
+	const int32 RequestedIndex = OptionalInt(Params, TEXT("index"), -1);
+
 	UClass* ConfigClass = ResolveOptionalClass(MassConfigClassPath);
 	UClass* TraitBase = ResolveOptionalClass(MassTraitBaseClassPath);
 	if (!ConfigClass || !TraitBase)
@@ -591,8 +596,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveMassTrait(const TSharedPtr<FJson
 		return MCPError(FString::Printf(TEXT("Asset is not a MassEntityConfigAsset: %s"), *Asset->GetPathName()));
 	}
 
-	const FString TraitClassSpec = OptionalString(Params, TEXT("traitClass"));
-	const bool bHasIndex = HasParam(Params, TEXT("index"));
 	if (TraitClassSpec.IsEmpty() && !bHasIndex)
 	{
 		return MCPError(TEXT("Provide traitClass (idempotent: removes the first trait of that class) or index (positional: removes whatever currently sits there)"));
@@ -634,7 +637,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveMassTrait(const TSharedPtr<FJson
 	}
 	else
 	{
-		const int32 Requested = OptionalInt(Params, TEXT("index"), -1);
+		const int32 Requested = RequestedIndex;
 		if (Requested < 0)
 		{
 			return MCPError(FString::Printf(TEXT("index must be 0 or greater; got %d"), Requested));
@@ -731,6 +734,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReorderMassTraits(const TSharedPtr<FJs
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
+	// Read before anything can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* OrderArray = nullptr;
+	const bool bHasOrder = TryGetArrayParam(Params, TEXT("order"), OrderArray) && OrderArray;
+
 	UClass* ConfigClass = ResolveOptionalClass(MassConfigClassPath);
 	if (!ConfigClass)
 	{
@@ -748,8 +755,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReorderMassTraits(const TSharedPtr<FJs
 	TArray<UObject*> Traits;
 	if (!ReadConfigTraitObjects(Asset, Traits, Error)) return MCPError(Error);
 
-	const TArray<TSharedPtr<FJsonValue>>* OrderArray = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("order"), OrderArray) || !OrderArray)
+	if (!bHasOrder)
 	{
 		return MCPError(FString::Printf(
 			TEXT("Missing required parameter 'order': the current trait indices in the order wanted, a full permutation of 0..%d"),
@@ -1064,7 +1070,18 @@ TSharedPtr<FJsonValue> FGameplayHandlers::QueryZoneGraph(const TSharedPtr<FJsonO
 {
 	using namespace MassZoneGraph_Internal;
 
+	// Every parameter is read before anything can fail (#1057).
 	const FString QueryMode = OptionalString(Params, TEXT("queryMode"), TEXT("summary")).ToLower();
+	UWorld* World = ResolveWorldFromParams(Params, TEXT("editor"));
+	const int32 Limit = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 50), 1, 5000);
+	const FString ActorToken = OptionalString(Params, TEXT("actorPath"), OptionalString(Params, TEXT("actorLabel")));
+	const TArray<TSharedPtr<FJsonValue>>* TagArray = nullptr;
+	const bool bHasTags = TryGetArrayParam(Params, TEXT("tags"), TagArray) && TagArray;
+	FVector QueryLocation = FVector::ZeroVector;
+	const TSharedPtr<FJsonValue> LocationError = RequireVec3(Params, TEXT("location"), QueryLocation);
+	const double SearchRadius = OptionalNumber(Params, TEXT("radius"), 100000.0);
+	const int32 WantedLane = OptionalInt(Params, TEXT("laneIndex"), -1);
+
 	if (QueryMode != TEXT("summary") && QueryMode != TEXT("lanes") && QueryMode != TEXT("lane") && QueryMode != TEXT("nearest"))
 	{
 		return MCPError(FString::Printf(
@@ -1077,17 +1094,12 @@ TSharedPtr<FJsonValue> FGameplayHandlers::QueryZoneGraph(const TSharedPtr<FJsonO
 		return MCPError(TEXT("ZoneGraph is unavailable: /Script/ZoneGraph.ZoneGraphData did not resolve. Enable the ZoneGraph plugin and restart the editor."));
 	}
 
-	UWorld* World = ResolveWorldFromParams(Params, TEXT("editor"));
 	if (!World) return MCPError(TEXT("No world available; pass world=editor or world=pie with a running session"));
-
-	const int32 Limit = FMath::Clamp(OptionalInt(Params, TEXT("limit"), 50), 1, 5000);
-	const FString ActorToken = OptionalString(Params, TEXT("actorPath"), OptionalString(Params, TEXT("actorLabel")));
 
 	// Tag filtering is by NAME, because the bit index a tag occupies is a
 	// project-settings detail no caller should have to know.
 	TSet<FString> WantedTags;
-	const TArray<TSharedPtr<FJsonValue>>* TagArray = nullptr;
-	if (TryGetArrayParam(Params, TEXT("tags"), TagArray) && TagArray)
+	if (bHasTags)
 	{
 		for (const TSharedPtr<FJsonValue>& Value : *TagArray)
 		{
@@ -1141,13 +1153,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::QueryZoneGraph(const TSharedPtr<FJsonO
 		return MCPResult(Result);
 	}
 
-	FVector QueryLocation = FVector::ZeroVector;
-	if (QueryMode == TEXT("nearest"))
+	if (QueryMode == TEXT("nearest") && LocationError.IsValid())
 	{
-		if (auto Err = RequireVec3(Params, TEXT("location"), QueryLocation)) return Err;
+		return LocationError;
 	}
-	const double SearchRadius = OptionalNumber(Params, TEXT("radius"), 100000.0);
-	const int32 WantedLane = OptionalInt(Params, TEXT("laneIndex"), -1);
 	if (QueryMode == TEXT("lane") && WantedLane < 0)
 	{
 		return MCPError(TEXT("queryMode 'lane' needs laneIndex (0 or greater); read the available indices with queryMode 'lanes'"));

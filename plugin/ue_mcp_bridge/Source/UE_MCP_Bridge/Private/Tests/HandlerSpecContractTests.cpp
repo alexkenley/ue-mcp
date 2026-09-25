@@ -6,13 +6,60 @@
 //
 // The values point at an asset that does not exist, so every handler fails at
 // its first load and nothing is written. That is also why each spec'd handler
-// reads all of its parameters before loading anything.
+// reads all of its parameters before loading anything. A spec'd handler with
+// nothing to load either only reads, or refuses these values (an unknown mode,
+// a zero factor, an empty path list) before it acts; one that would act on
+// them is left unspecified.
+// reads all of its parameters before loading anything. An actor selector gets
+// the same path, which names no actor, so nothing is spawned or edited either;
+// a handler that would create or spawn before failing is left unspecified.
+// The values point at an asset that does not exist, so every handler stops
+// before it writes: at its first load, or at a validation these values fail
+// (a zero duration, two sources where one is allowed). A handler with nothing
+// to load before it creates is left unspecced rather than given a spec this
+// test would run. That is also why each spec'd handler reads all of its
+// parameters before loading anything.
+// The values point at an asset that does not exist, so every handler that
+// writes fails at its first load, or on a refused value such as limit 0 or
+// step 0, before anything is written; a read-only handler may run to the end.
+// That is also why each spec'd handler reads all of its parameters before
+// loading or validating anything. A handler whose contract values could reach
+// a write (an asset create, an ini write, a demo scene step) carries no spec.
+// its first load and nothing is written. The same string is an actor path that
+// names nothing, so a world handler fails at its actor lookup. That is also why
+// each spec'd handler reads all of its parameters before loading anything. A
+// handler whose values would reach a write before either failure is left
+// unspecced, with the reason at its registration.
 
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
 #include "Handlers/AnimationHandlers.h"
+#include "Handlers/AudioHandlers.h"
+#include "Handlers/FabHandlers.h"
+#include "Handlers/NetworkingHandlers.h"
+#include "Handlers/ProjectHandlers.h"
+#include "Handlers/StateTreeHandlers.h"
+#include "Handlers/GameplayHandlers.h"
+#include "Handlers/GasHandlers.h"
+#include "Handlers/DialogHandlers.h"
+#include "Handlers/EditorHandlers.h"
+#include "Handlers/SequencerHandlers.h"
+#include "Handlers/PCGHandlers.h"
+#include "Handlers/NiagaraHandlers.h"
+#include "Handlers/MaterialHandlers.h"
+#include "Handlers/WidgetHandlers.h"
+#include "Handlers/AssetHandlers.h"
+#include "Handlers/AssetHandlers_Geometry.h"
+#include "Handlers/BlueprintHandlers.h"
+#include "Handlers/BlueprintHandlers_Collision.h"
+#include "Handlers/ChooserHandlers.h"
+#include "Handlers/DemoHandlers.h"
+#include "Handlers/ReflectionHandlers.h"
+#include "Handlers/FoliageHandlers.h"
+#include "Handlers/LandscapeHandlers.h"
+#include "Handlers/LevelHandlers.h"
 #include "Misc/AutomationTest.h"
 
 namespace MCPHandlerSpecTests
@@ -75,14 +122,42 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 {
 	using namespace MCPHandlerSpecTests;
-	// Loading a path with nothing behind it logs through the editor asset library.
+	// Loading a path with nothing behind it logs through the editor asset library,
+	// and a direct LoadObject names the missing path in its warning.
 	AddExpectedError(TEXT("LoadAsset failed"), EAutomationExpectedErrorFlags::Contains, 0);
-
+	AddExpectedError(TEXT("HandlerSpecContract/NoSuchAsset"), EAutomationExpectedErrorFlags::Contains, 0);
 	FMCPHandlerRegistry Registry;
 	FAnimationHandlers::RegisterHandlers(Registry);
+	FAudioHandlers::RegisterHandlers(Registry);
+	FNetworkingHandlers::RegisterHandlers(Registry);
+	FFabHandlers::RegisterHandlers(Registry);
+	FProjectHandlers::RegisterHandlers(Registry);
+	FStateTreeHandlers::RegisterHandlers(Registry);
+	FGameplayHandlers::RegisterHandlers(Registry);
+	FGasHandlers::RegisterHandlers(Registry);
+	FEditorHandlers::RegisterHandlers(Registry);
+	FSequencerHandlers::RegisterHandlers(Registry);
+	FDialogHandlers::RegisterHandlers(Registry);
+	FPCGHandlers::RegisterHandlers(Registry);
+	FNiagaraHandlers::RegisterHandlers(Registry);
+	FMaterialHandlers::RegisterHandlers(Registry);
+	FWidgetHandlers::RegisterHandlers(Registry);
+	// asset's create actions are spec'd only where a validation the contract
+	// values fail (an unresolvable class or struct, a name holding '/', an
+	// invalid package name) runs before anything is created.
+	FAssetHandlers::RegisterHandlers(Registry);
+	FAssetGeometryHandlers::RegisterHandlers(Registry);
+	FBlueprintHandlers::RegisterHandlers(Registry);
+	FCollisionQueryHandlers::RegisterHandlers(Registry);
+	FChooserHandlers::RegisterHandlers(Registry);
+	FDemoHandlers::RegisterHandlers(Registry);
+	FReflectionHandlers::RegisterHandlers(Registry);
+	FFoliageHandlers::RegisterHandlers(Registry);
+	FLandscapeHandlers::RegisterHandlers(Registry);
+	FLevelHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
-	TestTrue(TEXT("animation registers handlers with a parameter spec"), Specs.Num() > 0);
+	TestTrue(TEXT("handlers register with a parameter spec"), Specs.Num() > 0);
 
 	TArray<FString> Methods;
 	Specs.GetKeys(Methods);

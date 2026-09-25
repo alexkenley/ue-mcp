@@ -50,10 +50,23 @@
 TSharedPtr<FJsonValue> FBlueprintHandlers::SetVariableProperties(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString VarName;
 	if (auto Err = RequireString(Params, TEXT("name"), VarName)) return Err;
+
+	// Read every request before anything can fail (#1057).
+	bool bExposeOnSpawn = false;
+	const bool bHasExposeOnSpawn = TryGetBoolParam(Params, TEXT("exposeOnSpawn"), bExposeOnSpawn);
+	bool bInstanceEditable = false;
+	const bool bHasInstanceEditable = TryGetBoolParam(Params, TEXT("instanceEditable"), bInstanceEditable);
+	bool bPrivate = false;
+	const bool bHasPrivate = TryGetBoolParam(Params, TEXT("private"), bPrivate);
+	FString EditFlag = OptionalString(Params, TEXT("editFlag"));
+	FString CategoryStr;
+	const bool bHasCategory = TryGetStringParam(Params, TEXT("category"), CategoryStr);
+	FString TooltipStr;
+	const bool bHasTooltip = TryGetStringParam(Params, TEXT("tooltip"), TooltipStr);
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint)
@@ -98,10 +111,8 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetVariableProperties(const TSharedPt
 		PrevTooltip = FoundVar->GetMetaData(FBlueprintMetadata::MD_Tooltip);
 	}
 
-	// Read every request and capture every previous value FIRST. Nothing below
-	// this point writes until the no-op check has run.
-	bool bExposeOnSpawn = false;
-	const bool bHasExposeOnSpawn = TryGetBoolParam(Params, TEXT("exposeOnSpawn"), bExposeOnSpawn);
+	// Capture every previous value FIRST. Nothing below this point writes
+	// until the no-op check has run.
 	// Compare the effective state, not merely the presence of the metadata key:
 	// the key can exist with value "false", or exist while CPF_ExposeOnSpawn is
 	// clear, and treating that as "already true" hid a real change.
@@ -110,8 +121,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetVariableProperties(const TSharedPt
 		(FoundVar->HasMetaData(FBlueprintMetadata::MD_ExposeOnSpawn) &&
 		 FoundVar->GetMetaData(FBlueprintMetadata::MD_ExposeOnSpawn).ToBool());
 
-	bool bInstanceEditable = false;
-	const bool bHasInstanceEditable = TryGetBoolParam(Params, TEXT("instanceEditable"), bInstanceEditable);
 	const bool bWasEditableAtAll = (FoundVar->PropertyFlags & CPF_Edit) != 0;
 	// Read the VALUE, not just presence - the engine's own readers use it, so a
 	// key present with "false" is NOT private. GetMetaData asserts outright
@@ -136,9 +145,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetVariableProperties(const TSharedPt
 	// "Private" checkbox does not clear EditAnywhere - so it is its own param
 	// rather than a fifth enum value. Folding it in would lose a bit, which is
 	// exactly what made the old rollback unable to restore the original state.
-	bool bPrivate = false;
-	const bool bHasPrivate = TryGetBoolParam(Params, TEXT("private"), bPrivate);
-	FString EditFlag = OptionalString(Params, TEXT("editFlag"));
 	if (!EditFlag.IsEmpty())
 	{
 		const FString L = EditFlag.ToLower();
@@ -158,11 +164,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetVariableProperties(const TSharedPt
 	{
 		return MCPError(TEXT("Pass editFlag or instanceEditable, not both - instanceEditable is the two-state shorthand for editFlag."));
 	}
-
-	FString CategoryStr;
-	const bool bHasCategory = TryGetStringParam(Params, TEXT("category"), CategoryStr);
-	FString TooltipStr;
-	const bool bHasTooltip = TryGetStringParam(Params, TEXT("tooltip"), TooltipStr);
 
 	// Detect no-op BEFORE writing anything. Previously every branch above had
 	// already mutated PropertyFlags by the time this ran, so a "nothing
@@ -295,7 +296,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetVariableProperties(const TSharedPt
 TSharedPtr<FJsonValue> FBlueprintHandlers::SetComponentProperty(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString ComponentName;
 	if (auto Err = RequireString(Params, TEXT("componentName"), ComponentName)) return Err;
@@ -523,7 +524,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetComponentProperty(const TSharedPtr
 TSharedPtr<FJsonValue> FBlueprintHandlers::SetClassDefault(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString PropertyName;
 	if (auto Err = RequireString(Params, TEXT("propertyName"), PropertyName)) return Err;
@@ -654,7 +655,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetClassDefault(const TSharedPtr<FJso
 TSharedPtr<FJsonValue> FBlueprintHandlers::AddFunctionParameter(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString FunctionName;
 	if (auto Err = RequireString(Params, TEXT("functionName"), FunctionName)) return Err;
@@ -862,7 +863,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddFunctionParameter(const TSharedPtr
 TSharedPtr<FJsonValue> FBlueprintHandlers::SetVariableDefault(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString VarName;
 	if (auto Err = RequireString(Params, TEXT("name"), VarName)) return Err;
@@ -1038,7 +1039,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetVariableDefault(const TSharedPtr<F
 TSharedPtr<FJsonValue> FBlueprintHandlers::ReadComponentProperties(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString ComponentName;
 	if (auto Err = RequireString(Params, TEXT("componentName"), ComponentName)) return Err;
@@ -1102,7 +1103,14 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ReadComponentProperties(const TShared
 TSharedPtr<FJsonValue> FBlueprintHandlers::SetActorTickSettings(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Read before the load can fail (#1057). An omitted field keeps its value.
+	bool bRequestedCanEverTick = false;
+	const bool bHasCanEverTick = TryGetBoolParam(Params, TEXT("bCanEverTick"), bRequestedCanEverTick);
+	bool bRequestedStartWithTickEnabled = false;
+	const bool bHasStartWithTickEnabled = TryGetBoolParam(Params, TEXT("bStartWithTickEnabled"), bRequestedStartWithTickEnabled);
+	double RequestedTickInterval = 0.0;
+	const bool bHasTickInterval = TryGetNumberParam(Params, TEXT("TickInterval"), RequestedTickInterval);
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint || !Blueprint->GeneratedClass) return MCPError(TEXT("Blueprint not found or not compiled"));
@@ -1119,13 +1127,9 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetActorTickSettings(const TSharedPtr
 	// unable to recognise a value it had just written.
 	const float PrevTickInterval = CDO->PrimaryActorTick.TickInterval;
 
-	bool bCanEverTick = bPrevCanEverTick;
-	bool bStartWithTickEnabled = bPrevStartWithTickEnabled;
-	double TickInterval = PrevTickInterval;
-
-	TryGetBoolParam(Params, TEXT("bCanEverTick"), bCanEverTick);
-	TryGetBoolParam(Params, TEXT("bStartWithTickEnabled"), bStartWithTickEnabled);
-	TryGetNumberParam(Params, TEXT("TickInterval"), TickInterval);
+	const bool bCanEverTick = bHasCanEverTick ? bRequestedCanEverTick : bPrevCanEverTick;
+	const bool bStartWithTickEnabled = bHasStartWithTickEnabled ? bRequestedStartWithTickEnabled : bPrevStartWithTickEnabled;
+	const double TickInterval = bHasTickInterval ? RequestedTickInterval : static_cast<double>(PrevTickInterval);
 
 	// The stored field is a float, so the comparison has to happen in float.
 	// Comparing the caller's double 0.1 against a float-widened 0.1f is never
@@ -1195,7 +1199,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetActorTickSettings(const TSharedPtr
 TSharedPtr<FJsonValue> FBlueprintHandlers::GetComponentProperty(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString ComponentName;
 	if (auto Err = RequireString(Params, TEXT("componentName"), ComponentName)) return Err;
 	FString PropertyName;
@@ -1395,6 +1399,10 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::GetCdoProperties(const TSharedPtr<FJs
 {
 	FString ClassName;
 	if (auto Err = RequireString(Params, TEXT("className"), ClassName)) return Err;
+	// Optional filter: specific property names. Read before the class can fail
+	// to resolve (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* PropNamesArr = nullptr;
+	TryGetArrayParam(Params, TEXT("propertyNames"), PropNamesArr);
 
 	// Resolve UClass
 	UClass* Class = LoadObject<UClass>(nullptr, *ClassName);
@@ -1413,10 +1421,8 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::GetCdoProperties(const TSharedPtr<FJs
 		return MCPError(FString::Printf(TEXT("Could not get CDO for class: %s"), *Class->GetName()));
 	}
 
-	// Optional filter: specific property names
 	TSet<FString> Filter;
-	const TArray<TSharedPtr<FJsonValue>>* PropNamesArr = nullptr;
-	if (TryGetArrayParam(Params, TEXT("propertyNames"), PropNamesArr) && PropNamesArr)
+	if (PropNamesArr)
 	{
 		for (const auto& V : *PropNamesArr)
 		{
@@ -1465,7 +1471,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::GetCdoProperties(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FBlueprintHandlers::SetComponentOverrideMaterials(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString ComponentName;
 	if (auto Err = RequireString(Params, TEXT("componentName"), ComponentName)) return Err;
 
@@ -1558,12 +1564,17 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetComponentOverrideMaterials(const T
 TSharedPtr<FJsonValue> FBlueprintHandlers::AddTimelineTrack(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString TimelineName;
 	if (auto Err = RequireString(Params, TEXT("timelineName"), TimelineName)) return Err;
 	FString TrackName;
 	if (auto Err = RequireString(Params, TEXT("trackName"), TrackName)) return Err;
 	const FString TrackType = OptionalString(Params, TEXT("trackType"), TEXT("float")).ToLower();
+	// Read keyframes array. Float/event keys carry numeric values; vector
+	// keys are {x,y,z}; color keys are {r,g,b,a}. Read before the load can
+	// fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* Keys = nullptr;
+	TryGetArrayParam(Params, TEXT("keyframes"), Keys);
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
@@ -1583,11 +1594,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddTimelineTrack(const TSharedPtr<FJs
 		Timeline = NewObject<UTimelineTemplate>(Blueprint, FName(*TemplateName), RF_Transactional);
 		Blueprint->Timelines.Add(Timeline);
 	}
-
-	// Read keyframes array. Float/event keys carry numeric values; vector
-	// keys are {x,y,z}; color keys are {r,g,b,a}.
-	const TArray<TSharedPtr<FJsonValue>>* Keys = nullptr;
-	TryGetArrayParam(Params, TEXT("keyframes"), Keys);
 
 	const FName TrackFName(*TrackName);
 
@@ -1776,7 +1782,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddTimelineTrack(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FBlueprintHandlers::SetCapsuleSize(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString ComponentName;
 	if (auto Err = RequireString(Params, TEXT("componentName"), ComponentName)) return Err;
 

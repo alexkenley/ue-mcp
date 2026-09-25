@@ -39,6 +39,8 @@ import { switchProject, isTargetDiverged } from "../project-switch.js";
 import { ueMcpConfigRejections, describeConfigRejections } from "../project.js";
 import { CURSOR_PARAM, paged } from "../pagination.js";
 import { actions as epicActions, schema as epicSchema } from "./epic/project.generated.js";
+import { specBp, schema as specSchema } from "./specs/project.generated.js";
+import { specBp as reflectionSpecBp } from "./specs/reflection.generated.js";
 
 /**
  * The environment variables flattening every registered editor into one, right
@@ -1050,25 +1052,22 @@ export const projectTool: ToolDef = categoryTool(
         subPath: p.subPath,
       }),
     },
-    list_project_modules: bp("read", 
-      paged("List native modules in the current project (name, host type, source path), in the .uproject's own declaration order. Feed moduleName from here into create_cpp_class."),
+    list_project_modules: specBp("read", 
+      "List native modules in the current project (name, host type, source path), in the .uproject's own declaration order. Feed moduleName from here into create_cpp_class.",
       "list_project_modules",
-      (p) => ({ cursor: p.cursor, limit: p.limit }),
     ),
-    list_loaded_modules: bp("read", 
-      paged("Enumerate ALL engine+project modules with runtime load state (loaded/gameModule), not just uproject-declared ones. Params: filter? (case-insensitive substring), loadedOnly? (default false) (#689)"),
+    // Registered under reflection in C++; project exposes the same handlers.
+    list_loaded_modules: reflectionSpecBp("read", 
+      "Enumerate ALL engine+project modules with runtime load state (loaded/gameModule), not just uproject-declared ones. filter is a case-insensitive substring; loadedOnly defaults to false (#689).",
       "list_loaded_modules",
-      (p) => ({ filter: p.filter, loadedOnly: p.loadedOnly, cursor: p.cursor, limit: p.limit }),
     ),
-    is_module_loaded: bp("read", 
-      "Report whether a named module is currently loaded in the editor. Params: moduleName (#689)",
+    is_module_loaded: reflectionSpecBp("read", 
+      "Report whether a named module is currently loaded in the editor (#689).",
       "is_module_loaded",
-      (p) => ({ moduleName: p.moduleName }),
     ),
-    list_available_plugins: bp("read", 
-      paged("List every plugin installed in this engine or project, sorted by name, with its category, version, type, whether it is enabled in THIS editor session, whether it is enabled by default, and the .uproject's current reference to it under projectReference {present, enabled}. Those two disagree after enable_plugin until the editor restarts, which is the point of reporting both. Params: filter?, pluginCategory?, enabledOnly?, limit? (default 200, max 2000)"),
+    list_available_plugins: specBp("read", 
+      "List every plugin installed in this engine or project, sorted by name, with its category, version, type, whether it is enabled in THIS editor session, whether it is enabled by default, and the .uproject's current reference to it under projectReference {present, enabled}. Those two disagree after enable_plugin until the editor restarts, which is the point of reporting both.",
       "list_available_plugins",
-      (p) => ({ filter: p.filter, pluginCategory: p.pluginCategory, enabledOnly: p.enabledOnly, cursor: p.cursor, limit: p.limit }),
     ),
     enable_plugin: bp("mutate", 
       "Enable a plugin in the .uproject. Plugin enablement is neither a UPROPERTY nor an INI key, it is a JSON array in the .uproject read once at startup, so set_config cannot reach it and without this a plugin-gated capability stays permanently unreachable through the bridge. Idempotent: a plugin already enabled, or enabled by default with no entry, reports existed and writes nothing. The change is a file change, so modules, classes, content and settings appear only after editor(restart_editor), which the result says. Params: pluginName",
@@ -1088,10 +1087,9 @@ export const projectTool: ToolDef = categoryTool(
       timeoutMs: 300_000,
       mapParams: (p) => ({ wait: p.wait }),
     },
-    live_coding_status: bp("read", 
-      "Report Live Coding availability/state (available, started, enabledForSession, compiling). Helps choose between live_coding_compile and build_project. Params: none",
+    live_coding_status: specBp("read", 
+      "Report Live Coding availability/state (available, started, enabledForSession, compiling). Helps choose between live_coding_compile and build_project.",
       "live_coding_status",
-      () => ({}),
     ),
     resolve_collision_profile: bp("read", 
       "Read one collision profile's resolved per-channel responses: collisionEnabled, objectType, and every channel with Block/Overlap/Ignore. This is the project-side half of blueprint(get_component_collision) (#925): a component's ResponseArray only lists the channels it OVERRIDES, so the profile is where an inherited response actually comes from. Project trace and object channels appear under their configured names, with enumName (ECC_GameTraceChannel1) alongside so a caller can key on something stable. By default the eight engine channels plus every channel the project configured are returned; includeAllChannels=true adds the unused slots. channel narrows it to one. A profile that does not exist lists the ones that do. Params: profileName, channel?, includeAllChannels?",
@@ -1654,6 +1652,10 @@ export const projectTool: ToolDef = categoryTool(
   undefined,
   {
     ...epicSchema,
+    // #1057: every key a spec'd handler declares, generated from its C++
+    // registration. A key listed again below is shared with hand-written
+    // actions, and tests/unit/handler-specs.test.ts holds the two to one type.
+    ...specSchema,
     projectPath: z.string().optional().describe("For set_project / add_editor / check_install: path to .uproject"),
     editorName: z.string().optional().describe("For add_editor: name to address the new session by (default the project name) (#817)"),
     editorTarget: z.string().optional().describe("For use_editor / drop_editor: session name, project name, or .uproject path (#817)"),
@@ -1666,8 +1668,6 @@ export const projectTool: ToolDef = categoryTool(
     filter: z.string().optional().describe("For list_loaded_modules and list_available_plugins: case-insensitive name substring (#689)"),
     pluginName: z.string().optional().describe("enable_plugin / disable_plugin: plugin name as it appears in list_available_plugins, matched case-insensitively"),
     removeReference: z.boolean().optional().describe("disable_plugin: delete the .uproject entry entirely instead of writing an explicit disable (default false)"),
-    pluginCategory: z.string().optional().describe("list_available_plugins: case-insensitive substring of the plugin's category"),
-    enabledOnly: z.boolean().optional().describe("list_available_plugins: only plugins enabled in this editor session"),
     loadedOnly: z.boolean().optional().describe("For list_loaded_modules: only loaded modules (#689)"),
     limit: z.number().optional().describe("Max results: search_tools (default 20), find_example_usage (10), find_references (40), find_callers (25), find_callees (100), class_hierarchy descendants (100). The paged list actions: rows on this page (#704)"),
     // The paged list actions in this category resume on a cursor. `limit`

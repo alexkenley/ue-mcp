@@ -603,6 +603,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::RecreatePhysicsState(const TSharedPtr<FJs
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FLevelHandlers::TestComponentOverlap(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabelA"), TEXT("actorPathA"), TEXT("actorLabelB"), TEXT("actorPathB"), TEXT("componentNameA"),
+		TEXT("componentNameB"), TEXT("method"), TEXT("world"), TEXT("pieInstance"),
+	});
+
 	MCP_CHECK_GAME_THREAD();
 
 	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));

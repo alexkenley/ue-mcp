@@ -49,19 +49,21 @@ TSharedPtr<FJsonValue> FAssetHandlers::AddSocket(const TSharedPtr<FJsonObject>& 
 		RelScale.Z = (*ScaleObj)->GetNumberField(TEXT("z"));
 	}
 
-	UObject* Asset = MCPLoadAssetObject(AssetPath);
-	if (!Asset)
-	{
-		return MCPError(FString::Printf(TEXT("Could not load asset '%s'"), *AssetPath));
-	}
-
+	// Every parameter is read before anything can fail (#1057).
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	const FString BoneNameParam = OptionalString(Params, TEXT("boneName"), TEXT("root"));
 
 	// Track which transform fields the caller actually supplied so onConflict=update
 	// only overwrites what was passed in (matches set_socket_transform semantics).
 	const bool bHasLoc   = HasParam(Params, TEXT("relativeLocation"));
 	const bool bHasRot   = HasParam(Params, TEXT("relativeRotation"));
 	const bool bHasScale = HasParam(Params, TEXT("relativeScale"));
+
+	UObject* Asset = MCPLoadAssetObject(AssetPath);
+	if (!Asset)
+	{
+		return MCPError(FString::Printf(TEXT("Could not load asset '%s'"), *AssetPath));
+	}
 
 	// Try StaticMesh first
 	if (UStaticMesh* SM = Cast<UStaticMesh>(Asset))
@@ -147,7 +149,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::AddSocket(const TSharedPtr<FJsonObject>& 
 	// Try SkeletalMesh
 	if (USkeletalMesh* SKM = Cast<USkeletalMesh>(Asset))
 	{
-		FString BoneName = OptionalString(Params, TEXT("boneName"), TEXT("root"));
+		FString BoneName = BoneNameParam;
 
 		for (USkeletalMeshSocket* Existing : SKM->GetMeshOnlySocketList())
 		{
@@ -236,7 +238,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::AddSocket(const TSharedPtr<FJsonObject>& 
 	// given socket belongs to.
 	if (USkeleton* Skel = Cast<USkeleton>(Asset))
 	{
-		const FString BoneName = OptionalString(Params, TEXT("boneName"), TEXT("root"));
+		const FString BoneName = BoneNameParam;
 
 		for (USkeletalMeshSocket* Existing : Skel->Sockets)
 		{
@@ -600,20 +602,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetSocketTransform(const TSharedPtr<FJson
 	FString SocketName;
 	if (auto Err = RequireString(Params, TEXT("socketName"), SocketName)) return Err;
 
-	UObject* Asset = MCPLoadAssetObject(AssetPath);
-	if (!Asset)
-	{
-		return MCPError(FString::Printf(TEXT("Could not load asset '%s'"), *AssetPath));
-	}
-
 	// Optional transform components - only fields that are passed are written.
+	// Every parameter is read before the asset loads (#1057).
 	const bool bHasLoc = HasParam(Params, TEXT("relativeLocation"));
 	const bool bHasRot = HasParam(Params, TEXT("relativeRotation"));
 	const bool bHasScale = HasParam(Params, TEXT("relativeScale"));
-	if (!bHasLoc && !bHasRot && !bHasScale)
-	{
-		return MCPError(TEXT("Pass at least one of relativeLocation, relativeRotation, relativeScale"));
-	}
 
 	FVector NewLoc = FVector::ZeroVector;
 	FRotator NewRot = FRotator::ZeroRotator;
@@ -635,6 +628,16 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetSocketTransform(const TSharedPtr<FJson
 		NewScale.X = (*ScaleObj)->GetNumberField(TEXT("x"));
 		NewScale.Y = (*ScaleObj)->GetNumberField(TEXT("y"));
 		NewScale.Z = (*ScaleObj)->GetNumberField(TEXT("z"));
+	}
+
+	UObject* Asset = MCPLoadAssetObject(AssetPath);
+	if (!Asset)
+	{
+		return MCPError(FString::Printf(TEXT("Could not load asset '%s'"), *AssetPath));
+	}
+	if (!bHasLoc && !bHasRot && !bHasScale)
+	{
+		return MCPError(TEXT("Pass at least one of relativeLocation, relativeRotation, relativeScale"));
 	}
 
 	// Build the rollback payload from the pre-change values so we can restore.

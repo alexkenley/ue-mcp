@@ -18,18 +18,52 @@ void FNetworkingHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("networking"));
-	Registry.RegisterHandler(TEXT("get_networking_info"), &GetNetworkingInfo);
-	Registry.RegisterHandler(TEXT("set_replicates"), &SetReplicates);
-	Registry.RegisterHandler(TEXT("configure_net_update_frequency"), &ConfigureNetUpdateFrequency);
-	Registry.RegisterHandler(TEXT("set_net_dormancy"), &SetNetDormancy);
-	Registry.RegisterHandler(TEXT("set_always_relevant"), &SetAlwaysRelevant);
-	Registry.RegisterHandler(TEXT("set_net_priority"), &SetNetPriority);
-	Registry.RegisterHandler(TEXT("set_replicate_movement"), &SetReplicateMovement);
+
+	// #1057: a spec'd handler declares its parameters here and nowhere else; the
+	// TS surface is generated from a recording of these.
+	using EType = EMCPParamType;
+	Registry.RegisterHandler(TEXT("get_networking_info"), &GetNetworkingInfo, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
+	});
+	Registry.RegisterHandler(TEXT("set_replicates"), &SetReplicates, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
+		MCPParam::Optional(TEXT("replicates"), EType::Boolean, TEXT("Replicate the actor (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("configure_net_update_frequency"), &ConfigureNetUpdateFrequency, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
+		MCPParam::Optional(TEXT("netUpdateFrequency"), EType::Number, TEXT("NetUpdateFrequency in updates per second (omit to leave it)")),
+		MCPParam::Optional(TEXT("minNetUpdateFrequency"), EType::Number, TEXT("MinNetUpdateFrequency in updates per second (omit to leave it)")),
+	});
+	Registry.RegisterHandler(TEXT("set_net_dormancy"), &SetNetDormancy, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
+		MCPParam::Required(TEXT("dormancy"), EType::String, TEXT("DORM_Never | DORM_Awake | DORM_DormantAll | DORM_DormantPartial | DORM_Initial")),
+	});
+	Registry.RegisterHandler(TEXT("set_always_relevant"), &SetAlwaysRelevant, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
+		MCPParam::Optional(TEXT("alwaysRelevant"), EType::Boolean, TEXT("bAlwaysRelevant (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("set_net_priority"), &SetNetPriority, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
+		MCPParam::Optional(TEXT("netPriority"), EType::Number, TEXT("NetPriority (default 1.0)")),
+	});
+	Registry.RegisterHandler(TEXT("set_replicate_movement"), &SetReplicateMovement, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
+		MCPParam::Optional(TEXT("replicateMovement"), EType::Boolean, TEXT("Replicate movement (default false)")),
+	});
+	// Hand-authored in TS: its mapParams folds replicated/repNotify into replicationType.
 	Registry.RegisterHandler(TEXT("set_property_replicated"), &SetVariableReplication);
-	Registry.RegisterHandler(TEXT("set_only_relevant_to_owner"), &SetOwnerOnlyRelevant);
-	// New handlers
-	Registry.RegisterHandler(TEXT("set_net_load_on_client"), &SetNetLoadOnClient);
-	Registry.RegisterHandler(TEXT("configure_net_cull_distance"), &ConfigureNetCullDistance);
+	Registry.RegisterHandler(TEXT("set_only_relevant_to_owner"), &SetOwnerOnlyRelevant, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
+		MCPParam::Optional(TEXT("onlyRelevantToOwner"), EType::Boolean, TEXT("bOnlyRelevantToOwner (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("set_net_load_on_client"), &SetNetLoadOnClient, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
+		MCPParam::Optional(TEXT("loadOnClient"), EType::Boolean, TEXT("bNetLoadOnClient (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("configure_net_cull_distance"), &ConfigureNetCullDistance, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Actor Blueprint asset path")),
+		MCPParam::Optional(TEXT("netCullDistanceSquared"), EType::Number, TEXT("NetCullDistanceSquared (default 225000000)")),
+	});
 }
 
 AActor* FNetworkingHandlers::LoadBlueprintCDO(const FString& BlueprintPath, TSharedPtr<FJsonObject>& OutResult)
@@ -94,11 +128,11 @@ TSharedPtr<FJsonValue> FNetworkingHandlers::SetReplicates(const TSharedPtr<FJson
 	FString BlueprintPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BlueprintPath)) return Err;
 
+	bool bReplicates = OptionalBool(Params, TEXT("replicates"), false);
+
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	AActor* CDO = LoadBlueprintCDO(BlueprintPath, Result);
 	if (!CDO) return MCPResult(Result);
-
-	bool bReplicates = OptionalBool(Params, TEXT("replicates"), false);
 	const bool bPrev = CDO->GetIsReplicated();
 
 	Result->SetStringField(TEXT("blueprintPath"), BlueprintPath);
@@ -136,6 +170,10 @@ TSharedPtr<FJsonValue> FNetworkingHandlers::ConfigureNetUpdateFrequency(const TS
 {
 	FString BlueprintPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BlueprintPath)) return Err;
+	double NetUpdateFrequency = 0;
+	const bool bHasNetUpdateFrequency = TryGetNumberParam(Params, TEXT("netUpdateFrequency"), NetUpdateFrequency);
+	double MinNetUpdateFrequency = 0;
+	const bool bHasMinNetUpdateFrequency = TryGetNumberParam(Params, TEXT("minNetUpdateFrequency"), MinNetUpdateFrequency);
 
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	AActor* CDO = LoadBlueprintCDO(BlueprintPath, Result);
@@ -153,8 +191,7 @@ TSharedPtr<FJsonValue> FNetworkingHandlers::ConfigureNetUpdateFrequency(const TS
 	const float PrevMinFrequency = CDO->MinNetUpdateFrequency;
 #endif
 
-	double NetUpdateFrequency = 0;
-	if (TryGetNumberParam(Params, TEXT("netUpdateFrequency"), NetUpdateFrequency))
+	if (bHasNetUpdateFrequency)
 	{
 #if UE_MCP_HAS_5_5_API
 		CDO->SetNetUpdateFrequency((float)NetUpdateFrequency);
@@ -162,8 +199,7 @@ TSharedPtr<FJsonValue> FNetworkingHandlers::ConfigureNetUpdateFrequency(const TS
 		CDO->NetUpdateFrequency = (float)NetUpdateFrequency;
 #endif
 	}
-	double MinNetUpdateFrequency = 0;
-	if (TryGetNumberParam(Params, TEXT("minNetUpdateFrequency"), MinNetUpdateFrequency))
+	if (bHasMinNetUpdateFrequency)
 	{
 #if UE_MCP_HAS_5_5_API
 		CDO->SetMinNetUpdateFrequency((float)MinNetUpdateFrequency);
@@ -241,11 +277,11 @@ TSharedPtr<FJsonValue> FNetworkingHandlers::SetNetDormancy(const TSharedPtr<FJso
 	FString BlueprintPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BlueprintPath)) return Err;
 
+	FString Dormancy = OptionalString(Params, TEXT("dormancy"));
+
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	AActor* CDO = LoadBlueprintCDO(BlueprintPath, Result);
 	if (!CDO) return MCPResult(Result);
-
-	FString Dormancy = OptionalString(Params, TEXT("dormancy"));
 	const ENetDormancy PrevDormancy = CDO->NetDormancy;
 	const FString PrevDormStr = DormancyToString(PrevDormancy);
 	ENetDormancy NewDormancy = PrevDormancy;
@@ -307,11 +343,11 @@ TSharedPtr<FJsonValue> FNetworkingHandlers::SetAlwaysRelevant(const TSharedPtr<F
 	FString BlueprintPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BlueprintPath)) return Err;
 
+	bool bAlwaysRelevant = OptionalBool(Params, TEXT("alwaysRelevant"), false);
+
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	AActor* CDO = LoadBlueprintCDO(BlueprintPath, Result);
 	if (!CDO) return MCPResult(Result);
-
-	bool bAlwaysRelevant = OptionalBool(Params, TEXT("alwaysRelevant"), false);
 	const bool bPrev = CDO->bAlwaysRelevant;
 
 	Result->SetStringField(TEXT("blueprintPath"), BlueprintPath);
@@ -350,11 +386,11 @@ TSharedPtr<FJsonValue> FNetworkingHandlers::SetNetPriority(const TSharedPtr<FJso
 	FString BlueprintPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BlueprintPath)) return Err;
 
+	double NetPriority = OptionalNumber(Params, TEXT("netPriority"), 1.0);
+
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	AActor* CDO = LoadBlueprintCDO(BlueprintPath, Result);
 	if (!CDO) return MCPResult(Result);
-
-	double NetPriority = OptionalNumber(Params, TEXT("netPriority"), 1.0);
 	const float fPrev = CDO->NetPriority;
 
 	Result->SetStringField(TEXT("blueprintPath"), BlueprintPath);
@@ -395,11 +431,11 @@ TSharedPtr<FJsonValue> FNetworkingHandlers::SetReplicateMovement(const TSharedPt
 	FString BlueprintPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BlueprintPath)) return Err;
 
+	bool bReplicateMovement = OptionalBool(Params, TEXT("replicateMovement"), false);
+
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	AActor* CDO = LoadBlueprintCDO(BlueprintPath, Result);
 	if (!CDO) return MCPResult(Result);
-
-	bool bReplicateMovement = OptionalBool(Params, TEXT("replicateMovement"), false);
 	const bool bPrev = CDO->IsReplicatingMovement();
 
 	Result->SetStringField(TEXT("blueprintPath"), BlueprintPath);
@@ -545,11 +581,11 @@ TSharedPtr<FJsonValue> FNetworkingHandlers::SetOwnerOnlyRelevant(const TSharedPt
 	FString BlueprintPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BlueprintPath)) return Err;
 
+	bool bOnlyRelevantToOwner = OptionalBool(Params, TEXT("onlyRelevantToOwner"), false);
+
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	AActor* CDO = LoadBlueprintCDO(BlueprintPath, Result);
 	if (!CDO) return MCPResult(Result);
-
-	bool bOnlyRelevantToOwner = OptionalBool(Params, TEXT("onlyRelevantToOwner"), false);
 	const bool bPrev = CDO->bOnlyRelevantToOwner;
 
 	Result->SetStringField(TEXT("blueprintPath"), BlueprintPath);
@@ -590,11 +626,11 @@ TSharedPtr<FJsonValue> FNetworkingHandlers::SetNetLoadOnClient(const TSharedPtr<
 	FString BlueprintPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BlueprintPath)) return Err;
 
+	bool bLoadOnClient = OptionalBool(Params, TEXT("loadOnClient"), true);
+
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	AActor* CDO = LoadBlueprintCDO(BlueprintPath, Result);
 	if (!CDO) return MCPResult(Result);
-
-	bool bLoadOnClient = OptionalBool(Params, TEXT("loadOnClient"), true);
 	bool bPrev = bLoadOnClient;
 
 	FProperty* Prop = CDO->GetClass()->FindPropertyByName(TEXT("bNetLoadOnClient"));
@@ -662,11 +698,11 @@ TSharedPtr<FJsonValue> FNetworkingHandlers::ConfigureNetCullDistance(const TShar
 	FString BlueprintPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BlueprintPath)) return Err;
 
+	double Distance = OptionalNumber(Params, TEXT("netCullDistanceSquared"), 225000000.0);
+
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	AActor* CDO = LoadBlueprintCDO(BlueprintPath, Result);
 	if (!CDO) return MCPResult(Result);
-
-	double Distance = OptionalNumber(Params, TEXT("netCullDistanceSquared"), 225000000.0);
 
 	FProperty* Prop = CDO->GetClass()->FindPropertyByName(TEXT("NetCullDistanceSquared"));
 	// The value that was there, read before the write, so the inverse restores

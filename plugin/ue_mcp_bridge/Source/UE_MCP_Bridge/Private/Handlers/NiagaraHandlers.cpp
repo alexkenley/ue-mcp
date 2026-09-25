@@ -96,53 +96,268 @@ void FNiagaraHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("niagara"));
-	Registry.RegisterHandler(TEXT("list_niagara_systems"), &ListNiagaraSystems);
-	Registry.RegisterHandler(TEXT("list_niagara_modules"), &ListNiagaraModules);
+
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else; the TS surface is generated from a recording of these.
+	// Unspecified: the create actions, which the contract test would see create
+	// an asset; reactivate, set_niagara_parameter and the custom HLSL pair,
+	// whose parameters are a required choice a spec cannot express yet; and
+	// set_niagara_module_input, whose TS mapper converts its value.
+	using EType = EMCPParamType;
+	auto SystemPathParam = []()
+	{
+		return MCPParam::Required(TEXT("systemPath"), EType::String, TEXT("NiagaraSystem asset path"));
+	};
+	auto EmitterNameParam = []()
+	{
+		return MCPParam::Optional(TEXT("emitterName"), EType::String, TEXT("Emitter handle name. Omit to address the emitter by emitterIndex"));
+	};
+	auto EmitterIndexParam = []()
+	{
+		return MCPParam::Optional(TEXT("emitterIndex"), EType::Number, TEXT("Emitter handle index, used when emitterName is omitted"));
+	};
+	auto StackContextParam = []()
+	{
+		return MCPParam::Required(TEXT("stackContext"), EType::String, TEXT("ParticleSpawn|ParticleUpdate|EmitterSpawn|EmitterUpdate"));
+	};
+	auto StackFilterParam = []()
+	{
+		return MCPParam::Optional(TEXT("stackContext"), EType::String, TEXT("ParticleSpawn|ParticleUpdate|EmitterSpawn|EmitterUpdate|all (default all)"));
+	};
+	auto ModuleNameParam = []()
+	{
+		return MCPParam::Required(TEXT("moduleName"), EType::String, TEXT("Name of the module function call node"));
+	};
+	auto ModuleFilterParam = []()
+	{
+		return MCPParam::Optional(TEXT("moduleName"), EType::String, TEXT("Only this module (default: every module)"));
+	};
+	auto CursorParam = []()
+	{
+		return MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the 'nextCursor' from the previous page, unmodified"));
+	};
+	auto LimitParam = []()
+	{
+		return MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 200, max 2000)"));
+	};
+	auto LabelParam = []()
+	{
+		return MCPParam::Optional(TEXT("label"), EType::String, TEXT("Editor label. Also the idempotency key: an existing actor with this label is reported rather than duplicated"));
+	};
+	auto LocationParam = []()
+	{
+		return MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("World location {x,y,z} (default origin)"));
+	};
+	auto RotationParam = []()
+	{
+		return MCPParam::Optional(TEXT("rotation"), EType::Rotator, TEXT("World rotation {pitch,yaw,roll}"));
+	};
+
+	Registry.RegisterHandler(TEXT("list_niagara_systems"), &ListNiagaraSystems, {
+		CursorParam(),
+		LimitParam(),
+	});
+	Registry.RegisterHandler(TEXT("list_niagara_modules"), &ListNiagaraModules, {
+		MCPParam::Optional(TEXT("pathFilter"), EType::String, TEXT("Case-sensitive substring of the module script object path, applied to the whole set before paging")),
+		CursorParam(),
+		LimitParam(),
+	});
 	Registry.RegisterHandler(TEXT("create_niagara_system"), &CreateNiagaraSystem);
-	Registry.RegisterHandler(TEXT("get_niagara_info"), &GetNiagaraInfo);
-	Registry.RegisterHandler(TEXT("list_emitters_in_system"), &ListEmittersInSystem);
+	Registry.RegisterHandler(TEXT("get_niagara_info"), &GetNiagaraInfo, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("NiagaraSystem asset path")).Alias(TEXT("path")),
+	});
+	Registry.RegisterHandler(TEXT("list_emitters_in_system"), &ListEmittersInSystem, {
+		SystemPathParam(),
+	});
 	Registry.RegisterHandler(TEXT("create_niagara_emitter"), &CreateNiagaraEmitter);
-	Registry.RegisterHandler(TEXT("spawn_niagara_at_location"), &SpawnNiagaraAtLocation);
-	Registry.RegisterHandler(TEXT("spawn_niagara_actor"), &SpawnNiagaraActor);
+	Registry.RegisterHandler(TEXT("spawn_niagara_at_location"), &SpawnNiagaraAtLocation, {
+		SystemPathParam(),
+		LocationParam(),
+		RotationParam(),
+		LabelParam(),
+		MCPParam::Optional(TEXT("scaleX"), EType::Number, TEXT("X scale of the spawned component (default 1)")),
+		MCPParam::Optional(TEXT("scaleY"), EType::Number, TEXT("Y scale of the spawned component (default 1)")),
+		MCPParam::Optional(TEXT("scaleZ"), EType::Number, TEXT("Z scale of the spawned component (default 1)")),
+		MCPParam::Optional(TEXT("autoDestroy"), EType::Boolean, TEXT("Destroy the component once the system finishes (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("spawn_niagara_actor"), &SpawnNiagaraActor, {
+		SystemPathParam(),
+		LocationParam(),
+		RotationParam(),
+		LabelParam(),
+		MCPParam::Optional(TEXT("activate"), EType::Boolean, TEXT("Activate the system on spawn (default true) (#537)")),
+	});
 	Registry.RegisterHandler(TEXT("reactivate_niagara"), &ReactivateNiagara);
 	Registry.RegisterHandler(TEXT("set_niagara_parameter"), &SetNiagaraParameter);
-	Registry.RegisterHandler(TEXT("add_emitter_to_system"), &AddEmitterToSystem);
-	Registry.RegisterHandler(TEXT("set_emitter_property"), &SetEmitterProperty);
-	Registry.RegisterHandler(TEXT("get_emitter_info"), &GetEmitterInfo);
+	Registry.RegisterHandler(TEXT("add_emitter_to_system"), &AddEmitterToSystem, {
+		SystemPathParam(),
+		MCPParam::Required(TEXT("emitterPath"), EType::String, TEXT("NiagaraEmitter asset to add")),
+	});
+	Registry.RegisterHandler(TEXT("set_emitter_property"), &SetEmitterProperty, {
+		MCPParam::Required(TEXT("systemPath"), EType::String, TEXT("NiagaraSystem asset path")).Alias(TEXT("assetPath")),
+		MCPParam::Optional(TEXT("emitterName"), EType::String, TEXT("Emitter handle name (default: the first emitter)")),
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Emitter property to set")),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("New value, as a string")),
+	});
+	Registry.RegisterHandler(TEXT("get_emitter_info"), &GetEmitterInfo, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("NiagaraEmitter asset path")),
+	});
 
 	// v0.7.10 - depth
-	Registry.RegisterHandler(TEXT("list_emitter_renderers"), &ListEmitterRenderers);
-	Registry.RegisterHandler(TEXT("add_emitter_renderer"), &AddEmitterRenderer);
-	Registry.RegisterHandler(TEXT("remove_emitter_renderer"), &RemoveEmitterRenderer);
-	Registry.RegisterHandler(TEXT("set_renderer_property"), &SetRendererProperty);
-	Registry.RegisterHandler(TEXT("inspect_data_interface"), &InspectDataInterface);
+	Registry.RegisterHandler(TEXT("list_emitter_renderers"), &ListEmitterRenderers, {
+		SystemPathParam(),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("add_emitter_renderer"), &AddEmitterRenderer, {
+		SystemPathParam(),
+		MCPParam::Required(TEXT("rendererType"), EType::String, TEXT("sprite|mesh|ribbon or full class name")),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("remove_emitter_renderer"), &RemoveEmitterRenderer, {
+		SystemPathParam(),
+		MCPParam::Required(TEXT("rendererIndex"), EType::Integer, TEXT("Index of the renderer on the emitter")),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("set_renderer_property"), &SetRendererProperty, {
+		SystemPathParam(),
+		MCPParam::Optional(TEXT("rendererIndex"), EType::Integer, TEXT("Index of the renderer on the emitter (default 0)")),
+		MCPParam::Required(TEXT("propertyName"), EType::String, TEXT("Renderer property to set")),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("New value: a bool, number or string, an asset path for an object property, or JSON for a struct, enum, name or array")),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("inspect_data_interface"), &InspectDataInterface, {
+		SystemPathParam(),
+	});
 	Registry.RegisterHandler(TEXT("create_niagara_system_from_spec"), &CreateNiagaraSystemFromSpec);
-	Registry.RegisterHandler(TEXT("get_niagara_compiled_hlsl"), &GetCompiledHLSL);
-	Registry.RegisterHandler(TEXT("list_niagara_system_parameters"), &ListSystemParameters);
+	Registry.RegisterHandler(TEXT("get_niagara_compiled_hlsl"), &GetCompiledHLSL, {
+		SystemPathParam(),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("list_niagara_system_parameters"), &ListSystemParameters, {
+		SystemPathParam(),
+	});
 
 	// v0.7.14 - module inputs, static switches, HLSL modules
-	Registry.RegisterHandler(TEXT("list_niagara_module_inputs"), &ListModuleInputs);
+	Registry.RegisterHandler(TEXT("list_niagara_module_inputs"), &ListModuleInputs, {
+		SystemPathParam(),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+		StackFilterParam(),
+		ModuleFilterParam(),
+	});
 	Registry.RegisterHandler(TEXT("set_niagara_module_input"), &SetModuleInput);
-	Registry.RegisterHandler(TEXT("add_niagara_module"), &AddModule);
-	Registry.RegisterHandler(TEXT("list_niagara_dynamic_inputs"), &ListDynamicInputs);
-	Registry.RegisterHandler(TEXT("set_niagara_dynamic_input"), &SetDynamicInput);
-	Registry.RegisterHandler(TEXT("remove_niagara_dynamic_input"), &RemoveDynamicInput);
-	Registry.RegisterHandler(TEXT("add_niagara_simulation_stage"), &AddSimulationStage);
-	Registry.RegisterHandler(TEXT("remove_niagara_simulation_stage"), &RemoveSimulationStage);
-	Registry.RegisterHandler(TEXT("add_niagara_event_handler"), &AddEventHandler);
-	Registry.RegisterHandler(TEXT("remove_niagara_event_handler"), &RemoveEventHandler);
+	Registry.RegisterHandler(TEXT("add_niagara_module"), &AddModule, {
+		SystemPathParam(),
+		MCPParam::Required(TEXT("moduleScript"), EType::String, TEXT("Stock module script path, e.g. /Niagara/Modules/Emitter/SpawnRate")),
+		StackContextParam(),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+		MCPParam::Optional(TEXT("targetIndex"), EType::Integer, TEXT("Stack insert position; -1 (default) appends")),
+	});
+	Registry.RegisterHandler(TEXT("list_niagara_dynamic_inputs"), &ListDynamicInputs, {
+		SystemPathParam(),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+		StackFilterParam(),
+		ModuleFilterParam(),
+	});
+	Registry.RegisterHandler(TEXT("set_niagara_dynamic_input"), &SetDynamicInput, {
+		SystemPathParam(),
+		StackContextParam(),
+		ModuleNameParam(),
+		MCPParam::Required(TEXT("inputName"), EType::String, TEXT("Module input pin name")),
+		MCPParam::Required(TEXT("dynamicInputScript"), EType::String, TEXT("The dynamic-input NiagaraScript to wire in")),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("remove_niagara_dynamic_input"), &RemoveDynamicInput, {
+		SystemPathParam(),
+		StackContextParam(),
+		ModuleNameParam(),
+		MCPParam::Required(TEXT("inputName"), EType::String, TEXT("Module input pin name")),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("add_niagara_simulation_stage"), &AddSimulationStage, {
+		SystemPathParam(),
+		MCPParam::Required(TEXT("stageName"), EType::String, TEXT("Simulation stage name")),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+		MCPParam::Optional(TEXT("enabled"), EType::Boolean, TEXT("Create the stage enabled (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("remove_niagara_simulation_stage"), &RemoveSimulationStage, {
+		SystemPathParam(),
+		MCPParam::Required(TEXT("stageName"), EType::String, TEXT("Simulation stage name")),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("add_niagara_event_handler"), &AddEventHandler, {
+		SystemPathParam(),
+		MCPParam::Required(TEXT("eventName"), EType::String, TEXT("Event handler name")),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+		MCPParam::Optional(TEXT("sourceEmitterId"), EType::String, TEXT("Id of the emitter whose events this handler listens to (default: this emitter)")),
+	});
+	Registry.RegisterHandler(TEXT("remove_niagara_event_handler"), &RemoveEventHandler, {
+		SystemPathParam(),
+		MCPParam::Required(TEXT("eventName"), EType::String, TEXT("Event handler name")),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+	});
 	Registry.RegisterHandler(TEXT("get_niagara_custom_hlsl"), &GetCustomHlsl);
 	Registry.RegisterHandler(TEXT("set_niagara_custom_hlsl"), &SetCustomHlsl);
-	Registry.RegisterHandler(TEXT("remove_niagara_module"), &RemoveModule);
-	Registry.RegisterHandler(TEXT("set_niagara_module_enabled"), &SetModuleEnabled);
-	Registry.RegisterHandler(TEXT("remove_emitter_from_system"), &RemoveEmitterFromSystem);
-	Registry.RegisterHandler(TEXT("validate_niagara_system"), &ValidateSystem);
-	Registry.RegisterHandler(TEXT("list_niagara_static_switches"), &ListStaticSwitches);
-	Registry.RegisterHandler(TEXT("set_niagara_static_switch"), &SetStaticSwitch);
+	Registry.RegisterHandler(TEXT("remove_niagara_module"), &RemoveModule, {
+		SystemPathParam(),
+		StackContextParam(),
+		ModuleNameParam(),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("set_niagara_module_enabled"), &SetModuleEnabled, {
+		SystemPathParam(),
+		StackContextParam(),
+		ModuleNameParam(),
+		MCPParam::Required(TEXT("enabled"), EType::Boolean, TEXT("The state to set")),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("remove_emitter_from_system"), &RemoveEmitterFromSystem, {
+		SystemPathParam(),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+	});
+	Registry.RegisterHandler(TEXT("validate_niagara_system"), &ValidateSystem, {
+		SystemPathParam(),
+	});
+	Registry.RegisterHandler(TEXT("list_niagara_static_switches"), &ListStaticSwitches, {
+		SystemPathParam(),
+		ModuleFilterParam(),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+		StackFilterParam(),
+	});
+	Registry.RegisterHandler(TEXT("set_niagara_static_switch"), &SetStaticSwitch, {
+		SystemPathParam(),
+		ModuleNameParam(),
+		MCPParam::Required(TEXT("switchName"), EType::String, TEXT("Static switch input name")),
+		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Switch value, as a string")),
+		EmitterNameParam(),
+		EmitterIndexParam(),
+		StackFilterParam(),
+	});
 	Registry.RegisterHandler(TEXT("create_niagara_module_from_hlsl"), &CreateModuleFromHlsl);
 	// #185: Create an empty scratch-pad-style module
 	Registry.RegisterHandler(TEXT("create_scratch_module"), &CreateScratchModule);
-	Registry.RegisterHandler(TEXT("compile_niagara_system"), &CompileSystem);
+	Registry.RegisterHandler(TEXT("compile_niagara_system"), &CompileSystem, {
+		SystemPathParam(),
+		MCPParam::Optional(TEXT("force"), EType::Boolean, TEXT("Recompile even when nothing looks dirty (default true)")),
+		MCPParam::Optional(TEXT("includeGpuShaders"), EType::Boolean, TEXT("Also wait for GPU shader compilation to finish (default false)")),
+	});
 }
 
 TSharedPtr<FJsonValue> FNiagaraHandlers::ListNiagaraSystems(const TSharedPtr<FJsonObject>& Params)
@@ -269,7 +484,7 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::CreateNiagaraSystem(const TSharedPtr<FJ
 TSharedPtr<FJsonValue> FNiagaraHandlers::GetNiagaraInfo(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, *AssetPath);
 	if (!System)
@@ -406,14 +621,7 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::SpawnNiagaraAtLocation(const TSharedPtr
 	FString SystemPath;
 	if (auto Err = RequireString(Params, TEXT("systemPath"), SystemPath)) return Err;
 
-	UNiagaraSystem* NiagaraSystem = LoadObject<UNiagaraSystem>(nullptr, *SystemPath);
-	if (!NiagaraSystem)
-	{
-		return MCPError(FString::Printf(TEXT("NiagaraSystem not found: %s"), *SystemPath));
-	}
-
-	REQUIRE_EDITOR_WORLD(World);
-
+	// Every parameter is read before anything can fail (#1057).
 	// Location accepts nested {x,y,z} or flat x/y/z params (#70).
 	FVector Location = OptionalVec3(Params, TEXT("location"));
 	if (Location == FVector::ZeroVector)
@@ -426,13 +634,13 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::SpawnNiagaraAtLocation(const TSharedPtr
 		ReadRotatorFields(Params, Rotation);
 	}
 
-	// Parse scale
+	// Parse scale. Every axis is read; stopping at the first one present lost the rest.
 	FVector Scale = FVector::OneVector;
 	double ScaleX = 1, ScaleY = 1, ScaleZ = 1;
-	// Bitwise | so every axis is read; || stopped at the first one present.
-	if (TryGetNumberParam(Params, TEXT("scaleX"), ScaleX) |
-		TryGetNumberParam(Params, TEXT("scaleY"), ScaleY) |
-		TryGetNumberParam(Params, TEXT("scaleZ"), ScaleZ))
+	const bool bHasScaleX = TryGetNumberParam(Params, TEXT("scaleX"), ScaleX);
+	const bool bHasScaleY = TryGetNumberParam(Params, TEXT("scaleY"), ScaleY);
+	const bool bHasScaleZ = TryGetNumberParam(Params, TEXT("scaleZ"), ScaleZ);
+	if (bHasScaleX || bHasScaleY || bHasScaleZ)
 	{
 		Scale = FVector(ScaleX, ScaleY, ScaleZ);
 	}
@@ -440,8 +648,17 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::SpawnNiagaraAtLocation(const TSharedPtr
 	// Default autoDestroy to false so editor spawns persist (#66)
 	bool bAutoDestroy = OptionalBool(Params, TEXT("autoDestroy"), false);
 
-	// Idempotency: if a label is provided and an actor with that label already exists, short-circuit
 	FString Label = OptionalString(Params, TEXT("label"));
+
+	UNiagaraSystem* NiagaraSystem = LoadObject<UNiagaraSystem>(nullptr, *SystemPath);
+	if (!NiagaraSystem)
+	{
+		return MCPError(FString::Printf(TEXT("NiagaraSystem not found: %s"), *SystemPath));
+	}
+
+	REQUIRE_EDITOR_WORLD(World);
+
+	// Idempotency: if a label is provided and an actor with that label already exists, short-circuit
 	if (auto ExistingActor = MCPCheckActorLabelExists(World, Label, TEXT("skip"), TEXT("Niagara actor")))
 	{
 		return ExistingActor;
@@ -509,6 +726,14 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::SpawnNiagaraActor(const TSharedPtr<FJso
 	FString SystemPath;
 	if (auto Err = RequireString(Params, TEXT("systemPath"), SystemPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	FVector Location = OptionalVec3(Params, TEXT("location"));
+	if (Location == FVector::ZeroVector) ReadVec3Fields(Params, Location);
+	FRotator Rotation = OptionalRotator(Params, TEXT("rotation"));
+	if (Rotation == FRotator::ZeroRotator) ReadRotatorFields(Params, Rotation);
+	const FString Label = OptionalString(Params, TEXT("label"));
+	const bool bActivate = OptionalBool(Params, TEXT("activate"), true);
+
 	UNiagaraSystem* NiagaraSystem = LoadObject<UNiagaraSystem>(nullptr, *SystemPath);
 	if (!NiagaraSystem)
 	{
@@ -517,18 +742,10 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::SpawnNiagaraActor(const TSharedPtr<FJso
 
 	REQUIRE_EDITOR_WORLD(World);
 
-	FVector Location = OptionalVec3(Params, TEXT("location"));
-	if (Location == FVector::ZeroVector) ReadVec3Fields(Params, Location);
-	FRotator Rotation = OptionalRotator(Params, TEXT("rotation"));
-	if (Rotation == FRotator::ZeroRotator) ReadRotatorFields(Params, Rotation);
-
-	const FString Label = OptionalString(Params, TEXT("label"));
 	if (auto ExistingActor = MCPCheckActorLabelExists(World, Label, TEXT("skip"), TEXT("Niagara actor")))
 	{
 		return ExistingActor;
 	}
-
-	const bool bActivate = OptionalBool(Params, TEXT("activate"), true);
 
 	FActorSpawnParameters SpawnParams;
 	ANiagaraActor* Actor = World->SpawnActor<ANiagaraActor>(ANiagaraActor::StaticClass(), Location, Rotation, SpawnParams);
@@ -902,7 +1119,7 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::AddEmitterToSystem(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FNiagaraHandlers::SetEmitterProperty(const TSharedPtr<FJsonObject>& Params)
 {
 	FString SystemPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("systemPath"), TEXT("assetPath"), SystemPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("systemPath"), SystemPath)) return Err;
 
 	FString EmitterName = OptionalString(Params, TEXT("emitterName"));
 
@@ -1330,6 +1547,9 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::SetRendererProperty(const TSharedPtr<FJ
 	const int32 RendererIndex = OptionalInt(Params, TEXT("rendererIndex"), 0);
 	FString EmitterName = OptionalString(Params, TEXT("emitterName"), TEXT(""));
 	int32 EmitterIndex = OptionalInt(Params, TEXT("emitterIndex"), 0);
+	// Read before anything can fail (#1057). Each property branch below reads
+	// it again in the shape that property takes.
+	(void)TryGetParam(Params, TEXT("value"));
 
 	UNiagaraSystem* System = Cast<UNiagaraSystem>(UEditorAssetLibrary::LoadAsset(SystemPath));
 	if (!System) return MCPError(FString::Printf(TEXT("System not found: %s"), *SystemPath));
@@ -1767,7 +1987,16 @@ namespace
 
 TSharedPtr<FJsonValue> FNiagaraHandlers::ListModuleInputs(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read on every engine version, so the spec holds on 5.4 too (#1057).
+	FString SystemPath;
+	if (auto Err = RequireString(Params, TEXT("systemPath"), SystemPath)) return Err;
+	FString EmitterName = OptionalString(Params, TEXT("emitterName"), TEXT(""));
+	int32 EmitterIndex = OptionalInt(Params, TEXT("emitterIndex"), 0);
+	FString StackContext = OptionalString(Params, TEXT("stackContext"), TEXT("all"));
+	FString ModuleFilter = OptionalString(Params, TEXT("moduleName"), TEXT(""));
+
 #if !UE_MCP_HAS_5_5_API
+	(void)EmitterIndex;
 	// FNiagaraStackGraphUtilities::GetStackFunctionInputs and
 	// FNiagaraStackFunctionInputBinder are declared but not exported in 5.4, and no reflected API stands in for them.
 	TSharedPtr<FJsonObject> Unsupported = MakeShared<FJsonObject>();
@@ -1776,12 +2005,6 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::ListModuleInputs(const TSharedPtr<FJson
 	Unsupported->SetStringField(TEXT("error"), TEXT("niagara module input actions require Unreal Engine 5.5 or newer: the NiagaraEditor stack API they read and write through is not exported in 5.4."));
 	return MCPResult(Unsupported);
 #else
-	FString SystemPath;
-	if (auto Err = RequireString(Params, TEXT("systemPath"), SystemPath)) return Err;
-	FString EmitterName = OptionalString(Params, TEXT("emitterName"), TEXT(""));
-	int32 EmitterIndex = OptionalInt(Params, TEXT("emitterIndex"), 0);
-	FString StackContext = OptionalString(Params, TEXT("stackContext"), TEXT("all"));
-	FString ModuleFilter = OptionalString(Params, TEXT("moduleName"), TEXT(""));
 
 	UNiagaraSystem* System = Cast<UNiagaraSystem>(UEditorAssetLibrary::LoadAsset(SystemPath));
 	if (!System) return MCPError(FString::Printf(TEXT("System not found: %s"), *SystemPath));
@@ -2501,11 +2724,12 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::SetStaticSwitch(const TSharedPtr<FJsonO
 	if (auto Err = RequireString(Params, TEXT("moduleName"), ModuleName)) return Err;
 	FString SwitchName;
 	if (auto Err = RequireString(Params, TEXT("switchName"), SwitchName)) return Err;
-	FString Value;
-	if (auto Err = RequireString(Params, TEXT("value"), Value)) return Err;
 	FString EmitterName = OptionalString(Params, TEXT("emitterName"), TEXT(""));
 	int32 EmitterIndex = OptionalInt(Params, TEXT("emitterIndex"), 0);
 	FString StackContext = OptionalString(Params, TEXT("stackContext"), TEXT("all"));
+	// Last, so the optional reads above happen even when it is missing (#1057).
+	FString Value;
+	if (auto Err = RequireString(Params, TEXT("value"), Value)) return Err;
 
 	UNiagaraSystem* System = Cast<UNiagaraSystem>(UEditorAssetLibrary::LoadAsset(SystemPath));
 	if (!System) return MCPError(FString::Printf(TEXT("System not found: %s"), *SystemPath));

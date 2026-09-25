@@ -87,9 +87,10 @@ export function specProblems(specs: HandlerSpecs): string[] {
 /**
  * Build the action declaration for a spec'd bridge method: the summary a person
  * wrote, then the generated `Params:` clause. There is no mapParams, because the
- * spec names are the bridge names and renames are the registry's aliases.
+ * spec names are the bridge names and renames are the registry's aliases. The
+ * action carries the spec itself, so describe_action reports it verbatim.
  */
-export function makeSpecBp(clauses: Readonly<Record<string, string>>) {
+export function makeSpecBp(clauses: Readonly<Record<string, string>>, specs: HandlerSpecs = {}) {
   return (effect: ActionEffect, summary: string, bridge: string): BridgeActionSpec => {
     const clause = clauses[bridge];
     if (clause === undefined) {
@@ -98,7 +99,9 @@ export function makeSpecBp(clauses: Readonly<Record<string, string>>) {
         + "then run npm run specs:record and npm run specs:generate.",
       );
     }
-    return bp(effect, `${summary} ${clause}`, bridge);
+    const action = bp(effect, `${summary} ${clause}`, bridge);
+    const params = specs[bridge]?.params;
+    return params ? { ...action, paramSpec: params } : action;
   };
 }
 

@@ -672,15 +672,7 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::ListDynamicInputs(const TSharedPtr<FJso
 
 TSharedPtr<FJsonValue> FNiagaraHandlers::SetDynamicInput(const TSharedPtr<FJsonObject>& Params)
 {
-#if !UE_MCP_HAS_5_5_API
-	// FNiagaraStackGraphUtilities::GetStackFunctionInputs and
-	// FNiagaraStackFunctionInputBinder are declared but not exported in 5.4, and no reflected API stands in for them.
-	TSharedPtr<FJsonObject> Unsupported = MakeShared<FJsonObject>();
-	Unsupported->SetBoolField(TEXT("success"), false);
-	Unsupported->SetStringField(TEXT("errorCode"), TEXT("unsupported_engine_version"));
-	Unsupported->SetStringField(TEXT("error"), TEXT("niagara module input actions require Unreal Engine 5.5 or newer: the NiagaraEditor stack API they read and write through is not exported in 5.4."));
-	return MCPResult(Unsupported);
-#else
+	// Read on every engine version, so the spec holds on 5.4 too (#1057).
 	FString SystemPath, StackContext, ModuleName, InputName, DynamicInputScript;
 	if (auto Err = RequireString(Params, TEXT("systemPath"), SystemPath)) return Err;
 	if (auto Err = RequireString(Params, TEXT("stackContext"), StackContext)) return Err;
@@ -689,6 +681,17 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::SetDynamicInput(const TSharedPtr<FJsonO
 	if (auto Err = RequireString(Params, TEXT("dynamicInputScript"), DynamicInputScript)) return Err;
 	const FString EmitterName = OptionalString(Params, TEXT("emitterName"), TEXT(""));
 	const int32 EmitterIndex = OptionalInt(Params, TEXT("emitterIndex"), 0);
+
+#if !UE_MCP_HAS_5_5_API
+	(void)EmitterIndex;
+	// FNiagaraStackGraphUtilities::GetStackFunctionInputs and
+	// FNiagaraStackFunctionInputBinder are declared but not exported in 5.4, and no reflected API stands in for them.
+	TSharedPtr<FJsonObject> Unsupported = MakeShared<FJsonObject>();
+	Unsupported->SetBoolField(TEXT("success"), false);
+	Unsupported->SetStringField(TEXT("errorCode"), TEXT("unsupported_engine_version"));
+	Unsupported->SetStringField(TEXT("error"), TEXT("niagara module input actions require Unreal Engine 5.5 or newer: the NiagaraEditor stack API they read and write through is not exported in 5.4."));
+	return MCPResult(Unsupported);
+#else
 
 	if (MCPIsProtectedAssetPath(SystemPath)) return MCPProtectedPathError(SystemPath);
 
@@ -1088,6 +1091,8 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::AddSimulationStage(const TSharedPtr<FJs
 	if (auto Err = RequireString(Params, TEXT("stageName"), StageName)) return Err;
 	const FString EmitterName = OptionalString(Params, TEXT("emitterName"), TEXT(""));
 	const int32 EmitterIndex = OptionalInt(Params, TEXT("emitterIndex"), 0);
+	// Read before anything can fail (#1057).
+	const bool bEnabled = OptionalBool(Params, TEXT("enabled"), true);
 
 	if (MCPIsProtectedAssetPath(SystemPath)) return MCPProtectedPathError(SystemPath);
 
@@ -1136,7 +1141,7 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::AddSimulationStage(const TSharedPtr<FJs
 
 	Stage->Script = Script;
 	Stage->SimulationStageName = WantedName;
-	Stage->bEnabled = OptionalBool(Params, TEXT("enabled"), true) ? 1 : 0;
+	Stage->bEnabled = bEnabled ? 1 : 0;
 	Stage->OuterEmitterVersion = Version;
 	Emitter->AddSimulationStage(Stage, Version);
 

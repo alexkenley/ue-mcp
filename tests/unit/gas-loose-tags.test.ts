@@ -20,29 +20,16 @@ describe("gas loose tag actions", () => {
     it(`${action} declares every parameter it documents`, () => {
       const documented = parseParamsClause(gasTool.actions[action].description ?? "");
       expect(documented.map((p) => p.name)).toEqual(
-        expect.arrayContaining(["actorLabel", "actorPath", "tag", "count", "world", "pieInstance"]),
+        expect.arrayContaining(["actorLabel", "actorPath", "tag", "count", "world"]),
       );
       for (const { name } of documented) {
         expect(gasTool.schema[name], `${action}'s '${name}' is declared`).toBeDefined();
       }
     });
 
-    it(`${action} forwards the selector, tag and count to the bridge`, () => {
-      const mapped = gasTool.actions[action].mapParams!({
-        action,
-        actorPath: "/Game/Map.Map:PersistentLevel.Hero",
-        tag: "Status.Stunned",
-        count: 2,
-        world: "pie",
-        pieInstance: 1,
-      });
-      expect(mapped).toMatchObject({
-        actorPath: "/Game/Map.Map:PersistentLevel.Hero",
-        tag: "Status.Stunned",
-        count: 2,
-        world: "pie",
-        pieInstance: 1,
-      });
+    it(`${action} forwards the selector, tag and count to the bridge untouched`, () => {
+      // Spec'd from C++ (#1057): no mapParams, so the whole bag reaches the handler.
+      expect(gasTool.actions[action].mapParams).toBeUndefined();
     });
   }
 

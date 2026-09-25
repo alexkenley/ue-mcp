@@ -68,6 +68,10 @@ namespace
 
 TSharedPtr<FJsonValue> FLevelHandlers::SummarizeStaticMeshUsage(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("world"), TEXT("pieInstance"), TEXT("maxResults"), TEXT("includeOccurrences"), TEXT("maxOccurrences"),
+	});
+
 	check(IsInGameThread());
 
 	const FString RequestedWorld = OptionalString(Params, TEXT("world"), TEXT("editor"));

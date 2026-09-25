@@ -77,8 +77,11 @@ namespace
 TSharedPtr<FJsonValue> FAudioHandlers::SoundCueAddNode(const TSharedPtr<FJsonObject>& Params)
 {
 	FString CuePath, NodeType;
-	if (auto Err = RequireStringAlt(Params, TEXT("cuePath"), TEXT("assetPath"), CuePath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("cuePath"), CuePath)) return Err;
 	if (auto Err = RequireString(Params, TEXT("nodeType"), NodeType)) return Err;
+	// Read before the asset load can fail (#1057).
+	const FString WavePath = OptionalString(Params, TEXT("soundWavePath"));
+	const bool bHasProperties = HasParam(Params, TEXT("properties"));
 
 	USoundCue* Cue = Cast<USoundCue>(UEditorAssetLibrary::LoadAsset(CuePath));
 	if (!Cue) return MCPError(FString::Printf(TEXT("SoundCue not found: %s"), *CuePath));
@@ -89,8 +92,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::SoundCueAddNode(const TSharedPtr<FJsonObj
 
 	if (USoundNodeWavePlayer* WP = Cast<USoundNodeWavePlayer>(Node))
 	{
-		FString WavePath;
-		if (TryGetStringParam(Params, TEXT("soundWavePath"), WavePath) && !WavePath.IsEmpty())
+		if (!WavePath.IsEmpty())
 		{
 			if (USoundWave* Wave = Cast<USoundWave>(UEditorAssetLibrary::LoadAsset(WavePath)))
 			{
@@ -99,7 +101,10 @@ TSharedPtr<FJsonValue> FAudioHandlers::SoundCueAddNode(const TSharedPtr<FJsonObj
 		}
 	}
 
-	ApplyNodeProps(Node, Params);
+	if (bHasProperties)
+	{
+		ApplyNodeProps(Node, Params);
+	}
 	Cue->MarkPackageDirty();
 	UEditorAssetLibrary::SaveAsset(CuePath);
 
@@ -124,16 +129,18 @@ TSharedPtr<FJsonValue> FAudioHandlers::SoundCueAddNode(const TSharedPtr<FJsonObj
 TSharedPtr<FJsonValue> FAudioHandlers::SoundCueConnect(const TSharedPtr<FJsonObject>& Params)
 {
 	FString CuePath, ChildNodeId;
-	if (auto Err = RequireStringAlt(Params, TEXT("cuePath"), TEXT("assetPath"), CuePath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("cuePath"), CuePath)) return Err;
 	if (auto Err = RequireString(Params, TEXT("childNodeId"), ChildNodeId)) return Err;
+	// Read before the asset load can fail (#1057).
+	const FString ParentNodeId = OptionalString(Params, TEXT("parentNodeId"));
+	const bool bHasChildIndex = HasParam(Params, TEXT("childIndex"));
+	const int32 RequestedChildIndex = OptionalInt(Params, TEXT("childIndex"), 0);
 
 	USoundCue* Cue = Cast<USoundCue>(UEditorAssetLibrary::LoadAsset(CuePath));
 	if (!Cue) return MCPError(FString::Printf(TEXT("SoundCue not found: %s"), *CuePath));
 
 	USoundNode* Child = FindSoundCueNodeByName(Cue, ChildNodeId);
 	if (!Child) return MCPError(FString::Printf(TEXT("Child node '%s' not found in cue."), *ChildNodeId));
-
-	const FString ParentNodeId = OptionalString(Params, TEXT("parentNodeId"));
 
 	// What the rollback has to put back, captured before anything moves.
 	FString PreviousRootId;
@@ -150,9 +157,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::SoundCueConnect(const TSharedPtr<FJsonObj
 		USoundNode* Parent = FindSoundCueNodeByName(Cue, ParentNodeId);
 		if (!Parent) return MCPError(FString::Printf(TEXT("Parent node '%s' not found in cue."), *ParentNodeId));
 
-		int32 Index = HasParam(Params, TEXT("childIndex"))
-			? (int32)OptionalNumber(Params, TEXT("childIndex"), 0)
-			: Parent->ChildNodes.Num();
+		int32 Index = bHasChildIndex ? RequestedChildIndex : Parent->ChildNodes.Num();
 		Index = FMath::Clamp(Index, 0, Parent->ChildNodes.Num());
 
 		if (Index >= Parent->GetMaxChildNodes())
@@ -227,7 +232,7 @@ TSharedPtr<FJsonValue> FAudioHandlers::SoundCueConnect(const TSharedPtr<FJsonObj
 TSharedPtr<FJsonValue> FAudioHandlers::SoundCueGetGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString CuePath;
-	if (auto Err = RequireStringAlt(Params, TEXT("cuePath"), TEXT("assetPath"), CuePath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("cuePath"), CuePath)) return Err;
 
 	USoundCue* Cue = Cast<USoundCue>(UEditorAssetLibrary::LoadAsset(CuePath));
 	if (!Cue) return MCPError(FString::Printf(TEXT("SoundCue not found: %s"), *CuePath));

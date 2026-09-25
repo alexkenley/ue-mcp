@@ -365,6 +365,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddEqsTest(const TSharedPtr<FJsonObjec
 	if (auto Err = RequireString(Params, TEXT("queryPath"), QueryPath)) return Err;
 	if (auto Err = RequireString(Params, TEXT("testClass"), TestSpec)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	const int32 OptionIndex = static_cast<int32>(OptionalNumber(Params, TEXT("optionIndex"), 0.0));
+	const FString Purpose = OptionalString(Params, TEXT("purpose"), TEXT(""));
+
 	TSharedPtr<FJsonValue> Error;
 	UEnvQuery* Query = LoadQuery(QueryPath, Error);
 	if (!Query) return Error;
@@ -372,7 +376,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddEqsTest(const TSharedPtr<FJsonObjec
 	UClass* TestClass = ResolveEqsClass(TestSpec, UEnvQueryTest::StaticClass(), Error);
 	if (!TestClass) return Error;
 
-	const int32 OptionIndex = static_cast<int32>(OptionalNumber(Params, TEXT("optionIndex"), 0.0));
 	TArray<TObjectPtr<UEnvQueryOption>>& Options = Query->GetOptionsMutable();
 	if (!Options.IsValidIndex(OptionIndex) || !Options[OptionIndex])
 	{
@@ -384,7 +387,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddEqsTest(const TSharedPtr<FJsonObjec
 
 	UEnvQueryTest* Test = NewObject<UEnvQueryTest>(Query, TestClass);
 
-	const FString Purpose = OptionalString(Params, TEXT("purpose"), TEXT(""));
 	if (!Purpose.IsEmpty())
 	{
 		if (Purpose.Equals(TEXT("filter"), ESearchCase::IgnoreCase))
@@ -435,11 +437,14 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveEqsTest(const TSharedPtr<FJsonOb
 	FString QueryPath;
 	if (auto Err = RequireString(Params, TEXT("queryPath"), QueryPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	const int32 OptionIndex = static_cast<int32>(OptionalNumber(Params, TEXT("optionIndex"), 0.0));
+	const int32 TestIndex = static_cast<int32>(OptionalNumber(Params, TEXT("testIndex"), -1.0));
+
 	TSharedPtr<FJsonValue> Error;
 	UEnvQuery* Query = LoadQuery(QueryPath, Error);
 	if (!Query) return Error;
 
-	const int32 OptionIndex = static_cast<int32>(OptionalNumber(Params, TEXT("optionIndex"), 0.0));
 	TArray<TObjectPtr<UEnvQueryOption>>& Options = Query->GetOptionsMutable();
 	if (!Options.IsValidIndex(OptionIndex) || !Options[OptionIndex])
 	{
@@ -448,7 +453,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveEqsTest(const TSharedPtr<FJsonOb
 	}
 
 	TArray<TObjectPtr<UEnvQueryTest>>& Tests = Options[OptionIndex]->Tests;
-	const int32 TestIndex = static_cast<int32>(OptionalNumber(Params, TEXT("testIndex"), -1.0));
 	if (TestIndex < 0)
 	{
 		return MCPError(FString::Printf(
@@ -513,11 +517,13 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveEqsOption(const TSharedPtr<FJson
 	FString QueryPath;
 	if (auto Err = RequireString(Params, TEXT("queryPath"), QueryPath)) return Err;
 
+	// Read before anything can fail (#1057).
+	const int32 OptionIndex = static_cast<int32>(OptionalNumber(Params, TEXT("optionIndex"), -1.0));
+
 	TSharedPtr<FJsonValue> Error;
 	UEnvQuery* Query = LoadQuery(QueryPath, Error);
 	if (!Query) return Error;
 
-	const int32 OptionIndex = static_cast<int32>(OptionalNumber(Params, TEXT("optionIndex"), -1.0));
 	if (OptionIndex < 0)
 	{
 		return MCPError(TEXT("Missing 'optionIndex'. gameplay(read_eqs_query) lists the options with their indices."));
@@ -573,11 +579,15 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReorderEqsTests(const TSharedPtr<FJson
 	FString QueryPath;
 	if (auto Err = RequireString(Params, TEXT("queryPath"), QueryPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	const int32 OptionIndex = static_cast<int32>(OptionalNumber(Params, TEXT("optionIndex"), 0.0));
+	const TArray<TSharedPtr<FJsonValue>>* OrderJson = nullptr;
+	const bool bHasOrder = TryGetArrayParam(Params, TEXT("order"), OrderJson) && OrderJson;
+
 	TSharedPtr<FJsonValue> Error;
 	UEnvQuery* Query = LoadQuery(QueryPath, Error);
 	if (!Query) return Error;
 
-	const int32 OptionIndex = static_cast<int32>(OptionalNumber(Params, TEXT("optionIndex"), 0.0));
 	TArray<TObjectPtr<UEnvQueryOption>>& Options = Query->GetOptionsMutable();
 	if (!Options.IsValidIndex(OptionIndex) || !Options[OptionIndex])
 	{
@@ -585,8 +595,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::ReorderEqsTests(const TSharedPtr<FJson
 			OptionIndex, Options.Num()));
 	}
 
-	const TArray<TSharedPtr<FJsonValue>>* OrderJson = nullptr;
-	if (!TryGetArrayParam(Params, TEXT("order"), OrderJson) || !OrderJson)
+	if (!bHasOrder)
 	{
 		return MCPError(TEXT("Missing 'order': an array of the current test indices, in the order you want them."));
 	}
@@ -660,12 +669,18 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RunEqsQuery(const TSharedPtr<FJsonObje
 	FString QueryPath;
 	if (auto Err = RequireString(Params, TEXT("queryPath"), QueryPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
+	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("auto"));
+	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
+	const bool bHasQuerierLabel = HasParam(Params, TEXT("querierLabel"));
+	const bool bHasQuerierPath = HasParam(Params, TEXT("querierPath"));
+	const FString ModeName = OptionalString(Params, TEXT("runMode"), TEXT("all"));
+	const int32 Limit = static_cast<int32>(OptionalNumber(Params, TEXT("limit"), 50.0));
+
 	TSharedPtr<FJsonValue> Error;
 	UEnvQuery* Query = LoadQuery(QueryPath, Error);
 	if (!Query) return Error;
 
-	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("auto"));
-	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
 	if (!World)
 	{
 		return MCPError(FString::Printf(TEXT("World '%s' not available."), *WorldScope));
@@ -683,7 +698,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RunEqsQuery(const TSharedPtr<FJsonObje
 	// (Querier, and anything derived from it) have nothing to resolve against,
 	// which is a silent empty result rather than an error.
 	AActor* Querier = nullptr;
-	if (HasParam(Params, TEXT("querierLabel")) || HasParam(Params, TEXT("querierPath")))
+	if (bHasQuerierLabel || bHasQuerierPath)
 	{
 		FMCPActorSelector Selector;
 		Selector.LabelKey = TEXT("querierLabel");
@@ -693,7 +708,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RunEqsQuery(const TSharedPtr<FJsonObje
 		if (!Querier) return Error;
 	}
 
-	const FString ModeName = OptionalString(Params, TEXT("runMode"), TEXT("all"));
 	EEnvQueryRunMode::Type Mode = EEnvQueryRunMode::AllMatching;
 	if (ModeName.Equals(TEXT("best"), ESearchCase::IgnoreCase)) Mode = EEnvQueryRunMode::SingleResult;
 	else if (ModeName.Equals(TEXT("random"), ESearchCase::IgnoreCase)) Mode = EEnvQueryRunMode::RandomBest25Pct;
@@ -712,7 +726,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RunEqsQuery(const TSharedPtr<FJsonObje
 							 "for an option with no generator."));
 	}
 
-	const int32 Limit = static_cast<int32>(OptionalNumber(Params, TEXT("limit"), 50.0));
 	TArray<TSharedPtr<FJsonValue>> Items;
 	for (int32 i = 0; i < QueryResult->Items.Num() && Items.Num() < Limit; i++)
 	{

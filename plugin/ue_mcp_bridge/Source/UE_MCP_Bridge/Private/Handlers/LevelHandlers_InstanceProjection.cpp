@@ -698,6 +698,13 @@ TSharedPtr<FJsonValue> UEMCPInstanceProjection::SnapInstancesToSurfaceInWorld(
 
 TSharedPtr<FJsonValue> FLevelHandlers::SnapInstancesToSurface(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("componentName"), TEXT("instanceIndices"), TEXT("maxInstances"),
+		TEXT("direction"), TEXT("traceStartOffset"), TEXT("traceDistance"), TEXT("surfaceOffset"), TEXT("onMiss"),
+		TEXT("surfaceActorClass"), TEXT("surfaceActorLabels"), TEXT("channel"), TEXT("traceComplex"),
+		TEXT("dryRun"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	return UEMCPInstanceProjection::SnapInstancesToSurfaceInWorld(World, Params);
 }

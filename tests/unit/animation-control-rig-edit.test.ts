@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { animationTool } from "../../src/tools/animation.js";
+import { handlerSpecs } from "../../src/tools/specs/animation.generated.js";
 import type { ToolContext } from "../../src/types.js";
 
 const workflowActions = [
@@ -603,7 +604,15 @@ describe("animation Control Rig edit workflow", () => {
     }, undefined);
   });
 
-  it("maps the AnimSequence-only analysis contract without leaking edit-session fields", async () => {
+  it("declares the AnimSequence-only analysis contract in its C++ spec, without edit-session fields (#1057)", async () => {
+    expect(animationTool.actions.analyze_animation.mapParams).toBeUndefined();
+    const declared = handlerSpecs.analyze_animation.params.map((p) => p.name);
+    expect(declared.sort()).toEqual([
+      "assetPath", "boneNames", "facingBones", "frames", "loop", "outputDirectory", "sampleRate", "skeletalMeshPath",
+    ]);
+    expect(declared).not.toContain("sequencePath");
+    expect(declared).not.toContain("bindingTag");
+
     const call = vi.fn().mockResolvedValue({ success: true });
     const ctx = { bridge: { call } } as unknown as ToolContext;
 
@@ -616,8 +625,6 @@ describe("animation Control Rig edit workflow", () => {
       sampleRate: 30,
       loop: true,
       outputDirectory: "manny_idle_ready",
-      sequencePath: "/Game/ShouldNotLeak",
-      bindingTag: "should-not-leak",
     });
 
     expect(call).toHaveBeenCalledWith("analyze_animation", {

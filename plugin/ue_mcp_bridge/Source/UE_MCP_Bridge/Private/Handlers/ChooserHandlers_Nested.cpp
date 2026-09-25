@@ -294,16 +294,16 @@ namespace
 TSharedPtr<FJsonValue> FChooserHandlers::ListObjectReferences(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const FString ClassFilter = OptionalString(Params, TEXT("classFilter"));
+	const FString PathFilter = OptionalString(Params, TEXT("pathFilter"));
 
 	UChooserTable* Chooser = Cast<UChooserTable>(UEditorAssetLibrary::LoadAsset(AssetPath));
 	if (!Chooser)
 	{
 		return MCPError(FString::Printf(TEXT("ChooserTable not found: %s"), *AssetPath));
 	}
-
-	const FString ClassFilter = OptionalString(Params, TEXT("classFilter"));
-	const FString PathFilter = OptionalString(Params, TEXT("pathFilter"));
 
 	TArray<FChooserObjectRef> Refs;
 	GatherAllRefs(Chooser, Refs);
@@ -349,7 +349,18 @@ TSharedPtr<FJsonValue> FChooserHandlers::ListObjectReferences(const TSharedPtr<F
 TSharedPtr<FJsonValue> FChooserHandlers::RemapObjectReferences(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+
+	// Either an exact from/to pair, or a prefix rewrite for the common
+	// "adopt a vendor folder into our namespace" case. Every parameter is read
+	// before anything can fail (#1057).
+	const FString From = OptionalString(Params, TEXT("from"));
+	const FString To = OptionalString(Params, TEXT("to"));
+	const FString FromPrefix = OptionalString(Params, TEXT("fromPrefix"));
+	const FString ToPrefix = OptionalString(Params, TEXT("toPrefix"));
+	// Default to a dry run: this rewrites asset references in place.
+	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), true);
+	const bool bAllowMissing = OptionalBool(Params, TEXT("allowMissing"), false);
 
 	UChooserTable* Chooser = Cast<UChooserTable>(UEditorAssetLibrary::LoadAsset(AssetPath));
 	if (!Chooser)
@@ -357,20 +368,12 @@ TSharedPtr<FJsonValue> FChooserHandlers::RemapObjectReferences(const TSharedPtr<
 		return MCPError(FString::Printf(TEXT("ChooserTable not found: %s"), *AssetPath));
 	}
 
-	// Either an exact from/to pair, or a prefix rewrite for the common
-	// "adopt a vendor folder into our namespace" case.
-	const FString From = OptionalString(Params, TEXT("from"));
-	const FString To = OptionalString(Params, TEXT("to"));
-	const FString FromPrefix = OptionalString(Params, TEXT("fromPrefix"));
-	const FString ToPrefix = OptionalString(Params, TEXT("toPrefix"));
 	const bool bExact = !From.IsEmpty() && !To.IsEmpty();
 	const bool bPrefix = !FromPrefix.IsEmpty() && !ToPrefix.IsEmpty();
 	if (bExact == bPrefix)
 	{
 		return MCPError(TEXT("Provide exactly one of: from+to (exact path swap), or fromPrefix+toPrefix (folder rewrite)"));
 	}
-	// Default to a dry run: this rewrites asset references in place.
-	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), true);
 
 	TArray<FChooserObjectRef> Refs;
 	GatherAllRefs(Chooser, Refs);
@@ -469,7 +472,7 @@ TSharedPtr<FJsonValue> FChooserHandlers::RemapObjectReferences(const TSharedPtr<
 				{
 					Change->SetStringField(TEXT("error"), FString::Printf(TEXT("Not a valid object path: %s"), *NewPath));
 				}
-				else if (!OptionalBool(Params, TEXT("allowMissing"), false) && !ResolvedTargets.FindRef(NewPath).IsValid())
+				else if (!bAllowMissing && !ResolvedTargets.FindRef(NewPath).IsValid())
 				{
 					Change->SetStringField(TEXT("error"), FString::Printf(
 						TEXT("Target does not exist: %s (pass allowMissing=true to write it anyway)"), *NewPath));

@@ -251,6 +251,11 @@ namespace
 // the worst shape of wrong answer: nothing about it looks wrong.
 TSharedPtr<FJsonValue> FLevelHandlers::LineTrace(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("start"), TEXT("end"), TEXT("direction"), TEXT("distance"), TEXT("traceComplex"), TEXT("channel"),
+		TEXT("ignoreActors"), TEXT("world"), TEXT("pieInstance"),
+	});
+
 	TSharedPtr<FJsonValue> WorldError;
 	UWorld* World = ResolveTraceWorld(Params, WorldError);
 	if (!World) return WorldError;
@@ -307,6 +312,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::BulkLineTrace(const TSharedPtr<FJsonObjec
 
 TSharedPtr<FJsonValue> FLevelHandlers::SnapActorToFloor(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("floorOffset"), TEXT("maxDistance"), TEXT("world"),
+		TEXT("pieInstance"),
+	});
+
 	// #933: same defect as line_trace. The actor is looked up in this world and
 	// the downward trace runs in it, so both halves have to agree on which one.
 	TSharedPtr<FJsonValue> WorldError;

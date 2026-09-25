@@ -666,6 +666,36 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ReflectInstance(const TSharedPtr<FJs
 	FString ObjectPath;
 	if (auto Err = RequireString(Params, TEXT("objectPath"), ObjectPath)) return Err;
 
+	// Every parameter, paging included, is read before anything can fail (#1057).
+	const FString PropertyPath = OptionalString(Params, TEXT("propertyPath"));
+	const FString Filter = OptionalString(Params, TEXT("filter"));
+	const bool bIncludeInherited = OptionalBool(Params, TEXT("includeInherited"), true);
+	const bool bIncludeValues = OptionalBool(Params, TEXT("includeValues"), true);
+	const bool bEditableOnly = OptionalBool(Params, TEXT("editableOnly"), false);
+
+	int32 MaxDepth = OptionalInt(Params, TEXT("maxDepth"), 1);
+	if (MaxDepth < 0 || MaxDepth > 5)
+	{
+		return MCPError(FString::Printf(
+			TEXT("'maxDepth' must be between 0 and 5 (got %d). 0 names container and struct types without ")
+			TEXT("expanding them; 1 is the default and expands one level of struct fields."), MaxDepth));
+	}
+
+	// One cursor is only valid for the exact query that issued it, so every
+	// parameter that changes which rows are enumerated goes into the key. The
+	// object is keyed by the path the caller gave, which the paging contract
+	// already requires to stay the same between pages.
+	const FString CollectionKey = FString::Printf(
+		TEXT("reflect_instance|obj=%s|prop=%s|filter=%s|inherited=%d|editableOnly=%d"),
+		*ObjectPath, *PropertyPath, *Filter,
+		bIncludeInherited ? 1 : 0, bEditableOnly ? 1 : 0);
+
+	MCPPagination::FPageRequest Page;
+	if (auto Err = MCPPagination::ReadPageRequest(Params, CollectionKey, /*Default*/ 100, /*Max*/ 500, Page))
+	{
+		return Err;
+	}
+
 	// Resolution mirrors editor(set_property): the same paths that can be
 	// WRITTEN are the paths that can be described, or the schema would be
 	// answering about a different object than the write lands on.
@@ -706,20 +736,6 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ReflectInstance(const TSharedPtr<FJs
 		Object->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject)
 			? EInstanceContext::Defaults
 			: EInstanceContext::Instance;
-
-	const FString PropertyPath = OptionalString(Params, TEXT("propertyPath"));
-	const FString Filter = OptionalString(Params, TEXT("filter"));
-	const bool bIncludeInherited = OptionalBool(Params, TEXT("includeInherited"), true);
-	const bool bIncludeValues = OptionalBool(Params, TEXT("includeValues"), true);
-	const bool bEditableOnly = OptionalBool(Params, TEXT("editableOnly"), false);
-
-	int32 MaxDepth = OptionalInt(Params, TEXT("maxDepth"), 1);
-	if (MaxDepth < 0 || MaxDepth > 5)
-	{
-		return MCPError(FString::Printf(
-			TEXT("'maxDepth' must be between 0 and 5 (got %d). 0 names container and struct types without ")
-			TEXT("expanding them; 1 is the default and expands one level of struct fields."), MaxDepth));
-	}
 
 	// Scope: the whole object, or the struct / subobject a dotted path names.
 	const UStruct* ContainerStruct = Object->GetClass();
@@ -770,19 +786,6 @@ TSharedPtr<FJsonValue> FReflectionHandlers::ReflectInstance(const TSharedPtr<FJs
 				TEXT("must name a struct or an object reference; omit it to describe the object itself."),
 				*PropertyPath, *ScopeProp->GetClass()->GetName()));
 		}
-	}
-
-	// One cursor is only valid for the exact query that issued it, so every
-	// parameter that changes which rows are enumerated goes into the key.
-	const FString CollectionKey = FString::Printf(
-		TEXT("reflect_instance|obj=%s|prop=%s|filter=%s|inherited=%d|editableOnly=%d"),
-		*Object->GetPathName(), *PropertyPath, *Filter,
-		bIncludeInherited ? 1 : 0, bEditableOnly ? 1 : 0);
-
-	MCPPagination::FPageRequest Page;
-	if (auto Err = MCPPagination::ReadPageRequest(Params, CollectionKey, /*Default*/ 100, /*Max*/ 500, Page))
-	{
-		return Err;
 	}
 
 	TArray<MCPPagination::FPageRow> Rows;

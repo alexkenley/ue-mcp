@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { IBridge } from "./bridge.js";
 import type { ProjectContext } from "./project.js";
 import type { EditorSession, SessionRegistry } from "./session.js";
+import type { ParamSpec } from "./handler-spec.js";
 import { McpError, ErrorCode } from "./errors.js";
 import { MAX_BRIDGE_TIMEOUT_MS } from "./bridge-timeouts.js";
 import { unknownActionMessage } from "./action-schema.js";
@@ -322,6 +323,12 @@ export interface BridgeActionSpec extends ActionSpecBase {
   kind: "bridge";
   bridge: string;
   mapParams?: (p: Record<string, unknown>) => Record<string, unknown>;
+  /**
+   * The parameters the bridge method declares in C++, set by specBp (#1057).
+   * When present it is the authority on this action's names, types, required
+   * flags and aliases; the category's zod shape is shared and cannot say.
+   */
+  paramSpec?: readonly ParamSpec[];
   handler?: never;
 }
 

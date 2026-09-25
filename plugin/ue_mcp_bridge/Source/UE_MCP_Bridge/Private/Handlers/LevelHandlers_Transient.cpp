@@ -65,6 +65,11 @@ namespace
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FLevelHandlers::SpawnTransientActor(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("world"), TEXT("pieInstance"), TEXT("actorClass"), TEXT("location"), TEXT("rotation"), TEXT("scale"),
+		TEXT("label"), TEXT("hideFromOutliner"), TEXT("initialize"), TEXT("properties"),
+	});
+
 	MCP_CHECK_GAME_THREAD();
 
 	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));
@@ -281,6 +286,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::SpawnTransientActor(const TSharedPtr<FJso
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FLevelHandlers::DestroyTransientActor(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("world"), TEXT("pieInstance"), TEXT("actorPath"), TEXT("actorLabel"), TEXT("all"),
+	});
+
 	MCP_CHECK_GAME_THREAD();
 
 	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));
@@ -431,6 +440,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::DestroyTransientActor(const TSharedPtr<FJ
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FLevelHandlers::ListTransientActors(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("world"), TEXT("pieInstance"), TEXT("cursor"), TEXT("limit"),
+	});
+
 	MCP_CHECK_GAME_THREAD();
 
 	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));

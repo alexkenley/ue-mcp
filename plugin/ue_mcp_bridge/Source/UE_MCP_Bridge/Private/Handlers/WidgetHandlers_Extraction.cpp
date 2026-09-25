@@ -248,16 +248,19 @@ UClass* ResolveDestinationParentClass(const FString& RequestedClass)
 TSharedPtr<FJsonValue> FWidgetHandlers::ExtractWidgetSubtree(const TSharedPtr<FJsonObject>& Params)
 {
 	FString SourceAssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("sourceAssetPath"), TEXT("sourcePath"), SourceAssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("sourceAssetPath"), SourceAssetPath)) return Err;
 
 	FString SourceWidgetName;
-	if (auto Err = RequireStringAlt(Params, TEXT("sourceWidgetName"), TEXT("widgetName"), SourceWidgetName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("sourceWidgetName"), SourceWidgetName)) return Err;
 
 	FString RequestedDestinationPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("destinationAssetPath"), TEXT("destinationPath"), RequestedDestinationPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("destinationAssetPath"), RequestedDestinationPath)) return Err;
 
+	// Every parameter is read before anything can fail (#1057).
 	const bool bDryRun = OptionalBool(Params, TEXT("dryRun"), true);
 	const FString RequestedParentClass = OptionalString(Params, TEXT("destinationParentClass"), TEXT("UserWidget"));
+	FString RequestedRootName;
+	const bool bHasRequestedRootName = TryGetStringParam(Params, TEXT("destinationRootName"), RequestedRootName);
 
 	UWidgetBlueprint* Source = LoadWidgetBlueprintForExtraction(SourceAssetPath);
 	if (!Source || !Source->WidgetTree)
@@ -291,7 +294,7 @@ TSharedPtr<FJsonValue> FWidgetHandlers::ExtractWidgetSubtree(const TSharedPtr<FJ
 		return MCPError(FString::Printf(TEXT("destinationParentClass '%s' is not a UUserWidget subclass"), *RequestedParentClass));
 	}
 
-	const FString DestinationRootName = OptionalString(Params, TEXT("destinationRootName"), SourceRoot->GetName());
+	const FString DestinationRootName = bHasRequestedRootName ? RequestedRootName : SourceRoot->GetName();
 	if (DestinationRootName.IsEmpty() || !FName::IsValidXName(DestinationRootName, INVALID_OBJECTNAME_CHARACTERS))
 	{
 		return MCPError(FString::Printf(TEXT("destinationRootName '%s' is not a valid UObject name"), *DestinationRootName));

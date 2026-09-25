@@ -390,7 +390,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListBlueprintInterfaces(const TShared
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("blueprintPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
@@ -510,7 +510,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RemoveBlueprintInterface(const TShare
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("blueprintPath"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString InterfaceSpec;
 	if (auto Err = RequireString(Params, TEXT("interfacePath"), InterfaceSpec)) return Err;
 
@@ -611,9 +611,24 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetFunctionProperties(const TSharedPt
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString FunctionName;
 	if (auto Err = RequireString(Params, TEXT("functionName"), FunctionName)) return Err;
+
+	// ── read every request before anything can fail (#1057) ──
+	bool bPure = false;      const bool bHasPure      = TryGetBoolParam(Params, TEXT("pure"), bPure);
+	bool bConst = false;     const bool bHasConst     = TryGetBoolParam(Params, TEXT("isConst"), bConst);
+	bool bCallInEditor = false; const bool bHasCallInEditor = TryGetBoolParam(Params, TEXT("callInEditor"), bCallInEditor);
+	bool bThreadSafe = false;   const bool bHasThreadSafe   = TryGetBoolParam(Params, TEXT("threadSafe"), bThreadSafe);
+	bool bDeprecated = false;   const bool bHasDeprecated   = TryGetBoolParam(Params, TEXT("deprecated"), bDeprecated);
+
+	FString Category;          const bool bHasCategory   = TryGetStringParam(Params, TEXT("category"), Category);
+	FString Tooltip;           const bool bHasTooltip    = TryGetStringParam(Params, TEXT("tooltip"), Tooltip);
+	FString Keywords;          const bool bHasKeywords   = TryGetStringParam(Params, TEXT("keywords"), Keywords);
+	FString CompactNodeTitle;  const bool bHasCompact    = TryGetStringParam(Params, TEXT("compactNodeTitle"), CompactNodeTitle);
+	FString DeprecationMessage;const bool bHasDeprMsg    = TryGetStringParam(Params, TEXT("deprecationMessage"), DeprecationMessage);
+
+	FString AccessSpecifier = OptionalString(Params, TEXT("accessSpecifier"));
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
@@ -643,20 +658,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetFunctionProperties(const TSharedPt
 	}
 	UK2Node_FunctionEntry* Entry = (Kind == EGraphKind::Macro) ? nullptr : FindFunctionEntry(Graph);
 
-	// ── read every request and capture every previous value BEFORE writing ──
-	bool bPure = false;      const bool bHasPure      = TryGetBoolParam(Params, TEXT("pure"), bPure);
-	bool bConst = false;     const bool bHasConst     = TryGetBoolParam(Params, TEXT("isConst"), bConst);
-	bool bCallInEditor = false; const bool bHasCallInEditor = TryGetBoolParam(Params, TEXT("callInEditor"), bCallInEditor);
-	bool bThreadSafe = false;   const bool bHasThreadSafe   = TryGetBoolParam(Params, TEXT("threadSafe"), bThreadSafe);
-	bool bDeprecated = false;   const bool bHasDeprecated   = TryGetBoolParam(Params, TEXT("deprecated"), bDeprecated);
-
-	FString Category;          const bool bHasCategory   = TryGetStringParam(Params, TEXT("category"), Category);
-	FString Tooltip;           const bool bHasTooltip    = TryGetStringParam(Params, TEXT("tooltip"), Tooltip);
-	FString Keywords;          const bool bHasKeywords   = TryGetStringParam(Params, TEXT("keywords"), Keywords);
-	FString CompactNodeTitle;  const bool bHasCompact    = TryGetStringParam(Params, TEXT("compactNodeTitle"), CompactNodeTitle);
-	FString DeprecationMessage;const bool bHasDeprMsg    = TryGetStringParam(Params, TEXT("deprecationMessage"), DeprecationMessage);
-
-	FString AccessSpecifier = OptionalString(Params, TEXT("accessSpecifier"));
+	// ── capture every previous value BEFORE writing ──
 	const bool bHasAccess = !AccessSpecifier.IsEmpty();
 	if (bHasAccess)
 	{
@@ -817,14 +819,14 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListGraphParameters(const TSharedPtr<
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
-
-	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
-	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
-
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+	// Read before the load can fail (#1057).
 	const FString FunctionName = OptionalString(Params, TEXT("functionName"));
 	const FString EventName = OptionalString(Params, TEXT("eventName"));
 	const FString GraphName = OptionalString(Params, TEXT("graphName"));
+
+	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
+	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
 
 	if (FunctionName.IsEmpty() == EventName.IsEmpty())
 	{
@@ -917,19 +919,35 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditGraphParameters(const TSharedPtr<
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString Op;
 	if (auto Err = RequireString(Params, TEXT("op"), Op)) return Err;
 
 	static const TCHAR* OpList = TEXT("add, remove, rename, set_type, set_default, reorder");
 
-	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
-	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
-
+	// Every parameter is read before anything can fail (#1057); each op below
+	// checks the ones it needs.
 	const FString FunctionName = OptionalString(Params, TEXT("functionName"));
 	const FString EventName = OptionalString(Params, TEXT("eventName"));
 	const FString GraphName = OptionalString(Params, TEXT("graphName"));
 	const bool bIsOutput = OptionalBool(Params, TEXT("isOutput"), false);
+	FString ParameterName;
+	TryGetStringParam(Params, TEXT("parameterName"), ParameterName);
+	FString ParameterType;
+	const bool bHasParameterType = TryGetStringParam(Params, TEXT("parameterType"), ParameterType);
+	FString NewName;
+	TryGetStringParam(Params, TEXT("newName"), NewName);
+	FString DefaultValue;
+	const bool bHasDefaultValue = TryGetStringParam(Params, TEXT("defaultValue"), DefaultValue);
+	const TArray<TSharedPtr<FJsonValue>>* Order = nullptr;
+	TryGetArrayParam(Params, TEXT("order"), Order);
+	auto MissingParam = [](const TCHAR* Key)
+	{
+		return MCPError(FString::Printf(TEXT("Missing required parameter '%s'"), Key));
+	};
+
+	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
+	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
 
 	if (FunctionName.IsEmpty() == EventName.IsEmpty())
 	{
@@ -1027,9 +1045,8 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditGraphParameters(const TSharedPtr<
 	// ── add ──────────────────────────────────────────────────────────────────
 	if (Op == TEXT("add"))
 	{
-		FString ParameterName;
-		if (auto Err = RequireString(Params, TEXT("parameterName"), ParameterName)) return Err;
-		const FString TypeSpec = OptionalString(Params, TEXT("parameterType"), TEXT("bool"));
+		if (ParameterName.IsEmpty()) return MissingParam(TEXT("parameterName"));
+		const FString TypeSpec = bHasParameterType ? ParameterType : FString(TEXT("bool"));
 
 		FEdGraphPinType PinType;
 		FString TypeError;
@@ -1095,8 +1112,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditGraphParameters(const TSharedPtr<
 	// ── remove ───────────────────────────────────────────────────────────────
 	if (Op == TEXT("remove"))
 	{
-		FString ParameterName;
-		if (auto Err = RequireString(Params, TEXT("parameterName"), ParameterName)) return Err;
+		if (ParameterName.IsEmpty()) return MissingParam(TEXT("parameterName"));
 
 		const FName PinName(*ParameterName);
 		const int32 At = FindUserPin(Owner, PinName);
@@ -1150,10 +1166,8 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditGraphParameters(const TSharedPtr<
 	// ── rename ───────────────────────────────────────────────────────────────
 	if (Op == TEXT("rename"))
 	{
-		FString ParameterName;
-		if (auto Err = RequireString(Params, TEXT("parameterName"), ParameterName)) return Err;
-		FString NewName;
-		if (auto Err = RequireString(Params, TEXT("newName"), NewName)) return Err;
+		if (ParameterName.IsEmpty()) return MissingParam(TEXT("parameterName"));
+		if (NewName.IsEmpty()) return MissingParam(TEXT("newName"));
 
 		const FName OldPin(*ParameterName);
 		const FName NewPin(*NewName);
@@ -1212,10 +1226,9 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditGraphParameters(const TSharedPtr<
 	// ── set_type ─────────────────────────────────────────────────────────────
 	if (Op == TEXT("set_type"))
 	{
-		FString ParameterName;
-		if (auto Err = RequireString(Params, TEXT("parameterName"), ParameterName)) return Err;
-		FString TypeSpec;
-		if (auto Err = RequireString(Params, TEXT("parameterType"), TypeSpec)) return Err;
+		if (ParameterName.IsEmpty()) return MissingParam(TEXT("parameterName"));
+		if (ParameterType.IsEmpty()) return MissingParam(TEXT("parameterType"));
+		const FString TypeSpec = ParameterType;
 
 		const int32 At = FindUserPin(Owner, FName(*ParameterName));
 		if (At == INDEX_NONE)
@@ -1281,10 +1294,8 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditGraphParameters(const TSharedPtr<
 	// ── set_default ──────────────────────────────────────────────────────────
 	if (Op == TEXT("set_default"))
 	{
-		FString ParameterName;
-		if (auto Err = RequireString(Params, TEXT("parameterName"), ParameterName)) return Err;
-		FString DefaultValue;
-		if (!TryGetStringParam(Params, TEXT("defaultValue"), DefaultValue))
+		if (ParameterName.IsEmpty()) return MissingParam(TEXT("parameterName"));
+		if (!bHasDefaultValue)
 		{
 			return MCPError(TEXT("Missing required parameter 'defaultValue': the value as Unreal export text (e.g. '5', 'true', '(X=1.000000,Y=0.000000,Z=0.000000)'). Pass an empty string to clear it."));
 		}
@@ -1341,8 +1352,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditGraphParameters(const TSharedPtr<
 	// ── reorder ──────────────────────────────────────────────────────────────
 	if (Op == TEXT("reorder"))
 	{
-		const TArray<TSharedPtr<FJsonValue>>* Order = nullptr;
-		if (!TryGetArrayParam(Params, TEXT("order"), Order) || !Order)
+		if (!Order)
 		{
 			return MCPError(FString::Printf(
 				TEXT("Missing required parameter 'order': the COMPLETE list of %s names in their desired order. Parameters: %s"),
@@ -1434,7 +1444,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RenameBlueprintVariable(const TShared
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString OldName;
 	if (auto Err = RequireString(Params, TEXT("oldName"), OldName)) return Err;
 	FString NewName;
@@ -1530,14 +1540,15 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::GetBlueprintVariableMetadata(const TS
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString VarName;
 	if (auto Err = RequireString(Params, TEXT("name"), VarName)) return Err;
+	// Read before the load can fail (#1057).
+	const FString FunctionName = OptionalString(Params, TEXT("functionName"));
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
 
-	const FString FunctionName = OptionalString(Params, TEXT("functionName"));
 	const FName VarFName(*VarName);
 	const FBPVariableDescription* Found = nullptr;
 
@@ -1602,20 +1613,21 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetBlueprintVariableMetadata(const TS
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString VarName;
 	if (auto Err = RequireString(Params, TEXT("name"), VarName)) return Err;
-
-	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
-	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
-
+	// Every parameter is read before anything can fail (#1057).
 	const TSharedPtr<FJsonObject>* MetaObj = nullptr;
-	if (!TryGetObjectParam(Params, TEXT("metadata"), MetaObj) || !MetaObj || !MetaObj->IsValid())
+	const bool bHasMetadata = TryGetObjectParam(Params, TEXT("metadata"), MetaObj) && MetaObj && MetaObj->IsValid();
+	const FString FunctionName = OptionalString(Params, TEXT("functionName"));
+	if (!bHasMetadata)
 	{
 		return MCPError(TEXT("Missing required parameter 'metadata': an object of key/value strings (ClampMin, UIMin, EditCondition, Bitmask, BitmaskEnum, MakeEditWidget, MultiLine, ...). A JSON null value removes that key."));
 	}
 
-	const FString FunctionName = OptionalString(Params, TEXT("functionName"));
+	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
+	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
+
 	const FName VarFName(*VarName);
 
 	// Resolve the scope, and prove the variable exists in it, before anything is
@@ -1773,7 +1785,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditLocalVariable(const TSharedPtr<FJ
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString FunctionName;
 	if (auto Err = RequireString(Params, TEXT("functionName"), FunctionName)) return Err;
 	FString VarName;
@@ -1782,6 +1794,13 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditLocalVariable(const TSharedPtr<FJ
 	if (auto Err = RequireString(Params, TEXT("op"), Op)) return Err;
 
 	static const TCHAR* OpList = TEXT("rename, remove, set_type, set_default");
+
+	// Every parameter is read before anything can fail (#1057); each op below
+	// checks the ones it needs.
+	const FString NewName = OptionalString(Params, TEXT("newName"));
+	const FString TypeSpec = OptionalString(Params, TEXT("varType"));
+	FString DefaultValue;
+	const bool bHasDefaultValue = TryGetStringParam(Params, TEXT("defaultValue"), DefaultValue);
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
@@ -1877,8 +1896,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditLocalVariable(const TSharedPtr<FJ
 
 	if (Op == TEXT("rename"))
 	{
-		FString NewName;
-		if (auto Err = RequireString(Params, TEXT("newName"), NewName)) return Err;
+		if (NewName.IsEmpty()) return MCPError(TEXT("Missing required parameter 'newName'"));
 		const FName NewVar(*NewName);
 		if (NewVar == VarFName)
 		{
@@ -1925,8 +1943,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditLocalVariable(const TSharedPtr<FJ
 
 	if (Op == TEXT("set_type"))
 	{
-		FString TypeSpec;
-		if (auto Err = RequireString(Params, TEXT("varType"), TypeSpec)) return Err;
+		if (TypeSpec.IsEmpty()) return MCPError(TEXT("Missing required parameter 'varType'"));
 
 		FEdGraphPinType PinType;
 		FString TypeError;
@@ -1973,8 +1990,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::EditLocalVariable(const TSharedPtr<FJ
 
 	if (Op == TEXT("set_default"))
 	{
-		FString DefaultValue;
-		if (!TryGetStringParam(Params, TEXT("defaultValue"), DefaultValue))
+		if (!bHasDefaultValue)
 		{
 			return MCPError(TEXT("Missing required parameter 'defaultValue': the value as Unreal export text. Pass an empty string to clear it."));
 		}
@@ -2028,7 +2044,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ListEventDispatchers(const TSharedPtr
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("blueprintPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
@@ -2084,7 +2100,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::RemoveEventDispatcher(const TSharedPt
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("blueprintPath"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString Name;
 	if (auto Err = RequireString(Params, TEXT("name"), Name)) return Err;
 
@@ -2189,14 +2205,22 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddCustomEvent(const TSharedPtr<FJson
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString EventName;
 	if (auto Err = RequireString(Params, TEXT("eventName"), EventName)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
+	FString NetMode = OptionalString(Params, TEXT("netMode"), TEXT("none"));
+	const bool bReliable = OptionalBool(Params, TEXT("reliable"), true);
+	const bool bCallInEditor = OptionalBool(Params, TEXT("callInEditor"), false);
+	const TArray<TSharedPtr<FJsonValue>>* ParamArray = nullptr;
+	TryGetArrayParam(Params, TEXT("parameters"), ParamArray);
+	const int32 PosX = OptionalInt(Params, TEXT("posX"), 0);
+	const int32 PosY = OptionalInt(Params, TEXT("posY"), 0);
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
 
-	const FString GraphName = OptionalString(Params, TEXT("graphName"), TEXT("EventGraph"));
 	UEdGraph* Graph = FindGraph(Blueprint, GraphName);
 	if (!Graph)
 	{
@@ -2218,7 +2242,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddCustomEvent(const TSharedPtr<FJson
 	}
 
 	// ── validate the whole request before creating anything ──
-	FString NetMode = OptionalString(Params, TEXT("netMode"), TEXT("none"));
 	{
 		const FString Lowered = NetMode.ToLower();
 		if      (Lowered == TEXT("none"))      NetMode = TEXT("none");
@@ -2231,13 +2254,9 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddCustomEvent(const TSharedPtr<FJson
 				TEXT("Unknown netMode '%s'. Expected none, multicast, server or client."), *NetMode));
 		}
 	}
-	const bool bReliable = OptionalBool(Params, TEXT("reliable"), true);
-	const bool bCallInEditor = OptionalBool(Params, TEXT("callInEditor"), false);
-
 	struct FPlannedParam { FName Name; FEdGraphPinType Type; FString Spec; };
 	TArray<FPlannedParam> PlannedParams;
-	const TArray<TSharedPtr<FJsonValue>>* ParamArray = nullptr;
-	if (TryGetArrayParam(Params, TEXT("parameters"), ParamArray) && ParamArray)
+	if (ParamArray)
 	{
 		TSet<FName> SeenNames;
 		for (int32 Slot = 0; Slot < ParamArray->Num(); ++Slot)
@@ -2287,8 +2306,8 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddCustomEvent(const TSharedPtr<FJson
 	if (NetMode != TEXT("none") && bReliable) FunctionFlags |= FUNC_NetReliable;
 	Event->FunctionFlags = FunctionFlags;
 
-	Event->NodePosX = OptionalInt(Params, TEXT("posX"), 0);
-	Event->NodePosY = OptionalInt(Params, TEXT("posY"), 0);
+	Event->NodePosX = PosX;
+	Event->NodePosY = PosY;
 
 	Graph->Modify();
 	Graph->AddNode(Event, false, false);
@@ -2354,14 +2373,19 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CreateMacro(const TSharedPtr<FJsonObj
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString MacroName;
 	if (auto Err = RequireString(Params, TEXT("macroName"), MacroName)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
+	const TArray<TSharedPtr<FJsonValue>>* InputsArr = nullptr;
+	TryGetArrayParam(Params, TEXT("inputs"), InputsArr);
+	const TArray<TSharedPtr<FJsonValue>>* OutputsArr = nullptr;
+	TryGetArrayParam(Params, TEXT("outputs"), OutputsArr);
 
 	UBlueprint* Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
 
-	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 	if (UEdGraph* Existing = FindByName(Blueprint->MacroGraphs, MacroName))
 	{
 		if (OnConflict == TEXT("error"))
@@ -2389,10 +2413,9 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CreateMacro(const TSharedPtr<FJsonObj
 	struct FPlannedPin { FName Name; FEdGraphPinType Type; FString Spec; bool bOutput = false; };
 	TArray<FPlannedPin> PlannedPins;
 
-	auto PlanPins = [&](const TCHAR* Field, bool bOutput) -> TSharedPtr<FJsonValue>
+	auto PlanPins = [&](const TArray<TSharedPtr<FJsonValue>>* Arr, const TCHAR* Field, bool bOutput) -> TSharedPtr<FJsonValue>
 	{
-		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-		if (!TryGetArrayParam(Params, Field, Arr) || !Arr) return nullptr;
+		if (!Arr) return nullptr;
 		for (int32 Slot = 0; Slot < Arr->Num(); ++Slot)
 		{
 			const TSharedPtr<FJsonObject>* Obj = nullptr;
@@ -2426,8 +2449,8 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CreateMacro(const TSharedPtr<FJsonObj
 		}
 		return nullptr;
 	};
-	if (auto Err = PlanPins(TEXT("inputs"), false)) return Err;
-	if (auto Err = PlanPins(TEXT("outputs"), true)) return Err;
+	if (auto Err = PlanPins(InputsArr, TEXT("inputs"), false)) return Err;
+	if (auto Err = PlanPins(OutputsArr, TEXT("outputs"), true)) return Err;
 
 	// ── nothing above this line creates anything ──
 	UEdGraph* Graph = FBlueprintEditorUtils::CreateNewGraph(
@@ -2516,10 +2539,11 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteGraph(const TSharedPtr<FJsonObj
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("path"), TEXT("assetPath"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
-	FString Requested = OptionalString(Params, TEXT("graphSelector"), TEXT(""));
-	if (Requested.IsEmpty()) Requested = OptionalString(Params, TEXT("graphName"), TEXT(""));
+	// Every parameter is read before anything can fail (#1057).
+	const FString Requested = ReadGraphNameOrSelector(Params, FString());
+	const bool bForce = OptionalBool(Params, TEXT("force"), false);
 	if (Requested.IsEmpty())
 	{
 		return MCPError(TEXT("Name the graph to delete with 'graphName', or 'graphSelector' for the exact selector list_graphs reports when two graphs share a name"));
@@ -2527,8 +2551,6 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteGraph(const TSharedPtr<FJsonObj
 
 	UBlueprint* const Blueprint = LoadBlueprint(AssetPath);
 	if (!Blueprint) return BlueprintNotFoundError(AssetPath);
-
-	const bool bForce = OptionalBool(Params, TEXT("force"), false);
 
 	TArray<UEdGraph*> AllGraphs;
 	Blueprint->GetAllGraphs(AllGraphs);
@@ -2664,7 +2686,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::DeleteMacro(const TSharedPtr<FJsonObj
 	using namespace MCPBlueprintDepth;
 
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString MacroName;
 	if (auto Err = RequireString(Params, TEXT("macroName"), MacroName)) return Err;
 

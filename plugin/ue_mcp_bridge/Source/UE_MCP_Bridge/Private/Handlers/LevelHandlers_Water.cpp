@@ -183,6 +183,10 @@ namespace
 // TileSize change reports a stale grid.
 TSharedPtr<FJsonValue> FLevelHandlers::RebuildWaterZone(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("zoneExtent"), TEXT("tileSize"), TEXT("maxPasses"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	UClass* ZoneClass = MCPWaterZoneClass();
@@ -507,6 +511,10 @@ namespace
 // level(get_water_state): every WaterZone and WaterBody in one structured read.
 TSharedPtr<FJsonValue> FLevelHandlers::GetWaterState(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	UClass* ZoneClass = MCPWaterZoneClass();

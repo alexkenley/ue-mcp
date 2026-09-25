@@ -191,15 +191,17 @@ namespace
 		return MCPResult(Result);
 	}
 
+	/** Resolve the live actor a query names. The caller reads `world` and
+	 *  `actorPath` itself, before anything can fail (#1057). */
 	static TSharedPtr<FJsonValue> ResolveSkeletalActorForQuery(
-		const TSharedPtr<FJsonObject>& Params,
+		const FString& WorldScope,
+		const FString& ActorPath,
 		const FString& ActorToken,
-		const FString& DefaultScope,
 		UWorld*& OutWorld,
 		AActor*& OutActor,
 		FString& OutResolvedScope)
 	{
-		const FString RequestedScope = OptionalString(Params, TEXT("world"), DefaultScope).ToLower();
+		const FString RequestedScope = WorldScope.ToLower();
 		if (!(RequestedScope == TEXT("auto") ||
 			  RequestedScope == TEXT("pie") ||
 			  RequestedScope == TEXT("game") ||
@@ -211,7 +213,6 @@ namespace
 		// #983: actorPath wins over the label token, and a label naming more
 		// than one actor in the world that answered is refused rather than
 		// read off whichever the iterator reached first.
-		const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
 		TArray<TPair<FString, UWorld*>> Candidates = BuildWorldCandidates(RequestedScope);
 		for (const TPair<FString, UWorld*>& Candidate : Candidates)
 		{
@@ -259,11 +260,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetBoneTransform(const TSharedPtr<FJs
 	if (auto Err = RequireString(Params, TEXT("boneName"), BoneName)) return Err;
 	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
 	const FString Space = OptionalString(Params, TEXT("space"), TEXT("world")).ToLower();
+	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("auto"));
+	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
 
 	UWorld* World = nullptr;
 	AActor* Actor = nullptr;
 	FString ResolvedWorldScope;
-	if (auto Err = ResolveSkeletalActorForQuery(Params, ActorLabel, TEXT("auto"), World, Actor, ResolvedWorldScope)) return Err;
+	if (auto Err = ResolveSkeletalActorForQuery(WorldScope, ActorPath, ActorLabel, World, Actor, ResolvedWorldScope)) return Err;
 	// A caller who passed only actorPath left ActorLabel holding the path, and
 	// every message below reads better naming the actor that answered (#983).
 	ActorLabel = Actor->GetActorLabel();
@@ -321,11 +324,17 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListBones(const TSharedPtr<FJsonObjec
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
+	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("auto"));
+	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
+	// cursor and limit are validated by ReadPageRequest once the actor is known,
+	// and noted here so a failed resolve still reads them (#1057).
+	HasParam(Params, TEXT("cursor"));
+	HasParam(Params, TEXT("limit"));
 
 	UWorld* World = nullptr;
 	AActor* Actor = nullptr;
 	FString ResolvedWorldScope;
-	if (auto Err = ResolveSkeletalActorForQuery(Params, ActorLabel, TEXT("auto"), World, Actor, ResolvedWorldScope)) return Err;
+	if (auto Err = ResolveSkeletalActorForQuery(WorldScope, ActorPath, ActorLabel, World, Actor, ResolvedWorldScope)) return Err;
 	// A caller who passed only actorPath left ActorLabel holding the path, and
 	// every message below reads better naming the actor that answered (#983).
 	ActorLabel = Actor->GetActorLabel();
@@ -387,6 +396,8 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RebindLeaderPose(const TSharedPtr<FJs
 	REQUIRE_EDITOR_WORLD(World);
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
+	// Read before anything can fail (#1057).
+	const FString BodyHint = OptionalString(Params, TEXT("bodyComponent"));
 
 	TSharedPtr<FJsonValue> ActorErr;
 	AActor* Actor = MCPResolveActor(World, Params, ActorErr);
@@ -401,7 +412,6 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RebindLeaderPose(const TSharedPtr<FJs
 	}
 
 	USkeletalMeshComponent* Body = nullptr;
-	const FString BodyHint = OptionalString(Params, TEXT("bodyComponent"));
 	if (!BodyHint.IsEmpty())
 	{
 		Body = ResolveSkeletalMeshComp(Actor, BodyHint);
@@ -507,6 +517,16 @@ TSharedPtr<FJsonValue> FAnimationHandlers::PreviewAnimation(const TSharedPtr<FJs
 // or template and disappears when that component is reconstructed.
 TSharedPtr<FJsonValue> FAnimationHandlers::SetLivePostProcessAnimBlueprint(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before anything can fail, the unsupported-engine
+	// answer included (#1057).
+	FString ActorLabel;
+	TSharedPtr<FJsonValue> ActorLabelError = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel);
+	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
+	const FString AnimBlueprintClassPath = OptionalString(Params, TEXT("animBlueprintClassPath"));
+	bool bClear = false;
+	TryGetBoolParam(Params, TEXT("clear"), bClear);
+	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("auto"));
+	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
 #if !UE_MCP_HAS_5_5_API
 	// USkeletalMeshComponent::OverridePostProcessAnimBP, its setter, and
 	// GetPostProcessAnimBPClassToBeUsed all arrived in 5.5. On 5.4 the
@@ -519,12 +539,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetLivePostProcessAnimBlueprint(const
 	Result->SetStringField(TEXT("error"), TEXT("set_live_post_process_anim_blueprint requires Unreal Engine 5.5 or newer, because the per-component post-process AnimBP override does not exist in 5.4. Set the post-process AnimBP on the SkeletalMesh asset instead."));
 	return MCPResult(Result);
 #else
-	FString ActorLabel;
-	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
-	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
-	const FString AnimBlueprintClassPath = OptionalString(Params, TEXT("animBlueprintClassPath"));
-	bool bClear = false;
-	TryGetBoolParam(Params, TEXT("clear"), bClear);
+	if (ActorLabelError) return ActorLabelError;
 	if (bClear && !AnimBlueprintClassPath.IsEmpty())
 	{
 		return MCPError(TEXT("Pass either animBlueprintClassPath or clear=true, not both"));
@@ -553,7 +568,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetLivePostProcessAnimBlueprint(const
 	UWorld* World = nullptr;
 	AActor* Actor = nullptr;
 	FString ResolvedWorldScope;
-	if (auto Err = ResolveSkeletalActorForQuery(Params, ActorLabel, TEXT("auto"), World, Actor, ResolvedWorldScope)) return Err;
+	if (auto Err = ResolveSkeletalActorForQuery(WorldScope, ActorPath, ActorLabel, World, Actor, ResolvedWorldScope)) return Err;
 	ActorLabel = Actor->GetActorLabel();
 	USkeletalMeshComponent* SK = ResolveSkeletalMeshComp(Actor, ComponentName);
 	if (!SK) return MakeSkeletalComponentNotFoundError(Actor, ActorLabel, ComponentName);
@@ -649,6 +664,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetLiveBoneTransforms(const TSharedPt
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 	const FString ComponentName = OptionalString(Params, TEXT("componentName"));
 	const FString Space = OptionalString(Params, TEXT("space"), TEXT("world")).ToLower();
+	const FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("auto"));
+	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
+	// boneNames selects a subset; omitting it returns every bone, which is what a
+	// caller diagnosing a pose wants and is a few hundred entries on a character.
+	// Read before anything can fail (#1057).
+	const TArray<TSharedPtr<FJsonValue>>* BonesArray = nullptr;
+	const bool bHasBoneNames = TryGetArrayParam(Params, TEXT("boneNames"), BonesArray) && BonesArray;
 	if (!(Space == TEXT("world") || Space == TEXT("component") || Space == TEXT("local")))
 	{
 		return MCPError(TEXT("space must be 'world' (default), 'component', or 'local'"));
@@ -657,7 +679,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetLiveBoneTransforms(const TSharedPt
 	UWorld* World = nullptr;
 	AActor* Actor = nullptr;
 	FString ResolvedWorldScope;
-	if (auto Err = ResolveSkeletalActorForQuery(Params, ActorLabel, TEXT("auto"), World, Actor, ResolvedWorldScope)) return Err;
+	if (auto Err = ResolveSkeletalActorForQuery(WorldScope, ActorPath, ActorLabel, World, Actor, ResolvedWorldScope)) return Err;
 	// A caller who passed only actorPath left ActorLabel holding the path, and
 	// every message below reads better naming the actor that answered (#983).
 	ActorLabel = Actor->GetActorLabel();
@@ -672,11 +694,8 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetLiveBoneTransforms(const TSharedPt
 
 	const FReferenceSkeleton& RefSkeleton = Mesh->GetRefSkeleton();
 
-	// boneNames selects a subset; omitting it returns every bone, which is what a
-	// caller diagnosing a pose wants and is a few hundred entries on a character.
 	TArray<FName> RequestedBones;
-	const TArray<TSharedPtr<FJsonValue>>* BonesArray = nullptr;
-	if (TryGetArrayParam(Params, TEXT("boneNames"), BonesArray) && BonesArray)
+	if (bHasBoneNames)
 	{
 		for (const TSharedPtr<FJsonValue>& Entry : *BonesArray)
 		{

@@ -136,12 +136,16 @@ inline FString MakeGraphSelector(const FString& Name, int32 DuplicateIndex, int3
 }
 
 /** The graph a single-graph write addresses: graphSelector (the exact selector
- *  list_graphs reports) wins over graphName. FindGraph resolves both. */
+ *  list_graphs reports) wins over graphName. FindGraph resolves both. Both are
+ *  read either way, so a spec'd handler reads what it declares (#1057). */
 inline FString ReadGraphNameOrSelector(const TSharedPtr<FJsonObject>& Params, const FString& Default)
 {
-	FString Value;
-	if (TryGetStringParam(Params, TEXT("graphSelector"), Value) && !Value.IsEmpty()) return Value;
-	if (TryGetStringParam(Params, TEXT("graphName"), Value) && !Value.IsEmpty()) return Value;
+	FString Selector;
+	const bool bHasSelector = TryGetStringParam(Params, TEXT("graphSelector"), Selector) && !Selector.IsEmpty();
+	FString Name;
+	const bool bHasName = TryGetStringParam(Params, TEXT("graphName"), Name) && !Name.IsEmpty();
+	if (bHasSelector) return Selector;
+	if (bHasName) return Name;
 	return Default;
 }
 

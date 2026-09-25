@@ -167,12 +167,20 @@ namespace MCPDialogPolicy
 
 void FDialogHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
-	// Reports parameters its handlers never read (#1057).
-	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("dialog"));
+	// Reports parameters its handlers never read (#1057). Tagged with the editor
+	// category because the editor tool is the surface these methods are exposed
+	// through, so their parameter specs generate into its module.
+	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("editor"));
+
+	// #1057: arming a policy and pressing a button act on whatever the contract
+	// test sends, so set_dialog_policy and respond_to_dialog stay unspecified.
+	const TArray<FMCPParamSpec> NoParams;
 	Registry.RegisterHandler(TEXT("set_dialog_policy"), &SetDialogPolicy);
-	Registry.RegisterHandler(TEXT("clear_dialog_policy"), &ClearDialogPolicy);
-	Registry.RegisterHandler(TEXT("get_dialog_policy"), &GetDialogPolicy);
-	Registry.RegisterHandler(TEXT("list_dialogs"), &ListDialogs);
+	Registry.RegisterHandler(TEXT("clear_dialog_policy"), &ClearDialogPolicy, {
+		MCPParam::Optional(TEXT("pattern"), EMCPParamType::String, TEXT("Exact pattern of the policy to clear; omit to clear every policy")),
+	});
+	Registry.RegisterHandler(TEXT("get_dialog_policy"), &GetDialogPolicy, NoParams);
+	Registry.RegisterHandler(TEXT("list_dialogs"), &ListDialogs, NoParams);
 	Registry.RegisterHandler(TEXT("respond_to_dialog"), &RespondToDialog);
 }
 

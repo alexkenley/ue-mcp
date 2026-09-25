@@ -142,31 +142,97 @@ void FPCGHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("pcg"));
-	Registry.RegisterHandler(TEXT("list_pcg_graphs"), &ListPCGGraphs);
-	Registry.RegisterHandler(TEXT("get_pcg_components"), &GetPCGComponents);
+
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else; the TS surface is generated from a recording of these.
+	// Unspecified: create_pcg_graph and add_pcg_volume, which the contract test
+	// would see create an asset or spawn an actor before anything failed, and
+	// every action whose parameters are a required choice (actorLabel OR
+	// actorPath, settings OR propertyName + propertyValue), which a spec
+	// cannot express yet.
+	using EType = EMCPParamType;
+	auto GraphPath = []()
+	{
+		return MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("PCGGraph asset path")).Alias(TEXT("path"));
+	};
+	auto SourceNode = []()
+	{
+		return MCPParam::Required(TEXT("sourceNode"), EType::String, TEXT("Node the edge leaves")).Alias(TEXT("sourceNodeName"));
+	};
+	auto TargetNode = []()
+	{
+		return MCPParam::Required(TEXT("targetNode"), EType::String, TEXT("Node the edge enters")).Alias(TEXT("targetNodeName"));
+	};
+
+	Registry.RegisterHandler(TEXT("list_pcg_graphs"), &ListPCGGraphs, {
+		MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the 'nextCursor' from the previous page, unmodified")),
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return on this page (default 200, max 2000)")),
+	});
+	Registry.RegisterHandler(TEXT("get_pcg_components"), &GetPCGComponents, TArray<FMCPParamSpec>());
 	Registry.RegisterHandler(TEXT("create_pcg_graph"), &CreatePCGGraph);
-	Registry.RegisterHandler(TEXT("read_pcg_graph"), &ReadPCGGraph);
-	Registry.RegisterHandler(TEXT("add_pcg_node"), &AddPCGNode);
-	Registry.RegisterHandler(TEXT("connect_pcg_nodes"), &ConnectPCGNodes);
-	Registry.RegisterHandler(TEXT("disconnect_pcg_nodes"), &DisconnectPCGNodes);
-	Registry.RegisterHandler(TEXT("remove_pcg_node"), &RemovePCGNode);
+	Registry.RegisterHandler(TEXT("read_pcg_graph"), &ReadPCGGraph, {
+		GraphPath(),
+	});
+	Registry.RegisterHandler(TEXT("add_pcg_node"), &AddPCGNode, {
+		GraphPath(),
+		MCPParam::Required(TEXT("nodeType"), EType::String, TEXT("PCG settings class of the node to add")),
+		MCPParam::Optional(TEXT("posX"), EType::Number, TEXT("Graph editor X position for the new node")),
+		MCPParam::Optional(TEXT("posY"), EType::Number, TEXT("Graph editor Y position for the new node")),
+	});
+	Registry.RegisterHandler(TEXT("connect_pcg_nodes"), &ConnectPCGNodes, {
+		GraphPath(),
+		SourceNode(),
+		MCPParam::Optional(TEXT("sourcePin"), EType::String, TEXT("Output pin label. connect_nodes defaults to the first output pin, disconnect_nodes to any")).Alias(TEXT("sourcePinLabel")),
+		TargetNode(),
+		MCPParam::Optional(TEXT("targetPin"), EType::String, TEXT("Input pin label. connect_nodes defaults to the first input pin, disconnect_nodes to any")).Alias(TEXT("targetPinLabel")),
+	});
+	Registry.RegisterHandler(TEXT("disconnect_pcg_nodes"), &DisconnectPCGNodes, {
+		GraphPath(),
+		SourceNode(),
+		TargetNode(),
+		MCPParam::Optional(TEXT("sourcePin"), EType::String, TEXT("Output pin label. connect_nodes defaults to the first output pin, disconnect_nodes to any")).Alias(TEXT("sourcePinLabel")),
+		MCPParam::Optional(TEXT("targetPin"), EType::String, TEXT("Input pin label. connect_nodes defaults to the first input pin, disconnect_nodes to any")).Alias(TEXT("targetPinLabel")),
+	});
+	Registry.RegisterHandler(TEXT("remove_pcg_node"), &RemovePCGNode, {
+		GraphPath(),
+		MCPParam::Required(TEXT("nodeName"), EType::String, TEXT("Engine name of the node, as read_graph reports it")),
+	});
 	Registry.RegisterHandler(TEXT("set_pcg_node_settings"), &SetPCGNodeSettings);
 	Registry.RegisterHandler(TEXT("execute_pcg_graph"), &ExecutePCGGraph);
 	Registry.RegisterHandler(TEXT("add_pcg_volume"), &SpawnPCGVolume);
-	Registry.RegisterHandler(TEXT("read_pcg_node_settings"), &ReadPCGNodeSettings);
+	Registry.RegisterHandler(TEXT("read_pcg_node_settings"), &ReadPCGNodeSettings, {
+		GraphPath(),
+		MCPParam::Required(TEXT("nodeName"), EType::String, TEXT("Engine name of the node, as read_graph reports it")),
+	});
 	Registry.RegisterHandler(TEXT("get_pcg_component_details"), &GetPCGComponentDetails);
-	Registry.RegisterHandler(TEXT("set_static_mesh_spawner_meshes"), &SetStaticMeshSpawnerMeshes);
+	Registry.RegisterHandler(TEXT("set_static_mesh_spawner_meshes"), &SetStaticMeshSpawnerMeshes, {
+		GraphPath(),
+		MCPParam::Required(TEXT("nodeName"), EType::String, TEXT("Engine name of the node, as read_graph reports it")),
+		MCPParam::Required(TEXT("entries"), EType::Array, TEXT("Array of {mesh, weight?} entries")).Items(EType::Object),
+		MCPParam::Optional(TEXT("replace"), EType::Boolean, TEXT("Overwrite existing MeshEntries (default true)")),
+	});
 	// #146: force_regenerate / cleanup / toggle_graph on PCG components
 	Registry.RegisterHandler(TEXT("force_regenerate_pcg"), &ForceRegeneratePCG);
 	Registry.RegisterHandler(TEXT("cleanup_pcg"), &CleanupPCG);
 	Registry.RegisterHandler(TEXT("toggle_pcg_graph"), &ToggleGraphPCG);
 
 	// #213: bulk JSON-driven graph authoring (mirrors material.import_graph).
-	Registry.RegisterHandler(TEXT("import_pcg_graph"), &ImportGraph);
-	Registry.RegisterHandler(TEXT("export_pcg_graph"), &ExportGraph);
+	Registry.RegisterHandler(TEXT("import_pcg_graph"), &ImportGraph, {
+		GraphPath(),
+		MCPParam::Required(TEXT("nodes"), EType::Array, TEXT("[{name, class, posX?, posY?, settings?}]")).Items(EType::Object),
+		MCPParam::Optional(TEXT("connections"), EType::Array, TEXT("[{from, fromPin?, to, toPin?}]")).Items(EType::Object),
+		MCPParam::Optional(TEXT("replace"), EType::Boolean, TEXT("Wipe existing user nodes first (default false)")),
+	});
+	Registry.RegisterHandler(TEXT("export_pcg_graph"), &ExportGraph, {
+		GraphPath(),
+		MCPParam::Optional(TEXT("includeSettings"), EType::Boolean, TEXT("Include per-node editable settings in the response (default true)")),
+	});
 
 	// #1087: give instance nodes their own settings so the editor can edit them.
-	Registry.RegisterHandler(TEXT("unwrap_pcg_instance_nodes"), &UnwrapInstanceNodes);
+	Registry.RegisterHandler(TEXT("unwrap_pcg_instance_nodes"), &UnwrapInstanceNodes, {
+		GraphPath(),
+		MCPParam::Optional(TEXT("nodeName"), EType::String, TEXT("Only this node (default: every node in the graph)")),
+	});
 }
 
 TSharedPtr<FJsonValue> FPCGHandlers::ListPCGGraphs(const TSharedPtr<FJsonObject>& Params)
@@ -259,7 +325,7 @@ TSharedPtr<FJsonValue> FPCGHandlers::CreatePCGGraph(const TSharedPtr<FJsonObject
 TSharedPtr<FJsonValue> FPCGHandlers::ReadPCGGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *AssetPath);
 	if (!Graph)
@@ -360,10 +426,16 @@ TSharedPtr<FJsonValue> FPCGHandlers::ReadPCGGraph(const TSharedPtr<FJsonObject>&
 TSharedPtr<FJsonValue> FPCGHandlers::AddPCGNode(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString NodeType;
 	if (auto Err = RequireString(Params, TEXT("nodeType"), NodeType)) return Err;
+
+	// Every parameter is read before anything can fail (#1057).
+	double PosX = 0, PosY = 0;
+	const bool bHasPosX = TryGetNumberParam(Params, TEXT("posX"), PosX);
+	const bool bHasPosY = TryGetNumberParam(Params, TEXT("posY"), PosY);
+	const bool bHasPosition = bHasPosX || bHasPosY;
 
 	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *AssetPath);
 	if (!Graph)
@@ -423,9 +495,7 @@ TSharedPtr<FJsonValue> FPCGHandlers::AddPCGNode(const TSharedPtr<FJsonObject>& P
 	}
 	DefaultSettings->PostEditChange();
 
-	double PosX = 0, PosY = 0;
-	// Bitwise | so both are read; || ignored posY whenever posX was given.
-	if (TryGetNumberParam(Params, TEXT("posX"), PosX) | TryGetNumberParam(Params, TEXT("posY"), PosY))
+	if (bHasPosition)
 	{
 		NewNode->PositionX = (int32)PosX;
 		NewNode->PositionY = (int32)PosY;
@@ -457,13 +527,18 @@ TSharedPtr<FJsonValue> FPCGHandlers::AddPCGNode(const TSharedPtr<FJsonObject>& P
 TSharedPtr<FJsonValue> FPCGHandlers::ConnectPCGNodes(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SourceNodeName;
-	if (auto Err = RequireStringAlt(Params, TEXT("sourceNodeName"), TEXT("sourceNode"), SourceNodeName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("sourceNode"), SourceNodeName)) return Err;
 
 	FString TargetNodeName;
-	if (auto Err = RequireStringAlt(Params, TEXT("targetNodeName"), TEXT("targetNode"), TargetNodeName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("targetNode"), TargetNodeName)) return Err;
+
+	// Pin labels if specified, otherwise the first available pins are used.
+	// Read before anything can fail (#1057).
+	const FString SourcePinLabel = OptionalString(Params, TEXT("sourcePin"));
+	const FString TargetPinLabel = OptionalString(Params, TEXT("targetPin"));
 
 	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *AssetPath);
 	if (!Graph)
@@ -524,18 +599,6 @@ TSharedPtr<FJsonValue> FPCGHandlers::ConnectPCGNodes(const TSharedPtr<FJsonObjec
 	if (!TargetNode)
 	{
 		return MCPError(FString::Printf(TEXT("Target node not found: %s%s"), *TargetNodeName, *ImplicitHint(TargetNodeName)));
-	}
-
-	// Get pin labels if specified, otherwise use the first available pins
-	FString SourcePinLabel;
-	if (!TryGetStringParam(Params, TEXT("sourcePinLabel"), SourcePinLabel))
-	{
-		TryGetStringParam(Params, TEXT("sourcePin"), SourcePinLabel);
-	}
-	FString TargetPinLabel;
-	if (!TryGetStringParam(Params, TEXT("targetPinLabel"), TargetPinLabel))
-	{
-		TryGetStringParam(Params, TEXT("targetPin"), TargetPinLabel);
 	}
 
 	// UE 5.7: Pin and edge APIs refactored; use Graph->AddEdge() with node+label
@@ -673,10 +736,10 @@ TSharedPtr<FJsonValue> FPCGHandlers::ConnectPCGNodes(const TSharedPtr<FJsonObjec
 	// Rollback: disconnect the freshly-added edge.
 	TSharedPtr<FJsonObject> RollbackPayload = MakeShared<FJsonObject>();
 	RollbackPayload->SetStringField(TEXT("assetPath"), AssetPath);
-	RollbackPayload->SetStringField(TEXT("sourceNodeName"), SourceNodeName);
-	RollbackPayload->SetStringField(TEXT("targetNodeName"), TargetNodeName);
-	RollbackPayload->SetStringField(TEXT("sourcePinLabel"), ResolvedSourcePinLabel.ToString());
-	RollbackPayload->SetStringField(TEXT("targetPinLabel"), ResolvedTargetPinLabel.ToString());
+	RollbackPayload->SetStringField(TEXT("sourceNode"), SourceNodeName);
+	RollbackPayload->SetStringField(TEXT("targetNode"), TargetNodeName);
+	RollbackPayload->SetStringField(TEXT("sourcePin"), ResolvedSourcePinLabel.ToString());
+	RollbackPayload->SetStringField(TEXT("targetPin"), ResolvedTargetPinLabel.ToString());
 	MCPSetRollback(Result, TEXT("disconnect_pcg_nodes"), RollbackPayload);
 
 	return MCPResult(Result);
@@ -688,13 +751,17 @@ TSharedPtr<FJsonValue> FPCGHandlers::ConnectPCGNodes(const TSharedPtr<FJsonObjec
 TSharedPtr<FJsonValue> FPCGHandlers::DisconnectPCGNodes(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString SourceNodeName;
-	if (auto Err = RequireStringAlt(Params, TEXT("sourceNodeName"), TEXT("sourceNode"), SourceNodeName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("sourceNode"), SourceNodeName)) return Err;
 
 	FString TargetNodeName;
-	if (auto Err = RequireStringAlt(Params, TEXT("targetNodeName"), TEXT("targetNode"), TargetNodeName)) return Err;
+	if (auto Err = RequireString(Params, TEXT("targetNode"), TargetNodeName)) return Err;
+
+	// Read before anything can fail (#1057). Empty matches any pin.
+	const FString SourcePinLabel = OptionalString(Params, TEXT("sourcePin"));
+	const FString TargetPinLabel = OptionalString(Params, TEXT("targetPin"));
 
 	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *AssetPath);
 	if (!Graph)
@@ -720,11 +787,6 @@ TSharedPtr<FJsonValue> FPCGHandlers::DisconnectPCGNodes(const TSharedPtr<FJsonOb
 	}
 	if (!SourceNode) return MCPError(FString::Printf(TEXT("Source node not found: %s"), *SourceNodeName));
 	if (!TargetNode) return MCPError(FString::Printf(TEXT("Target node not found: %s"), *TargetNodeName));
-
-	FString SourcePinLabel = OptionalString(Params, TEXT("sourcePinLabel"));
-	if (SourcePinLabel.IsEmpty()) SourcePinLabel = OptionalString(Params, TEXT("sourcePin"));
-	FString TargetPinLabel = OptionalString(Params, TEXT("targetPinLabel"));
-	if (TargetPinLabel.IsEmpty()) TargetPinLabel = OptionalString(Params, TEXT("targetPin"));
 
 	FScopedTransaction Transaction(NSLOCTEXT("UEMCPBridge", "DisconnectPCGNodes", "Disconnect PCG Nodes"));
 	Graph->Modify();
@@ -812,10 +874,10 @@ TSharedPtr<FJsonValue> FPCGHandlers::DisconnectPCGNodes(const TSharedPtr<FJsonOb
 	// pick by default.
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetStringField(TEXT("assetPath"), AssetPath);
-	Payload->SetStringField(TEXT("sourceNodeName"), SourceNodeName);
-	Payload->SetStringField(TEXT("targetNodeName"), TargetNodeName);
-	Payload->SetStringField(TEXT("sourcePinLabel"), FirstRemovedSourcePin);
-	Payload->SetStringField(TEXT("targetPinLabel"), FirstRemovedTargetPin);
+	Payload->SetStringField(TEXT("sourceNode"), SourceNodeName);
+	Payload->SetStringField(TEXT("targetNode"), TargetNodeName);
+	Payload->SetStringField(TEXT("sourcePin"), FirstRemovedSourcePin);
+	Payload->SetStringField(TEXT("targetPin"), FirstRemovedTargetPin);
 	MCPSetRollback(Result, TEXT("connect_pcg_nodes"), Payload);
 	Result->SetBoolField(TEXT("rollbackLossy"), RemovedCount > 1);
 	if (RemovedCount > 1)
@@ -830,7 +892,7 @@ TSharedPtr<FJsonValue> FPCGHandlers::DisconnectPCGNodes(const TSharedPtr<FJsonOb
 TSharedPtr<FJsonValue> FPCGHandlers::RemovePCGNode(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString NodeName;
 	if (auto Err = RequireString(Params, TEXT("nodeName"), NodeName)) return Err;
@@ -1324,7 +1386,7 @@ TSharedPtr<FJsonValue> FPCGHandlers::SpawnPCGVolume(const TSharedPtr<FJsonObject
 TSharedPtr<FJsonValue> FPCGHandlers::ReadPCGNodeSettings(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	FString NodeName;
 	if (auto Err = RequireString(Params, TEXT("nodeName"), NodeName)) return Err;
@@ -1568,7 +1630,7 @@ TSharedPtr<FJsonValue> FPCGHandlers::GetPCGComponentDetails(const TSharedPtr<FJs
 TSharedPtr<FJsonValue> FPCGHandlers::SetStaticMeshSpawnerMeshes(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	FString NodeName;
 	if (auto Err = RequireString(Params, TEXT("nodeName"), NodeName)) return Err;
 
@@ -1577,6 +1639,8 @@ TSharedPtr<FJsonValue> FPCGHandlers::SetStaticMeshSpawnerMeshes(const TSharedPtr
 	{
 		return MCPError(TEXT("Missing 'entries' array - each item should be {mesh: <path>, weight?: <int>}"));
 	}
+	// Read before anything can fail (#1057).
+	const bool bReplace = OptionalBool(Params, TEXT("replace"), true);
 
 	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *AssetPath);
 	if (!Graph) return MCPError(FString::Printf(TEXT("PCGGraph not found: %s"), *AssetPath));
@@ -1616,8 +1680,6 @@ TSharedPtr<FJsonValue> FPCGHandlers::SetStaticMeshSpawnerMeshes(const TSharedPtr
 	{
 		return MCPError(TEXT("Failed to configure UPCGMeshSelectorWeighted on spawner"));
 	}
-
-	const bool bReplace = OptionalBool(Params, TEXT("replace"), true);
 
 	// The entry list as found, in the only shape this action can be handed back:
 	// {mesh, weight}. That is NOT the whole entry. Each one carries a full
@@ -1980,21 +2042,23 @@ TSharedPtr<FJsonValue> FPCGHandlers::ToggleGraphPCG(const TSharedPtr<FJsonObject
 TSharedPtr<FJsonValue> FPCGHandlers::ImportGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
 	const TArray<TSharedPtr<FJsonValue>>* NodesArr = nullptr;
 	if (!TryGetArrayParam(Params, TEXT("nodes"), NodesArr) || !NodesArr)
 	{
 		return MCPError(TEXT("Missing 'nodes' array"));
 	}
+	// Read before anything can fail (#1057).
+	const bool bReplace = OptionalBool(Params, TEXT("replace"), false);
+	const TArray<TSharedPtr<FJsonValue>>* ConnsArr = nullptr;
+	const bool bHasConnections = TryGetArrayParam(Params, TEXT("connections"), ConnsArr) && ConnsArr;
 
 	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *AssetPath);
 	if (!Graph)
 	{
 		return MCPError(FString::Printf(TEXT("PCGGraph not found: %s"), *AssetPath));
 	}
-
-	const bool bReplace = OptionalBool(Params, TEXT("replace"), false);
 
 	// Snapshot the graph before touching it. export_pcg_graph and this action
 	// speak the same vocabulary by design (#213), so the export IS the inverse
@@ -2146,9 +2210,8 @@ TSharedPtr<FJsonValue> FPCGHandlers::ImportGraph(const TSharedPtr<FJsonObject>& 
 
 	// Connections. Resolve names via the local-name map first, then fall back
 	// to the graph's own nodes (Input/Output/already-existing) by engine name.
-	const TArray<TSharedPtr<FJsonValue>>* ConnsArr = nullptr;
 	int32 ConnectionsMade = 0;
-	if (TryGetArrayParam(Params, TEXT("connections"), ConnsArr) && ConnsArr)
+	if (bHasConnections)
 	{
 		auto Resolve = [&](const FString& Name) -> UPCGNode*
 		{
@@ -2299,15 +2362,16 @@ TSharedPtr<FJsonValue> FPCGHandlers::ImportGraph(const TSharedPtr<FJsonObject>& 
 TSharedPtr<FJsonValue> FPCGHandlers::ExportGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
+
+	// Read before anything can fail (#1057).
+	const bool bIncludeSettings = OptionalBool(Params, TEXT("includeSettings"), true);
 
 	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *AssetPath);
 	if (!Graph)
 	{
 		return MCPError(FString::Printf(TEXT("PCGGraph not found: %s"), *AssetPath));
 	}
-
-	const bool bIncludeSettings = OptionalBool(Params, TEXT("includeSettings"), true);
 
 	// #235: editor layout (NodePosX/NodePosY) lives on UPCGEditorGraphNodeBase
 	// in the asset's UPCGEditorGraph. The runtime UPCGNode::PositionX/Y is
@@ -2421,7 +2485,7 @@ TSharedPtr<FJsonValue> FPCGHandlers::ExportGraph(const TSharedPtr<FJsonObject>& 
 TSharedPtr<FJsonValue> FPCGHandlers::UnwrapInstanceNodes(const TSharedPtr<FJsonObject>& Params)
 {
 	FString AssetPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 	const FString OnlyNode = OptionalString(Params, TEXT("nodeName"));
 
 	UPCGGraph* Graph = LoadObject<UPCGGraph>(nullptr, *AssetPath);

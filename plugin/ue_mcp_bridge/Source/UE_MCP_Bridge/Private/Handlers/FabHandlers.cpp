@@ -338,12 +338,15 @@ void FFabHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("fab"));
-	Registry.RegisterHandler(TEXT("fab_status"), &Status);
+	// #1057: the three reads take no parameters, declared as an empty spec. The
+	// rest act on the account, the cache or the project and stay unspecced, so
+	// the spec contract test never calls them.
+	Registry.RegisterHandler(TEXT("fab_status"), &Status, {});
 	Registry.RegisterHandler(TEXT("fab_login"), &Login);
 	Registry.RegisterHandler(TEXT("fab_logout"), &Logout);
 	Registry.RegisterHandler(TEXT("fab_sync_library"), &SyncLibrary);
-	Registry.RegisterHandler(TEXT("fab_list_cached"), &ListCached);
-	Registry.RegisterHandler(TEXT("fab_cache_info"), &CacheInfo);
+	Registry.RegisterHandler(TEXT("fab_list_cached"), &ListCached, {});
+	Registry.RegisterHandler(TEXT("fab_cache_info"), &CacheInfo, {});
 	Registry.RegisterHandler(TEXT("fab_clear_cache"), &ClearCache);
 	Registry.RegisterHandler(TEXT("fab_import_file"), &ImportFile);
 }

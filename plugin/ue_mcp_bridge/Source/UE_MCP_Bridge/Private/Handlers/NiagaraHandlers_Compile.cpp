@@ -174,17 +174,17 @@ TSharedPtr<FJsonValue> FNiagaraHandlers::CompileSystem(const TSharedPtr<FJsonObj
 	FString SystemPath;
 	if (auto Err = RequireString(Params, TEXT("systemPath"), SystemPath)) return Err;
 
+	// force=true recompiles even when nothing looks dirty, which is the point:
+	// a graph edit that left the change tracking untouched is exactly the bug
+	// this action exists to catch. Both are read before the load can fail (#1057).
+	const bool bForce = OptionalBool(Params, TEXT("force"), true);
+	const bool bIncludeGpuShaders = OptionalBool(Params, TEXT("includeGpuShaders"), false);
+
 	TSharedPtr<FJsonValue> Error;
 	UObject* Asset = MCPRequireAssetObject(SystemPath, Error, TEXT("NiagaraSystem"));
 	if (!Asset) return Error;
 	UNiagaraSystem* System = Cast<UNiagaraSystem>(Asset);
 	if (!System) return MCPAssetWrongTypeError(SystemPath, Asset, TEXT("NiagaraSystem"));
-
-	// force=true recompiles even when nothing looks dirty, which is the point:
-	// a graph edit that left the change tracking untouched is exactly the bug
-	// this action exists to catch.
-	const bool bForce = OptionalBool(Params, TEXT("force"), true);
-	const bool bIncludeGpuShaders = OptionalBool(Params, TEXT("includeGpuShaders"), false);
 
 	const bool bQueued = System->RequestCompile(bForce);
 	// Blocking is deliberate. An asynchronous compile would hand back the

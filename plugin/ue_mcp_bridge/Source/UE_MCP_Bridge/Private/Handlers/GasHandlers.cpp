@@ -66,48 +66,234 @@ void FGasHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("gas"));
+
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else; the TS surface for it is generated from a recording of these.
+	// The create_* handlers stay unspecced: the spec contract test would hand
+	// them a name and package path that reach AssetTools.CreateAsset.
+	using EType = EMCPParamType;
+	auto ActorLabel = []()
+	{
+		return MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Live actor label, internal name or object path. Pass this or actorPath"));
+	};
+	auto ActorPath = []()
+	{
+		return MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Full actor object path. The unambiguous selector, and it wins over actorLabel when both are given"));
+	};
+	auto World = []()
+	{
+		return MCPParam::Optional(TEXT("world"), EType::String, TEXT("Runtime world scope: auto (default) | pie | editor"));
+	};
+	auto AbilityClass = [](const TCHAR* Description)
+	{
+		return MCPParam::Required(TEXT("abilityClass"), EType::String, Description);
+	};
+
 	Registry.RegisterHandler(TEXT("create_gameplay_effect"), &CreateGameplayEffect);
-	Registry.RegisterHandler(TEXT("get_gas_info"), &GetGasInfo);
+	Registry.RegisterHandler(TEXT("get_gas_info"), &GetGasInfo, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Blueprint asset path to inspect")),
+	});
 	Registry.RegisterHandler(TEXT("create_gameplay_ability"), &CreateGameplayAbility);
 	Registry.RegisterHandler(TEXT("create_attribute_set"), &CreateAttributeSet);
 	Registry.RegisterHandler(TEXT("create_gameplay_cue"), &CreateGameplayCue);
-	Registry.RegisterHandler(TEXT("add_ability_system_component"), &AddAbilitySystemComponent);
-	Registry.RegisterHandler(TEXT("add_attribute"), &AddAttribute);
-	Registry.RegisterHandler(TEXT("set_ability_tags"), &SetAbilityTags);
-	Registry.RegisterHandler(TEXT("set_effect_modifier"), &SetEffectModifier);
-	Registry.RegisterHandler(TEXT("set_asc_defaults"), &SetAscDefaults);
-	Registry.RegisterHandler(TEXT("apply_effect"), &ApplyEffect);
-	Registry.RegisterHandler(TEXT("remove_effect"), &RemoveEffect);
-	Registry.RegisterHandler(TEXT("set_attribute"), &SetAttribute);
-	Registry.RegisterHandler(TEXT("get_attribute"), &GetAttribute);
-	Registry.RegisterHandler(TEXT("init_asc"), &InitAsc);
-	Registry.RegisterHandler(TEXT("get_asc_state"), &GetAscState);
-	Registry.RegisterHandler(TEXT("get_live_attribute_value"), &GetLiveAttributeValue);
-	Registry.RegisterHandler(TEXT("set_live_attribute_value"), &SetLiveAttributeValue);
-	Registry.RegisterHandler(TEXT("grant_ability"), &GrantAbility);
-	Registry.RegisterHandler(TEXT("revoke_ability"), &RevokeAbility);
-	Registry.RegisterHandler(TEXT("get_active_effects"), &GetActiveEffects);
-	Registry.RegisterHandler(TEXT("trace_ability_activation"), &TraceAbilityActivation);
-	Registry.RegisterHandler(TEXT("add_loose_gameplay_tag"), &AddLooseGameplayTag);
-	Registry.RegisterHandler(TEXT("remove_loose_gameplay_tag"), &RemoveLooseGameplayTag);
+	Registry.RegisterHandler(TEXT("add_ability_system_component"), &AddAbilitySystemComponent, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Blueprint asset path")),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("Name of the AbilitySystemComponent (default AbilitySystemComp)")),
+	});
+	Registry.RegisterHandler(TEXT("add_attribute"), &AddAttribute, {
+		MCPParam::Required(TEXT("attributeSetPath"), EType::String, TEXT("AttributeSet Blueprint asset path")),
+		MCPParam::Required(TEXT("attributeName"), EType::String, TEXT("FGameplayAttributeData variable to add")),
+	});
+	Registry.RegisterHandler(TEXT("set_ability_tags"), &SetAbilityTags, {
+		MCPParam::Required(TEXT("abilityPath"), EType::String, TEXT("GameplayAbility Blueprint asset path")),
+		MCPParam::Optional(TEXT("ability_tags"), EType::Array, TEXT("AbilityTags container, written whole")).Items(EType::String),
+		MCPParam::Optional(TEXT("cancel_abilities_with_tag"), EType::Array, TEXT("CancelAbilitiesWithTag container, written whole")).Items(EType::String),
+		MCPParam::Optional(TEXT("block_abilities_with_tag"), EType::Array, TEXT("BlockAbilitiesWithTag container, written whole")).Items(EType::String),
+		MCPParam::Optional(TEXT("activation_required_tags"), EType::Array, TEXT("ActivationRequiredTags container, written whole")).Items(EType::String),
+		MCPParam::Optional(TEXT("activation_blocked_tags"), EType::Array, TEXT("ActivationBlockedTags container, written whole")).Items(EType::String),
+	});
+	Registry.RegisterHandler(TEXT("set_effect_modifier"), &SetEffectModifier, {
+		MCPParam::Required(TEXT("effectPath"), EType::String, TEXT("GameplayEffect Blueprint asset path")),
+		MCPParam::Required(TEXT("attribute"), EType::String, TEXT("Attribute to modify: SetName.Attribute, or a unique attribute name")),
+		MCPParam::Optional(TEXT("operation"), EType::String, TEXT("Additive (default) | Multiplicative | Division | Override")),
+		MCPParam::Optional(TEXT("magnitude"), EType::Number, TEXT("Static magnitude (default 0)")),
+	});
+	Registry.RegisterHandler(TEXT("set_asc_defaults"), &SetAscDefaults, {
+		MCPParam::Required(TEXT("blueprintPath"), EType::String, TEXT("Blueprint asset path carrying the AbilitySystemComponent")),
+		MCPParam::Required(TEXT("attributeSet"), EType::String, TEXT("AttributeSet content path or class name")).Alias(TEXT("attributeSetPath")),
+		MCPParam::Optional(TEXT("componentName"), EType::String, TEXT("AbilitySystemComponent to wire (default: the first one)")),
+		MCPParam::Optional(TEXT("initDataTable"), EType::String, TEXT("DataTable of starting attribute values")),
+	});
+	Registry.RegisterHandler(TEXT("apply_effect"), &ApplyEffect, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Required(TEXT("effectClass"), EType::String, TEXT("GameplayEffect content path or class name")).Alias(TEXT("effectPath")),
+		MCPParam::Optional(TEXT("level"), EType::Number, TEXT("Effect level (default 1)")),
+		MCPParam::Optional(TEXT("setByCaller"), EType::Object, TEXT("SetByCaller magnitudes keyed by gameplay tag or name")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("remove_effect"), &RemoveEffect, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Optional(TEXT("effectHandle"), EType::String, TEXT("Active-effect handle apply_effect reported. Removes exactly that effect")),
+		MCPParam::Optional(TEXT("effectClass"), EType::String, TEXT("GameplayEffect content path or class name. Removes every active effect of that class")).Alias(TEXT("effectPath")),
+		MCPParam::Optional(TEXT("stacksToRemove"), EType::Integer, TEXT("Stacks to take off (default -1, the whole effect)")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("set_attribute"), &SetAttribute, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Required(TEXT("attribute"), EType::String, TEXT("Attribute name: Health or SetName.Health")),
+		MCPParam::Required(TEXT("value"), EType::Number, TEXT("New base value")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("get_attribute"), &GetAttribute, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Optional(TEXT("attribute"), EType::String, TEXT("Attribute to read. Omit to list every attribute")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("init_asc"), &InitAsc, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Optional(TEXT("attributeSet"), EType::String, TEXT("AttributeSet content path or class name to make sure is registered")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("get_asc_state"), &GetAscState, {
+		ActorLabel(),
+		ActorPath(),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("get_live_attribute_value"), &GetLiveAttributeValue, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Required(TEXT("attributeSet"), EType::String, TEXT("AttributeSet content path or class name")),
+		MCPParam::Required(TEXT("attribute"), EType::String, TEXT("Attribute property name, or Set.Property")),
+		MCPParam::Optional(TEXT("registerOwnerSets"), EType::Boolean, TEXT("Register the actor's own attribute sets on its ASC when it has none, the way BeginPlay would (default true)")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("set_live_attribute_value"), &SetLiveAttributeValue, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Required(TEXT("attributeSet"), EType::String, TEXT("AttributeSet content path or class name")),
+		MCPParam::Required(TEXT("attribute"), EType::String, TEXT("Attribute property name, or Set.Property")),
+		MCPParam::Required(TEXT("value"), EType::Number, TEXT("Value to write")),
+		MCPParam::Optional(TEXT("valueType"), EType::String, TEXT("current (default, writes the attribute data in place) | base (writes through the ASC aggregator)")),
+		MCPParam::Optional(TEXT("registerOwnerSets"), EType::Boolean, TEXT("Register the actor's own attribute sets on its ASC when it has none, the way BeginPlay would (default true)")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("grant_ability"), &GrantAbility, {
+		ActorLabel(),
+		ActorPath(),
+		AbilityClass(TEXT("GameplayAbility Blueprint path, generated class path, or native class name")),
+		MCPParam::Optional(TEXT("level"), EType::Number, TEXT("Ability level (default 1)")),
+		MCPParam::Optional(TEXT("inputId"), EType::Integer, TEXT("InputID for the spec (default -1, unbound)")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("revoke_ability"), &RevokeAbility, {
+		ActorLabel(),
+		ActorPath(),
+		AbilityClass(TEXT("GameplayAbility class to revoke")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("get_active_effects"), &GetActiveEffects, {
+		ActorLabel(),
+		ActorPath(),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("trace_ability_activation"), &TraceAbilityActivation, {
+		ActorLabel(),
+		ActorPath(),
+		AbilityClass(TEXT("GameplayAbility class to trace")),
+		MCPParam::Optional(TEXT("activate"), EType::Boolean, TEXT("Also call TryActivateAbility, to prove the verdict (default false)")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("add_loose_gameplay_tag"), &AddLooseGameplayTag, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Required(TEXT("tag"), EType::String, TEXT("A registered gameplay tag")),
+		MCPParam::Optional(TEXT("count"), EType::Integer, TEXT("References to add, at least 1 (default 1)")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("remove_loose_gameplay_tag"), &RemoveLooseGameplayTag, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Required(TEXT("tag"), EType::String, TEXT("A registered gameplay tag")),
+		MCPParam::Optional(TEXT("count"), EType::Integer, TEXT("References to remove, at least 1 (default 1)")),
+		World(),
+	});
 
 	// Input binding, cues and the attribute audit (GasHandlers_Abilities.cpp).
-	Registry.RegisterHandler(TEXT("bind_ability_input"), &BindAbilityInput);
-	Registry.RegisterHandler(TEXT("clear_ability_input"), &ClearAbilityInput);
-	Registry.RegisterHandler(TEXT("send_ability_input"), &SendAbilityInput);
-	Registry.RegisterHandler(TEXT("add_effect_cue"), &AddEffectCue);
-	Registry.RegisterHandler(TEXT("remove_effect_cue"), &RemoveEffectCue);
-	Registry.RegisterHandler(TEXT("validate_cue_coverage"), &ValidateCueCoverage);
+	Registry.RegisterHandler(TEXT("bind_ability_input"), &BindAbilityInput, {
+		ActorLabel(),
+		ActorPath(),
+		AbilityClass(TEXT("Granted GameplayAbility class to bind")),
+		MCPParam::Required(TEXT("inputId"), EType::Integer, TEXT("Input id to bind; -1 leaves the ability unbound")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("clear_ability_input"), &ClearAbilityInput, {
+		ActorLabel(),
+		ActorPath(),
+		AbilityClass(TEXT("Granted GameplayAbility class to unbind")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("send_ability_input"), &SendAbilityInput, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Optional(TEXT("inputEvent"), EType::String, TEXT("pressed (default) | released | confirm | cancel. pressed and released address an inputId; confirm and cancel take none")),
+		MCPParam::Optional(TEXT("inputId"), EType::Integer, TEXT("Input id to send pressed or released to")),
+		MCPParam::Optional(TEXT("abilityClass"), EType::String, TEXT("Granted ability whose bound input id to use instead of inputId")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("add_effect_cue"), &AddEffectCue, {
+		MCPParam::Required(TEXT("effectPath"), EType::String, TEXT("GameplayEffect Blueprint asset path")).Alias(TEXT("effectClass")),
+		MCPParam::Required(TEXT("cueTag"), EType::String, TEXT("Registered GameplayCue tag, under the GameplayCue root")),
+		MCPParam::Optional(TEXT("minLevel"), EType::Number, TEXT("Lowest effect level this cue covers, used to normalise the magnitude")),
+		MCPParam::Optional(TEXT("maxLevel"), EType::Number, TEXT("Highest effect level this cue covers")),
+		MCPParam::Optional(TEXT("magnitudeAttribute"), EType::String, TEXT("Attribute the cue takes its magnitude from (SetName.Attribute), instead of the effect level")),
+	});
+	Registry.RegisterHandler(TEXT("remove_effect_cue"), &RemoveEffectCue, {
+		MCPParam::Required(TEXT("effectPath"), EType::String, TEXT("GameplayEffect Blueprint asset path")).Alias(TEXT("effectClass")),
+		MCPParam::Required(TEXT("cueTag"), EType::String, TEXT("GameplayCue tag to unlink. May be one that is no longer registered")),
+	});
+	Registry.RegisterHandler(TEXT("validate_cue_coverage"), &ValidateCueCoverage, {
+		MCPParam::Optional(TEXT("directory"), EType::String, TEXT("Content path to scan (default /Game)")),
+		MCPParam::Optional(TEXT("effectPath"), EType::String, TEXT("Audit this one GameplayEffect instead of scanning")).Alias(TEXT("effectClass")),
+		MCPParam::Optional(TEXT("maxEffects"), EType::Integer, TEXT("Cap on effect classes scanned (default 500, max 5000)")),
+	});
 	// Named audit_attributes, not audit_attribute_set: the read/mutate lexicon
 	// takes a mutate verb anywhere in an action name and "set" is one, so the
 	// longer spelling would have been gated as a write it never performs.
-	Registry.RegisterHandler(TEXT("audit_attributes"), &AuditAttributeSet);
+	Registry.RegisterHandler(TEXT("audit_attributes"), &AuditAttributeSet, {
+		MCPParam::Optional(TEXT("attributeSet"), EType::String, TEXT("AttributeSet content path or class name. Pass this, a live actor, or both")),
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Optional(TEXT("probeClamping"), EType::Boolean, TEXT("Measure an existing clamp by driving the set's own PreAttributeChange. Needs a live registered set (default false)")),
+		World(),
+	});
 
 	// Snapshot and diff (GasHandlers_Snapshot.cpp).
-	Registry.RegisterHandler(TEXT("capture_gas_state"), &CaptureGasState);
-	Registry.RegisterHandler(TEXT("compare_gas_states"), &CompareGasStates);
-	Registry.RegisterHandler(TEXT("list_gas_snapshots"), &ListGasSnapshots);
-	Registry.RegisterHandler(TEXT("delete_gas_snapshot"), &DeleteGasSnapshot);
+	Registry.RegisterHandler(TEXT("capture_gas_state"), &CaptureGasState, {
+		ActorLabel(),
+		ActorPath(),
+		MCPParam::Optional(TEXT("snapshotId"), EType::String, TEXT("Id to store the snapshot under (generated when omitted)")),
+		MCPParam::Optional(TEXT("compareWith"), EType::String, TEXT("Earlier snapshot id to diff this capture against")),
+		MCPParam::Optional(TEXT("registerOwnerSets"), EType::Boolean, TEXT("Register the actor's own attribute sets on its ASC when it has none, the way BeginPlay would (default true)")),
+		World(),
+	});
+	Registry.RegisterHandler(TEXT("compare_gas_states"), &CompareGasStates, {
+		MCPParam::Optional(TEXT("beforeId"), EType::String, TEXT("Snapshot id of the earlier reading. Pass this or beforeSnapshot")),
+		MCPParam::Optional(TEXT("beforeSnapshot"), EType::Object, TEXT("The earlier snapshot object itself")),
+		MCPParam::Optional(TEXT("afterId"), EType::String, TEXT("Snapshot id of the later reading. Pass this or afterSnapshot")),
+		MCPParam::Optional(TEXT("afterSnapshot"), EType::Object, TEXT("The later snapshot object itself")),
+	});
+	Registry.RegisterHandler(TEXT("list_gas_snapshots"), &ListGasSnapshots, {
+		MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Only snapshots of this actor object path")),
+		MCPParam::Optional(TEXT("includeSnapshots"), EType::Boolean, TEXT("Return the full snapshot bodies rather than a summary row each")),
+	});
+	Registry.RegisterHandler(TEXT("delete_gas_snapshot"), &DeleteGasSnapshot, {
+		MCPParam::Required(TEXT("snapshotId"), EType::String, TEXT("Snapshot id to drop")),
+	});
 }
 
 TSharedPtr<FJsonValue> FGasHandlers::CreateGasBlueprint(
@@ -273,6 +459,8 @@ TSharedPtr<FJsonValue> FGasHandlers::AddAbilitySystemComponent(const TSharedPtr<
 {
 	FString BPPath;
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BPPath)) return Err;
+	// Read before anything can fail (#1057).
+	FString CompName = OptionalString(Params, TEXT("componentName"), TEXT("AbilitySystemComp"));
 
 	UBlueprint* BP = Cast<UBlueprint>(UEditorAssetLibrary::LoadAsset(BPPath));
 	if (!BP)
@@ -285,8 +473,6 @@ TSharedPtr<FJsonValue> FGasHandlers::AddAbilitySystemComponent(const TSharedPtr<
 	{
 		return MCPError(TEXT("AbilitySystemComponent not found. Enable GameplayAbilities plugin."));
 	}
-
-	FString CompName = OptionalString(Params, TEXT("componentName"), TEXT("AbilitySystemComp"));
 
 	// Idempotency: existing ASC on the blueprint?
 	if (BP->SimpleConstructionScript)
@@ -390,10 +576,6 @@ TSharedPtr<FJsonValue> FGasHandlers::SetAbilityTags(const TSharedPtr<FJsonObject
 	FString AbilityPath;
 	if (auto Err = RequireString(Params, TEXT("abilityPath"), AbilityPath)) return Err;
 
-	TSharedPtr<FJsonValue> CdoErr;
-	UObject* CDO = LoadBlueprintCDO<UObject>(AbilityPath, CdoErr);
-	if (!CDO) return CdoErr;
-
 	// param name -> FGameplayTagContainer UPROPERTY on UGameplayAbility.
 	const TArray<TPair<FString, FString>> TagMap = {
 		{TEXT("ability_tags"), TEXT("AbilityTags")},
@@ -402,6 +584,19 @@ TSharedPtr<FJsonValue> FGasHandlers::SetAbilityTags(const TSharedPtr<FJsonObject
 		{TEXT("activation_required_tags"), TEXT("ActivationRequiredTags")},
 		{TEXT("activation_blocked_tags"), TEXT("ActivationBlockedTags")},
 	};
+
+	// Every container is read before the CDO load can fail (#1057). A null entry
+	// is a container the caller did not pass.
+	TArray<const TArray<TSharedPtr<FJsonValue>>*> PassedArrays;
+	for (const TPair<FString, FString>& Entry : TagMap)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* TagArray = nullptr;
+		PassedArrays.Add(TryGetArrayParam(Params, *Entry.Key, TagArray) ? TagArray : nullptr);
+	}
+
+	TSharedPtr<FJsonValue> CdoErr;
+	UObject* CDO = LoadBlueprintCDO<UObject>(AbilityPath, CdoErr);
+	if (!CDO) return CdoErr;
 
 	TSharedPtr<FJsonObject> Applied = MakeShared<FJsonObject>();
 	// The tags each container held before this call, keyed by the SAME param
@@ -416,10 +611,11 @@ TSharedPtr<FJsonValue> FGasHandlers::SetAbilityTags(const TSharedPtr<FJsonObject
 	bool bAnyApplied = false;
 	bool bAnyChanged = false;
 
-	for (const TPair<FString, FString>& Entry : TagMap)
+	for (int32 EntryIndex = 0; EntryIndex < TagMap.Num(); ++EntryIndex)
 	{
-		const TArray<TSharedPtr<FJsonValue>>* TagArray = nullptr;
-		if (!TryGetArrayParam(Params, *Entry.Key, TagArray) || !TagArray) continue;
+		const TPair<FString, FString>& Entry = TagMap[EntryIndex];
+		const TArray<TSharedPtr<FJsonValue>>* TagArray = PassedArrays[EntryIndex];
+		if (!TagArray) continue;
 
 		FStructProperty* Prop = CastField<FStructProperty>(CDO->GetClass()->FindPropertyByName(*Entry.Value));
 		if (!Prop || Prop->Struct != FGameplayTagContainer::StaticStruct())
@@ -653,7 +849,11 @@ TSharedPtr<FJsonValue> FGasHandlers::SetAscDefaults(const TSharedPtr<FJsonObject
 	if (auto Err = RequireString(Params, TEXT("blueprintPath"), BPPath)) return Err;
 
 	FString AttrSetSpec;
-	if (auto Err = RequireStringAlt(Params, TEXT("attributeSet"), TEXT("attributeSetPath"), AttrSetSpec)) return Err;
+	if (auto Err = RequireString(Params, TEXT("attributeSet"), AttrSetSpec)) return Err;
+
+	// Read before anything can fail (#1057).
+	const FString CompName = OptionalString(Params, TEXT("componentName"));
+	const FString TablePath = OptionalString(Params, TEXT("initDataTable"));
 
 	UBlueprint* BP = Cast<UBlueprint>(UEditorAssetLibrary::LoadAsset(BPPath));
 	if (!BP) return MCPError(FString::Printf(TEXT("Blueprint not found: %s"), *BPPath));
@@ -692,7 +892,6 @@ TSharedPtr<FJsonValue> FGasHandlers::SetAscDefaults(const TSharedPtr<FJsonObject
 	if (!AttrSetClass) return MCPError(FString::Printf(TEXT("AttributeSet class not found: %s"), *AttrSetSpec));
 
 	// Find the ASC component template on the blueprint's construction script.
-	const FString CompName = OptionalString(Params, TEXT("componentName"));
 	UAbilitySystemComponent* ASCTemplate = nullptr;
 	FString ResolvedComp;
 	if (BP->SimpleConstructionScript)
@@ -713,7 +912,6 @@ TSharedPtr<FJsonValue> FGasHandlers::SetAscDefaults(const TSharedPtr<FJsonObject
 
 	// Optional init DataTable (production path: starting values at ASC init).
 	UDataTable* InitTable = nullptr;
-	const FString TablePath = OptionalString(Params, TEXT("initDataTable"));
 	if (!TablePath.IsEmpty())
 	{
 		InitTable = LoadObject<UDataTable>(nullptr, *TablePath);

@@ -672,7 +672,8 @@ namespace
 		OutGraph = nullptr;
 		bOutGraphCreated = false;
 
-		if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), OutAssetPath)) return Err;
+		// `path` is declared as an alias in each caller's spec (#1057).
+		if (auto Err = RequireString(Params, TEXT("assetPath"), OutAssetPath)) return Err;
 
 		OutTree = FGameplayHandlers::LoadBehaviorTree(OutAssetPath);
 		if (!OutTree)
@@ -753,14 +754,27 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddBTNode(const TSharedPtr<FJsonObject
 	// The graph is seeded only after every argument has been checked. Seeding
 	// it is a change to the asset, and a call that is going to be rejected for
 	// a bad nodeClass should leave the tree exactly as it found it.
+	//
+	// Every parameter is read before the tree load can fail (#1057). A missing
+	// nodeClass is still reported after the asset, as it always was.
+	FString NodeClassSpec;
+	const TSharedPtr<FJsonValue> NodeClassErr = RequireString(Params, TEXT("nodeClass"), NodeClassSpec);
+	FString Category = OptionalString(Params, TEXT("nodeCategory")).TrimStartAndEnd().ToLower();
+	const FString ParentSpec = OptionalString(Params, TEXT("parent"), TEXT("root"));
+	const int32 RequestedIndex = OptionalInt(Params, TEXT("index"), INDEX_NONE);
+	const FString NodeName = OptionalString(Params, TEXT("nodeName")).TrimStartAndEnd();
+	const TSharedPtr<FJsonObject>* PropertiesObj = nullptr;
+	const bool bHasProperties = TryGetObjectParam(Params, TEXT("properties"), PropertiesObj) && PropertiesObj;
+	const TSharedPtr<FJsonObject>* KeysObj = nullptr;
+	const bool bHasKeys = TryGetObjectParam(Params, TEXT("blackboardKeys"), KeysObj) && KeysObj;
+
 	FString AssetPath;
 	UBehaviorTree* Tree = nullptr;
 	UBehaviorTreeGraph* Graph = nullptr;
 	bool bGraphCreated = false;
 	if (auto Err = MCPBTAOpen(Params, /*bCreateGraph*/ false, AssetPath, Tree, Graph, bGraphCreated)) return Err;
 
-	FString NodeClassSpec;
-	if (auto Err = RequireString(Params, TEXT("nodeClass"), NodeClassSpec)) return Err;
+	if (NodeClassErr) return NodeClassErr;
 
 	UClass* RuntimeClass = MCPResolveClass(NodeClassSpec.TrimStartAndEnd(), /*bAllowLoad*/ true);
 	if (!RuntimeClass)
@@ -785,7 +799,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddBTNode(const TSharedPtr<FJsonObject
 			*RuntimeClass->GetName()));
 	}
 
-	FString Category = OptionalString(Params, TEXT("nodeCategory")).TrimStartAndEnd().ToLower();
 	if (Category.IsEmpty())
 	{
 		Category = DerivedCategory;
@@ -813,13 +826,11 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddBTNode(const TSharedPtr<FJsonObject
 	TArray<FMCPBTAEntry> Entries;
 	MCPBTACollectGraph(Graph, Entries);
 
-	const FString ParentSpec = OptionalString(Params, TEXT("parent"), TEXT("root"));
 	FString ResolveError;
 	UBehaviorTreeGraphNode* Parent = MCPBTAResolve(Entries, Tree, ParentSpec, ResolveError);
 	if (!Parent) return MCPError(FString::Printf(TEXT("parent: %s"), *ResolveError));
 
 	const bool bParentIsRoot = Parent->IsA<UBehaviorTreeGraphNode_Root>();
-	const int32 RequestedIndex = OptionalInt(Params, TEXT("index"), INDEX_NONE);
 
 	if ((Category == TEXT("decorator") || Category == TEXT("service")) &&
 		(Parent->IsA<UBehaviorTreeGraphNode_Decorator>() || Parent->IsA<UBehaviorTreeGraphNode_Service>()))
@@ -952,14 +963,12 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddBTNode(const TSharedPtr<FJsonObject
 			TEXT("%s produced no runtime node instance."), *RuntimeClass->GetName()));
 	}
 
-	const FString NodeName = OptionalString(Params, TEXT("nodeName")).TrimStartAndEnd();
 	if (!NodeName.IsEmpty())
 	{
 		Instance->NodeName = NodeName;
 	}
 
-	const TSharedPtr<FJsonObject>* PropertiesObj = nullptr;
-	if (TryGetObjectParam(Params, TEXT("properties"), PropertiesObj) && PropertiesObj)
+	if (bHasProperties)
 	{
 		FString WriteError;
 		if (!MCPBTAApplyProperties(Instance, *PropertiesObj, WriteError))
@@ -973,8 +982,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddBTNode(const TSharedPtr<FJsonObject
 	}
 
 	TArray<TSharedPtr<FJsonValue>> AppliedKeys;
-	const TSharedPtr<FJsonObject>* KeysObj = nullptr;
-	if (TryGetObjectParam(Params, TEXT("blackboardKeys"), KeysObj) && KeysObj)
+	if (bHasKeys)
 	{
 		FString KeyError;
 		if (!MCPBTAApplyBlackboardKeys(Instance, Tree, *KeysObj, AppliedKeys, KeyError))
@@ -1034,6 +1042,14 @@ TSharedPtr<FJsonValue> FGameplayHandlers::AddBTNode(const TSharedPtr<FJsonObject
 
 TSharedPtr<FJsonValue> FGameplayHandlers::MoveBTNode(const TSharedPtr<FJsonObject>& Params)
 {
+	// Every parameter is read before the tree load can fail (#1057); the
+	// errors are still reported in the order they always were.
+	FString NodeSpec;
+	const TSharedPtr<FJsonValue> NodeErr = RequireString(Params, TEXT("node"), NodeSpec);
+	const FString ParentSpec = OptionalString(Params, TEXT("parent")).TrimStartAndEnd();
+	const bool bHasIndex = Params.IsValid() && HasParam(Params, TEXT("index"));
+	const int32 RequestedIndex = OptionalInt(Params, TEXT("index"), INDEX_NONE);
+
 	FString AssetPath;
 	UBehaviorTree* Tree = nullptr;
 	UBehaviorTreeGraph* Graph = nullptr;
@@ -1045,8 +1061,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::MoveBTNode(const TSharedPtr<FJsonObjec
 			TEXT("%s has no editor graph, so it has no nodes to move."), *AssetPath));
 	}
 
-	FString NodeSpec;
-	if (auto Err = RequireStringAlt(Params, TEXT("node"), TEXT("nodePath"), NodeSpec)) return Err;
+	if (NodeErr) return NodeErr;
 
 	TArray<FMCPBTAEntry> Entries;
 	MCPBTACollectGraph(Graph, Entries);
@@ -1065,9 +1080,6 @@ TSharedPtr<FJsonValue> FGameplayHandlers::MoveBTNode(const TSharedPtr<FJsonObjec
 	const FString Category = Before ? Before->Category : FString();
 	const bool bIsSubNode = (Category == TEXT("decorator") || Category == TEXT("service"));
 
-	const FString ParentSpec = OptionalString(Params, TEXT("parent")).TrimStartAndEnd();
-	const bool bHasIndex = Params.IsValid() && HasParam(Params, TEXT("index"));
-	const int32 RequestedIndex = OptionalInt(Params, TEXT("index"), INDEX_NONE);
 	if (ParentSpec.IsEmpty() && !bHasIndex)
 	{
 		return MCPError(TEXT("pass 'parent' to reconnect the node, 'index' to reorder it, or both."));
@@ -1245,6 +1257,10 @@ TSharedPtr<FJsonValue> FGameplayHandlers::MoveBTNode(const TSharedPtr<FJsonObjec
 
 TSharedPtr<FJsonValue> FGameplayHandlers::RemoveBTNode(const TSharedPtr<FJsonObject>& Params)
 {
+	// Read before the tree load can fail (#1057), reported in the old order.
+	FString NodeSpec;
+	const TSharedPtr<FJsonValue> NodeErr = RequireString(Params, TEXT("node"), NodeSpec);
+
 	FString AssetPath;
 	UBehaviorTree* Tree = nullptr;
 	UBehaviorTreeGraph* Graph = nullptr;
@@ -1256,8 +1272,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::RemoveBTNode(const TSharedPtr<FJsonObj
 			TEXT("%s has no editor graph, so it has no nodes to remove."), *AssetPath));
 	}
 
-	FString NodeSpec;
-	if (auto Err = RequireStringAlt(Params, TEXT("node"), TEXT("nodePath"), NodeSpec)) return Err;
+	if (NodeErr) return NodeErr;
 
 	TArray<FMCPBTAEntry> Entries;
 	MCPBTACollectGraph(Graph, Entries);

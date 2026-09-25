@@ -35,6 +35,11 @@
 
 TSharedPtr<FJsonValue> FLevelHandlers::SpawnLight(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("lightType"), TEXT("onConflict"), TEXT("label"), TEXT("location"), TEXT("rotation"), TEXT("intensity"),
+		TEXT("color"), TEXT("mobility"), TEXT("attenuationRadius"),
+	});
+
 	FString LightType;
 	if (auto Err = RequireString(Params, TEXT("lightType"), LightType)) return Err;
 
@@ -182,6 +187,12 @@ TSharedPtr<FJsonValue> FLevelHandlers::SpawnLight(const TSharedPtr<FJsonObject>&
 
 TSharedPtr<FJsonValue> FLevelHandlers::SetLightProperties(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("intensity"), TEXT("color"), TEXT("rotation"), TEXT("mobility"),
+		TEXT("recaptureSky"), TEXT("volumetricScatteringIntensity"), TEXT("sourceRadius"), TEXT("innerConeAngle"),
+		TEXT("outerConeAngle"),
+	});
+
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
@@ -514,6 +525,13 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetLightProperties(const TSharedPtr<FJson
 // #94: ExponentialHeightFog tuning
 TSharedPtr<FJsonValue> FLevelHandlers::SetFogProperties(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("world"), TEXT("pieInstance"), TEXT("fogDensity"),
+		TEXT("fogHeightFalloff"), TEXT("startDistance"), TEXT("fogInscatteringColor"), TEXT("enableVolumetricFog"),
+		TEXT("volumetricFogScatteringDistribution"), TEXT("volumetricFogExtinctionScale"), TEXT("volumetricFogDistance"),
+		TEXT("volumetricFogAlbedo"),
+	});
+
 	FString WorldScope = OptionalString(Params, TEXT("world"), TEXT("editor"));
 	UWorld* World = ResolveWorldFromParams(Params, *WorldScope);
 	if (!World) return MCPError(TEXT("World not available"));
@@ -595,8 +613,8 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetFogProperties(const TSharedPtr<FJsonOb
 		FC->StartDistance = (float)StartDistance;
 	}
 	const TSharedPtr<FJsonObject>* ColorObj = nullptr;
-	if (TryGetObjectParam(Params, TEXT("fogInscatteringColor"), ColorObj) ||
-	    TryGetObjectParam(Params, TEXT("color"), ColorObj))
+	// color is a spec alias, renamed to fogInscatteringColor before this runs (#1057).
+	if (TryGetObjectParam(Params, TEXT("fogInscatteringColor"), ColorObj))
 	{
 		double R = 255, G = 255, B = 255;
 		(*ColorObj)->TryGetNumberField(TEXT("r"), R);

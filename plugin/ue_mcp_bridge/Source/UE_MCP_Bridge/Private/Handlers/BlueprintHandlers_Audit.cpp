@@ -106,14 +106,31 @@ namespace MCPBlueprintBatch
 		return Blueprint->ParentClass && Blueprint->ParentClass->IsChildOf(FilterClass);
 	}
 
+	/** The selection parameters, read before anything can fail (#1057). */
+	struct FSelectionRequest
+	{
+		bool bRecursive = true;
+		const TArray<TSharedPtr<FJsonValue>>* Paths = nullptr;
+		FString Directory;
+	};
+
+	FSelectionRequest ReadSelectionRequest(const TSharedPtr<FJsonObject>& Params)
+	{
+		FSelectionRequest Request;
+		Request.bRecursive = OptionalBool(Params, TEXT("recursive"), true);
+		TryGetArrayParam(Params, TEXT("assetPaths"), Request.Paths);
+		Request.Directory = OptionalString(Params, TEXT("directory"), TEXT("/Game"));
+		return Request;
+	}
+
 	/** assetPaths when given, otherwise the registry over directory. Returns an
 	 *  error response, or nullptr. */
 	TSharedPtr<FJsonValue> ReadSelection(
-		const TSharedPtr<FJsonObject>& Params, bool bIncludeLevelScripts, UClass* FilterClass, FSelection& Out)
+		const FSelectionRequest& Request, bool bIncludeLevelScripts, UClass* FilterClass, FSelection& Out)
 	{
-		Out.bRecursive = OptionalBool(Params, TEXT("recursive"), true);
-		const TArray<TSharedPtr<FJsonValue>>* Paths = nullptr;
-		if (TryGetArrayParam(Params, TEXT("assetPaths"), Paths) && Paths && Paths->Num() > 0)
+		Out.bRecursive = Request.bRecursive;
+		const TArray<TSharedPtr<FJsonValue>>* Paths = Request.Paths;
+		if (Paths && Paths->Num() > 0)
 		{
 			Out.bFromAssetPaths = true;
 			TSet<FString> Seen;
@@ -136,7 +153,7 @@ namespace MCPBlueprintBatch
 			return nullptr;
 		}
 
-		FString Directory = OptionalString(Params, TEXT("directory"), TEXT("/Game"));
+		FString Directory = Request.Directory;
 		Directory.TrimStartAndEndInline();
 		if (Directory.IsEmpty()) Directory = TEXT("/Game");
 		while (Directory.Len() > 1 && Directory.EndsWith(TEXT("/"))) Directory.LeftChopInline(1);
@@ -828,26 +845,30 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::ExportBlueprintBatch(const TSharedPtr
 {
 	using namespace MCPBlueprintBatch;
 
+	// Every parameter is read before anything can fail (#1057).
 	const FString ParentClassSpec = OptionalString(Params, TEXT("parentClass"), TEXT(""));
+	const bool bIncludeT3D = OptionalBool(Params, TEXT("includeT3D"), false);
+	const bool bIncludeLevelScripts = OptionalBool(Params, TEXT("includeLevelScripts"), false);
+	const int32 MaxAssets = FMath::Clamp(OptionalInt(Params, TEXT("maxAssets"), DefaultMaxAssets), 1, MaxMaxAssets);
+	const FString RequestedOutputDir = OptionalString(Params, TEXT("outputDir"), TEXT(""));
+	const FSelectionRequest SelectionRequest = ReadSelectionRequest(Params);
+
 	UClass* FilterClass = nullptr;
 	if (!ParentClassSpec.IsEmpty())
 	{
 		FilterClass = MCPResolveClass(ParentClassSpec);
 		if (!FilterClass) return MCPClassNotFoundError(ParentClassSpec, TEXT("parentClass"));
 	}
-	const bool bIncludeT3D = OptionalBool(Params, TEXT("includeT3D"), false);
-	const bool bIncludeLevelScripts = OptionalBool(Params, TEXT("includeLevelScripts"), false);
-	const int32 MaxAssets = FMath::Clamp(OptionalInt(Params, TEXT("maxAssets"), DefaultMaxAssets), 1, MaxMaxAssets);
 
 	FString OutputDir;
 	FString DirError;
-	if (!ResolveOutputDir(OptionalString(Params, TEXT("outputDir"), TEXT("")), OutputDir, DirError))
+	if (!ResolveOutputDir(RequestedOutputDir, OutputDir, DirError))
 	{
 		return MCPError(DirError);
 	}
 
 	FSelection Selection;
-	if (TSharedPtr<FJsonValue> Err = ReadSelection(Params, bIncludeLevelScripts, FilterClass, Selection)) return Err;
+	if (TSharedPtr<FJsonValue> Err = ReadSelection(SelectionRequest, bIncludeLevelScripts, FilterClass, Selection)) return Err;
 
 	const bool bTruncated = Selection.Targets.Num() > MaxAssets;
 	if (bTruncated) Selection.Targets.SetNum(MaxAssets);
@@ -1014,7 +1035,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AuditDeadCode(const TSharedPtr<FJsonO
 	const FString OutputPath = OptionalString(Params, TEXT("outputPath"), TEXT(""));
 
 	FSelection Selection;
-	if (TSharedPtr<FJsonValue> Err = ReadSelection(Params, bIncludeLevelScripts, nullptr, Selection)) return Err;
+	if (TSharedPtr<FJsonValue> Err = ReadSelection(ReadSelectionRequest(Params), bIncludeLevelScripts, nullptr, Selection)) return Err;
 
 	const bool bTruncatedAtMaxBlueprints = Selection.Targets.Num() > MaxBlueprints;
 	if (bTruncatedAtMaxBlueprints) Selection.Targets.SetNum(MaxBlueprints);
