@@ -899,8 +899,18 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetVariableDefault(const TSharedPtr<F
 			*VarName, *FString::Join(Names, TEXT(", "))));
 	}
 
-	// Capture previous value for rollback and idempotency
-	const FString PrevValue = FoundVar->DefaultValue;
+	// Capture previous value for rollback and idempotency. DefaultValue can be
+	// empty while the compiled default is not, so fall back to the CDO's value.
+	FString PrevValue = FoundVar->DefaultValue;
+	if (PrevValue.IsEmpty() && Blueprint->GeneratedClass)
+	{
+		FProperty* CurProp = Blueprint->GeneratedClass->FindPropertyByName(FName(*VarName));
+		UObject* CurCDO = Blueprint->GeneratedClass->GetDefaultObject();
+		if (CurProp && CurCDO)
+		{
+			CurProp->ExportTextItem_Direct(PrevValue, CurProp->ContainerPtrToValuePtr<void>(CurCDO), nullptr, nullptr, PPF_None);
+		}
+	}
 	if (PrevValue == Value)
 	{
 		auto Noop = MCPSuccess();
