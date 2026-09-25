@@ -198,7 +198,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AnalyzeAnimation(const TSharedPtr<FJs
 	FString AssetPath;
 	if (auto Error = RequireString(Params, TEXT("assetPath"), AssetPath)) return Error;
 
-	UAnimSequence* Sequence = LoadObject<UAnimSequence>(nullptr, *AssetPath);
+	UAnimSequence* Sequence = LoadAssetByPath<UAnimSequence>(AssetPath);
 	if (!Sequence)
 	{
 		return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *AssetPath));
@@ -216,7 +216,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AnalyzeAnimation(const TSharedPtr<FJs
 	USkeletalMesh* SkeletalMesh = nullptr;
 	if (!SkeletalMeshPath.IsEmpty())
 	{
-		SkeletalMesh = LoadObject<USkeletalMesh>(nullptr, *SkeletalMeshPath);
+		SkeletalMesh = LoadAssetByPath<USkeletalMesh>(SkeletalMeshPath);
 		if (!SkeletalMesh)
 		{
 			return MCPError(FString::Printf(TEXT("SkeletalMesh not found: %s"), *SkeletalMeshPath));

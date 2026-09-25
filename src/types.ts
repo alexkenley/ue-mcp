@@ -4,7 +4,7 @@ import type { ProjectContext } from "./project.js";
 import type { EditorSession, SessionRegistry } from "./session.js";
 import { McpError, ErrorCode } from "./errors.js";
 import { MAX_BRIDGE_TIMEOUT_MS } from "./bridge-timeouts.js";
-import { nearestActions } from "./action-schema.js";
+import { unknownActionMessage } from "./action-schema.js";
 import { prepareCall, finishCall } from "./call-pipeline.js";
 
 /**
@@ -624,15 +624,7 @@ export function categoryTool(
         // into every typo's error spends more context than the call would
         // have. Lead with the closest spellings, which is what a typo needs,
         // and name the two ways to see the rest.
-        const available = Object.keys(actions);
-        const close = nearestActions(action, available);
-        throw new McpError(
-          ErrorCode.UNKNOWN_ACTION,
-          `Unknown action '${action}' on '${name}'.`
-            + (close.length ? ` Did you mean: ${close.join(", ")}?` : "")
-            + ` ${available.length} actions available - project(action="describe_action", category="${name}")`
-            + ` lists them with their parameters, and project(action="search_tools") searches by intent.`,
-        );
+        throw new McpError(ErrorCode.UNKNOWN_ACTION, unknownActionMessage(action, name, Object.keys(actions)));
       }
       // THE per-call preparation, in the one place it is written: the routing
       // parameters (`timeoutMs`, `select`, `omit`) come off so no mapParams can

@@ -318,6 +318,10 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetComponentProperty(const TSharedPtr
 		return BlueprintNotFoundError(AssetPath);
 	}
 
+	// Refuse a package the save cannot write before anything changes; resolving
+	// an inherited template for write already mutates the Blueprint.
+	if (auto Blocked = MCPAssetWriteBlockedError(Blueprint, AssetPath, TEXT("set this component property"))) return Blocked;
+
 	bool bIsInherited = false;
 	TArray<FString> Available;
 	UActorComponent* Template = ResolveComponentTemplate(
@@ -368,13 +372,15 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetComponentProperty(const TSharedPtr
 				SkelComp->SetSkeletalMeshAsset(NewMesh);
 				SkelComp->PostEditChange();
 				FKismetEditorUtilities::CompileBlueprint(Blueprint);
-				SaveAssetPackage(Blueprint);
+				FString MeshSaveReason;
+				const bool bMeshSaved = SaveAssetPackageChecked(Blueprint, MeshSaveReason);
 
 				auto Result = MCPSuccess();
 				MCPSetUpdated(Result);
 				Result->SetStringField(TEXT("path"), AssetPath);
 				Result->SetStringField(TEXT("componentName"), ComponentName);
 				Result->SetStringField(TEXT("propertyName"), PropertyName);
+				MCPNoteSaveOutcome(Result, AssetPath, bMeshSaved, MeshSaveReason);
 				Result->SetStringField(TEXT("value"), NewMesh ? NewMesh->GetPathName() : TEXT("None"));
 				Result->SetStringField(TEXT("skinnedAsset"), SkelComp->GetSkinnedAsset() ? SkelComp->GetSkinnedAsset()->GetPathName() : TEXT("None"));
 				Result->SetStringField(TEXT("note"), TEXT("Routed through SetSkeletalMeshAsset so SkinnedAsset is updated (#680)"));
@@ -463,9 +469,11 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetComponentProperty(const TSharedPtr
 
 	Template->PostEditChange();
 
-	// Compile and save
+	// Compile and save. A save that did not reach disk fails the call and says
+	// why, since the in-memory read-back looks right until the editor restarts.
 	FKismetEditorUtilities::CompileBlueprint(Blueprint);
-	SaveAssetPackage(Blueprint);
+	FString SaveReason;
+	const bool bSaved = SaveAssetPackageChecked(Blueprint, SaveReason);
 
 	auto Result = MCPSuccess();
 	MCPSetUpdated(Result);
@@ -474,6 +482,7 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::SetComponentProperty(const TSharedPtr
 	Result->SetStringField(TEXT("propertyName"), PropertyName);
 	Result->SetStringField(TEXT("value"), NewValue);
 	Result->SetBoolField(TEXT("inherited"), bIsInherited);
+	MCPNoteSaveOutcome(Result, AssetPath, bSaved, SaveReason);
 	if (bMapBearing)
 	{
 		// #820: `value` is export text and cannot show a struct-keyed map
@@ -739,11 +748,11 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::AddFunctionParameter(const TSharedPtr
 		}
 	}
 
-	FEdGraphPinType PinType = MakePinType(ParamType);
-
-	if (PinType.PinCategory == NAME_None)
+	FEdGraphPinType PinType;
+	FString TypeError;
+	if (!ParsePinTypeSpec(ParamType, PinType, TypeError))
 	{
-		return MCPError(FString::Printf(TEXT("Unrecognized parameter type: '%s'. Use a known type (Bool, Int, Float, String, Name, Text, Byte, Object, Vector, Rotator, Transform, GameplayTag, etc.) or a full class/struct path."), *ParamType));
+		return MCPError(FString::Printf(TEXT("Unrecognized parameter type: %s"), *TypeError));
 	}
 
 	if (bIsOutput)

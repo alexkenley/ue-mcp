@@ -62,7 +62,7 @@ import * as path from "node:path";
 import yaml from "js-yaml";
 
 import { ALL_TOOLS, setLiveToolGraph } from "./tools.js";
-import { nearestActions } from "./action-schema.js";
+import { unknownActionMessage } from "./action-schema.js";
 import { applyNativeToolsConfig } from "./epic-surface.js";
 import { checkPluginFreshness } from "./plugin-freshness.js";
 import { readEngineSnapshot } from "./engine-observer.js";
@@ -824,16 +824,11 @@ async function main() {
       // .ts paths it tried to load the action from, which is worse than what
       // it replaced.
       if (!sessionRegistry.listRegistered().includes(taskName)) {
-        const available = Object.keys(tool.actions);
-        const close = nearestActions(action, available);
         return {
           content: withUpgradeNotice([
             {
               type: "text" as const,
-              text: `Error [NOT_FOUND]: Unknown action '${action}' on '${tool.name}'.`
-                + (close.length ? ` Did you mean: ${close.join(", ")}?` : "")
-                + ` ${available.length} actions available - project(action="describe_action", category="${tool.name}")`
-                + ` lists them with their parameters, and project(action="search_tools") searches by intent.`,
+              text: `Error [NOT_FOUND]: ${unknownActionMessage(action, tool.name, Object.keys(tool.actions))}`,
             },
           ]),
           isError: true,

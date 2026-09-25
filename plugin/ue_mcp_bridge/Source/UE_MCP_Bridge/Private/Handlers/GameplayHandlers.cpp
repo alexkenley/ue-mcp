@@ -1216,8 +1216,26 @@ TSharedPtr<FJsonValue> FGameplayHandlers::CreateBehaviorTree(const TSharedPtr<FJ
 		return MCPError(TEXT("BehaviorTree class not found."));
 	}
 
+	// Resolved before the asset exists, so a bad path creates nothing.
+	const FString BlackboardPath = OptionalString(Params, TEXT("blackboardPath"));
+	UBlackboardData* BB = nullptr;
+	if (!BlackboardPath.IsEmpty())
+	{
+		BB = LoadObject<UBlackboardData>(nullptr, *BlackboardPath);
+		if (!BB) return MCPError(FString::Printf(TEXT("BlackboardData not found: %s"), *BlackboardPath));
+	}
+
 	auto Created = MCPCreateAssetIdempotent<UObject>(Name, PackagePath, OnConflict, TEXT("BehaviorTree"), BTClass, nullptr);
 	if (Created.EarlyReturn) return Created.EarlyReturn;
+
+	if (BB)
+	{
+		if (UBehaviorTree* BT = Cast<UBehaviorTree>(Created.Asset))
+		{
+			BT->BlackboardAsset = BB;
+			BT->PostEditChange();
+		}
+	}
 
 	UEditorAssetLibrary::SaveAsset(Created.Asset->GetPathName());
 
@@ -1225,6 +1243,7 @@ TSharedPtr<FJsonValue> FGameplayHandlers::CreateBehaviorTree(const TSharedPtr<FJ
 	MCPSetCreated(Result);
 	Result->SetStringField(TEXT("path"), Created.Asset->GetPathName());
 	Result->SetStringField(TEXT("name"), Name);
+	if (BB) Result->SetStringField(TEXT("blackboardPath"), BB->GetPathName());
 	MCPSetDeleteAssetRollback(Result, Created.Asset->GetPathName());
 
 	return MCPResult(Result);

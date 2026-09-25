@@ -117,7 +117,12 @@ private:
 	// #595: read/write Chaos cloth data on a skeletal mesh's clothing assets.
 	static TSharedPtr<FJsonValue> ReadClothData(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetClothConfig(const TSharedPtr<FJsonObject>& Params);
+	// #1139: bind a clothing asset to a render section, or remove the binding.
+	static TSharedPtr<FJsonValue> BindClothToSection(const TSharedPtr<FJsonObject>& Params);
+	static TSharedPtr<FJsonValue> UnbindClothFromSection(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ImportAnimation(const TSharedPtr<FJsonObject>& Params);
+	// #1096: any source file through a chosen UFactory, unattended.
+	static TSharedPtr<FJsonValue> ImportFile(const TSharedPtr<FJsonObject>& Params);
 
 	// Mesh material handlers
 	static TSharedPtr<FJsonValue> SetMeshMaterial(const TSharedPtr<FJsonObject>& Params);

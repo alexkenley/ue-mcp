@@ -4,6 +4,7 @@
 #include "HandlerPagination.h"
 #include "HandlerAssetCreate.h"
 #include "HandlerJsonProperty.h"
+#include "HandlerAnimNotify.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
@@ -159,6 +160,7 @@ void FAnimationHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("list_control_rig_variables"), &ListControlRigVariables);
 	Registry.RegisterHandler(TEXT("read_control_rig_graph"), &ReadControlRigGraph);
 	Registry.RegisterHandler(TEXT("read_control_rig_hierarchy"), &ReadControlRigHierarchy);
+	Registry.RegisterHandler(TEXT("create_control_rig"), &CreateControlRig);
 	Registry.RegisterHandler(TEXT("begin_control_rig_edit"), &BeginControlRigEdit);
 	Registry.RegisterHandler(TEXT("read_control_rig_edit"), &ReadControlRigEdit);
 	Registry.RegisterHandler(TEXT("capture_control_rig_pose"), &CaptureControlRigPose);
@@ -361,7 +363,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetSkeletonInfo(const TSharedPtr<FJso
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(LoadedAsset);
 	if (!SkeletalMesh)
 	{
@@ -439,7 +441,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateSkeleton(const TSharedPtr<FJson
 
 	FString SkeletalMeshPath;
 	if (auto Err = RequireString(Params, TEXT("skeletalMeshPath"), SkeletalMeshPath)) return Err;
-	USkeletalMesh* SkeletalMesh = LoadObject<USkeletalMesh>(nullptr, *SkeletalMeshPath);
+	USkeletalMesh* SkeletalMesh = LoadAssetByPath<USkeletalMesh>(SkeletalMeshPath);
 	if (!SkeletalMesh)
 	{
 		return MCPError(FString::Printf(TEXT("Failed to load SkeletalMesh at '%s'"), *SkeletalMeshPath));
@@ -620,7 +622,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListSockets(const TSharedPtr<FJsonObj
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(LoadedAsset);
 	if (!SkeletalMesh)
 	{
@@ -687,7 +689,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetPhysicsAssetInfo(const TSharedPtr<
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(LoadedAsset);
 	if (!SkeletalMesh)
 	{
@@ -729,11 +731,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimBlueprint(const TSharedPtr<FJ
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UAnimBlueprint* AnimBP = Cast<UAnimBlueprint>(LoadedAsset);
 	if (!AnimBP)
 	{
-		return MCPError(FString::Printf(TEXT("Failed to load AnimBlueprint at '%s'"), *AssetPath));
+		return LoadedAsset
+			? MCPAssetWrongTypeError(AssetPath, LoadedAsset, TEXT("AnimBlueprint"))
+			: MCPAssetNotFoundError(AssetPath);
 	}
 
 	auto Result = MCPSuccess();
@@ -815,7 +819,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimMontage(const TSharedPtr<FJso
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
 	{
-		return MCPError(FString::Printf(TEXT("Failed to load AnimMontage at '%s'"), *AssetPath));
+		return MCPAssetLoadError(AssetPath, TEXT("AnimMontage"));
 	}
 
 	auto Result = MCPSuccess();
@@ -855,10 +859,20 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimMontage(const TSharedPtr<FJso
 		if (NotifyEvent.Notify)
 		{
 			NotifyObj->SetStringField(TEXT("class"), NotifyEvent.Notify->GetClass()->GetName());
+			NotifyObj->SetStringField(TEXT("objectPath"), NotifyEvent.Notify->GetPathName());
+			NotifyObj->SetObjectField(TEXT("properties"), MCPAnimNotify::EditableProperties(NotifyEvent.Notify));
+		}
+		// objectPath is the placed instance, editable in place with editor(set_property).
+		if (NotifyEvent.NotifyStateClass)
+		{
+			NotifyObj->SetStringField(TEXT("notifyStateClass"), NotifyEvent.NotifyStateClass->GetClass()->GetName());
+			NotifyObj->SetStringField(TEXT("objectPath"), NotifyEvent.NotifyStateClass->GetPathName());
+			NotifyObj->SetObjectField(TEXT("properties"), MCPAnimNotify::EditableProperties(NotifyEvent.NotifyStateClass));
 		}
 		NotifiesArray.Add(MakeShared<FJsonValueObject>(NotifyObj));
 	}
 	Result->SetArrayField(TEXT("notifies"), NotifiesArray);
+	Result->SetArrayField(TEXT("notifyStates"), MCPAnimNotify::ListNotifyStates(Montage));
 
 	// Slot anim tracks
 	TArray<TSharedPtr<FJsonValue>> SlotTracksArray;
@@ -902,7 +916,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateAnimBlueprint(const TSharedPtr<
 	FString ParentClassName = OptionalString(Params, TEXT("parentClass"));
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
-	UObject* SkeletonAsset = UEditorAssetLibrary::LoadAsset(SkeletonPath);
+	UObject* SkeletonAsset = MCPLoadAssetObject(SkeletonPath);
 	USkeleton* Skeleton = Cast<USkeleton>(SkeletonAsset);
 	if (!Skeleton)
 	{
@@ -1244,7 +1258,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadBlendspace(const TSharedPtr<FJson
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UBlendSpace* BlendSpace = Cast<UBlendSpace>(LoadedAsset);
 	if (!BlendSpace)
 	{
@@ -1723,7 +1737,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateBlendspace(const TSharedPtr<FJs
 	double VerticalMin = OptionalNumber(Params, TEXT("verticalMin"), -180.0);
 	double VerticalMax = OptionalNumber(Params, TEXT("verticalMax"), 180.0);
 
-	UObject* SkeletonAsset = UEditorAssetLibrary::LoadAsset(SkeletonPath);
+	UObject* SkeletonAsset = MCPLoadAssetObject(SkeletonPath);
 	USkeleton* Skeleton = Cast<USkeleton>(SkeletonAsset);
 	if (!Skeleton)
 	{
@@ -1779,7 +1793,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateBlendspace1D(const TSharedPtr<F
 	const double AxisMax = OptionalNumber(Params, TEXT("axisMax"), 500.0);
 	const int32 GridNum = (int32)OptionalNumber(Params, TEXT("gridNum"), 4.0);
 
-	USkeleton* Skeleton = Cast<USkeleton>(UEditorAssetLibrary::LoadAsset(SkeletonPath));
+	USkeleton* Skeleton = Cast<USkeleton>(MCPLoadAssetObject(SkeletonPath));
 	if (!Skeleton) return MCPError(FString::Printf(TEXT("Failed to load Skeleton at '%s'"), *SkeletonPath));
 
 	UBlendSpaceFactory1D* Factory = NewObject<UBlendSpaceFactory1D>();
@@ -2276,7 +2290,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageSequence(const TSharedPtr<F
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
 	{
-		return MCPError(FString::Printf(TEXT("Failed to load AnimMontage at '%s'"), *AssetPath));
+		return MCPAssetLoadError(AssetPath, TEXT("AnimMontage"));
 	}
 
 	// Load the new sequence
@@ -2455,7 +2469,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageProperties(const TSharedPtr
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
 	{
-		return MCPError(FString::Printf(TEXT("Failed to load AnimMontage at '%s'"), *AssetPath));
+		return MCPAssetLoadError(AssetPath, TEXT("AnimMontage"));
 	}
 
 	// Capture previous values for rollback
@@ -2584,7 +2598,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetMontageSlot(const TSharedPtr<FJson
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
 	{
-		return MCPError(FString::Printf(TEXT("Failed to load AnimMontage at '%s'"), *AssetPath));
+		return MCPAssetLoadError(AssetPath, TEXT("AnimMontage"));
 	}
 
 	if (TrackIndex < 0 || TrackIndex >= Montage->SlotAnimTracks.Num())
@@ -2772,7 +2786,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSection(const TSharedPtr<FJ
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
 	{
-		return MCPError(FString::Printf(TEXT("Failed to load AnimMontage at '%s'"), *AssetPath));
+		return MCPAssetLoadError(AssetPath, TEXT("AnimMontage"));
 	}
 
 	// #826: anchor the section to a specific segment. A bare startTime marker
@@ -2884,7 +2898,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddMontageSegment(const TSharedPtr<FJ
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
 	{
-		return MCPError(FString::Printf(TEXT("Failed to load AnimMontage at '%s'"), *AssetPath));
+		return MCPAssetLoadError(AssetPath, TEXT("AnimMontage"));
 	}
 
 	UAnimSequenceBase* Source = LoadAssetByPath<UAnimSequenceBase>(AnimSequencePath);
@@ -3059,7 +3073,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::RemoveMontageSegment(const TSharedPtr
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
 	{
-		return MCPError(FString::Printf(TEXT("Failed to load AnimMontage at '%s'"), *AssetPath));
+		return MCPAssetLoadError(AssetPath, TEXT("AnimMontage"));
 	}
 
 	int32 SlotIndex = 0;
@@ -3130,7 +3144,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListMontageSegments(const TSharedPtr<
 	UAnimMontage* Montage = LoadAssetByPath<UAnimMontage>(AssetPath);
 	if (!Montage)
 	{
-		return MCPError(FString::Printf(TEXT("Failed to load AnimMontage at '%s'"), *AssetPath));
+		return MCPAssetLoadError(AssetPath, TEXT("AnimMontage"));
 	}
 
 	const FString SlotFilter = OptionalString(Params, TEXT("slotName"));
@@ -3206,7 +3220,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ListControlRigVariables(const TShared
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
 	// In UE 5.7, ControlRigBlueprint was removed - load as a generic UBlueprint
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UBlueprint* CRBlueprint = Cast<UBlueprint>(LoadedAsset);
 	if (!CRBlueprint)
 	{
@@ -3267,7 +3281,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadControlRigHierarchy(const TShared
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UBlueprint* CRBlueprint = Cast<UBlueprint>(LoadedAsset);
 	if (!CRBlueprint) return MCPError(FString::Printf(TEXT("Failed to load Blueprint at '%s'"), *AssetPath));
 
@@ -3479,9 +3493,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetAnimBlueprintSkeleton(const TShare
 	FString SkeletonPath;
 	if (auto Err = RequireString(Params, TEXT("skeletonPath"), SkeletonPath)) return Err;
 
-	UAnimBlueprint* AnimBP = LoadObject<UAnimBlueprint>(nullptr, *AssetPath);
+	UAnimBlueprint* AnimBP = LoadAssetByPath<UAnimBlueprint>(AssetPath);
 	if (!AnimBP) return MCPError(FString::Printf(TEXT("AnimBlueprint not found: %s"), *AssetPath));
-	USkeleton* Skeleton = LoadObject<USkeleton>(nullptr, *SkeletonPath);
+	USkeleton* Skeleton = LoadAssetByPath<USkeleton>(SkeletonPath);
 	if (!Skeleton) return MCPError(FString::Printf(TEXT("Skeleton not found: %s"), *SkeletonPath));
 
 	// The skeleton the Blueprint targeted, read before the assignment: it is the

@@ -863,7 +863,7 @@ namespace
 			return false;
 		}
 
-		OutSession.Sequence = Cast<ULevelSequence>(UEditorAssetLibrary::LoadAsset(OutSession.SequencePath));
+		OutSession.Sequence = Cast<ULevelSequence>(MCPLoadAssetObject(OutSession.SequencePath));
 		if (!OutSession.Sequence)
 		{
 			OutError = FString::Printf(TEXT("LevelSequence not found: %s"), *OutSession.SequencePath);
@@ -1775,9 +1775,9 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BeginControlRigEdit(const TSharedPtr<
 	FString Error;
 	if (!ControlRigSequencerSplitAssetPath(SequencePath, PackagePath, AssetName, Error)) return MCPError(Error);
 
-	USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(UEditorAssetLibrary::LoadAsset(SkeletalMeshPath));
+	USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(MCPLoadAssetObject(SkeletalMeshPath));
 	if (!SkeletalMesh) return MCPError(FString::Printf(TEXT("SkeletalMesh not found: %s"), *SkeletalMeshPath));
-	UAnimSequence* SourceAnimation = Cast<UAnimSequence>(UEditorAssetLibrary::LoadAsset(SourceAnimationPath));
+	UAnimSequence* SourceAnimation = Cast<UAnimSequence>(MCPLoadAssetObject(SourceAnimationPath));
 	if (!SourceAnimation) return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *SourceAnimationPath));
 	if (!SkeletalMesh->GetSkeleton() || !SourceAnimation->GetSkeleton()
 		|| !SkeletalMesh->GetSkeleton()->IsCompatibleForEditor(SourceAnimation->GetSkeleton()))
@@ -1809,7 +1809,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BeginControlRigEdit(const TSharedPtr<
 	{
 		FString ControlRigPath;
 		if (auto RigError = RequireString(Params, TEXT("controlRigPath"), ControlRigPath)) return RigError;
-		UBlueprint* Blueprint = Cast<UBlueprint>(UEditorAssetLibrary::LoadAsset(ControlRigPath));
+		UBlueprint* Blueprint = Cast<UBlueprint>(MCPLoadAssetObject(ControlRigPath));
 		if (!Blueprint || !Blueprint->GeneratedClass || !Blueprint->GeneratedClass->IsChildOf(UControlRig::StaticClass()))
 		{
 			return MCPError(FString::Printf(TEXT("Control Rig asset is invalid or has no generated Control Rig class: %s"), *ControlRigPath));
@@ -1867,7 +1867,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BeginControlRigEdit(const TSharedPtr<
 	if (BindingTag.IsEmpty()) return MCPError(TEXT("'bindingTag' must not be empty"));
 	const bool bLayered = OptionalBool(Params, TEXT("layered"), false);
 
-	ULevelSequence* Sequence = Cast<ULevelSequence>(UEditorAssetLibrary::LoadAsset(SequencePath));
+	ULevelSequence* Sequence = Cast<ULevelSequence>(MCPLoadAssetObject(SequencePath));
 	const bool bCreated = Sequence == nullptr;
 	if (Sequence && OnConflict == TEXT("error"))
 	{
@@ -2067,7 +2067,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadControlRigEdit(const TSharedPtr<F
 #else
 	FString SequencePath;
 	if (auto Error = RequireString(Params, TEXT("sequencePath"), SequencePath)) return Error;
-	ULevelSequence* Sequence = Cast<ULevelSequence>(UEditorAssetLibrary::LoadAsset(SequencePath));
+	ULevelSequence* Sequence = Cast<ULevelSequence>(MCPLoadAssetObject(SequencePath));
 	if (!Sequence) return MCPError(FString::Printf(TEXT("LevelSequence not found: %s"), *SequencePath));
 	FControlRigSequenceFocusGuard Focus(Sequence);
 	if (!Focus.IsReady()) return MCPError(TEXT("Could not focus the LevelSequence in Sequencer"));
@@ -2410,7 +2410,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ApplyControlRigEdits(const TSharedPtr
 	{
 		return MCPError(FString::Printf(TEXT("Protected asset cannot be modified: %s"), *SequencePath));
 	}
-	ULevelSequence* Sequence = Cast<ULevelSequence>(UEditorAssetLibrary::LoadAsset(SequencePath));
+	ULevelSequence* Sequence = Cast<ULevelSequence>(MCPLoadAssetObject(SequencePath));
 	if (!Sequence) return MCPError(FString::Printf(TEXT("LevelSequence not found: %s"), *SequencePath));
 	FControlRigSequenceFocusGuard Focus(Sequence);
 	if (!Focus.IsReady()) return MCPError(TEXT("Could not focus the LevelSequence in Sequencer"));
@@ -4022,7 +4022,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BakeControlRigEdit(const TSharedPtr<F
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("error")).ToLower();
 	if (OnConflict != TEXT("skip") && OnConflict != TEXT("error"))
 		return MCPError(TEXT("'onConflict' must be 'skip' or 'error'; bake never overwrites an AnimSequence"));
-	if (UObject* Existing = UEditorAssetLibrary::LoadAsset(OutputAssetPath))
+	if (UObject* Existing = MCPLoadAssetObject(OutputAssetPath))
 	{
 		if (OnConflict == TEXT("error")) return MCPError(FString::Printf(TEXT("Output asset already exists: %s"), *OutputAssetPath));
 		if (!Existing->IsA<UAnimSequence>()) return MCPError(FString::Printf(TEXT("Existing output is not an AnimSequence: %s"), *OutputAssetPath));
@@ -4032,7 +4032,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BakeControlRigEdit(const TSharedPtr<F
 		return MCPResult(Result);
 	}
 
-	ULevelSequence* Sequence = Cast<ULevelSequence>(UEditorAssetLibrary::LoadAsset(SequencePath));
+	ULevelSequence* Sequence = Cast<ULevelSequence>(MCPLoadAssetObject(SequencePath));
 	if (!Sequence) return MCPError(FString::Printf(TEXT("LevelSequence not found: %s"), *SequencePath));
 	FControlRigSequenceFocusGuard Focus(Sequence);
 	if (!Focus.IsReady()) return MCPError(TEXT("Could not focus the LevelSequence in Sequencer"));

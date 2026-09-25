@@ -13,6 +13,7 @@
 #include "AnimationModifiersAssetUserData.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimSequenceBase.h"
+#include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "Animation/AnimComposite.h"
 #include "Animation/AnimData/IAnimationDataModel.h"
 #include "Animation/AnimCurveTypes.h"
@@ -43,11 +44,13 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimSequence(const TSharedPtr<FJs
 	FString AssetPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("assetPath"), TEXT("path"), AssetPath)) return Err;
 
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UAnimSequence* AnimSeq = Cast<UAnimSequence>(LoadedAsset);
 	if (!AnimSeq)
 	{
-		return MCPError(FString::Printf(TEXT("Failed to load AnimSequence at '%s'"), *AssetPath));
+		return LoadedAsset
+			? MCPAssetWrongTypeError(AssetPath, LoadedAsset, TEXT("AnimSequence"))
+			: MCPAssetNotFoundError(AssetPath);
 	}
 
 	auto Result = MCPSuccess();
@@ -115,9 +118,22 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadAnimSequence(const TSharedPtr<FJs
 		TSharedPtr<FJsonObject> NotifyObj = MakeShared<FJsonObject>();
 		NotifyObj->SetStringField(TEXT("name"), NotifyEvent.NotifyName.ToString());
 		NotifyObj->SetNumberField(TEXT("triggerTime"), NotifyEvent.GetTriggerTime());
+		NotifyObj->SetNumberField(TEXT("duration"), NotifyEvent.GetDuration());
+#if WITH_EDITORONLY_DATA
+		NotifyObj->SetNumberField(TEXT("trackIndex"), NotifyEvent.TrackIndex);
+		if (AnimSeq->AnimNotifyTracks.IsValidIndex(NotifyEvent.TrackIndex))
+		{
+			NotifyObj->SetStringField(TEXT("trackName"), AnimSeq->AnimNotifyTracks[NotifyEvent.TrackIndex].TrackName.ToString());
+		}
+#endif
 		if (NotifyEvent.Notify)
 		{
 			NotifyObj->SetStringField(TEXT("class"), NotifyEvent.Notify->GetClass()->GetName());
+		}
+		if (NotifyEvent.NotifyStateClass)
+		{
+			NotifyObj->SetStringField(TEXT("notifyStateClass"), NotifyEvent.NotifyStateClass->GetClass()->GetName());
+			NotifyObj->SetNumberField(TEXT("endTime"), NotifyEvent.GetEndTriggerTime());
 		}
 		NotifiesArray.Add(MakeShared<FJsonValueObject>(NotifyObj));
 	}
@@ -319,7 +335,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CreateSequence(const TSharedPtr<FJson
 	double NumFrames = OptionalNumber(Params, TEXT("numFrames"), 30.0);
 	const FString OnConflict = OptionalString(Params, TEXT("onConflict"), TEXT("skip"));
 
-	UObject* SkeletonAsset = UEditorAssetLibrary::LoadAsset(SkeletonPath);
+	UObject* SkeletonAsset = MCPLoadAssetObject(SkeletonPath);
 	USkeleton* Skeleton = Cast<USkeleton>(SkeletonAsset);
 	if (!Skeleton)
 	{
@@ -448,7 +464,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetBoneKeyframes(const TSharedPtr<FJs
 	}
 
 	// Load the anim sequence
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UAnimSequence* AnimSeq = Cast<UAnimSequence>(LoadedAsset);
 	if (!AnimSeq)
 	{
@@ -613,7 +629,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BakeKeyframesBatch(const TSharedPtr<F
 
 	const bool bSave = OptionalBool(Params, TEXT("save"), true);
 
-	UAnimSequence* AnimSeq = Cast<UAnimSequence>(UEditorAssetLibrary::LoadAsset(AssetPath));
+	UAnimSequence* AnimSeq = Cast<UAnimSequence>(MCPLoadAssetObject(AssetPath));
 	if (!AnimSeq) return MCPError(FString::Printf(TEXT("Failed to load AnimSequence at '%s'"), *AssetPath));
 	USkeleton* Skeleton = AnimSeq->GetSkeleton();
 	if (!Skeleton) return MCPError(TEXT("AnimSequence has no Skeleton"));
@@ -801,7 +817,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::GetBoneTransforms(const TSharedPtr<FJ
 	}
 
 	// Load skeleton (accept either USkeleton or USkeletalMesh)
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	USkeleton* Skeleton = Cast<USkeleton>(LoadedAsset);
 	if (!Skeleton)
 	{
@@ -908,7 +924,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::AddCurve(const TSharedPtr<FJsonObject
 	FString CurveName;
 	if (auto Err = RequireString(Params, TEXT("curveName"), CurveName)) return Err;
 
-	UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(AssetPath);
+	UObject* LoadedAsset = MCPLoadAssetObject(AssetPath);
 	UAnimSequence* AnimSeq = Cast<UAnimSequence>(LoadedAsset);
 	if (!AnimSeq)
 	{
@@ -987,7 +1003,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetAnimCurveKeys(const TSharedPtr<FJs
 		return MCPError(TEXT("Missing 'keys' array parameter (each entry: {time, value, interp?})"));
 	}
 
-	UAnimSequence* Seq = Cast<UAnimSequence>(UEditorAssetLibrary::LoadAsset(AssetPath));
+	UAnimSequence* Seq = Cast<UAnimSequence>(MCPLoadAssetObject(AssetPath));
 	if (!Seq) return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *AssetPath));
 	if (!Seq->GetSkeleton()) return MCPError(TEXT("AnimSequence has no Skeleton"));
 
@@ -1154,7 +1170,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ApplyAnimationModifier(const TSharedP
 	FString ModifierClassName;
 	if (auto Err = RequireStringAlt(Params, TEXT("modifierClass"), TEXT("modifier"), ModifierClassName)) return Err;
 
-	UAnimSequence* Seq = Cast<UAnimSequence>(UEditorAssetLibrary::LoadAsset(AssetPath));
+	UAnimSequence* Seq = Cast<UAnimSequence>(MCPLoadAssetObject(AssetPath));
 	if (!Seq) return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *AssetPath));
 
 	FString Hint;
@@ -1373,7 +1389,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::ReadBoneTrack(const TSharedPtr<FJsonO
 	FString BoneName;
 	if (auto Err = RequireString(Params, TEXT("boneName"), BoneName)) return Err;
 
-	UAnimSequence* Seq = LoadObject<UAnimSequence>(nullptr, *AssetPath);
+	UAnimSequence* Seq = LoadAssetByPath<UAnimSequence>(AssetPath);
 	if (!Seq) return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *AssetPath));
 
 	const IAnimationDataModel* DataModel = Seq->GetDataModel();
@@ -1487,7 +1503,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::SetSequenceProperties(const TSharedPt
 		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
 		Entry->SetStringField(TEXT("assetPath"), Path);
 
-		UObject* Loaded = UEditorAssetLibrary::LoadAsset(Path);
+		UObject* Loaded = MCPLoadAssetObject(Path);
 		UAnimSequence* Seq = Cast<UAnimSequence>(Loaded);
 		FString ResolvedPath = Path;
 		if (!Seq && bResolveMontages)
@@ -1651,7 +1667,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::BakeRootMotionFromBone(const TSharedP
 		}
 	}
 
-	UAnimSequence* Seq = Cast<UAnimSequence>(UEditorAssetLibrary::LoadAsset(AssetPath));
+	UAnimSequence* Seq = Cast<UAnimSequence>(MCPLoadAssetObject(AssetPath));
 	if (!Seq) return MCPError(FString::Printf(TEXT("AnimSequence not found: %s"), *AssetPath));
 
 	USkeleton* Skeleton = Seq->GetSkeleton();
@@ -1807,7 +1823,7 @@ TSharedPtr<FJsonValue> FAnimationHandlers::CompareCurvesToMorphTargets(const TSh
 	FString MeshPath;
 	if (auto Err = RequireStringAlt(Params, TEXT("skeletalMeshPath"), TEXT("meshPath"), MeshPath)) return Err;
 
-	UObject* CurveAsset = UEditorAssetLibrary::LoadAsset(CurveAssetPath);
+	UObject* CurveAsset = MCPLoadAssetObject(CurveAssetPath);
 	if (!CurveAsset) return MCPError(FString::Printf(TEXT("Asset not found: %s"), *CurveAssetPath));
 	USkeletalMesh* Mesh = LoadAssetByPath<USkeletalMesh>(MeshPath);
 	if (!Mesh) return MCPError(FString::Printf(TEXT("SkeletalMesh not found: %s"), *MeshPath));

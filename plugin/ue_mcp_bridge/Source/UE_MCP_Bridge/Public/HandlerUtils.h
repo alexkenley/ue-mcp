@@ -8,6 +8,11 @@
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "HAL/FileManager.h"
+#include "HAL/CriticalSection.h"
+#include "Misc/ScopeLock.h"
+#include "Misc/OutputDevice.h"
+#include "Misc/OutputDeviceRedirector.h"
+#include "Misc/FeedbackContext.h"
 #include "Misc/PackageName.h"
 #include "Engine/World.h"
 #include "Engine/Blueprint.h"
@@ -2166,6 +2171,104 @@ inline bool MCPPackageWriteBlocked(UObject* Asset, FString& OutReason)
 	return false;
 }
 
+/** Collects the warnings and errors the engine logs about a save while it is
+ *  in scope, so a refusal can quote the engine's own reason instead of
+ *  pointing at the output log (#1120). */
+class FMCPSaveDiagnostics : public FOutputDevice
+{
+public:
+	FMCPSaveDiagnostics() { if (GLog) GLog->AddOutputDevice(this); }
+	virtual ~FMCPSaveDiagnostics() override { if (GLog) GLog->RemoveOutputDevice(this); }
+	FMCPSaveDiagnostics(const FMCPSaveDiagnostics&) = delete;
+	FMCPSaveDiagnostics& operator=(const FMCPSaveDiagnostics&) = delete;
+
+	virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const class FName& Category) override
+	{
+		const ELogVerbosity::Type Level = (ELogVerbosity::Type)(Verbosity & ELogVerbosity::VerbosityMask);
+		if (Level == ELogVerbosity::NoLogging || Level > ELogVerbosity::Warning || !V) return;
+		static const FName SavePackageCategory(TEXT("LogSavePackage"));
+		const FString Line(V);
+		if (Category != SavePackageCategory && !Line.Contains(TEXT("Can't save")) && !Line.Contains(TEXT("Illegal reference")))
+		{
+			return;
+		}
+		FScopeLock Lock(&Guard);
+		if (Lines.Num() < 8) Lines.Add(Line.Left(2000));
+	}
+	virtual bool CanBeUsedOnAnyThread() const override { return true; }
+
+	TArray<FString> GetLines() const
+	{
+		FScopeLock Lock(&Guard);
+		return Lines;
+	}
+
+	/** The line that names the cause: the engine's "Can't save" sentence when
+	 *  there is one, otherwise the first captured line, otherwise empty. */
+	FString GetReason() const
+	{
+		FScopeLock Lock(&Guard);
+		for (const FString& Line : Lines)
+		{
+			if (Line.Contains(TEXT("Can't save"))) return Line;
+		}
+		return Lines.Num() > 0 ? Lines[0] : FString();
+	}
+
+private:
+	mutable FCriticalSection Guard;
+	TArray<FString> Lines;
+};
+
+/** Split the engine's "Illegal reference to private object" sentence into the
+ *  private object, the object holding the reference and its property, with a
+ *  hint on clearing it. Returns nullptr when Message is not that sentence. */
+inline TSharedPtr<FJsonObject> MCPDescribeIllegalReference(const FString& Message)
+{
+	static const TCHAR* Marker = TEXT("Illegal reference to private object: '");
+	const int32 Start = Message.Find(Marker);
+	if (Start == INDEX_NONE) return nullptr;
+	const FString Rest = Message.Mid(Start + FCString::Strlen(Marker));
+
+	FString PrivateObject, AfterObject, Referencer, AfterReferencer, Outer, AfterOuter, Property, AfterProperty;
+	if (!Rest.Split(TEXT("' referenced by '"), &PrivateObject, &AfterObject)) return nullptr;
+	if (!AfterObject.Split(TEXT("' (at '"), &Referencer, &AfterReferencer)) return nullptr;
+	if (!AfterReferencer.Split(TEXT("') in its '"), &Outer, &AfterOuter)) return nullptr;
+	if (!AfterOuter.Split(TEXT("' property"), &Property, &AfterProperty)) return nullptr;
+
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	Out->SetStringField(TEXT("privateObject"), PrivateObject);
+	Out->SetStringField(TEXT("referencer"), Referencer);
+	Out->SetStringField(TEXT("referencerOuter"), Outer);
+	Out->SetStringField(TEXT("property"), Property);
+	Out->SetStringField(TEXT("hint"), FString::Printf(
+		TEXT("'%s' (inside '%s') holds, in its '%s' property, a reference to '%s', which is private to another package, so the engine will not save. ")
+		TEXT("Point that reference, or the field inside '%s' that carries it, at a saved public asset or clear it to null, for example with asset(set_property) ")
+		TEXT("on the referencer's object path, then save again. The private object is usually one that was never saved or was left behind by a move."),
+		*Referencer, *Outer, *Property, *PrivateObject, *Property));
+	return Out;
+}
+
+/** Add what a failed save's diagnostics say to Result: saveDiagnostics with
+ *  the captured lines, and illegalReference when the engine named one. */
+inline void MCPAttachSaveDiagnostics(const TSharedPtr<FJsonObject>& Result, const FMCPSaveDiagnostics& Diagnostics)
+{
+	if (!Result.IsValid()) return;
+	const TArray<FString> Lines = Diagnostics.GetLines();
+	if (Lines.Num() == 0) return;
+	TArray<TSharedPtr<FJsonValue>> Json;
+	for (const FString& Line : Lines) Json.Add(MakeShared<FJsonValueString>(Line));
+	Result->SetArrayField(TEXT("saveDiagnostics"), Json);
+	for (const FString& Line : Lines)
+	{
+		if (TSharedPtr<FJsonObject> Illegal = MCPDescribeIllegalReference(Line))
+		{
+			Result->SetObjectField(TEXT("illegalReference"), Illegal);
+			break;
+		}
+	}
+}
+
 /** Mark the asset's package dirty and save it to disk. Used by every create/
  *  mutate handler that wants changes persisted across editor restarts.
  *  No-op if Asset or its package is null. Returns true on successful save.
@@ -2191,6 +2294,9 @@ inline bool SaveAssetPackage(UObject* Asset)
 	if (!ResolvePackageFileName(Package, PackageFileName)) return false;
 	FSavePackageArgs SaveArgs;
 	SaveArgs.TopLevelFlags = RF_Standalone;
+	// The default GError treats a save warning as fatal. GWarn logs it, which
+	// is what the editor's own save does and what FMCPSaveDiagnostics reads.
+	SaveArgs.Error = GWarn;
 	return UPackage::SavePackage(Package, nullptr, *PackageFileName, SaveArgs);
 }
 
@@ -2200,12 +2306,23 @@ inline bool SaveAssetPackage(UObject* Asset)
 inline bool SaveAssetPackageChecked(UObject* Asset, FString& OutReason)
 {
 	if (MCPPackageWriteBlocked(Asset, OutReason)) return false;
+	FMCPSaveDiagnostics Diagnostics;
 	if (SaveAssetPackage(Asset)) return true;
 
 	UPackage* Package = Asset ? Asset->GetOutermost() : nullptr;
-	OutReason = FString::Printf(
-		TEXT("The editor refused to write '%s'. The output log carries the reason."),
-		Package ? *Package->GetName() : TEXT("(no package)"));
+	const FString EngineReason = Diagnostics.GetReason();
+	if (EngineReason.IsEmpty())
+	{
+		OutReason = FString::Printf(
+			TEXT("The editor refused to write '%s'. The output log carries the reason."),
+			Package ? *Package->GetName() : TEXT("(no package)"));
+		return false;
+	}
+	OutReason = EngineReason;
+	if (TSharedPtr<FJsonObject> Illegal = MCPDescribeIllegalReference(EngineReason))
+	{
+		OutReason += TEXT(" ") + Illegal->GetStringField(TEXT("hint"));
+	}
 	return false;
 }
 
