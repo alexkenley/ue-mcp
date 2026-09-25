@@ -399,22 +399,95 @@ void FLandscapeHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 {
 	// Reports parameters its handlers never read (#1057).
 	FMCPHandlerRegistry::FCategoryScope CategoryScope(Registry, TEXT("landscape"));
-	Registry.RegisterHandler(TEXT("get_landscape_info"), &GetLandscapeInfo);
-	Registry.RegisterHandler(TEXT("list_landscape_layers"), &ListLandscapeLayers);
-	Registry.RegisterHandler(TEXT("sample_landscape"), &SampleLandscape);
-	Registry.RegisterHandler(TEXT("list_landscape_splines"), &ListLandscapeSplines);
-	Registry.RegisterHandler(TEXT("get_landscape_component"), &GetLandscapeComponent);
-	Registry.RegisterHandler(TEXT("set_landscape_material"), &SetLandscapeMaterial);
-	Registry.RegisterHandler(TEXT("add_landscape_layer_info"), &AddLandscapeLayerInfo);
-	Registry.RegisterHandler(TEXT("create_landscape"), &CreateLandscape);
+
+	// #1057: a handler registered with a spec declares its parameters here and
+	// nowhere else; the TS surface for it is generated from a recording of these.
+	// The shared spellings are declared once and listed per handler.
+	using EType = EMCPParamType;
+	const FMCPParamSpec SpecActorLabel = MCPParam::Optional(TEXT("actorLabel"), EType::String, TEXT("Landscape actor label, when the level has more than one"));
+	const FMCPParamSpec SpecActorPath = MCPParam::Optional(TEXT("actorPath"), EType::String, TEXT("Landscape actor object path; wins over actorLabel, which is not unique"));
+	const FMCPParamSpec SpecRegion = MCPParam::Optional(TEXT("region"), EType::Object, TEXT("Rectangle {minX, minY, maxX, maxY} in landscape vertex indices, or centimetres with space world. Omit it for the whole landscape"));
+	const FMCPParamSpec SpecSpace = MCPParam::Optional(TEXT("space"), EType::String, TEXT("Units of region: quad (vertex indices, default) | world (centimetres)"));
+	const FMCPParamSpec SpecCenter = MCPParam::Optional(TEXT("center"), EType::Object, TEXT("Brush centre {x, y} in world space"));
+	const FMCPParamSpec SpecRadius = MCPParam::Optional(TEXT("radius"), EType::Number, TEXT("Brush radius in world centimetres (default 500)"));
+	const FMCPParamSpec SpecMaxVertices = MCPParam::Optional(TEXT("maxVertices"), EType::Integer, TEXT("Refuse an area covering more than this many vertices"));
+	const FMCPParamSpec SpecEditLayer = MCPParam::Optional(TEXT("editLayer"), EType::String, TEXT("Edit layer name"));
+	const FMCPParamSpec SpecEditLayerIndex = MCPParam::Optional(TEXT("editLayerIndex"), EType::Integer, TEXT("Edit layer index when editLayer is not given (default 0)"));
+	const FMCPParamSpec SpecRollbackMaxVertices = MCPParam::Optional(TEXT("rollbackMaxVertices"), EType::Integer, TEXT("Carry the previous data as a rollback record only up to this many vertices (default 262144 for heights, 524288 for weights)"));
+	const FMCPParamSpec SpecArrayEncodingLimit = MCPParam::Optional(TEXT("arrayEncodingLimit"), EType::Integer, TEXT("Return the per-vertex array only up to this many values (default 16384)"));
+	const FMCPParamSpec SpecEncoding = MCPParam::Optional(TEXT("encoding"), EType::String, TEXT("array | base64 | auto (default, picks by arrayEncodingLimit)"));
+	const FMCPParamSpec SpecPoint = MCPParam::Optional(TEXT("point"), EType::Object, TEXT("World position {x, y}"));
+	const FMCPParamSpec SpecX = MCPParam::Optional(TEXT("x"), EType::Number, TEXT("World X of the position"));
+	const FMCPParamSpec SpecY = MCPParam::Optional(TEXT("y"), EType::Number, TEXT("World Y of the position"));
+	const FMCPParamSpec SpecWorldX = MCPParam::Optional(TEXT("worldX"), EType::Number, TEXT("World X of the position"));
+	const FMCPParamSpec SpecWorldY = MCPParam::Optional(TEXT("worldY"), EType::Number, TEXT("World Y of the position"));
+	const FMCPParamSpec SpecLayerName = MCPParam::Required(TEXT("layerName"), EType::String, TEXT("Paint layer name"));
+	const FMCPParamSpec SpecLandscapeName = MCPParam::Optional(TEXT("landscapeName"), EType::String, TEXT("Internal name of the landscape proxy, when the level has more than one"));
+	const FMCPParamSpec SpecHeightmapFormat = MCPParam::Optional(TEXT("format"), EType::String, TEXT("png16 | raw16; inferred from the file extension when omitted"));
+
+	Registry.RegisterHandler(TEXT("get_landscape_info"), &GetLandscapeInfo, {});
+	Registry.RegisterHandler(TEXT("list_landscape_layers"), &ListLandscapeLayers, {});
+	Registry.RegisterHandler(TEXT("sample_landscape"), &SampleLandscape, {
+		SpecX, SpecY, SpecPoint, SpecWorldX, SpecWorldY, SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("layerName"), EType::String, TEXT("Report this paint layer only")),
+		MCPParam::Optional(TEXT("includeLayers"), EType::Boolean, TEXT("Include per-paint-layer weights (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("list_landscape_splines"), &ListLandscapeSplines, {});
+	Registry.RegisterHandler(TEXT("get_landscape_component"), &GetLandscapeComponent, {
+		MCPParam::Optional(TEXT("componentIndex"), EType::Integer, TEXT("Index across every landscape component in the level (default 0)")),
+	});
+	Registry.RegisterHandler(TEXT("set_landscape_material"), &SetLandscapeMaterial, {
+		MCPParam::Required(TEXT("materialPath"), EType::String, TEXT("Material or material instance asset path")).Alias(TEXT("path")).Alias(TEXT("assetPath")),
+		SpecLandscapeName,
+	});
+	Registry.RegisterHandler(TEXT("add_landscape_layer_info"), &AddLandscapeLayerInfo, {
+		SpecLayerName, SpecLandscapeName,
+		MCPParam::Optional(TEXT("packagePath"), EType::String, TEXT("Content folder for the LayerInfo asset (default /Game/Landscape/LayerInfos)")),
+	});
+	Registry.RegisterHandler(TEXT("create_landscape"), &CreateLandscape, {
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("Actor location")),
+		MCPParam::Optional(TEXT("scale"), EType::Vec3, TEXT("Actor scale (default 100, 100, 100)")),
+		MCPParam::Optional(TEXT("componentCountX"), EType::Integer, TEXT("Components along X (default 8)")),
+		MCPParam::Optional(TEXT("componentCountY"), EType::Integer, TEXT("Components along Y (default 8)")),
+		MCPParam::Optional(TEXT("subsectionSizeQuads"), EType::Integer, TEXT("7 | 15 | 31 | 63 | 127 | 255 (default 63)")),
+		MCPParam::Optional(TEXT("numSubsections"), EType::Integer, TEXT("1 | 2 (default 2)")),
+		MCPParam::Optional(TEXT("heightOffset"), EType::Integer, TEXT("Flat uint16 height (default 32768, the actor's own Z)")),
+		MCPParam::Optional(TEXT("label"), EType::String, TEXT("Actor label; an existing landscape with this label is reported rather than duplicated")),
+	});
+	// Contract values reach CreatePackage before anything is loaded, so this one stays unspecced.
 	Registry.RegisterHandler(TEXT("create_landscape_layer_info"), &CreateLandscapeLayerInfo);
-	Registry.RegisterHandler(TEXT("get_landscape_material_usage_summary"), &GetMaterialUsageSummary);
+	Registry.RegisterHandler(TEXT("get_landscape_material_usage_summary"), &GetMaterialUsageSummary, {});
 	// #733: World Partition landscape streaming-proxy enumeration + spatial lookup.
-	Registry.RegisterHandler(TEXT("list_landscape_proxies"), &ListLandscapeProxies);
-	Registry.RegisterHandler(TEXT("find_landscape_proxy_at"), &FindLandscapeProxyAt);
+	Registry.RegisterHandler(TEXT("list_landscape_proxies"), &ListLandscapeProxies, {
+		MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: pass back the nextCursor from the previous page, unmodified")),
+		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows on this page (default 200, max 2000)")),
+	});
+	Registry.RegisterHandler(TEXT("find_landscape_proxy_at"), &FindLandscapeProxyAt, {
+		MCPParam::Required(TEXT("worldX"), EType::Number, TEXT("World X of the position")),
+		MCPParam::Required(TEXT("worldY"), EType::Number, TEXT("World Y of the position")),
+	});
+	// Its TS entry withholds save, which the handler reads only to refuse it, so it stays unspecced.
 	Registry.RegisterHandlerWithTimeout(TEXT("refresh_landscape_physical_material_collision"), &RefreshPhysicalMaterialCollision, 600.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("sculpt_landscape"), &Sculpt, 120.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("paint_landscape_layer"), &PaintLayer, 120.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("sculpt_landscape"), &Sculpt, 120.0f, {
+		MCPParam::Required(TEXT("center"), EType::Object, TEXT("Brush centre {x, y} in world space")),
+		SpecRadius,
+		MCPParam::Optional(TEXT("mode"), EType::String, TEXT("raise (default) | lower | flatten")),
+		MCPParam::Optional(TEXT("amount"), EType::Number, TEXT("World centimetres to move at full brush strength (default 100)")),
+		MCPParam::Optional(TEXT("falloff"), EType::Number, TEXT("Soft edge fraction, 0..1 (default 0.5)")),
+		SpecActorLabel, SpecActorPath, SpecEditLayer, SpecEditLayerIndex,
+		MCPParam::Optional(TEXT("maxVertices"), EType::Integer, TEXT("Refuse a brush covering more than this many vertices (default 4000000)")),
+		SpecRollbackMaxVertices,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("paint_landscape_layer"), &PaintLayer, 120.0f, {
+		SpecLayerName,
+		MCPParam::Required(TEXT("center"), EType::Object, TEXT("Brush centre {x, y} in world space")),
+		SpecRadius,
+		MCPParam::Optional(TEXT("strength"), EType::Number, TEXT("Target weight at full brush strength, 0..1 (default 1)")),
+		MCPParam::Optional(TEXT("falloff"), EType::Number, TEXT("Soft edge fraction, 0..1 (default 0.5)")),
+		SpecActorLabel, SpecActorPath, SpecEditLayer, SpecEditLayerIndex,
+		MCPParam::Optional(TEXT("maxVertices"), EType::Integer, TEXT("Refuse a brush covering more than this many vertices (default 4000000)")),
+		SpecRollbackMaxVertices,
+	});
 
 	// V1 region surface. Three of these names are load-bearing beyond dispatch:
 	// set_landscape_height_region, set_landscape_layer_weight_region and
@@ -422,35 +495,154 @@ void FLandscapeHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// LandscapeHandlers_Sculpt.cpp emit, so renaming one here breaks every
 	// undo those actions hand back without breaking anything that would show
 	// up at the call site.
-	Registry.RegisterHandlerWithTimeout(TEXT("get_landscape_height_region"), &GetHeightRegion, 120.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("set_landscape_height_region"), &SetHeightRegion, 300.0f);
-	Registry.RegisterHandler(TEXT("get_landscape_height_at_point"), &GetHeightAtPoint);
-	Registry.RegisterHandler(TEXT("get_landscape_normal_at_point"), &GetNormalAtPoint);
-	Registry.RegisterHandler(TEXT("get_landscape_slope_at_point"), &GetSlopeAtPoint);
-	Registry.RegisterHandlerWithTimeout(TEXT("get_landscape_slope_map"), &GetSlopeMap, 120.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("sculpt_landscape_region"), &SculptRegion, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("get_landscape_height_region"), &GetHeightRegion, 120.0f, {
+		SpecActorLabel, SpecActorPath, SpecRegion, SpecSpace, SpecCenter, SpecRadius, SpecMaxVertices, SpecEditLayer, SpecEditLayerIndex,
+		MCPParam::Optional(TEXT("includeHeights"), EType::Boolean, TEXT("Include the per-vertex heights (default true)")),
+		SpecEncoding, SpecArrayEncodingLimit,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("set_landscape_height_region"), &SetHeightRegion, 300.0f, {
+		SpecActorLabel, SpecActorPath, SpecRegion, SpecSpace, SpecCenter, SpecRadius, SpecMaxVertices,
+		MCPParam::Optional(TEXT("heightsBase64"), EType::String, TEXT("Little-endian uint16 blob, row-major, as get_landscape_height_region returns it")),
+		MCPParam::Optional(TEXT("heights"), EType::Array, TEXT("One height per vertex, row-major from (minX, minY)")).Items(EType::Number),
+		MCPParam::Optional(TEXT("height"), EType::Number, TEXT("One world Z to fill the region with")),
+		MCPParam::Optional(TEXT("rawHeight"), EType::Number, TEXT("One raw uint16 height to fill the region with (32768 = the actor's own Z)")),
+		MCPParam::Optional(TEXT("heightSpace"), EType::String, TEXT("raw (uint16, default) | world (centimetres)")),
+		SpecEditLayer, SpecEditLayerIndex, SpecRollbackMaxVertices,
+	});
+	Registry.RegisterHandler(TEXT("get_landscape_height_at_point"), &GetHeightAtPoint, {
+		SpecX, SpecY, SpecPoint, SpecWorldX, SpecWorldY, SpecActorLabel, SpecActorPath, SpecEditLayer, SpecEditLayerIndex,
+	});
+	Registry.RegisterHandler(TEXT("get_landscape_normal_at_point"), &GetNormalAtPoint, {
+		SpecX, SpecY, SpecPoint, SpecWorldX, SpecWorldY, SpecActorLabel, SpecActorPath,
+	});
+	Registry.RegisterHandler(TEXT("get_landscape_slope_at_point"), &GetSlopeAtPoint, {
+		SpecX, SpecY, SpecPoint, SpecWorldX, SpecWorldY, SpecActorLabel, SpecActorPath,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("get_landscape_slope_map"), &GetSlopeMap, 120.0f, {
+		SpecActorLabel, SpecActorPath, SpecRegion, SpecSpace, SpecCenter, SpecRadius, SpecMaxVertices,
+		MCPParam::Optional(TEXT("includeSlopes"), EType::Boolean, TEXT("Include the per-vertex slope array (default true)")),
+		SpecArrayEncodingLimit,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("sculpt_landscape_region"), &SculptRegion, 300.0f, {
+		MCPParam::Required(TEXT("operator"), EType::String, TEXT("raise | lower | flatten | smooth | mountain | valley | ridge | plateau | crater | terrace")),
+		SpecActorLabel, SpecActorPath, SpecRegion, SpecSpace, SpecCenter, SpecRadius, SpecMaxVertices,
+		MCPParam::Optional(TEXT("amount"), EType::Number, TEXT("World centimetres at full strength (default 500)")),
+		MCPParam::Optional(TEXT("strength"), EType::Number, TEXT("How hard the operator blends into what is there, 0..1 (default 1)")),
+		MCPParam::Optional(TEXT("falloff"), EType::Number, TEXT("Soft edge fraction, 0..1 (default 0.5)")),
+		MCPParam::Optional(TEXT("sharpness"), EType::Number, TEXT("How peaked the dome operators are, 0.1..8 (default 1.5)")),
+		MCPParam::Optional(TEXT("shape"), EType::String, TEXT("ellipse (radial falloff, default) | rect (falloff toward the region edges)")),
+		MCPParam::Optional(TEXT("targetHeight"), EType::Number, TEXT("World Z that flatten and plateau pull toward")),
+		MCPParam::Optional(TEXT("flattenTo"), EType::String, TEXT("mean (default) | center | min | max, when flatten has no targetHeight")),
+		MCPParam::Optional(TEXT("iterations"), EType::Integer, TEXT("Smooth passes (default 1)")),
+		MCPParam::Optional(TEXT("steps"), EType::Integer, TEXT("Terrace steps across the region's height range (default 8)")),
+		MCPParam::Optional(TEXT("ridgeAngle"), EType::Number, TEXT("Degrees the ridge crest runs at (default 0)")),
+		MCPParam::Optional(TEXT("rimPosition"), EType::Number, TEXT("Crater rim position as a fraction of the radius, 0.1..0.95 (default 0.75)")),
+		MCPParam::Optional(TEXT("rimRatio"), EType::Number, TEXT("Crater rim height as a fraction of the bowl depth (default 0.35)")),
+		SpecEditLayer, SpecEditLayerIndex, SpecRollbackMaxVertices,
+	});
 	// Erosion is O(vertices x iterations) on the game thread, and import and
 	// export move whole heightmaps through a codec and the filesystem, so these
 	// three get the long budgets. A client that gives up at the default while
 	// the editor is still writing leaves a half-applied terrain nobody asked
 	// about.
-	Registry.RegisterHandlerWithTimeout(TEXT("apply_landscape_erosion"), &ApplyErosion, 600.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("import_landscape_heightmap"), &ImportHeightmap, 600.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("export_landscape_heightmap"), &ExportHeightmap, 300.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("analyze_landscape_terrain"), &AnalyzeTerrain, 120.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("get_landscape_layer_weight_region"), &GetLayerWeightRegion, 120.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("set_landscape_layer_weight_region"), &SetLayerWeightRegion, 300.0f);
-	Registry.RegisterHandler(TEXT("landscape_layer_exists"), &LayerExists);
-	Registry.RegisterHandler(TEXT("remove_landscape_layer"), &RemoveLayer);
-	Registry.RegisterHandlerWithTimeout(TEXT("get_landscape_holes"), &GetHoles, 120.0f);
-	Registry.RegisterHandlerWithTimeout(TEXT("set_landscape_holes"), &SetHoles, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("apply_landscape_erosion"), &ApplyErosion, 600.0f, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("erosionType"), EType::String, TEXT("hydraulic (default) | thermal")),
+		SpecRegion, SpecSpace, SpecCenter, SpecRadius, SpecMaxVertices,
+		MCPParam::Optional(TEXT("iterations"), EType::Integer, TEXT("Passes to run (default 20)")),
+		MCPParam::Optional(TEXT("maxWork"), EType::Integer, TEXT("Refuse more than this many vertex-iterations (default 40000000)")),
+		MCPParam::Optional(TEXT("talusAngle"), EType::Number, TEXT("Thermal: slope in degrees material stops slumping at (default 35)")),
+		MCPParam::Optional(TEXT("strength"), EType::Number, TEXT("Thermal: how much of the excess slumps per pass, 0..1 (default 0.5)")),
+		MCPParam::Optional(TEXT("rainAmount"), EType::Number, TEXT("Hydraulic: water added per vertex per pass, in world centimetres (default 0.5)")),
+		MCPParam::Optional(TEXT("evaporation"), EType::Number, TEXT("Hydraulic: fraction of water lost per pass, 0.01..1 (default 0.5)")),
+		MCPParam::Optional(TEXT("sedimentCapacity"), EType::Number, TEXT("Hydraulic: sediment a unit of water can hold (default 0.6)")),
+		MCPParam::Optional(TEXT("erosionRate"), EType::Number, TEXT("Hydraulic: how fast under-loaded water cuts in, 0..1 (default 0.3)")),
+		MCPParam::Optional(TEXT("depositionRate"), EType::Number, TEXT("Hydraulic: how fast over-loaded water drops sediment, 0..1 (default 0.3)")),
+		SpecEditLayer, SpecEditLayerIndex, SpecRollbackMaxVertices,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("import_landscape_heightmap"), &ImportHeightmap, 600.0f, {
+		MCPParam::Required(TEXT("filePath"), EType::String, TEXT("Heightmap file to read; a relative path resolves under the project Saved directory")).Alias(TEXT("sourcePath")),
+		SpecActorLabel, SpecActorPath, SpecHeightmapFormat, SpecRegion, SpecSpace, SpecCenter, SpecRadius, SpecMaxVertices,
+		MCPParam::Optional(TEXT("width"), EType::Integer, TEXT("Source image width in pixels, required for raw16")),
+		MCPParam::Optional(TEXT("height"), EType::Number, TEXT("Source image height in pixels, required for raw16")),
+		MCPParam::Optional(TEXT("resample"), EType::Boolean, TEXT("Bilinearly fit an image whose size does not match the region (default false)")),
+		MCPParam::Optional(TEXT("minHeight"), EType::Number, TEXT("World Z the image value 0 maps to")),
+		MCPParam::Optional(TEXT("maxHeight"), EType::Number, TEXT("World Z the image value 65535 maps to")),
+		SpecEditLayer, SpecEditLayerIndex, SpecRollbackMaxVertices,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("export_landscape_heightmap"), &ExportHeightmap, 300.0f, {
+		MCPParam::Required(TEXT("filePath"), EType::String, TEXT("Where to write the heightmap; a relative path resolves under the project Saved directory")).Alias(TEXT("outputPath")),
+		SpecActorLabel, SpecActorPath, SpecHeightmapFormat, SpecRegion, SpecSpace, SpecCenter, SpecRadius, SpecMaxVertices, SpecEditLayer, SpecEditLayerIndex,
+		MCPParam::Optional(TEXT("overwrite"), EType::Boolean, TEXT("Allow replacing an existing file (default true)")),
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("analyze_landscape_terrain"), &AnalyzeTerrain, 120.0f, {
+		SpecActorLabel, SpecActorPath, SpecRegion, SpecSpace, SpecCenter, SpecRadius, SpecMaxVertices,
+		MCPParam::Optional(TEXT("histogramBins"), EType::Integer, TEXT("Bins in the height histogram, 2..256 (default 16)")),
+		MCPParam::Optional(TEXT("slopeThresholdDegrees"), EType::Number, TEXT("At or below this slope a vertex counts as flat (default 10)")),
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("get_landscape_layer_weight_region"), &GetLayerWeightRegion, 120.0f, {
+		SpecLayerName, SpecActorLabel, SpecActorPath, SpecRegion, SpecSpace, SpecCenter, SpecRadius, SpecMaxVertices, SpecEditLayer, SpecEditLayerIndex,
+		MCPParam::Optional(TEXT("includeWeights"), EType::Boolean, TEXT("Include the per-vertex weights (default true)")),
+		SpecEncoding, SpecArrayEncodingLimit,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("set_landscape_layer_weight_region"), &SetLayerWeightRegion, 300.0f, {
+		SpecLayerName, SpecActorLabel, SpecActorPath, SpecRegion, SpecSpace, SpecCenter, SpecRadius, SpecMaxVertices,
+		MCPParam::Optional(TEXT("weightsBase64"), EType::String, TEXT("One uint8 per vertex, base64, as the getter returns it")),
+		MCPParam::Optional(TEXT("weights"), EType::Array, TEXT("One 0..255 weight per vertex, row-major from (minX, minY)")).Items(EType::Number),
+		MCPParam::Optional(TEXT("weight"), EType::Number, TEXT("One value to fill the region with; 0..1 is a fraction, above that the raw 0..255")),
+		MCPParam::Optional(TEXT("strength"), EType::Number, TEXT("Fill fraction 0..1, used when weight is absent")),
+		SpecEditLayer, SpecEditLayerIndex, SpecRollbackMaxVertices,
+	});
+	Registry.RegisterHandler(TEXT("landscape_layer_exists"), &LayerExists, {
+		SpecLayerName, SpecActorLabel, SpecActorPath,
+	});
+	Registry.RegisterHandler(TEXT("remove_landscape_layer"), &RemoveLayer, {
+		SpecLayerName, SpecActorLabel, SpecActorPath,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("get_landscape_holes"), &GetHoles, 120.0f, {
+		SpecActorLabel, SpecActorPath, SpecRegion, SpecSpace, SpecCenter, SpecRadius, SpecX, SpecY, SpecPoint, SpecWorldX, SpecWorldY, SpecMaxVertices,
+		MCPParam::Optional(TEXT("includeMask"), EType::Boolean, TEXT("Include the per-vertex hole mask (default true)")),
+		SpecArrayEncodingLimit,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("set_landscape_holes"), &SetHoles, 300.0f, {
+		SpecActorLabel, SpecActorPath, SpecRegion, SpecSpace, SpecCenter, SpecRadius, SpecX, SpecY, SpecPoint, SpecWorldX, SpecWorldY, SpecMaxVertices,
+		MCPParam::Optional(TEXT("hole"), EType::Boolean, TEXT("Punch (true, default) or fill (false) the whole target")),
+		MCPParam::Optional(TEXT("holes"), EType::Array, TEXT("One boolean per vertex, row-major from (minX, minY)")).Items(EType::Boolean),
+		MCPParam::Optional(TEXT("weightsBase64"), EType::String, TEXT("Exact previous visibility weights, one uint8 per vertex, as the rollback record carries them")),
+		SpecEditLayer, SpecEditLayerIndex, SpecRollbackMaxVertices,
+	});
 
 	// V17 core half: plan a landscape from a real-world heightmap, and convert
 	// geographic coordinates into that landscape's world space.
-	Registry.RegisterHandlerWithTimeout(TEXT("plan_real_world_landscape"), &PlanRealWorldLandscape, 120.0f);
-	Registry.RegisterHandler(TEXT("project_geo_coordinates"), &ProjectGeoCoordinates);
-	Registry.RegisterHandler(TEXT("list_landscape_edit_layers"), &ListEditLayers);
-	Registry.RegisterHandlerWithTimeout(TEXT("merge_landscape_edit_layers"), &MergeEditLayers, 300.0f);
+	Registry.RegisterHandlerWithTimeout(TEXT("plan_real_world_landscape"), &PlanRealWorldLandscape, 120.0f, {
+		MCPParam::Required(TEXT("minElevationMeters"), EType::Number, TEXT("Real-world elevation the heightmap's low value stands for")),
+		MCPParam::Required(TEXT("maxElevationMeters"), EType::Number, TEXT("Real-world elevation the heightmap's high value stands for")),
+		MCPParam::Optional(TEXT("realWorldSizeMeters"), EType::Object, TEXT("Ground footprint {x, y} in metres")),
+		MCPParam::Optional(TEXT("boundsLatLon"), EType::Object, TEXT("Geographic box {minLat, minLon, maxLat, maxLon} in decimal degrees")),
+		MCPParam::Optional(TEXT("sourcePath"), EType::String, TEXT("Heightmap file to measure; a relative path resolves under the project Saved directory")).Alias(TEXT("filePath")),
+		SpecHeightmapFormat,
+		MCPParam::Optional(TEXT("width"), EType::Integer, TEXT("Source image width in pixels")),
+		MCPParam::Optional(TEXT("height"), EType::Number, TEXT("Source image height in pixels")),
+		MCPParam::Optional(TEXT("metersPerQuad"), EType::Number, TEXT("Ground distance one quad covers; omit for one vertex per image sample")),
+		MCPParam::Optional(TEXT("elevationEncoding"), EType::String, TEXT("full (default) | data (needs sourcePath)")),
+		MCPParam::Optional(TEXT("verticalExaggeration"), EType::Number, TEXT("Multiply real elevations by this, 0.01..100 (default 1)")),
+		MCPParam::Optional(TEXT("maxComponents"), EType::Integer, TEXT("Reject configurations needing more components than this (default 1024)")),
+		MCPParam::Optional(TEXT("location"), EType::Vec3, TEXT("Landscape origin; its Z is where elevation zero lands")),
+	});
+	Registry.RegisterHandler(TEXT("project_geo_coordinates"), &ProjectGeoCoordinates, {
+		MCPParam::Required(TEXT("boundsLatLon"), EType::Object, TEXT("The geographic box the landscape was planned for {minLat, minLon, maxLat, maxLon}")),
+		MCPParam::Required(TEXT("points"), EType::Array, TEXT("Entries {lat, lon} to place, or {x, y} to convert back; an optional name is echoed")).Items(EType::Object),
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("northAt"), EType::String, TEXT("Which end of the Y axis is north: minY (default) | maxY")),
+		MCPParam::Optional(TEXT("sampleHeight"), EType::Boolean, TEXT("Read the surface height at each projected point (default true)")),
+	});
+	Registry.RegisterHandler(TEXT("list_landscape_edit_layers"), &ListEditLayers, {
+		SpecActorLabel, SpecActorPath,
+	});
+	Registry.RegisterHandlerWithTimeout(TEXT("merge_landscape_edit_layers"), &MergeEditLayers, 300.0f, {
+		SpecActorLabel, SpecActorPath,
+		MCPParam::Optional(TEXT("updateNow"), EType::Boolean, TEXT("Run the merge now rather than on the next editor tick (default true)")),
+	});
 }
 
 TSharedPtr<FJsonValue> FLandscapeHandlers::GetLandscapeInfo(const TSharedPtr<FJsonObject>& Params)
@@ -572,26 +764,42 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::SampleLandscape(const TSharedPtr<FJso
 	double TraceOriginZ = 0.0;
 	bool bHavePosition = false;
 
+	// Every parameter is read before anything can fail (#1057), so each
+	// spelling is read whether or not an earlier one already answered.
 	const TSharedPtr<FJsonObject>* PointObj = nullptr;
-	if (TryGetObjectParam(Params, TEXT("point"), PointObj) && PointObj && PointObj->IsValid())
+	const bool bHasPoint = TryGetObjectParam(Params, TEXT("point"), PointObj) && PointObj && PointObj->IsValid();
+	const bool bHasX = HasParam(Params, TEXT("x"));
+	const bool bHasY = HasParam(Params, TEXT("y"));
+	const double ParamX = OptionalNumber(Params, TEXT("x"), 0.0);
+	const double ParamY = OptionalNumber(Params, TEXT("y"), 0.0);
+	const bool bHasWorldX = HasParam(Params, TEXT("worldX"));
+	const bool bHasWorldY = HasParam(Params, TEXT("worldY"));
+	const double ParamWorldX = OptionalNumber(Params, TEXT("worldX"), 0.0);
+	const double ParamWorldY = OptionalNumber(Params, TEXT("worldY"), 0.0);
+	const FString ActorLabel = OptionalString(Params, TEXT("actorLabel"));
+	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
+	const bool bIncludeLayers = OptionalBool(Params, TEXT("includeLayers"), true);
+	const FString LayerFilter = OptionalString(Params, TEXT("layerName"));
+
+	if (bHasPoint)
 	{
 		(*PointObj)->TryGetNumberField(TEXT("x"), WorldX);
 		(*PointObj)->TryGetNumberField(TEXT("y"), WorldY);
 		(*PointObj)->TryGetNumberField(TEXT("z"), TraceOriginZ);
 		bHavePosition = true;
 	}
-	else if (HasParam(Params, TEXT("x")) && HasParam(Params, TEXT("y")))
+	else if (bHasX && bHasY)
 	{
-		WorldX = OptionalNumber(Params, TEXT("x"), 0.0);
-		WorldY = OptionalNumber(Params, TEXT("y"), 0.0);
+		WorldX = ParamX;
+		WorldY = ParamY;
 		bHavePosition = true;
 	}
-	else if (HasParam(Params, TEXT("worldX")) && HasParam(Params, TEXT("worldY")))
+	else if (bHasWorldX && bHasWorldY)
 	{
 		// The names landscape(find_proxy_at) takes. A caller moving between the
 		// two actions should not have to rename the same two numbers.
-		WorldX = OptionalNumber(Params, TEXT("worldX"), 0.0);
-		WorldY = OptionalNumber(Params, TEXT("worldY"), 0.0);
+		WorldX = ParamWorldX;
+		WorldY = ParamWorldY;
 		bHavePosition = true;
 	}
 	if (!bHavePosition)
@@ -606,8 +814,6 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::SampleLandscape(const TSharedPtr<FJso
 	// them, because a map with two landscapes has no single right default.
 	// #983: actorPath narrows to exactly one proxy when several share a label,
 	// which is what a World Partition map full of streaming proxies looks like.
-	const FString ActorLabel = OptionalString(Params, TEXT("actorLabel"));
-	const FString ActorPath = OptionalString(Params, TEXT("actorPath"));
 	// Normalised the same way MCPFindActorByPath normalises, so the export-text
 	// form (Actor'/Game/...') resolves here exactly as it does on every other
 	// action rather than silently matching nothing (#983).
@@ -745,9 +951,8 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::SampleLandscape(const TSharedPtr<FJso
 	// Paint-layer weights, the half that had no read at all. Each layer is
 	// reported both as the raw 0..255 weightmap byte and as the 0..1 fraction,
 	// because the editor shows one and a material reads the other.
-	if (OptionalBool(Params, TEXT("includeLayers"), true))
+	if (bIncludeLayers)
 	{
-		const FString LayerFilter = OptionalString(Params, TEXT("layerName"));
 		TArray<TSharedPtr<FJsonValue>> LayerArray;
 		double TotalWeight = 0.0;
 		FString DominantLayer;
@@ -945,8 +1150,11 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::GetLandscapeComponent(const TSharedPt
 
 TSharedPtr<FJsonValue> FLandscapeHandlers::SetLandscapeMaterial(const TSharedPtr<FJsonObject>& Params)
 {
+	// path and assetPath are spec aliases, renamed to materialPath before this runs.
 	FString MaterialPath;
-	if (!TryGetStringParam(Params, TEXT("materialPath"), MaterialPath) && !TryGetStringParam(Params, TEXT("path"), MaterialPath) && !TryGetStringParam(Params, TEXT("assetPath"), MaterialPath))
+	const bool bHasMaterialPath = TryGetStringParam(Params, TEXT("materialPath"), MaterialPath);
+	FString LandscapeName = OptionalString(Params, TEXT("landscapeName"));
+	if (!bHasMaterialPath)
 	{
 		return MCPError(TEXT("Missing 'materialPath', 'path', or 'assetPath' parameter"));
 	}
@@ -955,7 +1163,6 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::SetLandscapeMaterial(const TSharedPtr
 
 	// Find the target landscape
 	ALandscapeProxy* TargetLandscape = nullptr;
-	FString LandscapeName = OptionalString(Params, TEXT("landscapeName"));
 
 	for (TActorIterator<ALandscapeProxy> It(World); It; ++It)
 	{
@@ -1033,12 +1240,14 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::AddLandscapeLayerInfo(const TSharedPt
 {
 	FString LayerName;
 	if (auto Err = RequireString(Params, TEXT("layerName"), LayerName)) return Err;
+	// Every parameter is read before anything can fail (#1057).
+	FString LandscapeName = OptionalString(Params, TEXT("landscapeName"));
+	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/Landscape/LayerInfos"));
 
 	REQUIRE_EDITOR_WORLD(World);
 
 	// Find the target landscape
 	ALandscapeProxy* TargetLandscape = nullptr;
-	FString LandscapeName = OptionalString(Params, TEXT("landscapeName"));
 
 	for (TActorIterator<ALandscapeProxy> It(World); It; ++It)
 	{
@@ -1085,8 +1294,6 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::AddLandscapeLayerInfo(const TSharedPt
 	}
 
 	// Create a new ULandscapeLayerInfoObject asset
-	FString PackagePath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/Landscape/LayerInfos"));
-
 	FString AssetName = FString::Printf(TEXT("LI_%s"), *LayerName);
 	FString PackageFullPath = PackagePath / AssetName;
 
@@ -1194,6 +1401,11 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::CreateLandscape(const TSharedPtr<FJso
 	const int32 NumSubsections = OptionalInt(Params, TEXT("numSubsections"), 2);
 	const int32 ComponentCountX = OptionalInt(Params, TEXT("componentCountX"), 8);
 	const int32 ComponentCountY = OptionalInt(Params, TEXT("componentCountY"), 8);
+	// Every parameter is read before anything can fail (#1057).
+	const int32 HeightOffset = OptionalInt(Params, TEXT("heightOffset"), 32768);
+	const FVector Location = OptionalVec3(Params, TEXT("location"));
+	const FVector Scale = OptionalVec3(Params, TEXT("scale"), FVector(100.0, 100.0, 100.0));
+	const FString Label = OptionalString(Params, TEXT("label"));
 
 	// Bounds checks: SubsectionSizeQuads must be one of the engine's supported
 	// values (7, 15, 31, 63, 127, 255), NumSubsections is 1 or 2, and the
@@ -1221,16 +1433,10 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::CreateLandscape(const TSharedPtr<FJso
 	const int32 SizeX = (ComponentCountX * ComponentSizeQuads) + 1;
 	const int32 SizeY = (ComponentCountY * ComponentSizeQuads) + 1;
 
-	const int32 HeightOffset = OptionalInt(Params, TEXT("heightOffset"), 32768);
 	if (HeightOffset < 0 || HeightOffset > 65535)
 	{
 		return MCPError(TEXT("heightOffset must be in [0, 65535] (uint16 elevation)"));
 	}
-
-	const FVector Location = OptionalVec3(Params, TEXT("location"));
-	const FVector Scale = OptionalVec3(Params, TEXT("scale"), FVector(100.0, 100.0, 100.0));
-
-	const FString Label = OptionalString(Params, TEXT("label"));
 
 	// Idempotency by label.
 	if (auto Existing = MCPCheckActorLabelExists(World, Label, TEXT("skip"), TEXT("Landscape")))

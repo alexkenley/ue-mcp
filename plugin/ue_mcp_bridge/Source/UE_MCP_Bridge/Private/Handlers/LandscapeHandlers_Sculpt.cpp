@@ -283,6 +283,11 @@ namespace
 // landscape(sculpt): raise, lower or flatten a circular brush footprint.
 TSharedPtr<FJsonValue> FLandscapeHandlers::Sculpt(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("center"), TEXT("radius"), TEXT("mode"), TEXT("amount"), TEXT("falloff"), TEXT("actorLabel"),
+		TEXT("actorPath"), TEXT("editLayer"), TEXT("editLayerIndex"), TEXT("maxVertices"), TEXT("rollbackMaxVertices"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	TSharedPtr<FJsonValue> ResolveError;
@@ -464,6 +469,11 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::Sculpt(const TSharedPtr<FJsonObject>&
 // landscape(paint_layer): paint a weight layer over a circular footprint.
 TSharedPtr<FJsonValue> FLandscapeHandlers::PaintLayer(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("layerName"), TEXT("center"), TEXT("radius"), TEXT("strength"), TEXT("falloff"), TEXT("actorLabel"),
+		TEXT("actorPath"), TEXT("editLayer"), TEXT("editLayerIndex"), TEXT("maxVertices"), TEXT("rollbackMaxVertices"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	TSharedPtr<FJsonValue> ResolveError;
@@ -1379,6 +1389,12 @@ namespace
 // landscape(get_height_region): read the heights over a rectangle.
 TSharedPtr<FJsonValue> FLandscapeHandlers::GetHeightRegion(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("region"), TEXT("space"), TEXT("center"), TEXT("radius"),
+		TEXT("maxVertices"), TEXT("editLayer"), TEXT("editLayerIndex"), TEXT("includeHeights"), TEXT("encoding"),
+		TEXT("arrayEncodingLimit"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	ALandscape* Landscape = nullptr;
@@ -1420,6 +1436,12 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::GetHeightRegion(const TSharedPtr<FJso
 // landscape(set_height_region): write heights over a rectangle.
 TSharedPtr<FJsonValue> FLandscapeHandlers::SetHeightRegion(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("region"), TEXT("space"), TEXT("center"), TEXT("radius"),
+		TEXT("maxVertices"), TEXT("heightsBase64"), TEXT("heights"), TEXT("height"), TEXT("rawHeight"),
+		TEXT("heightSpace"), TEXT("editLayer"), TEXT("editLayerIndex"), TEXT("rollbackMaxVertices"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	ALandscape* Landscape = nullptr;
@@ -1510,6 +1532,11 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::SetHeightRegion(const TSharedPtr<FJso
 // landscape(get_height_at_point): surface height under one world XY.
 TSharedPtr<FJsonValue> FLandscapeHandlers::GetHeightAtPoint(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("x"), TEXT("y"), TEXT("point"), TEXT("worldX"), TEXT("worldY"), TEXT("actorLabel"), TEXT("actorPath"),
+		TEXT("editLayer"), TEXT("editLayerIndex"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	ALandscape* Landscape = nullptr;
@@ -1559,6 +1586,10 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::GetHeightAtPoint(const TSharedPtr<FJs
 // landscape(get_normal_at_point): world-space surface normal under one XY.
 TSharedPtr<FJsonValue> FLandscapeHandlers::GetNormalAtPoint(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("x"), TEXT("y"), TEXT("point"), TEXT("worldX"), TEXT("worldY"), TEXT("actorLabel"), TEXT("actorPath"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	ALandscape* Landscape = nullptr;
@@ -1601,6 +1632,10 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::GetNormalAtPoint(const TSharedPtr<FJs
 // landscape(get_slope_at_point): slope in degrees under one XY.
 TSharedPtr<FJsonValue> FLandscapeHandlers::GetSlopeAtPoint(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("x"), TEXT("y"), TEXT("point"), TEXT("worldX"), TEXT("worldY"), TEXT("actorLabel"), TEXT("actorPath"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	ALandscape* Landscape = nullptr;
@@ -1652,6 +1687,11 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::GetSlopeAtPoint(const TSharedPtr<FJso
 // landscape(get_slope_map): per-vertex slope over a rectangle, plus its shape.
 TSharedPtr<FJsonValue> FLandscapeHandlers::GetSlopeMap(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("region"), TEXT("space"), TEXT("center"), TEXT("radius"),
+		TEXT("maxVertices"), TEXT("includeSlopes"), TEXT("arrayEncodingLimit"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	ALandscape* Landscape = nullptr;
@@ -1791,6 +1831,13 @@ namespace
 // rollback quietly stops being emitted.
 TSharedPtr<FJsonValue> FLandscapeHandlers::SculptRegion(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("operator"), TEXT("actorLabel"), TEXT("actorPath"), TEXT("region"), TEXT("space"), TEXT("center"),
+		TEXT("radius"), TEXT("maxVertices"), TEXT("amount"), TEXT("strength"), TEXT("falloff"), TEXT("sharpness"),
+		TEXT("shape"), TEXT("targetHeight"), TEXT("flattenTo"), TEXT("iterations"), TEXT("steps"), TEXT("ridgeAngle"),
+		TEXT("rimPosition"), TEXT("rimRatio"), TEXT("editLayer"), TEXT("editLayerIndex"), TEXT("rollbackMaxVertices"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	ALandscape* Landscape = nullptr;
@@ -2043,6 +2090,13 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::SculptRegion(const TSharedPtr<FJsonOb
 // landscape(apply_erosion): hydraulic or thermal erosion over a rectangle.
 TSharedPtr<FJsonValue> FLandscapeHandlers::ApplyErosion(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("erosionType"), TEXT("region"), TEXT("space"), TEXT("center"),
+		TEXT("radius"), TEXT("maxVertices"), TEXT("iterations"), TEXT("maxWork"), TEXT("talusAngle"),
+		TEXT("strength"), TEXT("rainAmount"), TEXT("evaporation"), TEXT("sedimentCapacity"), TEXT("erosionRate"),
+		TEXT("depositionRate"), TEXT("editLayer"), TEXT("editLayerIndex"), TEXT("rollbackMaxVertices"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	ALandscape* Landscape = nullptr;
@@ -2333,10 +2387,17 @@ namespace
 // landscape(export_heightmap): write the region's heights to a 16-bit file.
 TSharedPtr<FJsonValue> FLandscapeHandlers::ExportHeightmap(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("filePath"), TEXT("actorLabel"), TEXT("actorPath"), TEXT("format"), TEXT("region"), TEXT("space"),
+		TEXT("center"), TEXT("radius"), TEXT("maxVertices"), TEXT("editLayer"), TEXT("editLayerIndex"),
+		TEXT("overwrite"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	FString FilePath;
-	if (auto Err = RequireStringAlt(Params, TEXT("filePath"), TEXT("outputPath"), FilePath)) return Err;
+	// outputPath is a spec alias, renamed to filePath before this runs.
+	if (auto Err = RequireString(Params, TEXT("filePath"), FilePath)) return Err;
 
 	ALandscape* Landscape = nullptr;
 	ULandscapeInfo* Info = nullptr;
@@ -2439,10 +2500,17 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::ExportHeightmap(const TSharedPtr<FJso
 // landscape(import_heightmap): write a 16-bit file into the region.
 TSharedPtr<FJsonValue> FLandscapeHandlers::ImportHeightmap(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("filePath"), TEXT("actorLabel"), TEXT("actorPath"), TEXT("format"), TEXT("region"), TEXT("space"),
+		TEXT("center"), TEXT("radius"), TEXT("maxVertices"), TEXT("width"), TEXT("height"), TEXT("resample"),
+		TEXT("minHeight"), TEXT("maxHeight"), TEXT("editLayer"), TEXT("editLayerIndex"), TEXT("rollbackMaxVertices"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	FString FilePath;
-	if (auto Err = RequireStringAlt(Params, TEXT("filePath"), TEXT("sourcePath"), FilePath)) return Err;
+	// sourcePath is a spec alias, renamed to filePath before this runs.
+	if (auto Err = RequireString(Params, TEXT("filePath"), FilePath)) return Err;
 
 	ALandscape* Landscape = nullptr;
 	ULandscapeInfo* Info = nullptr;
@@ -2596,6 +2664,11 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::ImportHeightmap(const TSharedPtr<FJso
 // flat rectangle in the region.
 TSharedPtr<FJsonValue> FLandscapeHandlers::AnalyzeTerrain(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("region"), TEXT("space"), TEXT("center"), TEXT("radius"),
+		TEXT("maxVertices"), TEXT("histogramBins"), TEXT("slopeThresholdDegrees"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	ALandscape* Landscape = nullptr;
@@ -2999,6 +3072,12 @@ namespace
 // landscape(get_layer_weight_region): read one layer's weights over a rectangle.
 TSharedPtr<FJsonValue> FLandscapeHandlers::GetLayerWeightRegion(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("layerName"), TEXT("actorLabel"), TEXT("actorPath"), TEXT("region"), TEXT("space"), TEXT("center"),
+		TEXT("radius"), TEXT("maxVertices"), TEXT("editLayer"), TEXT("editLayerIndex"), TEXT("includeWeights"),
+		TEXT("encoding"), TEXT("arrayEncodingLimit"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	FString LayerName;
@@ -3074,6 +3153,12 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::GetLayerWeightRegion(const TSharedPtr
 // landscape(set_layer_weight_region): write one layer's weights over a rectangle.
 TSharedPtr<FJsonValue> FLandscapeHandlers::SetLayerWeightRegion(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("layerName"), TEXT("actorLabel"), TEXT("actorPath"), TEXT("region"), TEXT("space"), TEXT("center"),
+		TEXT("radius"), TEXT("maxVertices"), TEXT("weightsBase64"), TEXT("weights"), TEXT("weight"),
+		TEXT("strength"), TEXT("editLayer"), TEXT("editLayerIndex"), TEXT("rollbackMaxVertices"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	FString LayerName;
@@ -3245,6 +3330,12 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::RemoveLayer(const TSharedPtr<FJsonObj
 // landscape(get_holes): read the visibility mask over a point or a rectangle.
 TSharedPtr<FJsonValue> FLandscapeHandlers::GetHoles(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("region"), TEXT("space"), TEXT("center"), TEXT("radius"),
+		TEXT("x"), TEXT("y"), TEXT("point"), TEXT("worldX"), TEXT("worldY"), TEXT("maxVertices"), TEXT("includeMask"),
+		TEXT("arrayEncodingLimit"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	ALandscape* Landscape = nullptr;
@@ -3320,6 +3411,12 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::GetHoles(const TSharedPtr<FJsonObject
 // landscape(set_holes): punch or fill the visibility mask over a point or rect.
 TSharedPtr<FJsonValue> FLandscapeHandlers::SetHoles(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("region"), TEXT("space"), TEXT("center"), TEXT("radius"),
+		TEXT("x"), TEXT("y"), TEXT("point"), TEXT("worldX"), TEXT("worldY"), TEXT("maxVertices"), TEXT("hole"),
+		TEXT("holes"), TEXT("weightsBase64"), TEXT("editLayer"), TEXT("editLayerIndex"), TEXT("rollbackMaxVertices"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	ALandscape* Landscape = nullptr;
@@ -3692,6 +3789,12 @@ namespace
 // heightmap into the exact create + import calls that reproduce it in engine.
 TSharedPtr<FJsonValue> FLandscapeHandlers::PlanRealWorldLandscape(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("minElevationMeters"), TEXT("maxElevationMeters"), TEXT("realWorldSizeMeters"), TEXT("boundsLatLon"),
+		TEXT("sourcePath"), TEXT("format"), TEXT("width"), TEXT("height"), TEXT("metersPerQuad"), TEXT("elevationEncoding"),
+		TEXT("verticalExaggeration"), TEXT("maxComponents"), TEXT("location"),
+	});
+
 	// Deliberately no REQUIRE_EDITOR_WORLD: planning is arithmetic over a file
 	// and a bounding box, and the point of it is to run BEFORE a landscape
 	// exists. Refusing it because no level is open would make the one call that
@@ -3767,8 +3870,8 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::PlanRealWorldLandscape(const TSharedP
 
 	// ── the source raster ───────────────────────────────────────────────────
 	FMCPLscHeightmapStats Source;
-	FString SourcePath = OptionalString(Params, TEXT("sourcePath"));
-	if (SourcePath.IsEmpty()) SourcePath = OptionalString(Params, TEXT("filePath"));
+	// filePath is a spec alias, renamed to sourcePath before this runs.
+	const FString SourcePath = OptionalString(Params, TEXT("sourcePath"));
 	if (!SourcePath.IsEmpty())
 	{
 		FString InspectError;
@@ -4080,6 +4183,11 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::PlanRealWorldLandscape(const TSharedP
 // this landscape's world space, in both directions.
 TSharedPtr<FJsonValue> FLandscapeHandlers::ProjectGeoCoordinates(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("boundsLatLon"), TEXT("points"), TEXT("actorLabel"), TEXT("actorPath"), TEXT("northAt"),
+		TEXT("sampleHeight"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	FMCPLscGeoBounds Geo;
@@ -4357,6 +4465,7 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::ListEditLayers(const TSharedPtr<FJson
 // height and weight maps now, or on the next editor tick with updateNow=false.
 TSharedPtr<FJsonValue> FLandscapeHandlers::MergeEditLayers(const TSharedPtr<FJsonObject>& Params)
 {
+	const bool bUpdateNow = OptionalBool(Params, TEXT("updateNow"), true);
 	REQUIRE_EDITOR_WORLD(World);
 	TSharedPtr<FJsonValue> Err;
 	ALandscape* Landscape = ResolveLandscape(World, Params, Err);
@@ -4366,7 +4475,6 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::MergeEditLayers(const TSharedPtr<FJso
 		return MCPError(FString::Printf(TEXT("Landscape '%s' has no edit layers, so there is nothing to merge"), *Landscape->GetActorLabel()));
 	}
 
-	const bool bUpdateNow = OptionalBool(Params, TEXT("updateNow"), true);
 	Landscape->ForceLayersFullUpdate();
 	if (bUpdateNow)
 	{
