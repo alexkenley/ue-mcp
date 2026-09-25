@@ -18,6 +18,7 @@ import { handlerSpecs as gameplay } from "./gameplay.generated.js";
 import { handlerSpecs as gas } from "./gas.generated.js";
 import { handlerSpecs as landscape } from "./landscape.generated.js";
 import { handlerSpecs as level } from "./level.generated.js";
+import { handlerSpecs as mass } from "./mass.generated.js";
 import { handlerSpecs as material } from "./material.generated.js";
 import { handlerSpecs as networking } from "./networking.generated.js";
 import { handlerSpecs as niagara } from "./niagara.generated.js";
@@ -43,6 +44,7 @@ export const RECORDED_HANDLER_SPECS: HandlerSpecs = {
   ...gas,
   ...landscape,
   ...level,
+  ...mass,
   ...material,
   ...networking,
   ...niagara,

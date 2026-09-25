@@ -1,5 +1,5 @@
 {
-  "handlerCount": 843,
+  "handlerCount": 845,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -7733,6 +7733,75 @@
           "type": "string",
           "required": true,
           "description": "Name the region was opened under"
+        }
+      ]
+    },
+    "ensure_mass_entity_config": {
+      "category": "mass",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "MassEntityConfigAsset path, /Game/Folder/Name[.Name]"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Asset name, when assetPath is not given"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Content folder for name (default /Game)"
+        },
+        {
+          "name": "traits",
+          "type": "array",
+          "required": true,
+          "description": "Ordered trait list; the order is the asset's order and a class may appear once",
+          "items": "object",
+          "fields": [
+            {
+              "name": "class",
+              "type": "string",
+              "required": false,
+              "description": "Concrete UMassEntityTraitBase subclass, short name or /Script path; this or traitClass"
+            },
+            {
+              "name": "traitClass",
+              "type": "string",
+              "required": false,
+              "description": "Same as class"
+            },
+            {
+              "name": "properties",
+              "type": "object",
+              "required": false,
+              "description": "Fields written onto the trait instance; dotted paths allowed"
+            }
+          ]
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip | error | update (default): what an existing asset gets"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "exactlyOne",
+          "branches": [
+            [
+              "assetPath"
+            ],
+            [
+              "name"
+            ]
+          ]
         }
       ]
     },
@@ -15852,6 +15921,17 @@
           "type": "string",
           "required": true,
           "description": "InputAction asset path"
+        }
+      ]
+    },
+    "read_mass_entity_config": {
+      "category": "mass",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "MassEntityConfigAsset path"
         }
       ]
     },

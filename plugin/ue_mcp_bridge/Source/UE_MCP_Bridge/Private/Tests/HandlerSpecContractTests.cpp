@@ -33,6 +33,7 @@
 #include "Handlers/GameplayHandlers.h"
 #include "Handlers/GasHandlers.h"
 #include "Handlers/PhysicsHandlers.h"
+#include "Handlers/MassHandlers.h"
 #include "Handlers/DialogHandlers.h"
 #include "Handlers/EditorHandlers.h"
 #include "Handlers/SequencerHandlers.h"
@@ -192,6 +193,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FGameplayHandlers::RegisterHandlers(Registry);
 	FGasHandlers::RegisterHandlers(Registry);
 	FPhysicsHandlers::RegisterHandlers(Registry);
+	FMassHandlers::RegisterHandlers(Registry);
 	FEditorHandlers::RegisterHandlers(Registry);
 	FSequencerHandlers::RegisterHandlers(Registry);
 	FDialogHandlers::RegisterHandlers(Registry);
