@@ -8,10 +8,12 @@ import type { HandlerSpecs } from "../../handler-spec.js";
 import { handlerSpecs as animation } from "./animation.generated.js";
 import { handlerSpecs as fab } from "./fab.generated.js";
 import { handlerSpecs as networking } from "./networking.generated.js";
+import { handlerSpecs as project } from "./project.generated.js";
 
 /** Every recorded handler spec, across categories. */
 export const RECORDED_HANDLER_SPECS: HandlerSpecs = {
   ...animation,
   ...fab,
   ...networking,
+  ...project,
 };

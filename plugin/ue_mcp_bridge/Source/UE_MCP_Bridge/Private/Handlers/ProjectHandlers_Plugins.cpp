@@ -218,6 +218,9 @@ TSharedPtr<FJsonValue> FProjectHandlers::ListAvailablePlugins(const TSharedPtr<F
 	const FString Filter = OptionalString(Params, TEXT("filter"));
 	const FString Category = OptionalString(Params, TEXT("pluginCategory"));
 	const bool bEnabledOnly = OptionalBool(Params, TEXT("enabledOnly"), false);
+	// Noted before ReadPageRequest can refuse the limit, so the spec contract
+	// test sees every declared read (#1057).
+	HasParam(Params, TEXT("cursor"));
 
 	// T3: paged. This used to stop adding rows at `limit` while still counting
 	// the matches, so a caller was told there were 900 and handed 200 with no

@@ -97,13 +97,27 @@ void FProjectHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	// project files + kicks a Live Coding compile. Both are synchronous
 	// game-thread work and easily exceed the 30-second default.
 	Registry.RegisterHandlerWithTimeout(TEXT("create_cpp_class"), &CreateCppClass, 300.0f);
-	Registry.RegisterHandler(TEXT("list_project_modules"), &ListProjectModules);
+
+	// #1057: the reads declare their parameters here. create_cpp_class,
+	// live_coding_compile and the plugin writers change source, binaries or the
+	// .uproject, so they stay unspecced and the spec contract test never calls them.
+	using EType = EMCPParamType;
+	Registry.RegisterHandler(TEXT("list_project_modules"), &ListProjectModules, {
+		MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: the nextCursor from the previous page, unmodified")),
+		MCPParam::Optional(TEXT("limit"), EType::Number, TEXT("Rows per page, a whole number (default 200, max 2000)")),
+	});
 	// live_coding_compile(wait=true) can also exceed 30s on a full rebuild.
 	Registry.RegisterHandlerWithTimeout(TEXT("live_coding_compile"), &LiveCodingCompile, 300.0f);
-	Registry.RegisterHandler(TEXT("live_coding_status"), &LiveCodingStatus);
+	Registry.RegisterHandler(TEXT("live_coding_status"), &LiveCodingStatus, {});
 
 	// Plugin enablement. Bodies live in ProjectHandlers_Plugins.cpp.
-	Registry.RegisterHandler(TEXT("list_available_plugins"), &ListAvailablePlugins);
+	Registry.RegisterHandler(TEXT("list_available_plugins"), &ListAvailablePlugins, {
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring of the plugin name or friendly name")),
+		MCPParam::Optional(TEXT("pluginCategory"), EType::String, TEXT("Case-insensitive substring of the plugin category")),
+		MCPParam::Optional(TEXT("enabledOnly"), EType::Boolean, TEXT("Only plugins enabled in this editor session (default false)")),
+		MCPParam::Optional(TEXT("cursor"), EType::String, TEXT("Resume a paged read: the nextCursor from the previous page, unmodified")),
+		MCPParam::Optional(TEXT("limit"), EType::Number, TEXT("Rows per page, a whole number (default 200, max 2000)")),
+	});
 	Registry.RegisterHandler(TEXT("enable_plugin"), &EnablePlugin);
 	Registry.RegisterHandler(TEXT("disable_plugin"), &DisablePlugin);
 }
@@ -303,7 +317,9 @@ TSharedPtr<FJsonValue> FProjectHandlers::CreateCppClass(const TSharedPtr<FJsonOb
 // source path). Feed moduleName from here into create_cpp_class.
 TSharedPtr<FJsonValue> FProjectHandlers::ListProjectModules(const TSharedPtr<FJsonObject>& Params)
 {
-	// T3: paged.
+	// T3: paged. cursor is noted before ReadPageRequest can refuse the limit,
+	// so the spec contract test sees both declared reads (#1057).
+	HasParam(Params, TEXT("cursor"));
 	MCPPagination::FPageRequest Page;
 	if (auto Err = MCPPagination::ReadPageRequest(
 			Params, TEXT("list_project_modules"), /*DefaultLimit*/ 200, /*MaxLimit*/ 2000, Page))
