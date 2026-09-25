@@ -1,5 +1,5 @@
 {
-  "handlerCount": 853,
+  "handlerCount": 842,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -824,94 +824,6 @@
         }
       ]
     },
-    "add_force": {
-      "category": "physics",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Actor editor label; pass actorLabel or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; the unambiguous selector"
-        },
-        {
-          "name": "impulse",
-          "type": "vec3",
-          "required": true,
-          "description": "Impulse or force vector {x,y,z}",
-          "aliases": [
-            "force",
-            "vector"
-          ]
-        },
-        {
-          "name": "mode",
-          "type": "string",
-          "required": false,
-          "description": "impulse (default) | force"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "Primitive component to push (default: the root, else the first primitive)"
-        },
-        {
-          "name": "boneName",
-          "type": "string",
-          "required": false,
-          "description": "Physics bone to push"
-        },
-        {
-          "name": "location",
-          "type": "vec3",
-          "required": false,
-          "description": "World point to apply the impulse at; ignores mode"
-        },
-        {
-          "name": "velChange",
-          "type": "boolean",
-          "required": false,
-          "description": "Treat the impulse as a velocity change"
-        },
-        {
-          "name": "accelChange",
-          "type": "boolean",
-          "required": false,
-          "description": "Treat the force as an acceleration change"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: auto (default) | pie | editor"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the primary world"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "actorLabel"
-            ],
-            [
-              "actorPath"
-            ]
-          ]
-        }
-      ]
-    },
     "add_function_parameter": {
       "category": "blueprint",
       "params": [
@@ -1075,94 +987,6 @@
           "type": "boolean",
           "required": false,
           "description": "Persist the asset (default true); false defers the write"
-        }
-      ]
-    },
-    "add_impulse": {
-      "category": "physics",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Actor editor label; pass actorLabel or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; the unambiguous selector"
-        },
-        {
-          "name": "impulse",
-          "type": "vec3",
-          "required": true,
-          "description": "Impulse or force vector {x,y,z}",
-          "aliases": [
-            "force",
-            "vector"
-          ]
-        },
-        {
-          "name": "mode",
-          "type": "string",
-          "required": false,
-          "description": "impulse (default) | force"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "Primitive component to push (default: the root, else the first primitive)"
-        },
-        {
-          "name": "boneName",
-          "type": "string",
-          "required": false,
-          "description": "Physics bone to push"
-        },
-        {
-          "name": "location",
-          "type": "vec3",
-          "required": false,
-          "description": "World point to apply the impulse at; ignores mode"
-        },
-        {
-          "name": "velChange",
-          "type": "boolean",
-          "required": false,
-          "description": "Treat the impulse as a velocity change"
-        },
-        {
-          "name": "accelChange",
-          "type": "boolean",
-          "required": false,
-          "description": "Treat the force as an acceleration change"
-        },
-        {
-          "name": "world",
-          "type": "string",
-          "required": false,
-          "description": "World scope: auto (default) | pie | editor"
-        },
-        {
-          "name": "pieInstance",
-          "type": "number",
-          "required": false,
-          "description": "PIE world instance (0 = server/primary); omit for the primary world"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "actorLabel"
-            ],
-            [
-              "actorPath"
-            ]
-          ]
         }
       ]
     },
@@ -5852,29 +5676,53 @@
         }
       ]
     },
-    "create_attribute_set": {
-      "category": "gas",
+    "create_attenuation": {
+      "category": "audio",
       "params": [
         {
           "name": "name",
           "type": "string",
           "required": true,
-          "description": "Blueprint name"
+          "description": "SoundAttenuation asset name"
         },
         {
           "name": "packagePath",
           "type": "string",
           "required": false,
-          "description": "Content folder (default /Game/GAS/Attributes)"
+          "description": "Destination folder (default /Game/Audio/Attenuation)"
         },
         {
           "name": "onConflict",
           "type": "string",
           "required": false,
-          "description": "skip (default, returns the existing asset) or error when the asset already exists"
+          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
+        },
+        {
+          "name": "settings",
+          "type": "object",
+          "required": false,
+          "description": "FSoundAttenuationSettings as JSON, applied before the shortcuts"
+        },
+        {
+          "name": "falloffDistance",
+          "type": "number",
+          "required": false,
+          "description": "Falloff distance; also turns volume attenuation on"
+        },
+        {
+          "name": "spatialize",
+          "type": "boolean",
+          "required": false,
+          "description": "bSpatialize"
+        },
+        {
+          "name": "enableOcclusion",
+          "type": "boolean",
+          "required": false,
+          "description": "bEnableOcclusion"
         }
       ],
-      "contractExempt": "Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"
+      "contractExempt": "Creates and saves a SoundAttenuation asset named by the contract values"
     },
     "create_behavior_tree": {
       "category": "gameplay",
@@ -5904,30 +5752,6 @@
           "description": "BlackboardData assigned before the first save; an unknown path creates nothing"
         }
       ]
-    },
-    "create_blackboard": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/AI)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default, returns the existing asset) or error when the asset already exists"
-        }
-      ],
-      "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
     },
     "create_blendspace": {
       "category": "animation",
@@ -6046,6 +5870,54 @@
           "description": "skip (default) returns an existing asset untouched, error refuses"
         }
       ]
+    },
+    "create_concurrency": {
+      "category": "audio",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "SoundConcurrency asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/Audio/Concurrency)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
+        },
+        {
+          "name": "maxCount",
+          "type": "integer",
+          "required": false,
+          "description": "Most concurrent voices"
+        },
+        {
+          "name": "limitToOwner",
+          "type": "boolean",
+          "required": false,
+          "description": "Count voices per owning actor"
+        },
+        {
+          "name": "volumeScale",
+          "type": "number",
+          "required": false,
+          "description": "Volume scale applied to each new voice"
+        },
+        {
+          "name": "resolutionRule",
+          "type": "string",
+          "required": false,
+          "description": "EMaxConcurrentResolutionRule name, e.g. StopFarthestThenOldest"
+        }
+      ],
+      "contractExempt": "Creates and saves a SoundConcurrency asset named by the contract values"
     },
     "create_control_rig": {
       "category": "animation",
@@ -6178,30 +6050,6 @@
         }
       ]
     },
-    "create_eqs_query": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/AI/EQS)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default, returns the existing asset) or error when the asset already exists"
-        }
-      ],
-      "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
-    },
     "create_foliage_type": {
       "category": "foliage",
       "params": [
@@ -6309,90 +6157,6 @@
         }
       ]
     },
-    "create_gameplay_ability": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/GAS/Abilities)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default, returns the existing asset) or error when the asset already exists"
-        }
-      ],
-      "contractExempt": "Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"
-    },
-    "create_gameplay_cue": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/GAS/Cues)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default, returns the existing asset) or error when the asset already exists"
-        },
-        {
-          "name": "cueType",
-          "type": "string",
-          "required": false,
-          "description": "Static (default, GameplayCueNotify_Static) | Actor (GameplayCueNotify_Actor)"
-        }
-      ],
-      "contractExempt": "Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"
-    },
-    "create_gameplay_effect": {
-      "category": "gas",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Blueprint name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/GAS/Effects)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default, returns the existing asset) or error when the asset already exists"
-        },
-        {
-          "name": "durationPolicy",
-          "type": "string",
-          "required": false,
-          "description": "Echoed back as durationPolicy (default Instant); it is not written onto the effect"
-        }
-      ],
-      "contractExempt": "Creates, compiles and saves a Blueprint under the contract values; nothing it reads fails first"
-    },
     "create_hud": {
       "category": "gameplay",
       "params": [
@@ -6415,60 +6179,6 @@
           "description": "Parent deriving from HUD: short name, /Script path or Blueprint asset path"
         }
       ]
-    },
-    "create_input_action": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/Input)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default, returns the existing asset) or error when the asset already exists"
-        },
-        {
-          "name": "valueType",
-          "type": "string",
-          "required": false,
-          "description": "Boolean (default) | Axis1D | Axis2D | Axis3D; an unrecognised type leaves the default"
-        }
-      ],
-      "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
-    },
-    "create_input_mapping_context": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "required": true,
-          "description": "Asset name"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder (default /Game/Input)"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default, returns the existing asset) or error when the asset already exists"
-        }
-      ],
-      "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
     },
     "create_landscape": {
       "category": "landscape",
@@ -6562,6 +6272,42 @@
           "description": "skip (default) reports the existing entry; error refuses"
         }
       ]
+    },
+    "create_metasound_source": {
+      "category": "audio",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "MetaSoundSource asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/Audio/MetaSounds)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "required": false,
+          "description": "Output format: mono | stereo (default mono)"
+        },
+        {
+          "name": "oneShot",
+          "type": "boolean",
+          "required": false,
+          "description": "Declare the one-shot interface (default true)"
+        }
+      ],
+      "contractExempt": "Creates and saves a MetaSoundSource asset named by the contract values"
     },
     "create_pcg_graph": {
       "category": "pcg",
@@ -6844,41 +6590,134 @@
         }
       ]
     },
-    "create_smart_object_definition": {
-      "category": "gameplay",
+    "create_sound_class": {
+      "category": "audio",
       "params": [
         {
           "name": "name",
           "type": "string",
           "required": true,
-          "description": "Asset name"
+          "description": "SoundClass asset name"
         },
         {
           "name": "packagePath",
           "type": "string",
           "required": false,
-          "description": "Content folder (default /Game/AI/SmartObjects)"
+          "description": "Destination folder (default /Game/Audio/SoundClasses)"
         },
         {
           "name": "onConflict",
           "type": "string",
           "required": false,
-          "description": "skip (default, returns the existing asset) or error when the asset already exists"
+          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
         },
         {
-          "name": "defaultBehaviorClass",
-          "type": "string",
-          "required": false,
-          "description": "Behavior definition asset path or class path added to DefaultBehaviorDefinitions"
-        },
-        {
-          "name": "instanceProperties",
+          "name": "properties",
           "type": "object",
           "required": false,
-          "description": "Property writes applied to a freshly-spawned behavior instance"
+          "description": "FSoundClassProperties as JSON: Volume, Pitch, bIsUISound, ..."
+        },
+        {
+          "name": "parentPath",
+          "type": "string",
+          "required": false,
+          "description": "Parent SoundClass (default none)"
         }
       ],
-      "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
+      "contractExempt": "Creates and saves a SoundClass asset named by the contract values"
+    },
+    "create_sound_cue": {
+      "category": "audio",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "SoundCue asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/Audio/SoundCues)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
+        }
+      ],
+      "contractExempt": "Creates and saves a SoundCue asset named by the contract values"
+    },
+    "create_sound_mix": {
+      "category": "audio",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "SoundMix asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/Audio/SoundMixes)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
+        },
+        {
+          "name": "fadeInTime",
+          "type": "number",
+          "required": false,
+          "description": "Fade-in time in seconds"
+        },
+        {
+          "name": "fadeOutTime",
+          "type": "number",
+          "required": false,
+          "description": "Fade-out time in seconds"
+        },
+        {
+          "name": "adjusters",
+          "type": "array",
+          "required": false,
+          "description": "Per-SoundClass adjustments; an entry whose class does not load is skipped",
+          "items": "object",
+          "fields": [
+            {
+              "name": "soundClassPath",
+              "type": "string",
+              "required": true,
+              "description": "SoundClass asset the adjustment applies to"
+            },
+            {
+              "name": "volumeAdjuster",
+              "type": "number",
+              "required": false,
+              "description": "Volume multiplier (default 1)"
+            },
+            {
+              "name": "pitchAdjuster",
+              "type": "number",
+              "required": false,
+              "description": "Pitch multiplier (default 1)"
+            },
+            {
+              "name": "applyToChildren",
+              "type": "boolean",
+              "required": false,
+              "description": "Apply to child sound classes (default false)"
+            }
+          ]
+        }
+      ],
+      "contractExempt": "Creates and saves a SoundMix asset named by the contract values"
     },
     "create_state_machine": {
       "category": "animation",
@@ -6906,35 +6745,53 @@
         }
       ]
     },
-    "create_state_tree": {
-      "category": "gameplay",
+    "create_submix": {
+      "category": "audio",
       "params": [
         {
           "name": "name",
           "type": "string",
           "required": true,
-          "description": "Asset name"
+          "description": "SoundSubmix asset name"
         },
         {
           "name": "packagePath",
           "type": "string",
           "required": false,
-          "description": "Content folder (default /Game/AI)"
+          "description": "Destination folder (default /Game/Audio/Submixes)"
         },
         {
           "name": "onConflict",
           "type": "string",
           "required": false,
-          "description": "skip (default, returns the existing asset) or error when the asset already exists"
+          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
         },
         {
-          "name": "schema",
+          "name": "parentPath",
           "type": "string",
           "required": false,
-          "description": "StateTree schema class path; omit to take the gameplay default (StateTreeComponentSchema, then StateTreeAIComponentSchema, then any concrete schema)"
+          "description": "Parent submix (default none)"
+        },
+        {
+          "name": "outputVolume",
+          "type": "number",
+          "required": false,
+          "description": "Output volume"
+        },
+        {
+          "name": "wetLevel",
+          "type": "number",
+          "required": false,
+          "description": "Wet level"
+        },
+        {
+          "name": "dryLevel",
+          "type": "number",
+          "required": false,
+          "description": "Dry level"
         }
       ],
-      "contractExempt": "Creates and saves an asset under the contract values; nothing it reads fails first"
+      "contractExempt": "Creates and saves a SoundSubmix asset named by the contract values"
     },
     "create_subobject": {
       "category": "asset",
@@ -7901,75 +7758,6 @@
           "type": "string",
           "required": true,
           "description": "Name the region was opened under"
-        }
-      ]
-    },
-    "ensure_mass_entity_config": {
-      "category": "mass",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": false,
-          "description": "MassEntityConfigAsset path, /Game/Folder/Name[.Name]"
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "required": false,
-          "description": "Asset name, when assetPath is not given"
-        },
-        {
-          "name": "packagePath",
-          "type": "string",
-          "required": false,
-          "description": "Content folder for name (default /Game)"
-        },
-        {
-          "name": "traits",
-          "type": "array",
-          "required": true,
-          "description": "Ordered trait list; the order is the asset's order and a class may appear once",
-          "items": "object",
-          "fields": [
-            {
-              "name": "class",
-              "type": "string",
-              "required": false,
-              "description": "Concrete UMassEntityTraitBase subclass, short name or /Script path; this or traitClass"
-            },
-            {
-              "name": "traitClass",
-              "type": "string",
-              "required": false,
-              "description": "Same as class"
-            },
-            {
-              "name": "properties",
-              "type": "object",
-              "required": false,
-              "description": "Fields written onto the trait instance; dotted paths allowed"
-            }
-          ]
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip | error | update (default): what an existing asset gets"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "assetPath"
-            ],
-            [
-              "name"
-            ]
-          ]
         }
       ]
     },
@@ -11285,6 +11073,50 @@
         }
       ]
     },
+    "import_audio": {
+      "category": "audio",
+      "params": [
+        {
+          "name": "filePath",
+          "type": "string",
+          "required": true,
+          "description": "WAV, OGG or FLAC file on disk",
+          "aliases": [
+            "filename"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "description": "Asset name (default the file's base name)",
+          "aliases": [
+            "assetName"
+          ]
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/Audio)",
+          "aliases": [
+            "destinationPath"
+          ]
+        },
+        {
+          "name": "looping",
+          "type": "boolean",
+          "required": false,
+          "description": "Set bLooping on the imported SoundWave (omit to keep the importer's value)"
+        },
+        {
+          "name": "replaceExisting",
+          "type": "boolean",
+          "required": false,
+          "description": "Replace an existing asset of that name (default true)"
+        }
+      ]
+    },
     "import_curvetable": {
       "category": "asset",
       "params": [
@@ -14096,6 +13928,104 @@
         }
       ]
     },
+    "metasound_author": {
+      "category": "audio",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "MetaSoundSource asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/Audio/MetaSounds)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "required": false,
+          "description": "Output format: mono | stereo (default mono)"
+        },
+        {
+          "name": "oneShot",
+          "type": "boolean",
+          "required": false,
+          "description": "Declare the one-shot interface (default true)"
+        },
+        {
+          "name": "inputs",
+          "type": "array",
+          "required": false,
+          "description": "Graph inputs to add",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Graph input name"
+            },
+            {
+              "name": "dataType",
+              "type": "string",
+              "required": true,
+              "description": "MetaSound data type: Float, Int32, Bool, String, Trigger, Audio, Time, ..."
+            },
+            {
+              "name": "default",
+              "type": "any",
+              "required": false,
+              "description": "Literal default for the input"
+            }
+          ]
+        },
+        {
+          "name": "outputs",
+          "type": "array",
+          "required": false,
+          "description": "Graph outputs to add",
+          "items": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Graph output name"
+            },
+            {
+              "name": "dataType",
+              "type": "string",
+              "required": true,
+              "description": "MetaSound data type"
+            }
+          ]
+        },
+        {
+          "name": "nodes",
+          "type": "array",
+          "required": false,
+          "description": "Nodes to add, each {id, class, namespace?, variant?, majorVersion?, inputs?: {vertex: value}}; id is the local name connections use, namespace defaults to UE and majorVersion to 1",
+          "items": "object"
+        },
+        {
+          "name": "connections",
+          "type": "array",
+          "required": false,
+          "description": "Edges, each {from, to}. Endpoints are 'nodeId:vertex', or the heads 'input:<name>', 'output:<name>' and 'audioOut:<channel>'",
+          "items": "object"
+        }
+      ],
+      "contractExempt": "Creates and saves a MetaSoundSource asset named by the contract values"
+    },
     "metasound_build": {
       "category": "audio",
       "params": [
@@ -16092,17 +16022,6 @@
         }
       ]
     },
-    "read_mass_entity_config": {
-      "category": "mass",
-      "params": [
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": true,
-          "description": "MassEntityConfigAsset path"
-        }
-      ]
-    },
     "read_material": {
       "category": "material",
       "params": [
@@ -16609,11 +16528,6 @@
           "description": "Body component every other one follows (default CharacterMesh0, then Mesh)"
         }
       ]
-    },
-    "rebuild_navigation": {
-      "category": "gameplay",
-      "params": [],
-      "contractExempt": "Rebuilds the navmesh; it takes no parameters that could fail first"
     },
     "rebuild_water_zone": {
       "category": "level",
@@ -20853,156 +20767,6 @@
         }
       ]
     },
-    "set_collision": {
-      "category": "physics",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Actor editor label; pass actorLabel or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; the unambiguous selector"
-        },
-        {
-          "name": "assetPath",
-          "type": "string",
-          "required": false,
-          "description": "Blueprint whose component template to edit; needs componentName"
-        },
-        {
-          "name": "componentName",
-          "type": "string",
-          "required": false,
-          "description": "Primitive component name (prefix match on an actor, default every one); required with assetPath"
-        },
-        {
-          "name": "collisionProfile",
-          "type": "string",
-          "required": false,
-          "description": "Collision profile (preset) name, applied before the overrides"
-        },
-        {
-          "name": "collisionEnabled",
-          "type": "string",
-          "required": false,
-          "description": "NoCollision | QueryOnly | PhysicsOnly | QueryAndPhysics"
-        },
-        {
-          "name": "objectType",
-          "type": "string",
-          "required": false,
-          "description": "Object-type channel name, e.g. WorldStatic, Pawn, ECC_GameTraceChannel1"
-        },
-        {
-          "name": "responseToAllChannels",
-          "type": "string",
-          "required": false,
-          "description": "Block | Overlap | Ignore, applied to every channel before the per-channel responses"
-        },
-        {
-          "name": "responses",
-          "type": "object",
-          "required": false,
-          "description": "Per-channel responses, {channelName: Block | Overlap | Ignore}"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "actorLabel"
-            ],
-            [
-              "actorPath"
-            ],
-            [
-              "assetPath"
-            ]
-          ]
-        }
-      ]
-    },
-    "set_collision_enabled": {
-      "category": "physics",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Actor editor label; pass actorLabel or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; the unambiguous selector"
-        },
-        {
-          "name": "collisionEnabled",
-          "type": "string",
-          "required": true,
-          "description": "NoCollision | QueryOnly | PhysicsOnly | QueryAndPhysics",
-          "aliases": [
-            "collisionType"
-          ]
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "actorLabel"
-            ],
-            [
-              "actorPath"
-            ]
-          ]
-        }
-      ]
-    },
-    "set_collision_profile": {
-      "category": "physics",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Actor editor label; pass actorLabel or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; the unambiguous selector"
-        },
-        {
-          "name": "profileName",
-          "type": "string",
-          "required": true,
-          "description": "Collision profile (preset) name"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "actorLabel"
-            ],
-            [
-              "actorPath"
-            ]
-          ]
-        }
-      ]
-    },
     "set_component_override_materials": {
       "category": "blueprint",
       "params": [
@@ -23111,60 +22875,6 @@
         }
       ]
     },
-    "set_physics_properties": {
-      "category": "physics",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Actor editor label; pass actorLabel or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; the unambiguous selector"
-        },
-        {
-          "name": "mass",
-          "type": "number",
-          "required": false,
-          "description": "Mass override in kg"
-        },
-        {
-          "name": "linearDamping",
-          "type": "number",
-          "required": false,
-          "description": "Linear damping"
-        },
-        {
-          "name": "angularDamping",
-          "type": "number",
-          "required": false,
-          "description": "Angular damping"
-        },
-        {
-          "name": "enableGravity",
-          "type": "boolean",
-          "required": false,
-          "description": "Whether gravity applies to the body"
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "actorLabel"
-            ],
-            [
-              "actorPath"
-            ]
-          ]
-        }
-      ]
-    },
     "set_pie_time_scale": {
       "category": "editor",
       "params": [
@@ -23664,45 +23374,6 @@
           "type": "boolean",
           "required": false,
           "description": "Resolve a montage to its first AnimSequence (default true)"
-        }
-      ]
-    },
-    "set_simulate_physics": {
-      "category": "physics",
-      "params": [
-        {
-          "name": "actorLabel",
-          "type": "string",
-          "required": false,
-          "description": "Actor editor label; pass actorLabel or actorPath"
-        },
-        {
-          "name": "actorPath",
-          "type": "string",
-          "required": false,
-          "description": "Full actor object path; the unambiguous selector"
-        },
-        {
-          "name": "simulate",
-          "type": "boolean",
-          "required": true,
-          "description": "Turn physics simulation on or off",
-          "aliases": [
-            "enabled"
-          ]
-        }
-      ],
-      "choices": [
-        {
-          "mode": "exactlyOne",
-          "branches": [
-            [
-              "actorLabel"
-            ],
-            [
-              "actorPath"
-            ]
-          ]
         }
       ]
     },
@@ -25215,6 +24886,50 @@
         }
       ]
     },
+    "soundcue_author": {
+      "category": "audio",
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "SoundCue asset name"
+        },
+        {
+          "name": "packagePath",
+          "type": "string",
+          "required": false,
+          "description": "Destination folder (default /Game/Audio/SoundCues)"
+        },
+        {
+          "name": "onConflict",
+          "type": "string",
+          "required": false,
+          "description": "skip (default) returns the existing asset, error refuses; it never overwrites"
+        },
+        {
+          "name": "nodes",
+          "type": "array",
+          "required": false,
+          "description": "Nodes to add, each {id, type, soundWavePath?, properties?: {field: value}}; id is the local name connections use, type is a soundcue_add_node nodeType",
+          "items": "object"
+        },
+        {
+          "name": "connections",
+          "type": "array",
+          "required": false,
+          "description": "Links, each {child, parent?, index?}; an omitted or 'root' parent makes the child the cue root, and index defaults to append",
+          "items": "object"
+        },
+        {
+          "name": "root",
+          "type": "string",
+          "required": false,
+          "description": "Local id of the node to make the cue root, overriding the connections"
+        }
+      ],
+      "contractExempt": "Creates and saves a SoundCue asset named by the contract values"
+    },
     "soundcue_connect": {
       "category": "audio",
       "params": [
@@ -25466,48 +25181,6 @@
           "description": "Point, spot and rect lights only"
         }
       ]
-    },
-    "spawn_nav_modifier_volume": {
-      "category": "gameplay",
-      "params": [
-        {
-          "name": "location",
-          "type": "vec3",
-          "required": false,
-          "description": "World location of the volume (default origin)"
-        },
-        {
-          "name": "extent",
-          "type": "vec3",
-          "required": false,
-          "description": "Half-size in world units, positive on every axis (default 100)"
-        },
-        {
-          "name": "areaClass",
-          "type": "string",
-          "required": false,
-          "description": "UNavArea subclass: NavArea_Null (default, cuts a hole), NavArea_Obstacle, or a /Script path"
-        },
-        {
-          "name": "label",
-          "type": "string",
-          "required": false,
-          "description": "Actor label, also what onConflict dedupes on"
-        },
-        {
-          "name": "scale",
-          "type": "vec3",
-          "required": false,
-          "description": "Actor scale, applied after the brush is built"
-        },
-        {
-          "name": "onConflict",
-          "type": "string",
-          "required": false,
-          "description": "skip (default, returns the actor already carrying label) or error when one does"
-        }
-      ],
-      "contractExempt": "Spawns a NavModifierVolume under the contract values; nothing it reads fails first"
     },
     "spawn_niagara_actor": {
       "category": "niagara",
