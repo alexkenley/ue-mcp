@@ -148,6 +148,7 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("get_runtime_virtual_texture_summary"), &GetRVTSummary);
 	Registry.RegisterHandler(TEXT("set_water_body_property"), &SetWaterBodyProperty);
 	Registry.RegisterHandlerWithTimeout(TEXT("rebuild_water_zone"), &RebuildWaterZone, 120.0f);
+	Registry.RegisterHandler(TEXT("get_water_state"), &GetWaterState);
 	Registry.RegisterHandler(TEXT("get_actor_bounds"), &GetActorBounds);
 	Registry.RegisterHandler(TEXT("resolve_actor"), &ResolveActor);
 	Registry.RegisterHandler(TEXT("set_actor_property"), &SetActorProperty);
@@ -2927,7 +2928,14 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetWaterBodyProperty(const TSharedPtr<FJs
 	}
 	if (!WBComp) return MCPError(FString::Printf(TEXT("Actor '%s' has no WaterBodyComponent"), *ActorLabel));
 
+	// #1156: TessellatedWaterMeshExtent is deprecated and not serialized, so a
+	// write to it is lost on save. Refuse the miss by name and warn on a hit.
+	const bool bTessellatedExtent = PropertyName.StartsWith(TEXT("TessellatedWaterMeshExtent"), ESearchCase::IgnoreCase);
 	FProperty* Prop = WBComp->GetClass()->FindPropertyByName(FName(*PropertyName));
+	if (!Prop && bTessellatedExtent)
+	{
+		return MCPError(TEXT("TessellatedWaterMeshExtent is not a WaterBodyComponent property. It is deprecated (TessellatedWaterMeshExtent_DEPRECATED on the WaterZone) and not serialized, so a write would be lost. Size the water mesh with level(rebuild_water_zone, zoneExtent, tileSize) instead."));
+	}
 	if (!Prop) return MCPError(FString::Printf(TEXT("Property '%s' not found on %s"), *PropertyName, *WBComp->GetClass()->GetName()));
 
 	WBComp->Modify();
@@ -2961,6 +2969,12 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetWaterBodyProperty(const TSharedPtr<FJs
 	Result->SetStringField(TEXT("propertyName"), PropertyName);
 	Result->SetStringField(TEXT("value"), ValueStr);
 	Result->SetStringField(TEXT("previousValue"), PreviousValue);
+	if (bTessellatedExtent || Prop->HasAnyPropertyFlags(CPF_Deprecated))
+	{
+		Result->SetStringField(TEXT("warning"), FString::Printf(
+			TEXT("'%s' is deprecated and is not serialized, so this write is lost on save. For the water mesh extent use level(rebuild_water_zone, zoneExtent, tileSize)."),
+			*Prop->GetName()));
+	}
 
 	// The undo travels by actor path so replaying it cannot land on a namesake.
 	// Emitted only when the value actually moved: restoring a value that was

@@ -83,6 +83,8 @@ private:
 	static TSharedPtr<FJsonValue> SetWaterBodyProperty(const TSharedPtr<FJsonObject>& Params);
 	// #1156: rebuild a WaterZone until its quad tree settles. LevelHandlers_Water.cpp.
 	static TSharedPtr<FJsonValue> RebuildWaterZone(const TSharedPtr<FJsonObject>& Params);
+	// #1156: WaterZone and WaterBody read-back. LevelHandlers_Water.cpp.
+	static TSharedPtr<FJsonValue> GetWaterState(const TSharedPtr<FJsonObject>& Params);
 	// #188: get actor origin + extent bounds
 	static TSharedPtr<FJsonValue> GetActorBounds(const TSharedPtr<FJsonObject>& Params);
 	// #178: resolve actor by internal/runtime UObject name

@@ -18,6 +18,8 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "Tickable.h"
 #include "UObject/UnrealType.h"
+#include "UObject/SoftObjectPtr.h"
+#include "JsonObjectConverter.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 
@@ -359,5 +361,203 @@ TSharedPtr<FJsonValue> FLevelHandlers::RebuildWaterZone(const TSharedPtr<FJsonOb
 		MCPSetNoRollback(Result,
 			TEXT("A rebuild regenerates the zone's derived mesh and water info from its current properties and changes none of them, so there is nothing to put back."));
 	}
+	return MCPResult(Result);
+}
+
+namespace
+{
+	/** A reflected value as JSON: object refs as paths, arrays element-wise,
+	 *  everything else through the JSON converter or export text. */
+	TSharedPtr<FJsonValue> MCPWaterValueJson(FProperty* Prop, const void* Addr)
+	{
+		if (FSoftObjectProperty* Soft = CastField<FSoftObjectProperty>(Prop))
+		{
+			const FString Path = Soft->GetPropertyValue(Addr).ToSoftObjectPath().ToString();
+			if (Path.IsEmpty()) return MakeShared<FJsonValueNull>();
+			return MakeShared<FJsonValueString>(Path);
+		}
+		if (FObjectPropertyBase* ObjProp = CastField<FObjectPropertyBase>(Prop))
+		{
+			UObject* Value = ObjProp->GetObjectPropertyValue(Addr);
+			if (!Value) return MakeShared<FJsonValueNull>();
+			return MakeShared<FJsonValueString>(Value->GetPathName());
+		}
+		if (FArrayProperty* ArrProp = CastField<FArrayProperty>(Prop))
+		{
+			FScriptArrayHelper Helper(ArrProp, Addr);
+			TArray<TSharedPtr<FJsonValue>> Items;
+			for (int32 Index = 0; Index < Helper.Num(); ++Index)
+			{
+				Items.Add(MCPWaterValueJson(ArrProp->Inner, Helper.GetRawPtr(Index)));
+			}
+			return MakeShared<FJsonValueArray>(Items);
+		}
+		if (TSharedPtr<FJsonValue> Converted = FJsonObjectConverter::UPropertyToJsonValue(Prop, Addr))
+		{
+			return Converted;
+		}
+		FString Text;
+		Prop->ExportTextItem_Direct(Text, Addr, nullptr, nullptr, PPF_None);
+		return MakeShared<FJsonValueString>(Text);
+	}
+
+	/** Copy each named property that exists on Obj into Out, keyed by its
+	 *  engine name. Names absent on this engine version are skipped. */
+	template <int32 N>
+	void MCPWaterCopyProps(UObject* Obj, const TCHAR* const (&Names)[N], const TSharedPtr<FJsonObject>& Out)
+	{
+		if (!Obj) return;
+		for (const TCHAR* Name : Names)
+		{
+			FProperty* Prop = Obj->GetClass()->FindPropertyByName(FName(Name));
+			if (!Prop) continue;
+			Out->SetField(Name, MCPWaterValueJson(Prop, Prop->ContainerPtrToValuePtr<void>(Obj)));
+		}
+	}
+
+	/** Deprecated fields present on Obj, so a caller knows a write there is lost. */
+	void MCPWaterNoteDeprecated(UObject* Obj, const TSharedPtr<FJsonObject>& Out)
+	{
+		if (!Obj) return;
+		TArray<TSharedPtr<FJsonValue>> Names;
+		for (TFieldIterator<FProperty> It(Obj->GetClass()); It; ++It)
+		{
+			if (It->GetName().StartsWith(TEXT("TessellatedWaterMeshExtent")) && It->HasAnyPropertyFlags(CPF_Deprecated))
+			{
+				Names.Add(MakeShared<FJsonValueString>(It->GetName()));
+			}
+		}
+		if (Names.Num() == 0) return;
+		Out->SetArrayField(TEXT("deprecatedProperties"), Names);
+		Out->SetStringField(TEXT("deprecationNote"),
+			TEXT("TessellatedWaterMeshExtent is deprecated and not serialized. Size the water mesh with ZoneExtent and the WaterMesh TileSize, via level(rebuild_water_zone)."));
+	}
+
+	UActorComponent* MCPWaterBodyComponent(AActor* Actor, UClass* BodyClass)
+	{
+		if (!Actor || !BodyClass) return nullptr;
+		TArray<UActorComponent*> Comps;
+		Actor->GetComponents(Comps);
+		for (UActorComponent* Comp : Comps)
+		{
+			if (Comp && Comp->IsA(BodyClass)) return Comp;
+		}
+		return nullptr;
+	}
+
+	TSharedPtr<FJsonObject> MCPWaterDescribeZone(AActor* Zone)
+	{
+		static const TCHAR* const ZoneProps[] = {
+			TEXT("ZoneExtent"), TEXT("RenderTargetResolution"), TEXT("OverlapPriority"),
+			TEXT("CaptureZOffset"), TEXT("bHalfPrecisionTexture"), TEXT("VelocityBlurRadius"),
+			TEXT("bEnableLocalOnlyTessellation"), TEXT("LocalTessellationExtent"),
+			TEXT("bAutoIncludeLandscapesAsTerrain"), TEXT("WaterZoneIndex"),
+			TEXT("TessellatedWaterMeshExtent"), TEXT("OwnedWaterBodies") };
+		static const TCHAR* const MeshProps[] = {
+			TEXT("TileSize"), TEXT("QuadTreeResolution"), TEXT("ExtentInTiles"),
+			TEXT("TessellationFactor"), TEXT("LODScale"), TEXT("ForceCollapseDensityLevel"),
+			TEXT("FarDistanceMaterial"), TEXT("FarDistanceMeshExtent"),
+			TEXT("bUseFarMeshWithoutOcean"), TEXT("FarDistanceMeshHeightWithoutOcean") };
+
+		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+		Row->SetStringField(TEXT("actorLabel"), Zone->GetActorLabel());
+		Row->SetStringField(TEXT("actorPath"), Zone->GetPathName());
+		Row->SetStringField(TEXT("class"), Zone->GetClass()->GetName());
+		TSharedPtr<FJsonObject> Props = MakeShared<FJsonObject>();
+		MCPWaterCopyProps(Zone, ZoneProps, Props);
+		Row->SetObjectField(TEXT("properties"), Props);
+		if (UObject* Mesh = MCPWaterObjectProp(Zone, TEXT("WaterMesh")))
+		{
+			TSharedPtr<FJsonObject> MeshRow = MakeShared<FJsonObject>();
+			MeshRow->SetStringField(TEXT("path"), Mesh->GetPathName());
+			MCPWaterCopyProps(Mesh, MeshProps, MeshRow);
+			Row->SetObjectField(TEXT("waterMesh"), MeshRow);
+		}
+		MCPWaterNoteDeprecated(Zone, Row);
+		return Row;
+	}
+
+	TSharedPtr<FJsonObject> MCPWaterDescribeBody(AActor* Actor, UActorComponent* Body)
+	{
+		static const TCHAR* const BodyProps[] = {
+			TEXT("WaterZoneOverride"), TEXT("OwningWaterZone"), TEXT("bAffectsLandscape"),
+			TEXT("OceanExtents"), TEXT("CollisionExtents"), TEXT("bCenterOnWaterZone"),
+			TEXT("ShapeDilation"), TEXT("CollisionHeightOffset"), TEXT("FixedWaterDepth"),
+			TEXT("WaterBodyIndex"), TEXT("OverlapMaterialPriority"), TEXT("TessellatedWaterMeshExtent") };
+		static const TCHAR* const MaterialProps[] = {
+			TEXT("WaterMaterial"), TEXT("WaterHLODMaterial"), TEXT("WaterStaticMeshMaterial"),
+			TEXT("WaterLODMaterial"), TEXT("UnderwaterPostProcessMaterial"), TEXT("WaterInfoMaterial") };
+
+		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+		Row->SetStringField(TEXT("actorLabel"), Actor->GetActorLabel());
+		Row->SetStringField(TEXT("actorPath"), Actor->GetPathName());
+		Row->SetStringField(TEXT("componentName"), Body->GetName());
+		Row->SetStringField(TEXT("componentClass"), Body->GetClass()->GetName());
+		TSharedPtr<FJsonObject> Props = MakeShared<FJsonObject>();
+		MCPWaterCopyProps(Body, BodyProps, Props);
+		Row->SetObjectField(TEXT("properties"), Props);
+		TSharedPtr<FJsonObject> Materials = MakeShared<FJsonObject>();
+		MCPWaterCopyProps(Body, MaterialProps, Materials);
+		Row->SetObjectField(TEXT("materials"), Materials);
+		MCPWaterNoteDeprecated(Body, Row);
+		return Row;
+	}
+}
+
+// level(get_water_state): every WaterZone and WaterBody in one structured read.
+TSharedPtr<FJsonValue> FLevelHandlers::GetWaterState(const TSharedPtr<FJsonObject>& Params)
+{
+	REQUIRE_EDITOR_WORLD(World);
+
+	UClass* ZoneClass = MCPWaterZoneClass();
+	UClass* BodyClass = LoadClass<UActorComponent>(nullptr, TEXT("/Script/Water.WaterBodyComponent"));
+	if (!ZoneClass || !BodyClass) return MCPError(TEXT("Water classes not available - enable the Water plugin"));
+
+	TArray<TSharedPtr<FJsonValue>> Zones;
+	TArray<TSharedPtr<FJsonValue>> Bodies;
+
+	FMCPActorSelector Selector;
+	Selector.bRequired = false;
+	TSharedPtr<FJsonValue> ResolveErr;
+	AActor* Named = MCPResolveActor(World, Params, ResolveErr, Selector);
+	if (ResolveErr.IsValid()) return ResolveErr;
+	if (Named)
+	{
+		if (Named->IsA(ZoneClass))
+		{
+			Zones.Add(MakeShared<FJsonValueObject>(MCPWaterDescribeZone(Named)));
+		}
+		else if (UActorComponent* Body = MCPWaterBodyComponent(Named, BodyClass))
+		{
+			Bodies.Add(MakeShared<FJsonValueObject>(MCPWaterDescribeBody(Named, Body)));
+		}
+		else
+		{
+			return MCPError(FString::Printf(
+				TEXT("Actor '%s' is neither a WaterZone nor carries a WaterBodyComponent"), *Named->GetActorLabel()));
+		}
+	}
+	else
+	{
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			AActor* Actor = *It;
+			if (!IsValid(Actor)) continue;
+			if (Actor->IsA(ZoneClass))
+			{
+				Zones.Add(MakeShared<FJsonValueObject>(MCPWaterDescribeZone(Actor)));
+			}
+			else if (UActorComponent* Body = MCPWaterBodyComponent(Actor, BodyClass))
+			{
+				Bodies.Add(MakeShared<FJsonValueObject>(MCPWaterDescribeBody(Actor, Body)));
+			}
+		}
+	}
+
+	auto Result = MCPSuccess();
+	Result->SetNumberField(TEXT("zoneCount"), Zones.Num());
+	Result->SetNumberField(TEXT("bodyCount"), Bodies.Num());
+	Result->SetArrayField(TEXT("zones"), Zones);
+	Result->SetArrayField(TEXT("bodies"), Bodies);
 	return MCPResult(Result);
 }
