@@ -1,5 +1,5 @@
 {
-  "handlerCount": 839,
+  "handlerCount": 841,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -6977,9 +6977,19 @@
         }
       ]
     },
+    "demo_cleanup": {
+      "category": "demo",
+      "params": [],
+      "contractExempt": "Takes no parameters and acts unconditionally: switches levels and deletes the demo scene"
+    },
     "demo_get_steps": {
       "category": "demo",
       "params": []
+    },
+    "demo_go_home": {
+      "category": "demo",
+      "params": [],
+      "contractExempt": "Takes no parameters and acts unconditionally: creates the home level if missing and opens it"
     },
     "demo_step": {
       "category": "demo",

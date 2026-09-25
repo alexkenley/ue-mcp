@@ -9,9 +9,19 @@ import { makeSpecBp, type HandlerSpecs } from "../../handler-spec.js";
 
 /** The recorded contract of every spec'd demo handler. */
 export const handlerSpecs: HandlerSpecs = {
+  "demo_cleanup": {
+    "category": "demo",
+    "params": [],
+    "contractExempt": "Takes no parameters and acts unconditionally: switches levels and deletes the demo scene"
+  },
   "demo_get_steps": {
     "category": "demo",
     "params": []
+  },
+  "demo_go_home": {
+    "category": "demo",
+    "params": [],
+    "contractExempt": "Takes no parameters and acts unconditionally: creates the home level if missing and opens it"
   },
   "demo_step": {
     "category": "demo",
@@ -31,7 +41,9 @@ export const handlerSpecs: HandlerSpecs = {
 
 /** The Params: clause of each spec'd bridge method. */
 export const paramsClauses: Readonly<Record<string, string>> = {
+  demo_cleanup: "Params: none",
   demo_get_steps: "Params: none",
+  demo_go_home: "Params: none",
   demo_step: "Params: step? (or stepIndex)",
 };
 
