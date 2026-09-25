@@ -68,6 +68,10 @@
 		{
 			"Name": "AnimationLocomotionLibrary",
 			"Enabled": true
+		},
+		{
+			"Name": "DynamicMaterial",
+			"Enabled": true
 		}
 	]
 }
