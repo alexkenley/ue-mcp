@@ -260,6 +260,12 @@ namespace
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FLevelHandlers::BatchSetActorProperties(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("properties"), TEXT("actorLabels"), TEXT("labelPrefix"), TEXT("labelContains"), TEXT("tag"),
+		TEXT("classFilter"), TEXT("folderPath"), TEXT("folderPathPrefix"), TEXT("matchSubclasses"), TEXT("dryRun"),
+		TEXT("force"), TEXT("transactionLabel"),
+	});
+
 	MCP_CHECK_GAME_THREAD();
 	REQUIRE_EDITOR_WORLD(World);
 
@@ -608,6 +614,12 @@ TSharedPtr<FJsonValue> FLevelHandlers::BulkSetComponentProperty(const TSharedPtr
 // ---------------------------------------------------------------------------
 TSharedPtr<FJsonValue> FLevelHandlers::RemoveComponentsByClass(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("componentClass"), TEXT("matchComponentSubclasses"), TEXT("componentNameContains"), TEXT("actorLabels"),
+		TEXT("labelPrefix"), TEXT("labelContains"), TEXT("tag"), TEXT("classFilter"), TEXT("folderPath"),
+		TEXT("folderPathPrefix"), TEXT("matchSubclasses"), TEXT("dryRun"), TEXT("save"), TEXT("transactionLabel"),
+	});
+
 	MCP_CHECK_GAME_THREAD();
 	REQUIRE_EDITOR_WORLD(World);
 
@@ -624,16 +636,8 @@ TSharedPtr<FJsonValue> FLevelHandlers::RemoveComponentsByClass(const TSharedPtr<
 
 	FMCPBatchSelector Selector;
 	if (auto Err = MCPBatchReadSelector(Params, Selector)) return Err;
-	// actorClassFilter is the name #907 asks for; classFilter is what every
-	// other level action calls it. Accept both rather than make the caller
-	// remember which action they are in.
-	const FString ActorClassFilter = OptionalString(Params, TEXT("actorClassFilter"));
-	if (!ActorClassFilter.IsEmpty() && !Selector.ActorClass && Selector.ActorClassFallback.IsEmpty())
-	{
-		Selector.ActorClass = MCPResolveClassOfType(ActorClassFilter, AActor::StaticClass(), true);
-		if (!Selector.ActorClass) Selector.ActorClassFallback = ActorClassFilter;
-		Selector.bAny = true;
-	}
+	// actorClassFilter, the name #907 asks for, is a spec alias of classFilter,
+	// which is what every other level action calls it (#1057).
 
 	// dryRun DEFAULTS TO TRUE. This deletes components whose auto-generated
 	// names a caller cannot enumerate, which means it is the one level action

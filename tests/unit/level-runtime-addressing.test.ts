@@ -3,15 +3,19 @@ import { levelTool } from "../../src/tools/level.js";
 import { editorTool } from "../../src/tools/editor.js";
 import { RECORDED_HANDLER_SPECS } from "../../src/tools/specs/index.js";
 
+// A spec'd action has no mapper and forwards its bag as sent (#1057).
+const forwarded = (action: string, params: Record<string, unknown>) =>
+  levelTool.actions[action].mapParams?.(params) ?? params;
+
 describe("runtime addressing by label and component name (#1113)", () => {
   it("get_actors_by_class forwards labelPrefix", () => {
-    const mapped = levelTool.actions.get_actors_by_class.mapParams?.({ labelPrefix: "Stash_", world: "pie" });
+    const mapped = forwarded("get_actors_by_class", { labelPrefix: "Stash_", world: "pie" });
     expect(mapped).toHaveProperty("labelPrefix", "Stash_");
     expect(mapped).toHaveProperty("world", "pie");
   });
 
   it("get_component_tree forwards componentName", () => {
-    const mapped = levelTool.actions.get_component_tree.mapParams?.({ actorLabel: "GM", componentName: "StashWorld" });
+    const mapped = forwarded("get_component_tree", { actorLabel: "GM", componentName: "StashWorld" });
     expect(mapped).toHaveProperty("componentName", "StashWorld");
   });
 

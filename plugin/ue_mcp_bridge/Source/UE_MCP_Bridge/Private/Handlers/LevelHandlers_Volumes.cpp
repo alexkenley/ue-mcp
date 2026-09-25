@@ -38,6 +38,10 @@
 
 TSharedPtr<FJsonValue> FLevelHandlers::ListVolumes(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("volumeType"), TEXT("cursor"), TEXT("limit"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 
 	FString VolumeType = OptionalString(Params, TEXT("volumeType"));
@@ -97,6 +101,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::ListVolumes(const TSharedPtr<FJsonObject>
 
 TSharedPtr<FJsonValue> FLevelHandlers::SpawnVolume(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("volumeType"), TEXT("onConflict"), TEXT("label"), TEXT("location"), TEXT("extent"), TEXT("graphPath"),
+	});
+
 	FString VolumeType;
 	if (auto Err = RequireString(Params, TEXT("volumeType"), VolumeType)) return Err;
 
@@ -223,6 +231,10 @@ TSharedPtr<FJsonValue> FLevelHandlers::SpawnVolume(const TSharedPtr<FJsonObject>
 
 TSharedPtr<FJsonValue> FLevelHandlers::SetVolumeProperties(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("properties"),
+	});
+
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 
@@ -386,11 +398,15 @@ TSharedPtr<FJsonValue> FLevelHandlers::SetVolumeProperties(const TSharedPtr<FJso
 // the native path for post-process material stacks (e.g. a toon/outline pass).
 TSharedPtr<FJsonValue> FLevelHandlers::AddPostProcessBlendable(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("actorLabel"), TEXT("actorPath"), TEXT("materialPath"), TEXT("weight"),
+	});
+
 	REQUIRE_EDITOR_WORLD(World);
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
 	FString MaterialPath;
-	if (auto Err = RequireStringAlt(Params, TEXT("materialPath"), TEXT("material"), MaterialPath)) return Err;
+	if (auto Err = RequireString(Params, TEXT("materialPath"), MaterialPath)) return Err; // material is a spec alias (#1057).
 
 	// #983: this ran its own label loop and took the first PostProcessVolume
 	// it reached, so a second volume with the same label was a coin flip over

@@ -25,6 +25,11 @@
 // That is also why each spec'd handler reads all of its parameters before
 // loading or validating anything. A handler whose contract values could reach
 // a write (an asset create, an ini write, a demo scene step) carries no spec.
+// its first load and nothing is written. The same string is an actor path that
+// names nothing, so a world handler fails at its actor lookup. That is also why
+// each spec'd handler reads all of its parameters before loading anything. A
+// handler whose values would reach a write before either failure is left
+// unspecced, with the reason at its registration.
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -54,6 +59,7 @@
 #include "Handlers/ReflectionHandlers.h"
 #include "Handlers/FoliageHandlers.h"
 #include "Handlers/LandscapeHandlers.h"
+#include "Handlers/LevelHandlers.h"
 #include "Misc/AutomationTest.h"
 
 namespace MCPHandlerSpecTests
@@ -148,6 +154,7 @@ bool FMCPHandlerSpecContractTest::RunTest(const FString& Parameters)
 	FReflectionHandlers::RegisterHandlers(Registry);
 	FFoliageHandlers::RegisterHandlers(Registry);
 	FLandscapeHandlers::RegisterHandlers(Registry);
+	FLevelHandlers::RegisterHandlers(Registry);
 
 	const TMap<FString, FMCPHandlerSpec>& Specs = Registry.GetHandlerSpecs();
 	TestTrue(TEXT("handlers register with a parameter spec"), Specs.Num() > 0);

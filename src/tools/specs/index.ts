@@ -8,10 +8,12 @@ import type { HandlerSpecs } from "../../handler-spec.js";
 import { handlerSpecs as animation } from "./animation.generated.js";
 import { handlerSpecs as foliage } from "./foliage.generated.js";
 import { handlerSpecs as landscape } from "./landscape.generated.js";
+import { handlerSpecs as level } from "./level.generated.js";
 
 /** Every recorded handler spec, across categories. */
 export const RECORDED_HANDLER_SPECS: HandlerSpecs = {
   ...animation,
   ...foliage,
   ...landscape,
+  ...level,
 };

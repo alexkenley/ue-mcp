@@ -332,6 +332,11 @@ namespace
 
 TSharedPtr<FJsonValue> FLevelHandlers::ListActorDescs(const TSharedPtr<FJsonObject>& Params)
 {
+	MCPReadParamsAhead(Params, {
+		TEXT("filter"), TEXT("className"), TEXT("guids"), TEXT("bounds"), TEXT("loadedOnly"), TEXT("unloadedOnly"),
+		TEXT("cursor"), TEXT("limit"),
+	});
+
 #if UE_MCP_HAS_ACTOR_DESC_INSTANCE_API
 	REQUIRE_EDITOR_WORLD(World);
 	TSharedPtr<FJsonValue> Err;
