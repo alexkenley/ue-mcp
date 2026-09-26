@@ -986,6 +986,274 @@ export const handlerSpecs: HandlerSpecs = {
     "params": [],
     "contractExempt": "recompiles and reloads C++ modules"
   },
+  "invoke_function": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "functionName",
+        "type": "string",
+        "required": true,
+        "description": "BlueprintCallable or Exec UFUNCTION on the actor, or on component"
+      },
+      {
+        "name": "actorLabel",
+        "type": "string",
+        "required": false,
+        "description": "Actor label. Editor labels are not unique, so a label naming several actors is refused"
+      },
+      {
+        "name": "actorPath",
+        "type": "string",
+        "required": false,
+        "description": "Full actor object path, the unambiguous selector. Wins over actorLabel"
+      },
+      {
+        "name": "component",
+        "type": "string",
+        "required": false,
+        "description": "Component subobject name to call the function on instead of the actor"
+      },
+      {
+        "name": "args",
+        "type": "any",
+        "required": false,
+        "description": "Function arguments: an object mapping parameter name to value (a struct value takes a JSON object such as {X,Y,Z} or export text), an entry list [{name, value}], or a JSON string of either",
+        "forms": [
+          "argMap",
+          "stringList",
+          "argEntryList",
+          "string"
+        ]
+      },
+      {
+        "name": "actorArgs",
+        "type": "object",
+        "required": false,
+        "description": "UObject* parameter name -> actor label, resolved against live actors in the selected world"
+      },
+      {
+        "name": "world",
+        "type": "string",
+        "required": false,
+        "description": "editor (default) | pie | auto"
+      },
+      {
+        "name": "pieInstance",
+        "type": "number",
+        "required": false,
+        "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+      },
+      {
+        "name": "deferToNextTick",
+        "type": "boolean",
+        "required": false,
+        "description": "Queue the call for the next engine tick, outside the editor script-execution guard, so a replicated UFUNCTION routes normally; return and out values are not reported"
+      }
+    ],
+    "choices": [
+      {
+        "mode": "atLeastOne",
+        "branches": [
+          [
+            "actorLabel"
+          ],
+          [
+            "actorPath"
+          ]
+        ]
+      }
+    ],
+    "contractExempt": "calls a UFUNCTION"
+  },
+  "invoke_object_function": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "functionName",
+        "type": "string",
+        "required": true,
+        "description": "UFUNCTION to call; an unknown name lists the available ones"
+      },
+      {
+        "name": "objectPath",
+        "type": "string",
+        "required": false,
+        "description": "Object path of the live instance. Wins over target"
+      },
+      {
+        "name": "target",
+        "type": "string",
+        "required": false,
+        "description": "gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem"
+      },
+      {
+        "name": "subsystemClass",
+        "type": "string",
+        "required": false,
+        "description": "Subsystem class name or /Script path, with target=subsystem"
+      },
+      {
+        "name": "playerIndex",
+        "type": "number",
+        "required": false,
+        "description": "Player index for target=playercontroller or playerpawn (default 0)"
+      },
+      {
+        "name": "args",
+        "type": "any",
+        "required": false,
+        "description": "Function arguments: an object mapping parameter name to value (a struct value takes a JSON object such as {X,Y,Z} or export text), an entry list [{name, value}], or a JSON string of either",
+        "forms": [
+          "argMap",
+          "stringList",
+          "argEntryList",
+          "string"
+        ]
+      },
+      {
+        "name": "world",
+        "type": "string",
+        "required": false,
+        "description": "World scope: editor | pie | auto. Each action names its own default"
+      },
+      {
+        "name": "pieInstance",
+        "type": "number",
+        "required": false,
+        "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+      },
+      {
+        "name": "deferToNextTick",
+        "type": "boolean",
+        "required": false,
+        "description": "Queue the call for the next engine tick, outside the editor script-execution guard, so a replicated UFUNCTION routes normally; return and out values are not reported"
+      }
+    ],
+    "contractExempt": "calls a UFUNCTION"
+  },
+  "invoke_object_functions": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "calls",
+        "type": "array",
+        "required": true,
+        "description": "1 to 64 calls, run in order in one game-thread dispatch; the first failure stops the sequence",
+        "items": "object",
+        "fields": [
+          {
+            "name": "functionName",
+            "type": "string",
+            "required": true,
+            "description": "UFUNCTION to call"
+          },
+          {
+            "name": "objectPath",
+            "type": "string",
+            "required": false,
+            "description": "Object path of the live instance. Wins over target"
+          },
+          {
+            "name": "target",
+            "type": "string",
+            "required": false,
+            "description": "gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem"
+          },
+          {
+            "name": "subsystemClass",
+            "type": "string",
+            "required": false,
+            "description": "Subsystem class name or /Script path, with target=subsystem"
+          },
+          {
+            "name": "playerIndex",
+            "type": "integer",
+            "required": false,
+            "description": "Player index for target=playercontroller or playerpawn (default 0)"
+          },
+          {
+            "name": "args",
+            "type": "any",
+            "required": false,
+            "description": "This call's arguments, in any form invoke_object_function takes",
+            "forms": [
+              "argMap",
+              "stringList",
+              "argEntryList",
+              "string"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "world",
+        "type": "string",
+        "required": false,
+        "description": "World scope: editor | pie | auto. Each action names its own default"
+      },
+      {
+        "name": "pieInstance",
+        "type": "number",
+        "required": false,
+        "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+      }
+    ],
+    "contractExempt": "calls UFUNCTIONs"
+  },
+  "invoke_static_function": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "className",
+        "type": "string",
+        "required": true,
+        "description": "UBlueprintFunctionLibrary class: a short name or a /Script/Module.Class path"
+      },
+      {
+        "name": "functionName",
+        "type": "string",
+        "required": true,
+        "description": "Static UFUNCTION on the library"
+      },
+      {
+        "name": "args",
+        "type": "any",
+        "required": false,
+        "description": "Function arguments: an object mapping parameter name to value (a struct value takes a JSON object such as {X,Y,Z} or export text), an entry list [{name, value}], or a JSON string of either",
+        "forms": [
+          "argMap",
+          "stringList",
+          "argEntryList",
+          "string"
+        ]
+      },
+      {
+        "name": "actorArgs",
+        "type": "object",
+        "required": false,
+        "description": "UObject* parameter name -> actor label, resolved against live actors in the selected world"
+      },
+      {
+        "name": "worldContextParam",
+        "type": "string",
+        "required": false,
+        "description": "UObject* parameter to fill with the selected world; detected from WorldContext metadata and for WorldContextObject when omitted"
+      },
+      {
+        "name": "world",
+        "type": "string",
+        "required": false,
+        "description": "editor (default) | pie | game | auto"
+      },
+      {
+        "name": "pieInstance",
+        "type": "number",
+        "required": false,
+        "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+      }
+    ],
+    "contractExempt": "calls a static UFUNCTION"
+  },
   "launch_standalone_game": {
     "category": "editor",
     "params": [
@@ -1557,6 +1825,63 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ],
     "contractExempt": "runs automation tests"
+  },
+  "run_python_file": {
+    "category": "editor",
+    "params": [
+      {
+        "name": "filePath",
+        "type": "string",
+        "required": true,
+        "description": "Absolute path to the .py file",
+        "aliases": [
+          "path"
+        ]
+      },
+      {
+        "name": "entryPoint",
+        "type": "string",
+        "required": false,
+        "description": "Function in the file to call after loading it under a run name other than __main__, so its main guard does not fire; its return value comes back as result"
+      },
+      {
+        "name": "args",
+        "type": "any",
+        "required": false,
+        "description": "Positional arguments, as sys.argv[1:] or, with entryPoint, the call's arguments: a list of strings, a JSON array string, or one string. A parameter map is refused",
+        "forms": [
+          "argMap",
+          "stringList",
+          "argEntryList",
+          "string"
+        ]
+      },
+      {
+        "name": "kwargs",
+        "type": "object",
+        "required": false,
+        "description": "Keyword arguments for the entryPoint call"
+      },
+      {
+        "name": "resultVariable",
+        "type": "string",
+        "required": false,
+        "description": "Top-level Python variable to return as result, separate from the log (default result with entryPoint)"
+      },
+      {
+        "name": "captureLog",
+        "type": "boolean",
+        "required": false,
+        "description": "false drops everything the script logged except its errors (default true)"
+      },
+      {
+        "name": "maxLogChars",
+        "type": "number",
+        "required": false,
+        "description": "Keep only the last N characters of logged output"
+      }
+    ],
+    "contractExempt": "runs a Python file"
   },
   "run_stat_command": {
     "category": "editor",
@@ -2508,6 +2833,10 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   get_world_state: "Params: none",
   hit_test_viewport_pixel: "Params: x, y, width?, height?, maxDistance?, ignoreActors?",
   hot_reload: "Params: none",
+  invoke_function: "Params: functionName, at least one of actorLabel/actorPath, component?, args?, actorArgs?, world?, pieInstance?, deferToNextTick?",
+  invoke_object_function: "Params: functionName, objectPath?, target?, subsystemClass?, playerIndex?, args?, world?, pieInstance?, deferToNextTick?",
+  invoke_object_functions: "Params: calls, world?, pieInstance?",
+  invoke_static_function: "Params: className, functionName, args?, actorArgs?, worldContextParam?, world?, pieInstance?",
   launch_standalone_game: "Params: mapName?, channels?, traceFile?, windowed?, resX?, resY?, extraArgs?",
   list_crashes: "Params: cursor?, limit?",
   list_dialogs: "Params: none",
@@ -2531,6 +2860,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   respond_to_dialog: "Params: at least one of buttonLabel/buttonIndex/dialogAction, items?",
   restore_runtime_visibility: "Params: rollbackToken, world?, pieInstance?",
   run_automation_tests: "Params: filter?, maxTests?, latentTimeoutSeconds?",
+  run_python_file: "Params: filePath (or path), entryPoint?, args?, kwargs?, resultVariable?, captureLog?, maxLogChars?",
   run_stat_command: "Params: command?, name?",
   save_dirty: "Params: includeMaps?, includeContent?, commitDeletes?",
   scrub_sequence: "Params: sequencePath? (or assetPath, or path), seconds?, frame?, timeUnit?",
@@ -2565,6 +2895,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
 
 /** Every key the spec'd editor handlers declare, aliases included. */
 export const schema: Record<string, z.ZodType> = {
+  actorArgs: z.record(z.unknown()).optional().describe("UObject* parameter name -> actor label, resolved against live actors in the selected world"),
   actorClass: z.string().optional().describe("Every actor of this class in the PIE world, bounded by maxTargets"),
   actorLabel: z.string().optional().describe("Actor label. Editor labels are not unique, so a label naming several actors is refused"),
   actorLabels: z.array(z.string()).optional().describe("Explicit actor labels; a label matching several actors is refused"),
@@ -2573,6 +2904,7 @@ export const schema: Record<string, z.ZodType> = {
   affectActor: z.boolean().optional().describe("Hide or show the actor itself (default true only without a component filter)"),
   affectComponents: z.boolean().optional().describe("Hide or show matched components (default true with a component filter)"),
   allViewports: z.boolean().optional().describe("Redraw every level viewport rather than one (default false)"),
+  args: z.union([z.record(z.string(), z.union([z.union([z.string(), z.number(), z.boolean(), z.null()]), z.object({}).passthrough(), z.array(z.union([z.union([z.string(), z.number(), z.boolean(), z.null()]), z.object({}).passthrough(), z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))]))])), z.array(z.string()), z.array(z.object({ name: z.string(), value: z.union([z.union([z.string(), z.number(), z.boolean(), z.null()]), z.object({}).passthrough(), z.array(z.union([z.union([z.string(), z.number(), z.boolean(), z.null()]), z.object({}).passthrough(), z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))]))]).optional() })), z.string()], { errorMap: () => ({ message: "args must be an object mapping parameter name to value (e.g. {\"bEnabled\": true}), an array of positional strings, an entry list ([{\"name\": \"bEnabled\", \"value\": true}]), or a string" }) }).optional().describe("Function arguments: an object mapping parameter name to value (a struct value takes a JSON object such as {X,Y,Z} or export text), an entry list [{name, value}], or a JSON string of either (invoke_function, invoke_object_function, invoke_static_function). Positional arguments, as sys.argv[1:] or, with entryPoint, the call's arguments: a list of strings, a JSON array string, or one string. A parameter map is refused (run_python_file)"),
   assetPath: z.string().optional().describe("Alias for sequencePath (add_sequence_section, play_sequence, render_sequence_frames, scrub_sequence, set_sequence_keyframes, set_sequence_playback_range). Level Sequence asset path (add_sequence_track, get_sequence_info). Alias for objectPath (describe_object, get_property, set_property). Asset to open in its editor (open_asset). One exact package or object path to validate (validate_assets)"),
   assetPaths: z.array(z.string()).optional().describe("Exact package or object paths to validate"),
   assetRegistryTimeoutSeconds: z.number().optional().describe("start only: how long to wait for that scan (default 180)"),
@@ -2581,16 +2913,19 @@ export const schema: Record<string, z.ZodType> = {
   bookmarkName: z.string().optional().describe("Label for the timeline marker"),
   buttonIndex: z.number().optional().describe("Index of the button to press, in the order list_dialogs reports"),
   buttonLabel: z.string().optional().describe("Label of the button to press, matched exactly first, then as a substring (respond_to_dialog). Button a matched dialog gets pressed for it, matched exactly first, then as a substring. Reaches buttons no response names, such as Don't Save (set_dialog_policy)"),
+  calls: z.array(z.object({ functionName: z.string().describe("UFUNCTION to call"), objectPath: z.string().optional().describe("Object path of the live instance. Wins over target"), target: z.string().optional().describe("gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem"), subsystemClass: z.string().optional().describe("Subsystem class name or /Script path, with target=subsystem"), playerIndex: z.number().int().optional().describe("Player index for target=playercontroller or playerpawn (default 0)"), args: z.union([z.record(z.string(), z.union([z.union([z.string(), z.number(), z.boolean(), z.null()]), z.object({}).passthrough(), z.array(z.union([z.union([z.string(), z.number(), z.boolean(), z.null()]), z.object({}).passthrough(), z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))]))])), z.array(z.string()), z.array(z.object({ name: z.string(), value: z.union([z.union([z.string(), z.number(), z.boolean(), z.null()]), z.object({}).passthrough(), z.array(z.union([z.union([z.string(), z.number(), z.boolean(), z.null()]), z.object({}).passthrough(), z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))]))]).optional() })), z.string()], { errorMap: () => ({ message: "args must be an object mapping parameter name to value (e.g. {\"bEnabled\": true}), an array of positional strings, an entry list ([{\"name\": \"bEnabled\", \"value\": true}]), or a string" }) }).optional().describe("This call's arguments, in any form invoke_object_function takes") })).optional().describe("1 to 64 calls, run in order in one game-thread dispatch; the first failure stops the sequence"),
   cameraActorLabel: z.string().optional().describe("Camera actor to bind a CameraCut section to (add_sequence_section). Camera actor to render through instead of the camera cuts (render_sequence_frames)"),
   cameraActorPath: z.string().optional().describe("Full object path of the camera actor. Wins over cameraActorLabel (add_sequence_section). Full object path of that camera actor. Wins over cameraActorLabel (render_sequence_frames)"),
   cameraSpeed: z.number().optional().describe("Viewport camera speed, greater than 0"),
+  captureLog: z.boolean().optional().describe("false drops everything the script logged except its errors (default true)"),
   category: z.string().optional().describe("Case-insensitive substring the log category must contain (get_output_log). Settings category, e.g. Engine (open_settings)"),
   channel: z.string().optional().describe("Location.X/Y/Z or Rotation.X/Y/Z (also x/y/z, yaw/pitch/roll) on a Transform track; the float channel on Fade or Float"),
   channels: z.union([z.array(z.string()), z.string()]).optional().describe("Trace channels or a preset, as an array or a comma-separated string. Passing it (or traceFile) adds -trace and -tracefile (launch_standalone_game). Trace channels or a preset, as an array or a comma-separated string (default 'default'). list_trace_channels lists what this build registers (start_insights_trace)"),
   classFilter: z.string().optional().describe("Actor or component class name substring; omit to match every actor"),
-  className: z.string().optional().describe("Class to search for: a short name, a /Script path, a generated class name (WBP_Hud_C) or a Blueprint asset path"),
+  className: z.string().optional().describe("Class to search for: a short name, a /Script path, a generated class name (WBP_Hud_C) or a Blueprint asset path (find_object). UBlueprintFunctionLibrary class: a short name or a /Script/Module.Class path (invoke_static_function)"),
   command: z.string().optional().describe("Console command to run in the editor world (execute_command). Full console command; wins over name (run_stat_command)"),
   commitDeletes: z.boolean().optional().describe("Use the editor's dirty-package save, which deletes the packages of deleted World Partition actors and reports written and deleted files (default false)"),
+  component: z.string().optional().describe("Component subobject name to call the function on instead of the actor"),
   componentClasses: z.array(z.string()).optional().describe("Only SceneComponents of these classes; implies affectComponents"),
   componentName: z.string().optional().describe("Root every path at the component with this instance name (get_runtime_values). SkeletalMeshComponent to read; omit for the first one (read_bone_transforms)"),
   componentNames: z.array(z.string()).optional().describe("Only SceneComponents with these names; implies affectComponents"),
@@ -2600,6 +2935,7 @@ export const schema: Record<string, z.ZodType> = {
   cursor: z.string().optional().describe("Resume a paged read: pass back the nextCursor from the previous page, unmodified"),
   customMode: z.number().int().optional().describe("0-255, only with mode=custom"),
   cvars: z.union([z.array(z.object({ name: z.string().describe("Console variable name"), value: z.unknown().describe("Value to set; numbers and booleans are written as text") })), z.record(z.unknown())]).optional().describe("Console variables to set, as [{name, value}] or a {name: value} object"),
+  deferToNextTick: z.boolean().optional().describe("Queue the call for the next engine tick, outside the editor script-execution guard, so a replicated UFUNCTION routes normally; return and out values are not reported"),
   description: z.string().optional().describe("Undo-stack label for the transaction (default MCP Edit)"),
   dialogAction: z.string().optional().describe("escape | close: dismiss the dialog without pressing a button, for a modal offering none that fits"),
   direction: z.string().optional().describe("undo (default) | redo"),
@@ -2611,6 +2947,7 @@ export const schema: Record<string, z.ZodType> = {
   enabledOnly: z.boolean().optional().describe("Only channels that are currently on (default false)"),
   endFrame: z.number().optional().describe("Last display frame to render, inclusive. Not with endSeconds"),
   endSeconds: z.number().optional().describe("Section end in seconds (default one second after the start) (add_sequence_section). Range end in seconds, exclusive (render_sequence_frames). Range end in seconds (set_sequence_playback_range)"),
+  entryPoint: z.string().optional().describe("Function in the file to call after loading it under a run name other than __main__, so its main guard does not fire; its return value comes back as result"),
   ev100: z.number().optional().describe("Fixed EV100 to pin the viewport to; implies fixed exposure"),
   exactClass: z.boolean().optional().describe("Match className exactly instead of including subclasses (default false)"),
   excludeTail: z.boolean().optional().describe("Drop events buffered before the trace started (default false)"),
@@ -2619,6 +2956,7 @@ export const schema: Record<string, z.ZodType> = {
   farClip: z.number().optional().describe("Far clip plane override"),
   file: z.string().optional().describe(".utrace path to write, absolute or relative (default a timestamped file under <Project>/Saved/Profiling)"),
   filename: z.string().optional().describe("Alias for outputPath (capture_scene_png). Image path to write; .png is appended without an image extension (capture_screenshot)"),
+  filePath: z.string().optional().describe("Absolute path to the .py file"),
   filter: z.string().optional().describe("Case-insensitive substring the message must contain (get_output_log). Case-insensitive substring over channel name and description (list_trace_channels). Substring of the test names to run (run_automation_tests)"),
   fixed: z.boolean().optional().describe("Use a fixed exposure rather than eye adaptation"),
   focusActorLabel: z.string().optional().describe("Frame the camera on this actor's bounds"),
@@ -2630,6 +2968,7 @@ export const schema: Record<string, z.ZodType> = {
   frame: z.number().optional().describe("Playhead position as a frame number, read in timeUnit"),
   frameStep: z.number().optional().describe("Render every Nth frame (default 1)"),
   fullyLoadTextures: z.boolean().optional().describe("Stream textures in and flush the render thread before the capture (default true) (capture_scene_png). Stream textures in before each capture (default true) (render_sequence_frames)"),
+  functionName: z.string().optional().describe("BlueprintCallable or Exec UFUNCTION on the actor, or on component (invoke_function). UFUNCTION to call; an unknown name lists the available ones (invoke_object_function). Static UFUNCTION on the library (invoke_static_function)"),
   height: z.number().optional().describe("Capture height in pixels (default 720) (capture_scene_png). Viewport height to read y against, when picking from a screenshot of another resolution (hit_test_viewport_pixel). Frame height in pixels (default 720) (render_sequence_frames)"),
   hidden: z.boolean().optional().describe("true hides the target, false shows it"),
   hitchMilliseconds: z.number().optional().describe("How long to stall the game thread (default 250, max 5000)"),
@@ -2648,6 +2987,7 @@ export const schema: Record<string, z.ZodType> = {
   invalidateHitProxies: z.boolean().optional().describe("Also invalidate hit proxies, needed before a hit test (default true)"),
   items: z.array(z.object({ index: z.number().describe("Row index from list_dialogs"), checked: z.boolean().describe("Whether the row ends up ticked") })).optional().describe("The dialog's own tickable rows to set before the button is pressed; indices come from list_dialogs, and rows left out keep their state"),
   keyframes: z.array(z.record(z.unknown())).optional().describe("Keys to add, as [{seconds, value}]"),
+  kwargs: z.record(z.unknown()).optional().describe("Keyword arguments for the entryPoint call"),
   label: z.string().optional().describe("Alias for description"),
   latentTimeoutSeconds: z.number().optional().describe("How long one test's latent command queue may take before it is reported abandoned (default 5, max 120)"),
   launchSeparateServer: z.boolean().optional().describe("Launch a separate dedicated server"),
@@ -2662,6 +3002,7 @@ export const schema: Record<string, z.ZodType> = {
   maxEntries: z.number().optional().describe("Cap on entries returned (default 50)"),
   maxFrames: z.number().optional().describe("Refuse a range with more frames than this (default 300, max 5000)"),
   maxLines: z.number().int().optional().describe("Messages to return (default 200) (get_message_log). How far back into the ring buffer to read (default 100) (get_output_log)"),
+  maxLogChars: z.number().optional().describe("Keep only the last N characters of logged output"),
   maxResults: z.number().int().optional().describe("Cap on matching lines collected out of the 4096-line ring buffer (default 4096)"),
   maxTargets: z.number().int().optional().describe("Upper bound on resolved actor and component targets; a larger set is refused rather than truncated"),
   maxTests: z.number().optional().describe("Cap on tests to run (default 50)"),
@@ -2675,14 +3016,14 @@ export const schema: Record<string, z.ZodType> = {
   newWindowHeight: z.number().optional().describe("Play-in-New-Window height"),
   newWindowWidth: z.number().optional().describe("Play-in-New-Window width"),
   numClients: z.number().optional().describe("Number of PIE clients"),
-  objectPath: z.string().optional().describe("Object, asset, class or Blueprint path. A class or Blueprint resolves to its default object (describe_object, get_property, set_property). Check one path: reports found and isValid rather than failing when it is gone. Wins over the search filters (find_object). Object path of the live instance. Wins over target (get_object_properties, set_object_property)"),
+  objectPath: z.string().optional().describe("Object, asset, class or Blueprint path. A class or Blueprint resolves to its default object (describe_object, get_property, set_property). Check one path: reports found and isValid rather than failing when it is gone. Wins over the search filters (find_object). Object path of the live instance. Wins over target (get_object_properties, invoke_object_function, set_object_property)"),
   onConflict: z.string().optional().describe("skip (default) returns an existing asset untouched, error refuses (create_level_sequence). When the level exists: skip (default) returns it untouched, error refuses (create_new_level)"),
   orthoZoom: z.number().optional().describe("Orthographic zoom, within the engine's own limits"),
   outerPath: z.string().optional().describe("Only objects somewhere under this outer, such as one level or world"),
   outputDir: z.string().optional().describe("Absolute or project-relative directory for the frames (default Saved/SequenceFrames/<sequence>)"),
   outputPath: z.string().optional().describe("Absolute or project-relative PNG path to write, e.g. Saved/Screenshots/cap.png (capture_scene_png). Alias for filename (capture_screenshot)"),
   packagePath: z.string().optional().describe("Destination folder (default /Game/Cinematics)"),
-  path: z.string().optional().describe("Alias for sequencePath (add_sequence_section, play_sequence, render_sequence_frames, scrub_sequence, set_sequence_keyframes, set_sequence_playback_range). Alias for assetPath (add_sequence_track, get_sequence_info, open_asset). Alias for objectPath (describe_object, get_property, set_property)"),
+  path: z.string().optional().describe("Alias for sequencePath (add_sequence_section, play_sequence, render_sequence_frames, scrub_sequence, set_sequence_keyframes, set_sequence_playback_range). Alias for assetPath (add_sequence_track, get_sequence_info, open_asset). Alias for objectPath (describe_object, get_property, set_property). Alias for filePath (run_python_file)"),
   paths: z.array(z.string()).optional().describe("Dotted property or function paths to evaluate per match. A function segment may carry literal arguments, e.g. GetBalance(gold, 2)"),
   pattern: z.string().optional().describe("Exact pattern of the policy to clear; omit to clear every policy (clear_dialog_policy). Substring matched against every registered console variable. Pass at least one of name, names and pattern (get_cvars). Case-insensitive substring of the library class name (list_function_libraries). Substring matched case-insensitively against the dialog title and message (set_dialog_policy)"),
   paused: z.boolean().optional().describe("true pauses the running trace, false resumes it (default true)"),
@@ -2690,7 +3031,7 @@ export const schema: Record<string, z.ZodType> = {
   pieInstance: z.number().optional().describe("PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"),
   pitch: z.number().optional().describe("Control-rotation pitch"),
   platform: z.string().optional().describe("Target platform (default Windows)"),
-  playerIndex: z.number().optional().describe("Player index for target=playercontroller or playerpawn (default 0) (get_object_properties, set_object_property). 0-based player index (default 0) (get_pie_pawn)"),
+  playerIndex: z.number().optional().describe("Player index for target=playercontroller or playerpawn (default 0) (get_object_properties, invoke_object_function, set_object_property). 0-based player index (default 0) (get_pie_pawn)"),
   postEditChange: z.boolean().optional().describe("Fire PostEditChangeProperty after the write (default false)"),
   prefix: z.string().optional().describe("Purge sys.modules entries starting with this prefix; must be non-empty"),
   projection: z.string().optional().describe("perspective | top | bottom | left | right | front | back | orthoFreelook. Switched before the pose is applied"),
@@ -2703,6 +3044,7 @@ export const schema: Record<string, z.ZodType> = {
   regionName: z.string().optional().describe("Name the bracket is keyed by; end_profile_region closes it (begin_profile_region). Name the region was opened under (end_profile_region)"),
   relativeTo: z.string().optional().describe("Bone or socket whose live frame every sample is expressed in; supersedes space"),
   response: z.string().optional().describe("yes | no | ok | cancel | retry | continue | yesall | noall. On a Slate modal it presses whichever button carries that meaning; an unknown keyword is refused"),
+  resultVariable: z.string().optional().describe("Top-level Python variable to return as result, separate from the log (default result with entryPoint)"),
   resX: z.number().optional().describe("Window width (default 1280)"),
   resY: z.number().optional().describe("Window height (default 720)"),
   roll: z.number().optional().describe("Control-rotation roll"),
@@ -2725,7 +3067,7 @@ export const schema: Record<string, z.ZodType> = {
   subsystemClass: z.string().optional().describe("Subsystem class name or /Script path, with target=subsystem"),
   sweep: z.boolean().optional().describe("Collide on the way (default false)"),
   tabId: z.string().optional().describe("Registered editor tab id, e.g. ProjectSettings, OutputLog or ContentBrowserTab1"),
-  target: z.string().optional().describe("auto (default) | pie | editor | window (capture_screenshot). gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem (get_object_properties, set_object_property)"),
+  target: z.string().optional().describe("auto (default) | pie | editor | window (capture_screenshot). gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem (get_object_properties, invoke_object_function, set_object_property)"),
   templateLevel: z.string().optional().describe("Level to copy; omit, Empty or None for a blank level"),
   timeUnit: z.string().optional().describe("How to read frame: display (default, the frame numbers Sequencer shows) | tick (the units get_sequence_info's playbackRange reports)"),
   traceFile: z.string().optional().describe(".utrace path for the standalone process to write"),
@@ -2740,7 +3082,8 @@ export const schema: Record<string, z.ZodType> = {
   waitForAssetRegistry: z.boolean().optional().describe("start only: block until the AssetRegistry initial scan completes, since PIE silently no-ops during it on a cold editor (default true)"),
   width: z.number().optional().describe("Capture width in pixels (default 1280) (capture_scene_png). Viewport width to read x against, when picking from a screenshot of another resolution (hit_test_viewport_pixel). Frame width in pixels (default 1280) (render_sequence_frames)"),
   windowed: z.boolean().optional().describe("Run windowed rather than fullscreen (default true)"),
-  world: z.string().optional().describe("World scope: editor (default) | pie (capture_scene_png). World scope: any (default) | editor | pie (find_object). World scope: editor | pie | auto. Each action names its own default (get_object_properties, get_runtime_value, get_runtime_values, read_bone_transforms, restore_runtime_visibility, set_movement_mode, set_object_property, set_runtime_visibility, teleport_runtime_actor)"),
+  world: z.string().optional().describe("World scope: editor (default) | pie (capture_scene_png). World scope: any (default) | editor | pie (find_object). World scope: editor | pie | auto. Each action names its own default (get_object_properties, get_runtime_value, get_runtime_values, invoke_object_function, invoke_object_functions, read_bone_transforms, restore_runtime_visibility, set_movement_mode, set_object_property, set_runtime_visibility, teleport_runtime_actor). editor (default) | pie | auto (invoke_function). editor (default) | pie | game | auto (invoke_static_function)"),
+  worldContextParam: z.string().optional().describe("UObject* parameter to fill with the selected world; detected from WorldContext metadata and for WorldContextObject when omitted"),
   worldPath: z.string().optional().describe("Exact PIE UWorld path or name to capture"),
   x: z.number().optional().describe("Viewport pixel X"),
   y: z.number().optional().describe("Viewport pixel Y"),

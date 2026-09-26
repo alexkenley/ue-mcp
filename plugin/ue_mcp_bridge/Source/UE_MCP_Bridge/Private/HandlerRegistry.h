@@ -27,6 +27,24 @@ enum class EMCPParamType : uint8
 	Color,
 };
 
+/**
+ * A named shape of a value that takes one of several forms. Each form has one
+ * fixed, fully typed schema on the TS side, so a value that accepts a parameter
+ * map, an entry list or a string is declared without an untyped member (#811).
+ * Published as the name ValueFormName returns.
+ */
+enum class EMCPValueForm : uint8
+{
+	/** { name: value }, each value a scalar, a struct object, or an array of those. */
+	ArgMap,
+	/** [{ name, value? }]: the same map, written as a list of entries. */
+	ArgEntryList,
+	/** An array of strings. */
+	StringList,
+	/** One string. */
+	String,
+};
+
 /** One field of an object parameter, or of each element of an array of objects. */
 struct FMCPParamField
 {
@@ -36,6 +54,8 @@ struct FMCPParamField
 	FString Description;
 	/** Element type of an Array field. Any on every other type. */
 	EMCPParamType ItemType = EMCPParamType::Any;
+	/** The forms an Any field takes, when it takes one of several named shapes. */
+	TArray<EMCPValueForm> Forms;
 
 	FMCPParamField Items(EMCPParamType InItemType) const
 	{
@@ -43,6 +63,21 @@ struct FMCPParamField
 		Copy.ItemType = InItemType;
 		return Copy;
 	}
+
+	FMCPParamField OneOfForms(const TArray<EMCPValueForm>& InForms) const
+	{
+		FMCPParamField Copy = *this;
+		Copy.Forms = InForms;
+		return Copy;
+	}
+};
+
+/** One shape of a tagged union: the value of its tag field, and the fields that shape has. */
+struct FMCPParamVariant
+{
+	FString Tag;
+	FString Description;
+	TArray<FMCPParamField> Fields;
 };
 
 /** One declared parameter of a handler. */
@@ -64,6 +99,12 @@ struct FMCPParamSpec
 	TSharedPtr<FJsonValue> LiteralValue;
 	/** The shape of an Object parameter, or of each element of an Array of objects. */
 	TArray<FMCPParamField> Fields;
+	/** The forms an Any parameter takes, when it takes one of several named shapes. */
+	TArray<EMCPValueForm> Forms;
+	/** The field whose value selects a tagged union's variant. Set together with Variants. */
+	FString VariantKey;
+	/** The shapes of a tagged Object parameter, or of each element of a tagged Array of objects. */
+	TArray<FMCPParamVariant> Variants;
 
 	FMCPParamSpec Alias(const TCHAR* InAlias) const
 	{
@@ -120,6 +161,23 @@ struct FMCPParamSpec
 		Copy.Fields = InFields;
 		return Copy;
 	}
+
+	/** `.OneOfForms({ EMCPValueForm::ArgMap, EMCPValueForm::String })` on an Any parameter. */
+	FMCPParamSpec OneOfForms(const TArray<EMCPValueForm>& InForms) const
+	{
+		FMCPParamSpec Copy = *this;
+		Copy.Forms = InForms;
+		return Copy;
+	}
+
+	/** A tagged union: the field named Key holds a tag that picks one of InVariants. */
+	FMCPParamSpec Tagged(const TCHAR* Key, const TArray<FMCPParamVariant>& InVariants) const
+	{
+		FMCPParamSpec Copy = *this;
+		Copy.VariantKey = Key;
+		Copy.Variants = InVariants;
+		return Copy;
+	}
 };
 
 namespace MCPParam
@@ -156,6 +214,16 @@ namespace MCPParam
 		FMCPParamField Field = RequiredField(Name, Type, Description);
 		Field.bRequired = false;
 		return Field;
+	}
+
+	/** One variant of a tagged union: `MCPParam::Variant(TEXT("set"), TEXT("..."), { fields })`. */
+	inline FMCPParamVariant Variant(const TCHAR* Tag, const TCHAR* Description, const TArray<FMCPParamField>& Fields)
+	{
+		FMCPParamVariant Result;
+		Result.Tag = Tag;
+		Result.Description = Description;
+		Result.Fields = Fields;
+		return Result;
 	}
 }
 
@@ -312,9 +380,20 @@ public:
 	// every choice.
 	static FString ValidateHandlerSpec(const FMCPHandlerSpec& Spec);
 
-	// Why one parameter's nullable, union, literal or field shape does not fit
-	// its type, or empty when it does.
+	// Why one parameter's nullable, union, literal, field, form or variant shape
+	// does not fit its type, or empty when it does.
 	static FString ValidateValueShape(const FMCPParamSpec& Param);
+
+	// Why one object field does not fit its declared type, or empty when it
+	// does. Owner names what holds it, for the message.
+	static FString ValidateField(const FString& Owner, const FMCPParamField& Field);
+
+	// True for a name a spec may declare: letters, digits and underscores, not
+	// starting with a digit.
+	static bool IsParamIdentifier(const FString& Name);
+
+	// Lowercase wire name of a value form: argMap, argEntryList, stringList, string.
+	static const TCHAR* ValueFormName(EMCPValueForm Form);
 
 	// Lowercase wire name of a choice mode: exactlyOne, atLeastOne.
 	static const TCHAR* ChoiceModeName(EMCPChoiceMode Mode);

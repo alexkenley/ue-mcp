@@ -1290,6 +1290,10 @@ TSharedPtr<FJsonValue> FEditorHandlers::InvokeFunction(const TSharedPtr<FJsonObj
 	if (auto Err = RequireString(Params, TEXT("functionName"), FunctionName)) return Err;
 	FString ActorLabel;
 	if (auto Err = RequireStringAlt(Params, TEXT("actorLabel"), TEXT("actorPath"), ActorLabel)) return Err;
+	// A map, an entry list or a JSON string of either, refused before any
+	// world or actor is resolved (#811).
+	TSharedPtr<FJsonObject> ArgsMap;
+	if (auto Err = MCPReadFunctionArgs(Params, TEXT("args"), ArgsMap)) return Err;
 
 	// #778: this used GEditor->GetPIEWorldContext(), which is always the
 	// primary (server) context, so 'pieInstance' could never reach it and a
@@ -1381,9 +1385,6 @@ TSharedPtr<FJsonValue> FEditorHandlers::InvokeFunction(const TSharedPtr<FJsonObj
 		It->InitializeValue_InContainer(ParamBuf.GetData());
 	}
 
-	const TSharedPtr<FJsonObject>* ArgObj = nullptr;
-	TryGetObjectParam(Params, TEXT("args"), ArgObj);
-
 	// #383: optional actorArgs maps UObject* parameters to live actor labels in
 	// the active world. LoadObject only resolves asset paths, so any actor-to-
 	// actor RPC (Horse->ServerMount(PlayerCharacter)) previously had to be
@@ -1393,14 +1394,14 @@ TSharedPtr<FJsonValue> FEditorHandlers::InvokeFunction(const TSharedPtr<FJsonObj
 	const TSharedPtr<FJsonObject>* ActorArgObj = nullptr;
 	TryGetObjectParam(Params, TEXT("actorArgs"), ActorArgObj);
 
-	if (ArgObj && (*ArgObj).IsValid())
+	if (ArgsMap.IsValid())
 	{
 		for (TFieldIterator<FProperty> It(Func); It && (It->PropertyFlags & CPF_Parm); ++It)
 		{
 			FProperty* P = *It;
 			if (P->PropertyFlags & CPF_ReturnParm) continue;
 			if ((P->PropertyFlags & CPF_OutParm) && !(P->PropertyFlags & CPF_ReferenceParm)) continue;
-			TSharedPtr<FJsonValue> Val = (*ArgObj)->TryGetField(P->GetName());
+			TSharedPtr<FJsonValue> Val = ArgsMap->TryGetField(P->GetName());
 			if (!Val.IsValid()) continue;
 			void* PtrAddr = P->ContainerPtrToValuePtr<void>(ParamBuf.GetData());
 			FString E;
@@ -1617,6 +1618,10 @@ TSharedPtr<FJsonValue> FEditorHandlers::InvokeStaticFunction(const TSharedPtr<FJ
 	if (auto Err = RequireString(Params, TEXT("className"), ClassName)) return Err;
 	FString FunctionName;
 	if (auto Err = RequireString(Params, TEXT("functionName"), FunctionName)) return Err;
+	// A map, an entry list or a JSON string of either, refused before any
+	// world or class is resolved (#811).
+	TSharedPtr<FJsonObject> ArgsMap;
+	if (auto Err = MCPReadFunctionArgs(Params, TEXT("args"), ArgsMap)) return Err;
 
 	// #971: route through the shared resolver, so world=editor|pie|game|auto
 	// and pieInstance select here exactly as they do for invoke_function. The
@@ -1675,16 +1680,14 @@ TSharedPtr<FJsonValue> FEditorHandlers::InvokeStaticFunction(const TSharedPtr<FJ
 		}
 	};
 
-	const TSharedPtr<FJsonObject>* ArgObj = nullptr;
-	TryGetObjectParam(Params, TEXT("args"), ArgObj);
-	if (ArgObj && (*ArgObj).IsValid())
+	if (ArgsMap.IsValid())
 	{
 		for (TFieldIterator<FProperty> It(Func); It && (It->PropertyFlags & CPF_Parm); ++It)
 		{
 			FProperty* P = *It;
 			if (P->PropertyFlags & CPF_ReturnParm) continue;
 			if ((P->PropertyFlags & CPF_OutParm) && !(P->PropertyFlags & CPF_ReferenceParm)) continue;
-			TSharedPtr<FJsonValue> Val = (*ArgObj)->TryGetField(P->GetName());
+			TSharedPtr<FJsonValue> Val = ArgsMap->TryGetField(P->GetName());
 			if (!Val.IsValid()) continue;
 			void* PtrAddr = P->ContainerPtrToValuePtr<void>(ParamBuf.GetData());
 			FString E;

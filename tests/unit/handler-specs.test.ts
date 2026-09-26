@@ -18,8 +18,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { z } from "zod";
-import { renderAll, paramsClause } from "../../scripts/lib/handler-spec-gen.mjs";
+import { z as zodRuntime, type z } from "zod";
+import { renderAll, paramsClause, zodExpression } from "../../scripts/lib/handler-spec-gen.mjs";
 import { readCategory } from "../../scripts/lib/tool-source.mjs";
 import { readRegistrations } from "../../scripts/audit-handler-conventions.mjs";
 import {
@@ -36,7 +36,7 @@ import { ROUTING_PARAM_NAMES } from "../../src/routing-params.js";
 import { parseParams, actionSchema } from "../../src/action-schema.js";
 import { animationTool } from "../../src/tools/animation.js";
 import { ALL_TOOLS } from "../../src/tools.js";
-import type { ToolDef } from "../../src/types.js";
+import type { ActionSpec, ToolDef } from "../../src/types.js";
 import { schema as specSchema, handlerSpecs } from "../../src/tools/specs/animation.generated.js";
 import { RECORDED_HANDLER_SPECS } from "../../src/tools/specs/index.js";
 import { deployedPlugin, checkBridgeParity } from "../../src/bridge-parity.js";
@@ -48,11 +48,25 @@ const SNAPSHOT = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "golden", "
   handlers: HandlerSpecs;
 };
 
-/** Actions of a tool that dispatch to a spec'd bridge method. */
+/**
+ * The one documented passthrough (#1057). Every generated `epic_*` action
+ * dispatches to `epic_call_tool` through `epicToolCall`, which assembles the
+ * bag epic_call_tool's spec declares (toolset, tool, input or inputJson) from
+ * the wrapped tool's recorded Epic input schema. That schema is the action's
+ * parameter contract, carried on the action as `epicSchema` (#1175); the spec
+ * is the contract of the bag it builds. Recognized narrowly: the method, the
+ * name, the schema and the mapper all have to be there.
+ */
+function isEpicPassthrough(name: string, spec: ActionSpec): boolean {
+  return spec.kind === "bridge" && spec.bridge === "epic_call_tool" && name.startsWith("epic_")
+    && spec.epicSchema !== undefined && typeof spec.mapParams === "function";
+}
+
+/** Actions of a tool that dispatch to a spec'd bridge method, the Epic passthrough aside. */
 function specdActions(tool: ToolDef = animationTool): Array<[string, { bridge: string; description: string; mapParams?: unknown }]> {
   const out: Array<[string, { bridge: string; description: string; mapParams?: unknown }]> = [];
   for (const [name, spec] of Object.entries(tool.actions)) {
-    if (spec.kind === "bridge" && SNAPSHOT.handlers[spec.bridge]) {
+    if (spec.kind === "bridge" && SNAPSHOT.handlers[spec.bridge] && !isEpicPassthrough(name, spec)) {
       out.push([name, { bridge: spec.bridge, description: spec.description ?? "", mapParams: spec.mapParams }]);
     }
   }
@@ -117,6 +131,62 @@ describe("the recording", () => {
     expect(specProblems(twice).join("\n")).toContain("declared twice");
     const items: HandlerSpecs = { probe: { params: [{ name: "a", type: "string", required: false, description: "", items: "number" }] } };
     expect(specProblems(items).join("\n")).toContain("items on a non-array");
+  });
+
+  it("refuses a malformed value form or tagged union", () => {
+    const one = (param: Partial<ParamSpec>): string =>
+      specProblems({ probe: { params: [{ name: "v", type: "any", required: false, description: "", ...param } as ParamSpec] } }).join("\n");
+    expect(one({ forms: ["argMap", "string"] })).toBe("");
+    expect(one({ type: "object", forms: ["argMap"] })).toContain("not of type any");
+    expect(one({ forms: ["argMap", "argMap"] })).toContain("listed twice");
+    expect(one({ forms: ["nope" as never] })).toContain("unknown form");
+    const variants = [
+      { tag: "set", description: "", fields: [{ name: "frame", type: "integer" as const, required: true, description: "" }] },
+      { tag: "clear", description: "", fields: [] },
+    ];
+    expect(one({ type: "array", items: "object", oneOf: { key: "op", variants } })).toBe("");
+    expect(one({ type: "object", oneOf: { key: "op", variants } })).toBe("");
+    expect(one({ type: "string", oneOf: { key: "op", variants } })).toContain("tagged union on something");
+    expect(one({ type: "object", oneOf: { key: "op", variants: [variants[0]] } })).toContain("fewer than two variants");
+    expect(one({ type: "object", oneOf: { key: "op", variants: [variants[0], variants[0]] } })).toContain("declared twice");
+    expect(one({
+      type: "object",
+      oneOf: { key: "op", variants: [variants[1], { tag: "set", description: "", fields: [{ name: "op", type: "string", required: true, description: "" }] }] },
+    })).toContain("named after its tag");
+  });
+
+  it("generates the same schema for a value form or tagged union as it builds at runtime", () => {
+    const variants = [
+      { tag: "set", description: "Set it", fields: [
+        { name: "frame", type: "integer" as const, required: true, description: "" },
+        { name: "at", type: "vec3" as const, required: false, description: "" },
+      ] },
+      { tag: "clear", description: "Clear it", fields: [{ name: "args", type: "any" as const, required: false, description: "", forms: ["argMap" as const, "argEntryList" as const] }] },
+    ];
+    const params: ParamSpec[] = [
+      { name: "args", type: "any", required: false, description: "", forms: ["argMap", "stringList", "argEntryList", "string"] },
+      { name: "text", type: "any", required: false, description: "", forms: ["string"] },
+      { name: "operations", type: "array", items: "object", required: false, description: "", oneOf: { key: "op", variants } },
+      { name: "operation", type: "object", required: false, description: "", oneOf: { key: "op", variants } },
+    ];
+    for (const param of params) {
+      const generated = new Function("z", `return ${zodExpression(param)}`)(zodRuntime) as z.ZodTypeAny;
+      expect(zodSignature(generated), param.name).toBe(zodSignature(paramZod(param)));
+    }
+
+    const args = paramZod(params[0]);
+    for (const accepted of [{ bEnabled: true }, { Loc: { x: 1 } }, { Rows: [[1, 2]] }, ["one"], [{ name: "bEnabled", value: 1 }], '{"a":1}']) {
+      expect(args.safeParse(accepted).success, JSON.stringify(accepted)).toBe(true);
+    }
+    const refused = args.safeParse(42);
+    expect(refused.success).toBe(false);
+    if (!refused.success) expect(refused.error.issues[0].message).toContain("parameter name to value");
+
+    const operations = paramZod(params[2]);
+    expect(operations.safeParse([{ op: "set", frame: 1 }, { op: "clear" }]).success).toBe(true);
+    expect(operations.safeParse([{ op: "set" }]).success, "a variant's required field").toBe(false);
+    expect(operations.safeParse([{ op: "nope" }]).success, "an unknown tag").toBe(false);
+    expect(operations.safeParse([{ op: "clear", frame: 1 }]).success, "another variant's field").toBe(false);
   });
 
   it("refuses one category key declared with two types", () => {
@@ -355,6 +425,45 @@ describe.each(SPEC_TOOLS)("the %s tool", (toolName) => {
   });
 });
 
+
+describe("the Epic passthrough", () => {
+  const passthroughs = ALL_TOOLS.flatMap((t) =>
+    Object.entries(t.actions).filter(([name, spec]) => isEpicPassthrough(name, spec)).map(([name, spec]) => [`${t.name}.${name}`, spec] as const));
+  const declared = new Set(SNAPSHOT.handlers.epic_call_tool.params.map((p) => p.name));
+
+  it("is the only other way an action reaches epic_call_tool", () => {
+    expect(passthroughs.length).toBeGreaterThan(100);
+    const direct = ALL_TOOLS.flatMap((t) => Object.entries(t.actions)
+      .filter(([name, spec]) => spec.kind === "bridge" && spec.bridge === "epic_call_tool" && !isEpicPassthrough(name, spec))
+      .map(([name]) => `${t.name}.${name}`));
+    expect(direct).toEqual(["epic.call_tool"]);
+  });
+
+  it("builds exactly the bag epic_call_tool declares, from each wrapped tool's own schema", () => {
+    for (const [name, spec] of passthroughs) {
+      if (spec.kind !== "bridge") continue;
+      const schema = spec.epicSchema!;
+      const bag: Record<string, unknown> = {};
+      for (const [key, prop] of Object.entries(schema.properties ?? {})) {
+        const type = (prop as { type?: string }).type;
+        bag[key] = type === "number" || type === "integer" ? 1 : type === "boolean" ? true : type === "array" ? [] : type === "object" ? {} : "x";
+      }
+      const sent = spec.mapParams!(bag);
+      expect(typeof sent.toolset, name).toBe("string");
+      expect(typeof sent.tool, name).toBe("string");
+      for (const key of Object.keys(sent)) expect(declared.has(key), `${name} sends ${key}`).toBe(true);
+    }
+  });
+});
+
+describe("hand-written parameter contracts", () => {
+  it("are gone: every bridge action is spec'd or is the Epic passthrough", () => {
+    const hand = ALL_TOOLS.flatMap((t) => Object.entries(t.actions)
+      .filter(([name, spec]) => spec.kind === "bridge" && !SNAPSHOT.handlers[spec.bridge] && !isEpicPassthrough(name, spec))
+      .map(([name, spec]) => `${t.name}.${name} -> ${spec.kind === "bridge" ? spec.bridge : ""}`));
+    expect(hand).toEqual([]);
+  });
+});
 
 describe("drift against a connected editor", () => {
   const recorded: HandlerSpecs = {

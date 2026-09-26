@@ -379,50 +379,58 @@ describe("animation Control Rig edit workflow", () => {
       },
     ]).success).toBe(true);
 
+    // What the spec's shapes refuse before anything is sent: an unknown op, a
+    // missing or mistyped field, and a field that belongs to another op.
     const completeTransform = {
       translation: { x: 0, y: 0, z: 0 },
       rotationDegrees: { pitch: 0, yaw: 0, roll: 0 },
       scale: { x: 1, y: 1, z: 1 },
     };
-    expect(operations.safeParse([{ op: "set", control: "root_ctrl", transform: completeTransform }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "set", control: "root_ctrl", frame: 0, frames: [0], transform: completeTransform }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "offset", control: "root_ctrl", startFrame: 10, endFrame: 2, translationCm: { x: 1, y: 0, z: 0 } }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "offset", control: "root_ctrl", startFrame: 0, endFrame: 2 }]).success).toBe(false);
     const contactTarget = { translation: { x: 0, y: 0, z: 0 } };
-    expect(operations.safeParse([{ op: "contact_lock", control: "foot_ik", startFrame: 0, endFrame: 4 }]).success).toBe(false);
+    expect(operations.safeParse([{ op: "rotate", control: "root_ctrl", frame: 0 }]).success).toBe(false);
+    expect(operations.safeParse([{ op: "set", frame: 0, transform: completeTransform }]).success).toBe(false);
+    expect(operations.safeParse([{ op: "set", control: "root_ctrl", frame: 0 }]).success).toBe(false);
+    expect(operations.safeParse([{ op: "set", control: "root_ctrl", frame: 0, transform: completeTransform, startFrame: 0 }]).success).toBe(false);
+    expect(operations.safeParse([{ op: "contact_lock", control: "foot_ik", startFrame: 0, endFrame: 4, target: contactTarget, space: "local" }]).success).toBe(false);
+    expect(operations.safeParse([{ op: "offset", control: "root_ctrl", startFrame: 0.5, endFrame: 2, translationCm: { x: 1, y: 0, z: 0 } }]).success).toBe(false);
+    expect(operations.safeParse([{ op: "set_bool", control: "arm_r_fk_ik_switch", frame: 0, value: 1 }]).success).toBe(false);
+    expect(operations.safeParse([{ op: "set_int", control: "space", frame: 0, value: 1.5 }]).success).toBe(false);
+    expect(operations.safeParse([{ op: "propagate_pose", control: "finger_ctrl" }]).success).toBe(false);
+    expect(animationTool.schema.createLink.safeParse(true).success).toBe(false);
     expect(operations.safeParse([{ op: "contact_lock", control: "hand_l_ik", startFrame: 0, endFrame: 4, targetReference: "hand_r" }]).success).toBe(true);
     expect(operations.safeParse([{ op: "contact_lock", control: "hand_l_ik", startFrame: 0, endFrame: 4, targetReference: "hand_r", target: contactTarget }]).success).toBe(true);
-    expect(operations.safeParse([{ op: "contact_lock", control: "foot_ik", startFrame: 10, endFrame: 2, target: contactTarget }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "contact_lock", control: "foot_ik", startFrame: 0, endFrame: 4, target: contactTarget, blendInFrames: 3, blendOutFrames: 2 }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "contact_lock", control: "foot_ik", startFrame: 0, endFrame: 4, target: contactTarget, stabilizeControls: ["pole", "POLE"] }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "contact_lock", control: "foot_ik", startFrame: 0, endFrame: 4, target: contactTarget, stabilizeControls: ["FOOT_IK"] }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "contact_lock", control: "foot_ik", startFrame: 0, endFrame: 50_000, target: contactTarget, stabilizeControls: ["pole"] }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "contact_lock", control: "foot_ik", startFrame: 0, endFrame: 4, target: { ...contactTarget, rotationQuaternion: { x: 0, y: 0, z: 0, w: 2 } } }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "contact_lock", control: "foot_ik", startFrame: 0, endFrame: 4, target: { ...contactTarget, scale: { x: 1, y: 1, z: 1 } } }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "contact_lock", control: "foot_ik", startFrame: 0, endFrame: 4, target: contactTarget, positionToleranceCm: 0 }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "set_bool", control: "arm_r_fk_ik_switch", frame: 0, value: 1 }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "set_bool", control: "arm_r_fk_ik_switch", frame: 0, frames: [0], value: true }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "set_float", control: "blend", frame: 0, value: Number.POSITIVE_INFINITY }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "set_int", control: "space", frame: 0, value: 1.5 }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "set_int", control: "space", frame: 0, frames: [0], value: 1 }]).success).toBe(false);
-    expect(animationTool.schema.createLink.safeParse(true).success).toBe(false);
-    const quaternionTransform = {
-      translation: { x: 0, y: 0, z: 0 },
-      rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 },
-      scale: { x: 1, y: 1, z: 1 },
-    };
-    expect(operations.safeParse([{ op: "set_keys", control: "hand_r_ik_ctrl", keys: [
-      { frame: 2, transform: quaternionTransform },
-      { frame: 2, transform: quaternionTransform },
-    ] }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "set_keys", control: "hand_r_ik_ctrl", keys: [{
-      frame: 2,
-      transform: { ...quaternionTransform, rotationQuaternion: { x: 0, y: 0, z: 0, w: 2 } },
-    }] }]).success).toBe(false);
-    expect(operations.safeParse([{ op: "set_keys", control: "hand_r_ik_ctrl", keys: [{
-      frame: 2,
-      transform: { translation: { x: 0, y: 0, z: 0 }, rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } },
-    }] }]).success).toBe(false);
+
+    // The rules between fields are the handler's (#1057): the spec declares
+    // each op's fields, and the handler refuses what the fields cannot say
+    // before it samples or keys anything.
+    const source = readFileSync(
+      new URL(
+        "../../plugin/ue_mcp_bridge/Source/UE_MCP_Bridge/Private/Handlers/AnimationHandlers_ControlRigSequencer.cpp",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    for (const refusal of [
+      "requires exactly one of frame or frames",
+      "Specify 'frame' or a non-empty 'frames' array",
+      "endFrame must be at least startFrame",
+      "Transform must specify translation, rotation/rotationDegrees, or scale",
+      "blendInFrames and blendOutFrames must be non-negative",
+      "requires target or targetReference",
+      "blends must leave at least one fully constrained frame",
+      "stabilizers must be unique and cannot include the driver control",
+      "supports at most 8 stabilizer controls",
+      "contact control-frame cells",
+      "must be normalized within",
+      "target must contain translation and optional rotationQuaternion only",
+      "must be a positive finite number",
+      "value must be a finite number",
+      "value must be a 32-bit integer",
+      "keys frames must be strictly increasing and unique",
+      "transform must contain exactly translation, rotationQuaternion and scale",
+    ]) {
+      expect(source, refusal).toContain(refusal);
+    }
     expect(animationTool.schema.rigMode.safeParse("fk").success).toBe(true);
     expect(animationTool.schema.rigMode.safeParse("asset").success).toBe(true);
     // begin_control_rig_edit refuses a third mode and names both it takes. The
@@ -474,10 +482,7 @@ describe("animation Control Rig edit workflow", () => {
       controls: [{ control: "finger_ctrl", mode: "fixed", donorFrames: [0, 12, 24] }],
     };
     expect(animationTool.schema.operations.safeParse([operation]).success).toBe(true);
-    expect(animationTool.schema.operations.safeParse([{ ...operation, baseline: { ...snapshot, currentFrame: Number.NaN } }]).success).toBe(false);
     expect(animationTool.schema.operations.safeParse([{ ...operation, accepted: { ...operation.accepted, bindingGuid: "other" } }]).success).toBe(true);
-    expect(animationTool.schema.operations.safeParse([{ ...operation, controls: [{ ...operation.controls[0], donorFrames: [12, 12] }] }]).success).toBe(false);
-    expect(animationTool.schema.operations.safeParse([{ ...operation, controls: [operation.controls[0], operation.controls[0]] }]).success).toBe(false);
 
     const source = readFileSync(
       new URL(
@@ -486,6 +491,12 @@ describe("animation Control Rig edit workflow", () => {
       ),
       "utf8",
     );
+    // A snapshot is an object the handler reads field by field, and the
+    // rules over its contents and the donor frames are the handler's (#1057).
+    expect(animationTool.schema.operations.safeParse([{ ...operation, baseline: undefined }]).success).toBe(false);
+    expect(source).toContain("Snapshot frame identity must contain finite currentFrame and currentSubFrame values");
+    expect(source).toContain("donorFrames must be strictly increasing within");
+    expect(source).toContain("contains duplicate propagation control");
     expect(source).toContain("Baseline.ControlRigObjectId != Session.ControlRig->GetUniqueID()");
     expect(source).toContain("BaselineValue->ValueType != ExpectedValueType");
     expect(source).toContain("Snapshot selection is provenance metadata");
@@ -497,9 +508,9 @@ describe("animation Control Rig edit workflow", () => {
     const call = vi.fn().mockResolvedValue({ success: true });
     const ctx = { bridge: { call } } as unknown as ToolContext;
 
-    // Spec'd (#1057): begin, read and capture forward the bag as sent, and the
-    // spec is the contract. apply stays hand-authored and maps its own keys.
-    for (const action of ["begin_control_rig_edit", "read_control_rig_edit", "capture_control_rig_pose"] as const) {
+    // Spec'd (#1057): begin, read, capture and apply forward the bag as sent,
+    // and the spec is the contract.
+    for (const action of ["begin_control_rig_edit", "read_control_rig_edit", "capture_control_rig_pose", "apply_control_rig_edits"] as const) {
       expect(animationTool.actions[action].mapParams, action).toBeUndefined();
     }
     expect(handlerSpecs.begin_control_rig_edit.params.map((p) => p.name)).toEqual([
@@ -511,6 +522,12 @@ describe("animation Control Rig edit workflow", () => {
     ]);
     expect(handlerSpecs.capture_control_rig_pose.params.map((p) => p.name)).toEqual([
       "sequencePath", "bindingTag", "controlNames",
+    ]);
+    expect(handlerSpecs.apply_control_rig_edits.params.map((p) => p.name)).toEqual([
+      "sequencePath", "bindingTag", "operations",
+    ]);
+    expect(handlerSpecs.apply_control_rig_edits.params[2].oneOf?.variants.map((v) => v.tag)).toEqual([
+      "set", "set_keys", "offset", "contact_lock", "set_bool", "set_float", "set_int", "propagate_pose",
     ]);
 
     const begin = {
@@ -563,7 +580,6 @@ describe("animation Control Rig edit workflow", () => {
       sequencePath: "/Game/MCP/LS_Wave_Edit",
       bindingTag: "mcp.manny.wave",
       operations,
-      frames: [999],
     });
     expect(call).toHaveBeenLastCalledWith("apply_control_rig_edits", {
       sequencePath: "/Game/MCP/LS_Wave_Edit",

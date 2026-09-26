@@ -413,8 +413,13 @@ void FEpicHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("epic_describe_toolset"), &DescribeToolset, {
 		MCPParam::Required(TEXT("toolset"), EType::String, TEXT("Qualified toolset name from epic_list_toolsets, e.g. GASToolsets.AttributeSetToolset")),
 	});
-	// Unspecced: every generated epic_* action in every category dispatches
-	// here and builds this bag in its own mapParams from the wrapped tool's
-	// schema, so a spec would have to replace all of them.
-	Registry.RegisterHandler(TEXT("epic_call_tool"), &CallTool);
+	// The dispatcher every wrapped engine tool goes through. Its own contract is
+	// this bag; each generated epic_* action builds it from the wrapped tool's
+	// recorded input schema, which is that action's contract (#1057).
+	Registry.RegisterHandler(TEXT("epic_call_tool"), &CallTool, {
+		MCPParam::Required(TEXT("toolset"), EType::String, TEXT("Qualified toolset name from epic_list_toolsets, e.g. GASToolsets.AttributeSetToolset")),
+		MCPParam::Required(TEXT("tool"), EType::String, TEXT("Tool name from describe_toolset, bare or qualified with its toolset")),
+		MCPParam::Optional(TEXT("input"), EType::Object, TEXT("Tool arguments as a JSON object")),
+		MCPParam::Optional(TEXT("inputJson"), EType::String, TEXT("Tool arguments as a raw JSON string; wins over input")),
+	}, MCPSpec::ContractExempt(TEXT("runs a registered engine tool")));
 }

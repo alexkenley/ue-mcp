@@ -21,6 +21,15 @@ import { ROUTING_PARAM_NAMES } from "./routing-params.js";
 export const PARAM_TYPES = ["string", "number", "integer", "boolean", "object", "array", "vec3", "rotator", "color", "any"] as const;
 export type ParamType = (typeof PARAM_TYPES)[number];
 
+/**
+ * Named value shapes a multi-form value can take. Mirrors EMCPValueForm. Each
+ * has one fixed, fully typed schema, so a value accepting several of them is
+ * advertised without an untyped member a client could read as "nothing
+ * validates" (#811).
+ */
+export const VALUE_FORMS = ["argMap", "argEntryList", "stringList", "string"] as const;
+export type ValueForm = (typeof VALUE_FORMS)[number];
+
 /** One field of an object parameter, or of each element of an array of objects. */
 export interface ParamField {
   name: string;
@@ -29,6 +38,21 @@ export interface ParamField {
   description: string;
   /** Element type of an `array` field. */
   items?: ParamType;
+  /** The named shapes an `any` field takes. */
+  forms?: ValueForm[];
+}
+
+/** One shape of a tagged union: its tag value and the fields that shape has. */
+export interface ParamVariant {
+  tag: string;
+  description: string;
+  fields: ParamField[];
+}
+
+/** A tagged union: the field `key` holds a tag that picks one of `variants`. */
+export interface ParamOneOf {
+  key: string;
+  variants: ParamVariant[];
 }
 
 /** One declared parameter, as the bridge publishes it. */
@@ -49,6 +73,10 @@ export interface ParamSpec {
   literal?: boolean | string | number;
   /** The shape of an `object` parameter, or of each element of an array of objects. */
   fields?: ParamField[];
+  /** The named shapes an `any` parameter takes. */
+  forms?: ValueForm[];
+  /** The variants of a tagged `object` parameter, or of each element of a tagged array of objects. */
+  oneOf?: ParamOneOf;
 }
 
 /** How many branches of a choice a call supplies. Mirrors EMCPChoiceMode. */
@@ -151,20 +179,74 @@ function shapeProblems(method: string, param: ParamSpec): string[] {
     if (!fits) problems.push(`${at}: a literal that is not a value of its type`);
     if (orTypes.length > 0) problems.push(`${at}: both a literal and a union`);
   }
+  const objectShaped = param.type === "object" || (param.type === "array" && param.items === "object");
   if (param.fields !== undefined) {
-    const objectShaped = param.type === "object" || (param.type === "array" && param.items === "object");
     if (!objectShaped) problems.push(`${at}: fields on something that is neither an object nor an array of objects`);
-    const seen = new Set<string>();
-    for (const field of param.fields) {
-      if (typeof field.name !== "string" || !IDENTIFIER.test(field.name)) problems.push(`${at}: field '${String(field.name)}' is not an identifier`);
-      else if (seen.has(field.name)) problems.push(`${at}: field '${field.name}' is declared twice`);
-      seen.add(field.name);
-      if (!PARAM_TYPES.includes(field.type)) problems.push(`${at}.${field.name}: unknown type '${field.type}'`);
-      if (field.items !== undefined && field.type !== "array") problems.push(`${at}.${field.name}: items on a non-array`);
-      if (typeof field.required !== "boolean") problems.push(`${at}.${field.name}: required is not a boolean`);
-      if (typeof field.description !== "string") problems.push(`${at}.${field.name}: description is not a string`);
+    problems.push(...fieldListProblems(at, param.fields));
+  }
+  if (param.forms !== undefined) {
+    if (param.type !== "any") problems.push(`${at}: forms on a parameter that is not of type any; the forms are its type`);
+    if (param.literal !== undefined || param.fields !== undefined || param.oneOf !== undefined) {
+      problems.push(`${at}: forms together with a literal, fields or variants`);
+    }
+    problems.push(...formProblems(at, param.forms));
+  }
+  if (param.oneOf !== undefined) {
+    const { key, variants } = param.oneOf;
+    if (!objectShaped) problems.push(`${at}: a tagged union on something that is neither an object nor an array of objects`);
+    if (param.fields !== undefined || orTypes.length > 0 || param.literal !== undefined) {
+      problems.push(`${at}: a tagged union that also declares fields, a union or a literal`);
+    }
+    if (typeof key !== "string" || !IDENTIFIER.test(key)) problems.push(`${at}: tag field '${String(key)}' is not an identifier`);
+    if (!Array.isArray(variants) || variants.length < 2) {
+      problems.push(`${at}: a tagged union with fewer than two variants`);
+    } else {
+      const tags = new Set<string>();
+      for (const variant of variants) {
+        if (typeof variant.tag !== "string" || variant.tag === "" || tags.has(variant.tag)) {
+          problems.push(`${at}: variant tag '${String(variant.tag)}' is empty or declared twice`);
+        }
+        tags.add(variant.tag);
+        if (typeof variant.description !== "string") problems.push(`${at}[${key}=${variant.tag}]: description is not a string`);
+        if (!Array.isArray(variant.fields)) {
+          problems.push(`${at}[${key}=${variant.tag}]: fields is not an array`);
+          continue;
+        }
+        if (variant.fields.some((f) => f.name === key)) problems.push(`${at}[${key}=${variant.tag}]: a field named after its tag`);
+        problems.push(...fieldListProblems(`${at}[${key}=${variant.tag}]`, variant.fields));
+      }
     }
   }
+  return problems;
+}
+
+/** Mirrors FMCPHandlerRegistry::ValidateField, over a list that must not repeat a name. */
+function fieldListProblems(at: string, fields: readonly ParamField[]): string[] {
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  for (const field of fields) {
+    if (typeof field.name !== "string" || !IDENTIFIER.test(field.name)) problems.push(`${at}: field '${String(field.name)}' is not an identifier`);
+    else if (seen.has(field.name)) problems.push(`${at}: field '${field.name}' is declared twice`);
+    seen.add(field.name);
+    if (!PARAM_TYPES.includes(field.type)) problems.push(`${at}.${field.name}: unknown type '${field.type}'`);
+    if (field.items !== undefined && field.type !== "array") problems.push(`${at}.${field.name}: items on a non-array`);
+    if (typeof field.required !== "boolean") problems.push(`${at}.${field.name}: required is not a boolean`);
+    if (typeof field.description !== "string") problems.push(`${at}.${field.name}: description is not a string`);
+    if (field.forms !== undefined) {
+      if (field.type !== "any") problems.push(`${at}.${field.name}: forms on a field that is not of type any`);
+      problems.push(...formProblems(`${at}.${field.name}`, field.forms));
+    }
+  }
+  return problems;
+}
+
+function formProblems(at: string, forms: readonly ValueForm[]): string[] {
+  if (!Array.isArray(forms) || forms.length === 0) return [`${at}: forms is not a non-empty array`];
+  const problems: string[] = [];
+  forms.forEach((form, index) => {
+    if (!VALUE_FORMS.includes(form)) problems.push(`${at}: unknown form '${String(form)}'`);
+    else if (forms.indexOf(form) !== index) problems.push(`${at}: form '${form}' listed twice`);
+  });
   return problems;
 }
 
@@ -322,11 +404,72 @@ const ZOD_BASE: Record<ParamType, () => z.ZodTypeAny> = {
   any: () => z.unknown(),
 };
 
-function fieldsZod(fields: readonly ParamField[]): z.ZodTypeAny {
-  return z.object(Object.fromEntries(fields.map((f) => {
-    const base = f.type === "array" ? z.array(ZOD_BASE[f.items ?? "any"]()) : ZOD_BASE[f.type]();
+// The value forms, as fresh instances every time: a reused instance makes the
+// JSON Schema converter emit `$ref` pointers, which a client can fail to resolve.
+// Every member is concrete, never z.unknown(), which converts to `{}` (#811).
+const argScalar = () => z.union([z.string(), z.number(), z.boolean(), z.null()]);
+const argStruct = () => z.object({}).passthrough();
+const argValue = () => z.union([argScalar(), argStruct(), z.array(z.union([argScalar(), argStruct(), z.array(argScalar())]))]);
+
+const FORM_ZOD: Record<ValueForm, () => z.ZodTypeAny> = {
+  argMap: () => z.record(z.string(), argValue()),
+  argEntryList: () => z.array(z.object({ name: z.string(), value: argValue().optional() })),
+  stringList: () => z.array(z.string()),
+  string: () => z.string(),
+};
+
+/** How a refusal names each form, in the order the value declares them. */
+export const FORM_PHRASE: Record<ValueForm, string> = {
+  argMap: 'an object mapping parameter name to value (e.g. {"bEnabled": true})',
+  argEntryList: 'an entry list ([{"name": "bEnabled", "value": true}])',
+  stringList: "an array of positional strings",
+  string: "a string",
+};
+
+/** The message a value that fits none of its forms is refused with. */
+export function formsMessage(name: string, forms: readonly ValueForm[]): string {
+  const phrases = forms.map((f) => FORM_PHRASE[f]);
+  const listed = phrases.length === 1 ? phrases[0] : `${phrases.slice(0, -1).join(", ")}, or ${phrases[phrases.length - 1]}`;
+  return `${name} must be ${listed}`;
+}
+
+function formsZod(name: string, forms: readonly ValueForm[]): z.ZodTypeAny {
+  if (forms.length === 1) return FORM_ZOD[forms[0]]();
+  const message = formsMessage(name, forms);
+  return z.union(forms.map((f) => FORM_ZOD[f]()) as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]], {
+    errorMap: () => ({ message }),
+  });
+}
+
+function fieldZod(f: ParamField): z.ZodTypeAny {
+  if (f.forms?.length) return formsZod(f.name, f.forms);
+  return f.type === "array" ? z.array(ZOD_BASE[f.items ?? "any"]()) : ZOD_BASE[f.type]();
+}
+
+function fieldEntries(fields: readonly ParamField[]): Record<string, z.ZodTypeAny> {
+  return Object.fromEntries(fields.map((f) => {
+    const base = fieldZod(f);
     return [f.name, (f.required ? base : base.optional()).describe(f.description)];
-  })));
+  }));
+}
+
+function fieldsZod(fields: readonly ParamField[]): z.ZodTypeAny {
+  return z.object(fieldEntries(fields));
+}
+
+/**
+ * A tagged union: one strict object per variant, its tag a literal. Strict,
+ * because a variant is exactly its declared fields; a key that belongs to
+ * another variant is a mistake to refuse, not one to strip silently.
+ */
+function oneOfZod(oneOf: ParamOneOf): z.ZodTypeAny {
+  const variants = oneOf.variants.map((v) =>
+    z.object({ [oneOf.key]: z.literal(v.tag), ...fieldEntries(v.fields) }).strict().describe(v.description),
+  );
+  return z.discriminatedUnion(
+    oneOf.key,
+    variants as unknown as [z.ZodDiscriminatedUnionOption<string>, ...z.ZodDiscriminatedUnionOption<string>[]],
+  );
 }
 
 /**
@@ -337,9 +480,12 @@ function fieldsZod(fields: readonly ParamField[]): z.ZodTypeAny {
  */
 export function paramZod(param: ParamSpec): z.ZodTypeAny {
   let base: z.ZodTypeAny;
+  const element = (): z.ZodTypeAny =>
+    param.oneOf ? oneOfZod(param.oneOf) : param.fields ? fieldsZod(param.fields) : ZOD_BASE[param.items ?? "any"]();
   if (param.literal !== undefined) base = z.literal(param.literal);
-  else if (param.type === "array") base = z.array(param.fields ? fieldsZod(param.fields) : ZOD_BASE[param.items ?? "any"]());
-  else if (param.type === "object" && param.fields) base = fieldsZod(param.fields);
+  else if (param.forms?.length) base = formsZod(param.name, param.forms);
+  else if (param.type === "array") base = z.array(element());
+  else if (param.type === "object" && (param.fields || param.oneOf)) base = element();
   else base = ZOD_BASE[param.type]();
   if (param.orTypes?.length) {
     base = z.union([base, ...param.orTypes.map((t) => ZOD_BASE[t]())] as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
@@ -377,6 +523,12 @@ export function zodSignature(schema: z.ZodTypeAny): string {
     }
     case "ZodUnion":
       return (schema as z.ZodUnion<[z.ZodTypeAny, ...z.ZodTypeAny[]]>).options.map(zodSignature).join("|");
+    case "ZodDiscriminatedUnion": {
+      const tagged = schema as z.ZodDiscriminatedUnion<string, z.ZodDiscriminatedUnionOption<string>[]>;
+      return `oneOf<${tagged.discriminator}>(${tagged.options.map((o) => zodSignature(o)).join("|")})`;
+    }
+    case "ZodNull":
+      return "null";
     case "ZodLiteral":
       return `literal<${JSON.stringify((schema as z.ZodLiteral<unknown>).value)}>`;
     default:
@@ -392,13 +544,19 @@ export interface HandlerSpecDrift {
   drifted: string[];
 }
 
+function canonicalField(f: ParamField): unknown[] {
+  return [f.name, f.type, f.required, f.description, f.items ?? null, [...(f.forms ?? [])]];
+}
+
 function canonical(spec: HandlerSpec | undefined): string {
   if (!spec) return "";
   return JSON.stringify([
     spec.params.map((p) => [
       p.name, p.type, p.required, p.description, [...(p.aliases ?? [])], p.items ?? null,
       p.nullable ?? false, [...(p.orTypes ?? [])], p.literal ?? null,
-      (p.fields ?? []).map((f) => [f.name, f.type, f.required, f.description, f.items ?? null]),
+      (p.fields ?? []).map(canonicalField),
+      [...(p.forms ?? [])],
+      p.oneOf ? [p.oneOf.key, p.oneOf.variants.map((v) => [v.tag, v.description, v.fields.map(canonicalField)])] : null,
     ]),
     (spec.choices ?? []).map((c) => [c.mode, c.branches]),
     spec.contractExempt ?? null,

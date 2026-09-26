@@ -16,7 +16,7 @@
  * actions) from the declared schema `describe_action` reports. The notation is
  * explained once, by SIGNATURE_LEGEND, in the server instructions.
  */
-import type { ParamChoice, ParamSpec, ParamType } from "./handler-spec.js";
+import type { ParamChoice, ParamSpec, ParamType, ValueForm } from "./handler-spec.js";
 import { clauseItems } from "./handler-spec.js";
 import { actionSchema, ROUTING_PARAMS } from "./action-schema.js";
 import type { EpicInputSchema } from "./epic-input.js";
@@ -27,7 +27,8 @@ export const SIGNATURE_LEGEND =
   "Signatures read action(param, ...). Suffix ? = optional. a|b = one parameter, b an accepted alias. " +
   "one(a; b+c) = give exactly one group, any(a; b) = at least one. " +
   "Type after a colon, none = string: s string, n number, i integer, b boolean, o object, v {x,y,z}, " +
-  "r {pitch,yaw,roll}, c {r,g,b,a?}, ref asset path or {refPath}, * any JSON, [t] array of t, t/u either, =x only x. " +
+  "r {pitch,yaw,roll}, c {r,g,b,a?}, ref asset path or {refPath}, * any JSON, [t] array of t, t/u either, =x only x, " +
+  "o<k> object whose field k picks its shape (describe_action lists them). " +
   "+N = N more optional params.";
 
 /** One parameter as a signature writes it. */
@@ -62,14 +63,24 @@ function explicit(code: string): string {
   return code === "" ? "s" : code;
 }
 
+/** Each value form as the type codes already say it. */
+const FORM_TYPE: Record<ValueForm, string> = {
+  argMap: "o",
+  argEntryList: "[o]",
+  stringList: "[s]",
+  string: "s",
+};
+
 function specType(param: ParamSpec): string {
   if (param.literal !== undefined) return `=${typeof param.literal === "string" ? param.literal : JSON.stringify(param.literal)}`;
+  if (param.forms?.length) return param.forms.length === 1 && param.forms[0] === "string" ? "" : param.forms.map((f) => FORM_TYPE[f]).join("/");
+  const tagged = param.oneOf ? `o<${param.oneOf.key}>` : undefined;
   let base: string;
   if (param.type === "array") {
-    const item = param.fields ? "o" : param.items ? explicit(SPEC_TYPE[param.items]) : "*";
+    const item = tagged ?? (param.fields ? "o" : param.items ? explicit(SPEC_TYPE[param.items]) : "*");
     base = `[${item}]`;
   } else {
-    base = SPEC_TYPE[param.type];
+    base = tagged && param.type === "object" ? tagged : SPEC_TYPE[param.type];
   }
   if (param.orTypes?.length) base = [explicit(base), ...param.orTypes.map((t) => explicit(SPEC_TYPE[t]))].join("/");
   return base;

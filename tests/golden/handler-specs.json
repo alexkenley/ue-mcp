@@ -1,5 +1,5 @@
 {
-  "handlerCount": 1073,
+  "handlerCount": 1080,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -3780,6 +3780,348 @@
           "type": "object",
           "required": false,
           "description": "EditAnywhere property values to set on the modifier before it runs"
+        }
+      ]
+    },
+    "apply_control_rig_edits": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "sequencePath",
+          "type": "string",
+          "required": true,
+          "description": "LevelSequence holding the Control Rig edit session"
+        },
+        {
+          "name": "bindingTag",
+          "type": "string",
+          "required": true,
+          "description": "Edit-session natural key from begin_control_rig_edit"
+        },
+        {
+          "name": "operations",
+          "type": "array",
+          "required": true,
+          "description": "Typed edits applied in one transaction, in order",
+          "items": "object",
+          "oneOf": {
+            "key": "op",
+            "variants": [
+              {
+                "tag": "set",
+                "description": "Write one full absolute transform at frame or frames",
+                "fields": [
+                  {
+                    "name": "control",
+                    "type": "string",
+                    "required": true,
+                    "description": "Control name on the session's rig"
+                  },
+                  {
+                    "name": "frame",
+                    "type": "integer",
+                    "required": false,
+                    "description": "One frame to key; pass exactly one of frame and frames"
+                  },
+                  {
+                    "name": "frames",
+                    "type": "array",
+                    "required": false,
+                    "description": "Frames to key; pass exactly one of frame and frames",
+                    "items": "integer"
+                  },
+                  {
+                    "name": "transform",
+                    "type": "object",
+                    "required": true,
+                    "description": "{translation {x,y,z}, rotationDegrees {pitch,yaw,roll}, scale {x,y,z}}"
+                  },
+                  {
+                    "name": "space",
+                    "type": "string",
+                    "required": false,
+                    "description": "local (default) | component | global, where global is an alias for component"
+                  }
+                ]
+              },
+              {
+                "tag": "set_keys",
+                "description": "Write strictly ordered full per-frame transforms from normalized quaternions",
+                "fields": [
+                  {
+                    "name": "control",
+                    "type": "string",
+                    "required": true,
+                    "description": "Control name on the session's rig"
+                  },
+                  {
+                    "name": "keys",
+                    "type": "array",
+                    "required": true,
+                    "description": "[{frame, transform {translation {x,y,z}, rotationQuaternion {x,y,z,w}, scale {x,y,z}}}], frames strictly increasing",
+                    "items": "object"
+                  },
+                  {
+                    "name": "space",
+                    "type": "string",
+                    "required": false,
+                    "description": "local (default) | component | global, where global is an alias for component"
+                  }
+                ]
+              },
+              {
+                "tag": "offset",
+                "description": "Apply translation, rotation or scale deltas across an inclusive frame range",
+                "fields": [
+                  {
+                    "name": "control",
+                    "type": "string",
+                    "required": true,
+                    "description": "Control name on the session's rig"
+                  },
+                  {
+                    "name": "startFrame",
+                    "type": "integer",
+                    "required": true,
+                    "description": "First frame of the range"
+                  },
+                  {
+                    "name": "endFrame",
+                    "type": "integer",
+                    "required": true,
+                    "description": "Last frame of the range, at or after startFrame"
+                  },
+                  {
+                    "name": "translationCm",
+                    "type": "vec3",
+                    "required": false,
+                    "description": "Translation delta in centimetres"
+                  },
+                  {
+                    "name": "rotationDegrees",
+                    "type": "rotator",
+                    "required": false,
+                    "description": "Rotation delta in degrees"
+                  },
+                  {
+                    "name": "scaleMultiplier",
+                    "type": "vec3",
+                    "required": false,
+                    "description": "Scale multiplier; one of translationCm, rotationDegrees and scaleMultiplier is required"
+                  },
+                  {
+                    "name": "space",
+                    "type": "string",
+                    "required": false,
+                    "description": "local (default) | component | global, where global is an alias for component"
+                  },
+                  {
+                    "name": "blendInFrames",
+                    "type": "integer",
+                    "required": false,
+                    "description": "Frames to ease in over, from 0 (default 0)"
+                  },
+                  {
+                    "name": "blendOutFrames",
+                    "type": "integer",
+                    "required": false,
+                    "description": "Frames to ease out over, from 0 (default 0)"
+                  }
+                ]
+              },
+              {
+                "tag": "contact_lock",
+                "description": "Constrain a translatable driver control, or a driven bone or socket, to a fixed component-space target",
+                "fields": [
+                  {
+                    "name": "control",
+                    "type": "string",
+                    "required": true,
+                    "description": "Control name on the session's rig"
+                  },
+                  {
+                    "name": "drivenReference",
+                    "type": "string",
+                    "required": false,
+                    "description": "Bone or socket to constrain instead of the control; bake and analyze before accepting it"
+                  },
+                  {
+                    "name": "startFrame",
+                    "type": "integer",
+                    "required": true,
+                    "description": "First frame of the lock"
+                  },
+                  {
+                    "name": "endFrame",
+                    "type": "integer",
+                    "required": true,
+                    "description": "Last frame of the lock, at or after startFrame"
+                  },
+                  {
+                    "name": "target",
+                    "type": "object",
+                    "required": false,
+                    "description": "{translation {x,y,z}, rotationQuaternion? {x,y,z,w}}: a fixed component-space target, or a transform relative to targetReference when that is set; pass target or targetReference"
+                  },
+                  {
+                    "name": "targetReference",
+                    "type": "string",
+                    "required": false,
+                    "description": "Source-animation bone or socket to follow. Without target, the first frame's subject-to-reference offset is kept"
+                  },
+                  {
+                    "name": "blendInFrames",
+                    "type": "integer",
+                    "required": false,
+                    "description": "Frames to ease in over, from 0 (default 0)"
+                  },
+                  {
+                    "name": "blendOutFrames",
+                    "type": "integer",
+                    "required": false,
+                    "description": "Frames to ease out over, from 0 (default 0)"
+                  },
+                  {
+                    "name": "stabilizeControls",
+                    "type": "array",
+                    "required": false,
+                    "description": "Up to 8 pole or stabilizer controls to hold steady; never the locked control itself",
+                    "items": "string"
+                  },
+                  {
+                    "name": "positionToleranceCm",
+                    "type": "number",
+                    "required": false,
+                    "description": "Readback position tolerance, above 0 and up to 100 (default 0.1)"
+                  },
+                  {
+                    "name": "rotationToleranceDegrees",
+                    "type": "number",
+                    "required": false,
+                    "description": "Readback rotation tolerance, above 0 and up to 180 (default 0.5)"
+                  }
+                ]
+              },
+              {
+                "tag": "set_bool",
+                "description": "Key a bool control at frame or frames",
+                "fields": [
+                  {
+                    "name": "control",
+                    "type": "string",
+                    "required": true,
+                    "description": "Control name on the session's rig"
+                  },
+                  {
+                    "name": "frame",
+                    "type": "integer",
+                    "required": false,
+                    "description": "One frame to key; pass exactly one of frame and frames"
+                  },
+                  {
+                    "name": "frames",
+                    "type": "array",
+                    "required": false,
+                    "description": "Frames to key; pass exactly one of frame and frames",
+                    "items": "integer"
+                  },
+                  {
+                    "name": "value",
+                    "type": "boolean",
+                    "required": true,
+                    "description": "Value to key"
+                  }
+                ]
+              },
+              {
+                "tag": "set_float",
+                "description": "Key a float control at frame or frames",
+                "fields": [
+                  {
+                    "name": "control",
+                    "type": "string",
+                    "required": true,
+                    "description": "Control name on the session's rig"
+                  },
+                  {
+                    "name": "frame",
+                    "type": "integer",
+                    "required": false,
+                    "description": "One frame to key; pass exactly one of frame and frames"
+                  },
+                  {
+                    "name": "frames",
+                    "type": "array",
+                    "required": false,
+                    "description": "Frames to key; pass exactly one of frame and frames",
+                    "items": "integer"
+                  },
+                  {
+                    "name": "value",
+                    "type": "number",
+                    "required": true,
+                    "description": "Finite value to key"
+                  }
+                ]
+              },
+              {
+                "tag": "set_int",
+                "description": "Key an integer or enum control at frame or frames; an enum takes one of its enumOptions values",
+                "fields": [
+                  {
+                    "name": "control",
+                    "type": "string",
+                    "required": true,
+                    "description": "Control name on the session's rig"
+                  },
+                  {
+                    "name": "frame",
+                    "type": "integer",
+                    "required": false,
+                    "description": "One frame to key; pass exactly one of frame and frames"
+                  },
+                  {
+                    "name": "frames",
+                    "type": "array",
+                    "required": false,
+                    "description": "Frames to key; pass exactly one of frame and frames",
+                    "items": "integer"
+                  },
+                  {
+                    "name": "value",
+                    "type": "integer",
+                    "required": true,
+                    "description": "Value to key"
+                  }
+                ]
+              },
+              {
+                "tag": "propagate_pose",
+                "description": "Key the controls that changed between two live snapshots across each control's donor frames",
+                "fields": [
+                  {
+                    "name": "baseline",
+                    "type": "object",
+                    "required": true,
+                    "description": "Snapshot from capture_control_rig_pose before the edit"
+                  },
+                  {
+                    "name": "accepted",
+                    "type": "object",
+                    "required": true,
+                    "description": "Snapshot from capture_control_rig_pose after the edit, same session, rig instance, frame and control set"
+                  },
+                  {
+                    "name": "controls",
+                    "type": "array",
+                    "required": true,
+                    "description": "[{control, mode fixed | local_delta, donorFrames strictly increasing}], each control once; bool, enum and int controls take fixed only",
+                    "items": "object"
+                  }
+                ]
+              }
+            ]
+          }
         }
       ]
     },
@@ -12777,6 +13119,36 @@
         }
       ]
     },
+    "epic_call_tool": {
+      "category": "epic",
+      "params": [
+        {
+          "name": "toolset",
+          "type": "string",
+          "required": true,
+          "description": "Qualified toolset name from epic_list_toolsets, e.g. GASToolsets.AttributeSetToolset"
+        },
+        {
+          "name": "tool",
+          "type": "string",
+          "required": true,
+          "description": "Tool name from describe_toolset, bare or qualified with its toolset"
+        },
+        {
+          "name": "input",
+          "type": "object",
+          "required": false,
+          "description": "Tool arguments as a JSON object"
+        },
+        {
+          "name": "inputJson",
+          "type": "string",
+          "required": false,
+          "description": "Tool arguments as a raw JSON string; wins over input"
+        }
+      ],
+      "contractExempt": "runs a registered engine tool"
+    },
     "epic_describe_toolset": {
       "category": "epic",
       "params": [
@@ -17735,6 +18107,220 @@
         }
       ]
     },
+    "invoke_function": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "functionName",
+          "type": "string",
+          "required": true,
+          "description": "BlueprintCallable or Exec UFUNCTION on the actor, or on component"
+        },
+        {
+          "name": "actorLabel",
+          "type": "string",
+          "required": false,
+          "description": "Actor label. Editor labels are not unique, so a label naming several actors is refused"
+        },
+        {
+          "name": "actorPath",
+          "type": "string",
+          "required": false,
+          "description": "Full actor object path, the unambiguous selector. Wins over actorLabel"
+        },
+        {
+          "name": "component",
+          "type": "string",
+          "required": false,
+          "description": "Component subobject name to call the function on instead of the actor"
+        },
+        {
+          "name": "args",
+          "type": "any",
+          "required": false,
+          "description": "Function arguments: an object mapping parameter name to value (a struct value takes a JSON object such as {X,Y,Z} or export text), an entry list [{name, value}], or a JSON string of either",
+          "forms": [
+            "argMap",
+            "stringList",
+            "argEntryList",
+            "string"
+          ]
+        },
+        {
+          "name": "actorArgs",
+          "type": "object",
+          "required": false,
+          "description": "UObject* parameter name -> actor label, resolved against live actors in the selected world"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "editor (default) | pie | auto"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+        },
+        {
+          "name": "deferToNextTick",
+          "type": "boolean",
+          "required": false,
+          "description": "Queue the call for the next engine tick, outside the editor script-execution guard, so a replicated UFUNCTION routes normally; return and out values are not reported"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "actorLabel"
+            ],
+            [
+              "actorPath"
+            ]
+          ]
+        }
+      ],
+      "contractExempt": "calls a UFUNCTION"
+    },
+    "invoke_object_function": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "functionName",
+          "type": "string",
+          "required": true,
+          "description": "UFUNCTION to call; an unknown name lists the available ones"
+        },
+        {
+          "name": "objectPath",
+          "type": "string",
+          "required": false,
+          "description": "Object path of the live instance. Wins over target"
+        },
+        {
+          "name": "target",
+          "type": "string",
+          "required": false,
+          "description": "gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem"
+        },
+        {
+          "name": "subsystemClass",
+          "type": "string",
+          "required": false,
+          "description": "Subsystem class name or /Script path, with target=subsystem"
+        },
+        {
+          "name": "playerIndex",
+          "type": "number",
+          "required": false,
+          "description": "Player index for target=playercontroller or playerpawn (default 0)"
+        },
+        {
+          "name": "args",
+          "type": "any",
+          "required": false,
+          "description": "Function arguments: an object mapping parameter name to value (a struct value takes a JSON object such as {X,Y,Z} or export text), an entry list [{name, value}], or a JSON string of either",
+          "forms": [
+            "argMap",
+            "stringList",
+            "argEntryList",
+            "string"
+          ]
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: editor | pie | auto. Each action names its own default"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+        },
+        {
+          "name": "deferToNextTick",
+          "type": "boolean",
+          "required": false,
+          "description": "Queue the call for the next engine tick, outside the editor script-execution guard, so a replicated UFUNCTION routes normally; return and out values are not reported"
+        }
+      ],
+      "contractExempt": "calls a UFUNCTION"
+    },
+    "invoke_object_functions": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "calls",
+          "type": "array",
+          "required": true,
+          "description": "1 to 64 calls, run in order in one game-thread dispatch; the first failure stops the sequence",
+          "items": "object",
+          "fields": [
+            {
+              "name": "functionName",
+              "type": "string",
+              "required": true,
+              "description": "UFUNCTION to call"
+            },
+            {
+              "name": "objectPath",
+              "type": "string",
+              "required": false,
+              "description": "Object path of the live instance. Wins over target"
+            },
+            {
+              "name": "target",
+              "type": "string",
+              "required": false,
+              "description": "gameinstance | gamemode | gamestate | playercontroller | playerpawn | subsystem"
+            },
+            {
+              "name": "subsystemClass",
+              "type": "string",
+              "required": false,
+              "description": "Subsystem class name or /Script path, with target=subsystem"
+            },
+            {
+              "name": "playerIndex",
+              "type": "integer",
+              "required": false,
+              "description": "Player index for target=playercontroller or playerpawn (default 0)"
+            },
+            {
+              "name": "args",
+              "type": "any",
+              "required": false,
+              "description": "This call's arguments, in any form invoke_object_function takes",
+              "forms": [
+                "argMap",
+                "stringList",
+                "argEntryList",
+                "string"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: editor | pie | auto. Each action names its own default"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+        }
+      ],
+      "contractExempt": "calls UFUNCTIONs"
+    },
     "invoke_runtime_function": {
       "category": "widget",
       "params": [
@@ -17788,6 +18374,60 @@
           ]
         }
       ]
+    },
+    "invoke_static_function": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "className",
+          "type": "string",
+          "required": true,
+          "description": "UBlueprintFunctionLibrary class: a short name or a /Script/Module.Class path"
+        },
+        {
+          "name": "functionName",
+          "type": "string",
+          "required": true,
+          "description": "Static UFUNCTION on the library"
+        },
+        {
+          "name": "args",
+          "type": "any",
+          "required": false,
+          "description": "Function arguments: an object mapping parameter name to value (a struct value takes a JSON object such as {X,Y,Z} or export text), an entry list [{name, value}], or a JSON string of either",
+          "forms": [
+            "argMap",
+            "stringList",
+            "argEntryList",
+            "string"
+          ]
+        },
+        {
+          "name": "actorArgs",
+          "type": "object",
+          "required": false,
+          "description": "UObject* parameter name -> actor label, resolved against live actors in the selected world"
+        },
+        {
+          "name": "worldContextParam",
+          "type": "string",
+          "required": false,
+          "description": "UObject* parameter to fill with the selected world; detected from WorldContext metadata and for WorldContextObject when omitted"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "editor (default) | pie | game | auto"
+        },
+        {
+          "name": "pieInstance",
+          "type": "number",
+          "required": false,
+          "description": "PIE world to target: 0 = server/primary, 1..N = clients. See list_pie_instances"
+        }
+      ],
+      "contractExempt": "calls a static UFUNCTION"
     },
     "is_class_loaded": {
       "category": "reflection",
@@ -27582,6 +28222,63 @@
           "description": "How many scored items to return (default 50)"
         }
       ]
+    },
+    "run_python_file": {
+      "category": "editor",
+      "params": [
+        {
+          "name": "filePath",
+          "type": "string",
+          "required": true,
+          "description": "Absolute path to the .py file",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "entryPoint",
+          "type": "string",
+          "required": false,
+          "description": "Function in the file to call after loading it under a run name other than __main__, so its main guard does not fire; its return value comes back as result"
+        },
+        {
+          "name": "args",
+          "type": "any",
+          "required": false,
+          "description": "Positional arguments, as sys.argv[1:] or, with entryPoint, the call's arguments: a list of strings, a JSON array string, or one string. A parameter map is refused",
+          "forms": [
+            "argMap",
+            "stringList",
+            "argEntryList",
+            "string"
+          ]
+        },
+        {
+          "name": "kwargs",
+          "type": "object",
+          "required": false,
+          "description": "Keyword arguments for the entryPoint call"
+        },
+        {
+          "name": "resultVariable",
+          "type": "string",
+          "required": false,
+          "description": "Top-level Python variable to return as result, separate from the log (default result with entryPoint)"
+        },
+        {
+          "name": "captureLog",
+          "type": "boolean",
+          "required": false,
+          "description": "false drops everything the script logged except its errors (default true)"
+        },
+        {
+          "name": "maxLogChars",
+          "type": "number",
+          "required": false,
+          "description": "Keep only the last N characters of logged output"
+        }
+      ],
+      "contractExempt": "runs a Python file"
     },
     "run_stat_command": {
       "category": "editor",

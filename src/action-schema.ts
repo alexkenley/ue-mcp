@@ -23,7 +23,7 @@
 import { z } from "zod";
 import { ROUTING_PARAM_NAMES } from "./routing-params.js";
 import type { ActionEffectSource, ActionSpec, ToolDef } from "./types.js";
-import type { ParamSpec } from "./handler-spec.js";
+import type { ParamSpec, ValueForm } from "./handler-spec.js";
 import type { ActionClass } from "./action-class.js";
 
 /** A readable schema summary, not a substitute for runtime validation. */
@@ -39,6 +39,8 @@ export interface ValueSchema {
   properties?: Record<string, ValueSchema>;
   items?: ValueSchema;
   variants?: ValueSchema[];
+  /** For a tagged union: the field whose literal value picks one of `variants`. */
+  discriminator?: string;
   /** Deeper fields were omitted to bound discovery output. */
   truncated?: boolean;
 }
@@ -191,6 +193,8 @@ function typeName(schema: z.ZodTypeAny): string {
       const names = [...new Set(opts.map((o) => typeName(unwrap(o).inner)))];
       return names.join("|") || "union";
     }
+    // Every option of a tagged union is an object; `discriminator` says which field picks it.
+    case "ZodDiscriminatedUnion": return "object";
     default: return def.typeName ? def.typeName.replace(/^Zod/, "").toLowerCase() : "unknown";
   }
 }
@@ -201,9 +205,18 @@ function specTypeName(type: string, items?: string): string {
   return type === "vec3" || type === "rotator" || type === "color" ? "object" : type;
 }
 
+/** Each value form in typeName's vocabulary. */
+const FORM_TYPE_NAME: Record<ValueForm, string> = {
+  argMap: "object",
+  argEntryList: "object[]",
+  stringList: "string[]",
+  string: "string",
+};
+
 /** One declared parameter's type: a union's alternatives joined with `|`, and null when it takes one. */
 function specParamTypeName(param: ParamSpec): string {
-  const names = [specTypeName(param.type, param.fields && param.type === "array" ? "object" : param.items)];
+  if (param.forms?.length) return [...new Set(param.forms.map((f) => FORM_TYPE_NAME[f]))].join("|");
+  const names = [specTypeName(param.type, (param.fields || param.oneOf) && param.type === "array" ? "object" : param.items)];
   for (const orType of param.orTypes ?? []) {
     const name = specTypeName(orType);
     if (!names.includes(name)) names.push(name);
@@ -250,6 +263,9 @@ function valueSchema(schema: z.ZodTypeAny, depth = 0): ValueSchema {
     result.items = valueSchema(inner.valueSchema, depth + 1);
   } else if (inner instanceof z.ZodUnion) {
     result.variants = inner.options.map((option: z.ZodTypeAny) => valueSchema(option, depth + 1));
+  } else if (inner instanceof z.ZodDiscriminatedUnion) {
+    result.discriminator = inner.discriminator;
+    result.variants = (inner.options as z.ZodTypeAny[]).map((option) => valueSchema(option, depth + 1));
   }
   return result;
 }

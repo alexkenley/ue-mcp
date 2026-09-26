@@ -727,6 +727,348 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "apply_control_rig_edits": {
+    "category": "animation",
+    "params": [
+      {
+        "name": "sequencePath",
+        "type": "string",
+        "required": true,
+        "description": "LevelSequence holding the Control Rig edit session"
+      },
+      {
+        "name": "bindingTag",
+        "type": "string",
+        "required": true,
+        "description": "Edit-session natural key from begin_control_rig_edit"
+      },
+      {
+        "name": "operations",
+        "type": "array",
+        "required": true,
+        "description": "Typed edits applied in one transaction, in order",
+        "items": "object",
+        "oneOf": {
+          "key": "op",
+          "variants": [
+            {
+              "tag": "set",
+              "description": "Write one full absolute transform at frame or frames",
+              "fields": [
+                {
+                  "name": "control",
+                  "type": "string",
+                  "required": true,
+                  "description": "Control name on the session's rig"
+                },
+                {
+                  "name": "frame",
+                  "type": "integer",
+                  "required": false,
+                  "description": "One frame to key; pass exactly one of frame and frames"
+                },
+                {
+                  "name": "frames",
+                  "type": "array",
+                  "required": false,
+                  "description": "Frames to key; pass exactly one of frame and frames",
+                  "items": "integer"
+                },
+                {
+                  "name": "transform",
+                  "type": "object",
+                  "required": true,
+                  "description": "{translation {x,y,z}, rotationDegrees {pitch,yaw,roll}, scale {x,y,z}}"
+                },
+                {
+                  "name": "space",
+                  "type": "string",
+                  "required": false,
+                  "description": "local (default) | component | global, where global is an alias for component"
+                }
+              ]
+            },
+            {
+              "tag": "set_keys",
+              "description": "Write strictly ordered full per-frame transforms from normalized quaternions",
+              "fields": [
+                {
+                  "name": "control",
+                  "type": "string",
+                  "required": true,
+                  "description": "Control name on the session's rig"
+                },
+                {
+                  "name": "keys",
+                  "type": "array",
+                  "required": true,
+                  "description": "[{frame, transform {translation {x,y,z}, rotationQuaternion {x,y,z,w}, scale {x,y,z}}}], frames strictly increasing",
+                  "items": "object"
+                },
+                {
+                  "name": "space",
+                  "type": "string",
+                  "required": false,
+                  "description": "local (default) | component | global, where global is an alias for component"
+                }
+              ]
+            },
+            {
+              "tag": "offset",
+              "description": "Apply translation, rotation or scale deltas across an inclusive frame range",
+              "fields": [
+                {
+                  "name": "control",
+                  "type": "string",
+                  "required": true,
+                  "description": "Control name on the session's rig"
+                },
+                {
+                  "name": "startFrame",
+                  "type": "integer",
+                  "required": true,
+                  "description": "First frame of the range"
+                },
+                {
+                  "name": "endFrame",
+                  "type": "integer",
+                  "required": true,
+                  "description": "Last frame of the range, at or after startFrame"
+                },
+                {
+                  "name": "translationCm",
+                  "type": "vec3",
+                  "required": false,
+                  "description": "Translation delta in centimetres"
+                },
+                {
+                  "name": "rotationDegrees",
+                  "type": "rotator",
+                  "required": false,
+                  "description": "Rotation delta in degrees"
+                },
+                {
+                  "name": "scaleMultiplier",
+                  "type": "vec3",
+                  "required": false,
+                  "description": "Scale multiplier; one of translationCm, rotationDegrees and scaleMultiplier is required"
+                },
+                {
+                  "name": "space",
+                  "type": "string",
+                  "required": false,
+                  "description": "local (default) | component | global, where global is an alias for component"
+                },
+                {
+                  "name": "blendInFrames",
+                  "type": "integer",
+                  "required": false,
+                  "description": "Frames to ease in over, from 0 (default 0)"
+                },
+                {
+                  "name": "blendOutFrames",
+                  "type": "integer",
+                  "required": false,
+                  "description": "Frames to ease out over, from 0 (default 0)"
+                }
+              ]
+            },
+            {
+              "tag": "contact_lock",
+              "description": "Constrain a translatable driver control, or a driven bone or socket, to a fixed component-space target",
+              "fields": [
+                {
+                  "name": "control",
+                  "type": "string",
+                  "required": true,
+                  "description": "Control name on the session's rig"
+                },
+                {
+                  "name": "drivenReference",
+                  "type": "string",
+                  "required": false,
+                  "description": "Bone or socket to constrain instead of the control; bake and analyze before accepting it"
+                },
+                {
+                  "name": "startFrame",
+                  "type": "integer",
+                  "required": true,
+                  "description": "First frame of the lock"
+                },
+                {
+                  "name": "endFrame",
+                  "type": "integer",
+                  "required": true,
+                  "description": "Last frame of the lock, at or after startFrame"
+                },
+                {
+                  "name": "target",
+                  "type": "object",
+                  "required": false,
+                  "description": "{translation {x,y,z}, rotationQuaternion? {x,y,z,w}}: a fixed component-space target, or a transform relative to targetReference when that is set; pass target or targetReference"
+                },
+                {
+                  "name": "targetReference",
+                  "type": "string",
+                  "required": false,
+                  "description": "Source-animation bone or socket to follow. Without target, the first frame's subject-to-reference offset is kept"
+                },
+                {
+                  "name": "blendInFrames",
+                  "type": "integer",
+                  "required": false,
+                  "description": "Frames to ease in over, from 0 (default 0)"
+                },
+                {
+                  "name": "blendOutFrames",
+                  "type": "integer",
+                  "required": false,
+                  "description": "Frames to ease out over, from 0 (default 0)"
+                },
+                {
+                  "name": "stabilizeControls",
+                  "type": "array",
+                  "required": false,
+                  "description": "Up to 8 pole or stabilizer controls to hold steady; never the locked control itself",
+                  "items": "string"
+                },
+                {
+                  "name": "positionToleranceCm",
+                  "type": "number",
+                  "required": false,
+                  "description": "Readback position tolerance, above 0 and up to 100 (default 0.1)"
+                },
+                {
+                  "name": "rotationToleranceDegrees",
+                  "type": "number",
+                  "required": false,
+                  "description": "Readback rotation tolerance, above 0 and up to 180 (default 0.5)"
+                }
+              ]
+            },
+            {
+              "tag": "set_bool",
+              "description": "Key a bool control at frame or frames",
+              "fields": [
+                {
+                  "name": "control",
+                  "type": "string",
+                  "required": true,
+                  "description": "Control name on the session's rig"
+                },
+                {
+                  "name": "frame",
+                  "type": "integer",
+                  "required": false,
+                  "description": "One frame to key; pass exactly one of frame and frames"
+                },
+                {
+                  "name": "frames",
+                  "type": "array",
+                  "required": false,
+                  "description": "Frames to key; pass exactly one of frame and frames",
+                  "items": "integer"
+                },
+                {
+                  "name": "value",
+                  "type": "boolean",
+                  "required": true,
+                  "description": "Value to key"
+                }
+              ]
+            },
+            {
+              "tag": "set_float",
+              "description": "Key a float control at frame or frames",
+              "fields": [
+                {
+                  "name": "control",
+                  "type": "string",
+                  "required": true,
+                  "description": "Control name on the session's rig"
+                },
+                {
+                  "name": "frame",
+                  "type": "integer",
+                  "required": false,
+                  "description": "One frame to key; pass exactly one of frame and frames"
+                },
+                {
+                  "name": "frames",
+                  "type": "array",
+                  "required": false,
+                  "description": "Frames to key; pass exactly one of frame and frames",
+                  "items": "integer"
+                },
+                {
+                  "name": "value",
+                  "type": "number",
+                  "required": true,
+                  "description": "Finite value to key"
+                }
+              ]
+            },
+            {
+              "tag": "set_int",
+              "description": "Key an integer or enum control at frame or frames; an enum takes one of its enumOptions values",
+              "fields": [
+                {
+                  "name": "control",
+                  "type": "string",
+                  "required": true,
+                  "description": "Control name on the session's rig"
+                },
+                {
+                  "name": "frame",
+                  "type": "integer",
+                  "required": false,
+                  "description": "One frame to key; pass exactly one of frame and frames"
+                },
+                {
+                  "name": "frames",
+                  "type": "array",
+                  "required": false,
+                  "description": "Frames to key; pass exactly one of frame and frames",
+                  "items": "integer"
+                },
+                {
+                  "name": "value",
+                  "type": "integer",
+                  "required": true,
+                  "description": "Value to key"
+                }
+              ]
+            },
+            {
+              "tag": "propagate_pose",
+              "description": "Key the controls that changed between two live snapshots across each control's donor frames",
+              "fields": [
+                {
+                  "name": "baseline",
+                  "type": "object",
+                  "required": true,
+                  "description": "Snapshot from capture_control_rig_pose before the edit"
+                },
+                {
+                  "name": "accepted",
+                  "type": "object",
+                  "required": true,
+                  "description": "Snapshot from capture_control_rig_pose after the edit, same session, rig instance, frame and control set"
+                },
+                {
+                  "name": "controls",
+                  "type": "array",
+                  "required": true,
+                  "description": "[{control, mode fixed | local_delta, donorFrames strictly increasing}], each control once; bool, enum and int controls take fixed only",
+                  "items": "object"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
   "author_blend_profile": {
     "category": "animation",
     "params": [
@@ -4845,6 +5187,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   add_virtual_bone: "Params: skeletonPath, sourceBone, targetBone",
   analyze_animation: "Params: assetPath (or path), skeletalMeshPath?, boneNames?, frames?, sampleRate?, loop?, facingBones?, outputDirectory?",
   apply_animation_modifier: "Params: assetPath (or path), modifierClass (or modifier), props?",
+  apply_control_rig_edits: "Params: sequencePath, bindingTag, operations",
   author_blend_profile: "Params: skeletonPath, profileName, operation?, newProfileName?, mode?, entries?, removeEntries?",
   author_montages_batch: "Params: items",
   auto_align_retarget_pose: "Params: retargeterPath (or assetPath), side?",
@@ -4978,7 +5321,7 @@ export const schema: Record<string, z.ZodType> = {
   axisVertical: z.string().optional().describe("Vertical axis name (default Direction) (create_blendspace). Vertical axis name; ignored on a BlendSpace1D (populate_blendspace, populate_blendspace_1d)"),
   baseCostBias: z.number().optional().describe("Flat cost added to every pose"),
   binding: z.string().optional().describe("update (default) | becomeRelevant | initialUpdate"),
-  bindingTag: z.string().optional().describe("Edit-session natural key from begin_control_rig_edit (bake_control_rig_edit, capture_control_rig_pose, read_control_rig_edit). Stable natural key the later calls address (default derived from the mesh name) (begin_control_rig_edit)"),
+  bindingTag: z.string().optional().describe("Edit-session natural key from begin_control_rig_edit (apply_control_rig_edits, bake_control_rig_edit, capture_control_rig_pose, read_control_rig_edit). Stable natural key the later calls address (default derived from the mesh name) (begin_control_rig_edit)"),
   blendDuration: z.number().optional().describe("Crossfade in seconds (engine default 0.2) (add_transition). Crossfade in seconds (set_transition_blend)"),
   blendIn: z.number().optional().describe("Blend-in time in seconds"),
   blendLogic: z.string().optional().describe("Standard | Inertialization"),
@@ -5097,6 +5440,7 @@ export const schema: Record<string, z.ZodType> = {
   numFrames: z.number().optional().describe("Frame count (default 30)"),
   onConflict: z.string().optional().describe("skip (default) returns an existing section untouched, error refuses (add_montage_section). skip (default) returns an existing state untouched, error refuses (add_state). skip returns an existing output, error (default) refuses; it never overwrites (bake_control_rig_edit). skip returns the existing session, error (default) refuses; an existing session is never modified (begin_control_rig_edit). skip (default) returns an existing asset untouched, error refuses (create_anim_blueprint, create_anim_composite, create_anim_montage, create_blendspace, create_blendspace_1d, create_ik_retargeter, create_ik_rig, create_mirror_data_table, create_pose_search_database, create_pose_search_normalization_set, create_pose_search_schema, create_sequence). skip (default) returns the existing asset, error refuses; it never overwrites (create_control_rig). skip (default) | error. It never overwrites (create_skeleton). skip (default) returns an existing destination untouched, error refuses; it never overwrites (reverse_sequence)"),
   operation: z.string().optional().describe("upsert (default) | remove | rename"),
+  operations: z.array(z.discriminatedUnion("op", [z.object({ op: z.literal("set"), control: z.string().describe("Control name on the session's rig"), frame: z.number().int().optional().describe("One frame to key; pass exactly one of frame and frames"), frames: z.array(z.number().int()).optional().describe("Frames to key; pass exactly one of frame and frames"), transform: z.record(z.unknown()).describe("{translation {x,y,z}, rotationDegrees {pitch,yaw,roll}, scale {x,y,z}}"), space: z.string().optional().describe("local (default) | component | global, where global is an alias for component") }).strict().describe("Write one full absolute transform at frame or frames"), z.object({ op: z.literal("set_keys"), control: z.string().describe("Control name on the session's rig"), keys: z.array(z.record(z.unknown())).describe("[{frame, transform {translation {x,y,z}, rotationQuaternion {x,y,z,w}, scale {x,y,z}}}], frames strictly increasing"), space: z.string().optional().describe("local (default) | component | global, where global is an alias for component") }).strict().describe("Write strictly ordered full per-frame transforms from normalized quaternions"), z.object({ op: z.literal("offset"), control: z.string().describe("Control name on the session's rig"), startFrame: z.number().int().describe("First frame of the range"), endFrame: z.number().int().describe("Last frame of the range, at or after startFrame"), translationCm: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Translation delta in centimetres"), rotationDegrees: z.object({ pitch: z.number(), yaw: z.number(), roll: z.number() }).optional().describe("Rotation delta in degrees"), scaleMultiplier: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Scale multiplier; one of translationCm, rotationDegrees and scaleMultiplier is required"), space: z.string().optional().describe("local (default) | component | global, where global is an alias for component"), blendInFrames: z.number().int().optional().describe("Frames to ease in over, from 0 (default 0)"), blendOutFrames: z.number().int().optional().describe("Frames to ease out over, from 0 (default 0)") }).strict().describe("Apply translation, rotation or scale deltas across an inclusive frame range"), z.object({ op: z.literal("contact_lock"), control: z.string().describe("Control name on the session's rig"), drivenReference: z.string().optional().describe("Bone or socket to constrain instead of the control; bake and analyze before accepting it"), startFrame: z.number().int().describe("First frame of the lock"), endFrame: z.number().int().describe("Last frame of the lock, at or after startFrame"), target: z.record(z.unknown()).optional().describe("{translation {x,y,z}, rotationQuaternion? {x,y,z,w}}: a fixed component-space target, or a transform relative to targetReference when that is set; pass target or targetReference"), targetReference: z.string().optional().describe("Source-animation bone or socket to follow. Without target, the first frame's subject-to-reference offset is kept"), blendInFrames: z.number().int().optional().describe("Frames to ease in over, from 0 (default 0)"), blendOutFrames: z.number().int().optional().describe("Frames to ease out over, from 0 (default 0)"), stabilizeControls: z.array(z.string()).optional().describe("Up to 8 pole or stabilizer controls to hold steady; never the locked control itself"), positionToleranceCm: z.number().optional().describe("Readback position tolerance, above 0 and up to 100 (default 0.1)"), rotationToleranceDegrees: z.number().optional().describe("Readback rotation tolerance, above 0 and up to 180 (default 0.5)") }).strict().describe("Constrain a translatable driver control, or a driven bone or socket, to a fixed component-space target"), z.object({ op: z.literal("set_bool"), control: z.string().describe("Control name on the session's rig"), frame: z.number().int().optional().describe("One frame to key; pass exactly one of frame and frames"), frames: z.array(z.number().int()).optional().describe("Frames to key; pass exactly one of frame and frames"), value: z.boolean().describe("Value to key") }).strict().describe("Key a bool control at frame or frames"), z.object({ op: z.literal("set_float"), control: z.string().describe("Control name on the session's rig"), frame: z.number().int().optional().describe("One frame to key; pass exactly one of frame and frames"), frames: z.array(z.number().int()).optional().describe("Frames to key; pass exactly one of frame and frames"), value: z.number().describe("Finite value to key") }).strict().describe("Key a float control at frame or frames"), z.object({ op: z.literal("set_int"), control: z.string().describe("Control name on the session's rig"), frame: z.number().int().optional().describe("One frame to key; pass exactly one of frame and frames"), frames: z.array(z.number().int()).optional().describe("Frames to key; pass exactly one of frame and frames"), value: z.number().int().describe("Value to key") }).strict().describe("Key an integer or enum control at frame or frames; an enum takes one of its enumOptions values"), z.object({ op: z.literal("propagate_pose"), baseline: z.record(z.unknown()).describe("Snapshot from capture_control_rig_pose before the edit"), accepted: z.record(z.unknown()).describe("Snapshot from capture_control_rig_pose after the edit, same session, rig instance, frame and control set"), controls: z.array(z.record(z.unknown())).describe("[{control, mode fixed | local_delta, donorFrames strictly increasing}], each control once; bool, enum and int controls take fixed only") }).strict().describe("Key the controls that changed between two live snapshots across each control's donor frames")])).optional().describe("Typed edits applied in one transaction, in order"),
   ops: z.array(z.object({ name: z.string().optional().describe("Op to write, by name"), index: z.number().int().optional().describe("Op to write, by stack index, when name is omitted"), enabled: z.boolean().optional().describe("Enable or disable the op"), settings: z.record(z.unknown()).optional().describe("Properties on the op's settings struct, e.g. RootMotionSource"), chainSettings: z.array(z.record(z.unknown())).optional().describe("Per-chain properties as [{chain, ...}], e.g. RotationMode") })).optional().describe("Per-op writes, at most 64. settings writes properties on the op's own settings struct, and chainSettings merges per-chain FK properties into the named chain rather than replacing the list"),
   outputAssetPath: z.string().optional().describe("Destination AnimSequence asset path"),
   outputDirectory: z.string().optional().describe("Directory under Project/Saved/Codex/AnimationQA for analysis artifacts; must not already contain them"),
@@ -5142,7 +5486,7 @@ export const schema: Record<string, z.ZodType> = {
   sectionName: z.string().optional().describe("Composite section to add (add_montage_section). Composite section to remove (remove_montage_section)"),
   segmentIndex: z.number().optional().describe("Segment to anchor the section to, so it moves with that segment (#826) (add_montage_section). Segment to remove (remove_montage_segment). Replace only this segment; without it every segment in the slot is replaced (#626) (set_montage_sequence)"),
   sequenceLength: z.number().optional().describe("Montage length in seconds"),
-  sequencePath: z.string().optional().describe("AnimSequence, AnimComposite, AnimMontage or BlendSpace to append (add_pose_search_sequence). AnimSequence to evaluate (add_sequence_evaluator). LevelSequence holding the Control Rig edit session (bake_control_rig_edit, capture_control_rig_pose, read_control_rig_edit). LevelSequence to create, or to reuse with onConflict=skip (begin_control_rig_edit)"),
+  sequencePath: z.string().optional().describe("AnimSequence, AnimComposite, AnimMontage or BlendSpace to append (add_pose_search_sequence). AnimSequence to evaluate (add_sequence_evaluator). LevelSequence holding the Control Rig edit session (apply_control_rig_edits, bake_control_rig_edit, capture_control_rig_pose, read_control_rig_edit). LevelSequence to create, or to reuse with onConflict=skip (begin_control_rig_edit)"),
   sessionTag: z.string().optional().describe("Stable key every later call addresses (default Skel_<MeshName>) (begin_skeleton_edit). The open skeleton edit session to address; wins over skeletalMeshPath (cancel_skeleton_edit, commit_skeleton_edit, edit_skeleton_bones)"),
   shouldLoop: z.boolean().optional().describe("bShouldLoop"),
   side: z.string().optional().describe("source | target (default target)"),
