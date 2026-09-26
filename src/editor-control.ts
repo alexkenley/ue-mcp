@@ -579,9 +579,16 @@ export async function startEditor(
     };
   }
 
-  const alreadyRunning = await findInteractiveEditors(project.projectPath);
-  if (alreadyRunning.length > 0) {
-    const state = await readEngineState(project.projectPath, { probeWindows: true });
+  let alreadyRunning = await findInteractiveEditors(project.projectPath);
+  let state = alreadyRunning.length > 0 ? await readEngineState(project.projectPath, { probeWindows: true }) : null;
+  // An editor whose log is already closed is quitting, not running (#1179):
+  // wait for it to leave rather than refusing the launch it is making way for.
+  if (state?.log.phase === "editor exited") {
+    for (const p of alreadyRunning) await waitForEditorExit(project.projectPath, p.pid, 1000);
+    alreadyRunning = await findInteractiveEditors(project.projectPath);
+    state = alreadyRunning.length > 0 ? await readEngineState(project.projectPath, { probeWindows: true }) : null;
+  }
+  if (alreadyRunning.length > 0 && state) {
     // Nothing was launched here either, and the bridge is not answering yet:
     // `bridgeReady: false` is how a caller that needs it learns that without
     // reading the sentence.
@@ -1380,6 +1387,30 @@ export async function findRemainingInstances(
     .map((r) => ({ pid: r.pid, port: r.port }));
 }
 
+/** Polls allowed for a quitting editor's process to exit after its bridge closes. */
+const EXIT_POLLS = 60;
+
+/**
+ * Wait for an editor's process to leave the process table (#1179).
+ *
+ * The bridge port closes early in shutdown, and the process then unloads
+ * modules for seconds more while still holding the project, so a launch in
+ * that window finds an editor on its way out. False if it outlived the polls.
+ */
+async function waitForEditorExit(
+  projectPath: string | null | undefined,
+  pid: number,
+  pollMs: number,
+  polls = EXIT_POLLS,
+): Promise<boolean> {
+  for (let i = 0; i < polls; i++) {
+    const live = await findProjectEditors(projectPath).catch(() => null);
+    if (live && !live.some((p) => p.pid === pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  return false;
+}
+
 export async function stopEditor(
   projectDir?: string,
   opts: {
@@ -1468,6 +1499,14 @@ export async function stopEditor(
   // the guard catches it, and the person answers Save Selected, Don't Save or
   // Cancel. Nothing here saves anything and nothing here presses a button
   // nobody chose.
+  // The process the quit is aimed at, so the stop can wait for it to exit. An
+  // older plugin's lockfile carries no pid; then only a lone editor is certain.
+  let exitPid = ownership.pid;
+  if (exitPid === null) {
+    const candidates = await findProjectEditors(projectPath).catch(() => []);
+    if (candidates.length === 1) exitPid = candidates[0].pid;
+  }
+
   const shutdown = await requestNativeShutdown(port, host, false);
   const dirty = collectPackageNames(shutdown.result, SHUTDOWN_DIRTY_KEYS);
 
@@ -1537,6 +1576,16 @@ export async function stopEditor(
     await new Promise((resolve) => setTimeout(resolve, confirmPollMs));
     if (!(await isBridgeAvailable(host, port))) {
       quitsInFlight.delete(editorKey);
+      if (exitPid !== null && !(await waitForEditorExit(projectPath, exitPid, confirmPollMs))) {
+        const exitState = await readEngineState(projectPath, { probeWindows: false });
+        return {
+          success: false,
+          message:
+            `The editor closed its bridge but its process (pid ${exitPid}) is still running after ${EXIT_POLLS} ` +
+            `more polls, so it is not safe to build or relaunch yet. ${exitState.summary} ${NEVER_KILLS}`,
+          state: exitState,
+        };
+      }
       // The stop aims at one editor; say so when it was not the only one.
       const remaining = await findRemainingInstances(projectDir, projectPath, ownership.pid ?? null);
       const remainingNote = remaining.length === 0
@@ -1596,9 +1645,6 @@ export async function restartEditor(
   if (!stopResult.success && (await findInteractiveEditors(project.projectPath)).length > 0) {
     return { success: false, message: `Failed to stop editor: ${stopResult.message}` };
   }
-
-  // Wait for process to fully terminate and release locks
-  await new Promise((resolve) => setTimeout(resolve, 3000));
 
   const startResult = await startEditor(project);
   if (!startResult.success) {
