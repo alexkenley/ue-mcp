@@ -325,6 +325,28 @@ describe("a lifecycle no-op fails, and says why it did", () => {
     expect(result.message).toContain("already running for this project");
   });
 
+  it("waits out an editor whose log is closed instead of calling it running (#1179)", async () => {
+    // Engine 9.9 resolves to no executable, so the launch this reaches spawns nothing.
+    const { projectPath } = makeProject();
+    fs.writeFileSync(projectPath, JSON.stringify({ EngineAssociation: "9.9" }));
+    const project = new ProjectContext();
+    project.setProject(projectPath);
+    findInteractiveEditors.mockResolvedValueOnce([editor(4242, projectPath)]);
+    vi.mocked(observer.readEngineState).mockResolvedValueOnce({
+      running: true,
+      processes: [],
+      log: { logPath: null, secondsSinceWrite: 1, phase: "editor exited", blocking: false, lastLine: null, tail: [], errors: [], warnings: [] },
+      snapshot: null,
+      dialogs: [],
+      summary: "Editor is up (editor exited).",
+      blocked: false,
+    } as Awaited<ReturnType<typeof observer.readEngineState>>);
+
+    const result = await startEditor(project, 1);
+    expect(result.alreadyRunning).toBeUndefined();
+    expect(result.message).not.toContain("already running");
+  });
+
   it("refuses a stop for an editor that is already down, and marks the reason", async () => {
     const { projectDir } = makeProject();
     const result = await stopEditor(projectDir);

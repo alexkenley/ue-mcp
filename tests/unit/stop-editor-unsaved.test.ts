@@ -274,14 +274,17 @@ describe("stop_editor never presses a button and never arms one", () => {
     bridge = await startFakeBridge((method) => {
       if (method === "list_dialogs") return NO_DIALOGS;
       if (method === "request_editor_shutdown") {
-        setTimeout(() => bridge.goQuiet(), 50);
+        setTimeout(() => {
+          bridge.goQuiet();
+          findInteractiveEditors.mockResolvedValue([]);
+        }, 50);
         return { success: true, scheduled: true, dirtyContentPackages: [], dirtyMapPackages: [] };
       }
       return { success: true };
     });
     openBridges.push(bridge);
 
-    const result = await stopEditor(makeProject(bridge.port));
+    const result = await stopEditor(makeProject(bridge.port), { confirmPollMs: 20 });
 
     expect(result.success).toBe(true);
     // The quit and nothing else: the gate decides the dialog question.
@@ -587,5 +590,61 @@ describe("a state.json that parses to something that is not a state object", () 
 
     expect(result.success).toBe(false);
     expect(typeof result.message).toBe("string");
+  });
+});
+
+/**
+ * The bridge port closes early in shutdown and the process lingers for seconds
+ * after (#1179). A stop that reported success at the port let the next launch
+ * find the old editor still holding the project.
+ */
+describe("stop_editor waits for the editor's process to exit", () => {
+  function quittingBridge(onQuit: () => void): Promise<FakeBridge> {
+    let bridge: FakeBridge;
+    const started = startFakeBridge((method) => {
+      if (method === "request_editor_shutdown") {
+        setTimeout(() => {
+          bridge.goQuiet();
+          onQuit();
+        }, 20);
+        return { success: true, scheduled: true, dirtyContentPackages: [], dirtyMapPackages: [] };
+      }
+      return { success: true };
+    });
+    return started.then((b) => {
+      bridge = b;
+      openBridges.push(b);
+      return b;
+    });
+  }
+
+  it("reports success only once the process has left the process table", async () => {
+    let lingering = 0;
+    let exited = false;
+    const bridge = await quittingBridge(() => {
+      // Still listed for three polls after the port closes, as a real editor
+      // stays listed while it unloads its modules.
+      const listed = findInteractiveEditors.getMockImplementation();
+      findInteractiveEditors.mockImplementation(async (p) => {
+        if (lingering++ < 3) return listed ? listed(p) : [];
+        exited = true;
+        return [];
+      });
+    });
+
+    const result = await stopEditor(makeProject(bridge.port), { confirmPollMs: 10 });
+
+    expect(result.success).toBe(true);
+    expect(exited).toBe(true);
+  });
+
+  it("fails, naming the pid, when the process outlives the wait", async () => {
+    const bridge = await quittingBridge(() => {});
+
+    const result = await stopEditor(makeProject(bridge.port), { confirmPollMs: 1 });
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain(`pid ${EDITOR_PID}`);
+    expect(result.message).toContain("still running");
   });
 });
