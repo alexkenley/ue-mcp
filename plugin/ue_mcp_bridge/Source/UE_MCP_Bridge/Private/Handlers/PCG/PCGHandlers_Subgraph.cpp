@@ -139,7 +139,7 @@ namespace
 				void* Addr = Desc->CachedProperty->ContainerPtrToValuePtr<void>(Scratch.GetMutableValue().GetMemory());
 				if (!MCPJsonProperty::SetJsonOnProperty(const_cast<FProperty*>(Desc->CachedProperty), Addr, Pair.Value, ValueError))
 				{
-					Problems.Add(FString::Printf(TEXT("%s: %s"), *Name, *Error));
+					Problems.Add(FString::Printf(TEXT("%s: %s"), *Name, *ValueError));
 					continue;
 				}
 			}
