@@ -117,7 +117,9 @@ export class LiveServer {
 
   /** One `tools/call`, flattened to the text blocks and the error flag. */
   async call(name: string, args: Record<string, unknown>): Promise<LiveCallResult> {
-    const raw = await this.client.callTool({ name, arguments: args });
+    // A call that states its own timeoutMs gets it end to end; without this the client cut it off at the SDK's 60s.
+    const timeoutMs = typeof args.timeoutMs === "number" ? args.timeoutMs + 30_000 : undefined;
+    const raw = await this.client.callTool({ name, arguments: args }, undefined, timeoutMs ? { timeout: timeoutMs } : undefined);
     const blocks = (raw.content ?? []) as Array<{ type: string; text?: string }>;
     const texts = blocks.filter((b) => b.type === "text").map((b) => b.text ?? "");
     return {

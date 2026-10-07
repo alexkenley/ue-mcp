@@ -23,7 +23,7 @@
 import { z } from "zod";
 import { ROUTING_PARAM_NAMES } from "./routing-params.js";
 import type { ActionEffectSource, ActionSpec, ToolDef } from "../core/types.js";
-import type { ParamSpec, ValueForm } from "./handler-spec.js";
+import { paramZod, type ParamSpec, type ValueForm } from "./handler-spec.js";
 import type { ActionClass } from "./action-class.js";
 import { epicForwardedParams } from "./epic-input.js";
 
@@ -35,6 +35,9 @@ export interface ValueSchema {
   description?: string;
   /** Allowed values, when the parameter is an enum or a union of literals. */
   enumValues?: string[];
+  /** Inclusive bounds of a number. */
+  minimum?: number;
+  maximum?: number;
   /** Default applied by the schema when the caller omits the parameter. */
   default?: unknown;
   properties?: Record<string, ValueSchema>;
@@ -178,7 +181,7 @@ function typeName(schema: z.ZodTypeAny): string {
   const def = defOf(schema);
   switch (def.typeName) {
     case "ZodString": return "string";
-    case "ZodNumber": return "number";
+    case "ZodNumber": return ((def as { checks?: Array<{ kind: string }> }).checks)?.some((c) => c.kind === "int") ? "integer" : "number";
     case "ZodBoolean": return "boolean";
     case "ZodUnknown": case "ZodAny": return "any";
     case "ZodEnum": return "enum";
@@ -210,6 +213,7 @@ function specTypeName(type: string, items?: string): string {
 const FORM_TYPE_NAME: Record<ValueForm, string> = {
   argMap: "object",
   argEntryList: "object[]",
+  scalarMap: "object",
   stringList: "string[]",
   string: "string",
 };
@@ -244,12 +248,22 @@ function enumValues(schema: z.ZodTypeAny): string[] | undefined {
   return undefined;
 }
 
+function numberBounds(schema: z.ZodTypeAny): { minimum?: number; maximum?: number } {
+  if (!(schema instanceof z.ZodNumber)) return {};
+  const out: { minimum?: number; maximum?: number } = {};
+  for (const check of schema._def.checks) {
+    if (check.kind === "min") out.minimum = check.value;
+    if (check.kind === "max") out.maximum = check.value;
+  }
+  return out;
+}
+
 /** Reuse the declared shape so nested argument names never become another catalog. */
 function valueSchema(schema: z.ZodTypeAny, depth = 0): ValueSchema {
   const { inner, description, default: dflt } = unwrap(schema);
   const result: ValueSchema = {
     type: typeName(inner), required: !schema.isOptional(), description,
-    enumValues: enumValues(inner), default: dflt,
+    enumValues: enumValues(inner), default: dflt, ...numberBounds(inner),
   };
   // Bound the recursion so one deeply nested parameter cannot dominate a
   // discovery response. Deeper shapes are still validated at call time.
@@ -761,7 +775,7 @@ export function actionSchema(tool: ToolDef, action: string): ActionSchema {
   // A spec'd action's parameters are its C++ spec's (#1057). Its clause is
   // generated, so an `(or x)` there is an alias of one parameter, not a
   // choice between two, and each name is required exactly when the spec says.
-  const recorded = spec.kind === "bridge" ? spec.paramSpec : undefined;
+  const recorded = spec.paramSpec;
   const recordedByName = new Map((recorded ?? []).map((p) => [p.name, p]));
   const recordedAliases = new Set((recorded ?? []).flatMap((p) => p.aliases ?? []));
 
@@ -770,7 +784,7 @@ export function actionSchema(tool: ToolDef, action: string): ActionSchema {
   // A spec's choices are declared, not parsed: each is published with the
   // branches the spec names, and every one of them is required.
   const specGroup = new Map<string, number>();
-  if (recorded) (spec.kind === "bridge" ? spec.paramChoices ?? [] : []).forEach((choice) => {
+  if (recorded) (spec.paramChoices ?? []).forEach((choice) => {
     const index = alternatives.length;
     alternatives.push({ branches: choice.branches.map((b) => [...b]), required: true });
     for (const branch of choice.branches) for (const name of branch) specGroup.set(name, index);
@@ -805,13 +819,15 @@ export function actionSchema(tool: ToolDef, action: string): ActionSchema {
     if (recordedAliases.has(name)) continue;
     const declared = recordedByName.get(name);
     if (declared) {
+      // The action's own declaration, not the category key, which other actions share (#1282).
+      const own = valueSchema(paramZod(declared));
       params.push({
-        ...valueSchema(schema),
+        ...own,
         name,
         type: specParamTypeName(declared),
         required: declared.required,
         description: declared.description || paramDoc,
-        enumValues: declared.literal !== undefined ? [String(declared.literal)] : enumValues(inner),
+        enumValues: declared.literal !== undefined ? [String(declared.literal)] : own.enumValues,
         default: dflt,
         sources,
         alternativeGroup: specGroup.get(name),

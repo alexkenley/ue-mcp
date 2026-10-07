@@ -116,7 +116,7 @@ export const LOCAL_ACTIONS: Record<string, string> = {
   // Process lifecycle. Starting an editor is the one thing that must work
   // without one, and building requires the editor to be stopped.
   "editor.start_editor": "Launches the editor process, then waits for its bridge. It exists for the case where nothing is running.",
-  "editor.stop_editor": "Asks the editor that published this project's port lockfile to quit. With no lockfile it refuses and names the file it checked.",
+  "editor.stop_editor": "Asks the editor that published this project's port lockfile to quit. With no lockfile it refuses and names the file it checked. With no editor of this project left running, it ends a crash reporter a crashed one left holding the project's binaries.",
   "editor.restart_editor": "Stops whatever holds this project open and starts it again.",
   "editor.get_engine_state": "Probes the process table, the editor's log and the plugin's status file from outside. The bridge is consulted only when it is already connected.",
   "editor.build_project": "Runs UnrealBuildTool out of process, which requires the editor to be STOPPED because it cannot link while an editor holds the module DLLs.",

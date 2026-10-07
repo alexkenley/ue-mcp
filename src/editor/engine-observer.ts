@@ -20,6 +20,7 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -303,6 +304,119 @@ export async function findProjectEditors(projectPath?: string | null): Promise<E
 export async function findEditorByPid(pid: number): Promise<EditorProcess | null> {
   const all = await listEditorProcesses();
   return all.find((p) => p.pid === pid) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Crash reporter and file-holder probes (Windows)
+// ---------------------------------------------------------------------------
+
+/** A running CrashReportClient or CrashReportClientEditor process. */
+export interface CrashReporterProcess {
+  pid: number;
+  /** Image name, e.g. CrashReportClientEditor.exe. */
+  image: string;
+  commandLine: string;
+}
+
+const WINDOWS_CRASH_REPORTER_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+$procs = Get-CimInstance Win32_Process -Filter "Name LIKE 'CrashReportClient%'"
+$out = foreach ($p in $procs) {
+  [pscustomobject]@{ pid = $p.ProcessId; name = $p.Name; cmd = $p.CommandLine }
+}
+@($out) | ConvertTo-Json -Compress -Depth 3
+`;
+
+/**
+ * Every crash reporter process on this machine. Windows only: elsewhere the
+ * engine's crash reporter does not hold the project's binaries, so the answer
+ * is an empty list. Throws when the probe itself could not run, which is not
+ * the same as finding none.
+ */
+export async function listCrashReporterProcesses(): Promise<CrashReporterProcess[]> {
+  if (!IS_WINDOWS) return [];
+  const raw = await powershell(WINDOWS_CRASH_REPORTER_SCRIPT, 20000);
+  return parseJsonLoose<{ pid: number; name: string; cmd: string | null }>(raw)
+    .filter((r) => typeof r?.pid === "number")
+    .map((r) => ({ pid: r.pid, image: r.name ?? "", commandLine: r.cmd ?? "" }));
+}
+
+// Restart Manager is the API Windows itself uses to answer "who has this file
+// open", and it needs no elevation for the caller's own processes.
+const RESTART_MANAGER_TYPE = `
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class UeMcpFileHolders {
+  [StructLayout(LayoutKind.Sequential)]
+  struct RM_UNIQUE_PROCESS { public int dwProcessId; public System.Runtime.InteropServices.ComTypes.FILETIME ProcessStartTime; }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  struct RM_PROCESS_INFO {
+    public RM_UNIQUE_PROCESS Process;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string strAppName;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string strServiceShortName;
+    public int ApplicationType; public uint AppStatus; public uint TSSessionId;
+    [MarshalAs(UnmanagedType.Bool)] public bool bRestartable;
+  }
+  [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] static extern int RmStartSession(out uint h, int flags, StringBuilder key);
+  [DllImport("rstrtmgr.dll")] static extern int RmEndSession(uint h);
+  [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] static extern int RmRegisterResources(uint h, uint nFiles, string[] files, uint nApps, RM_UNIQUE_PROCESS[] apps, uint nSvcs, string[] svcs);
+  [DllImport("rstrtmgr.dll")] static extern int RmGetList(uint h, out uint needed, ref uint count, [In, Out] RM_PROCESS_INFO[] info, ref uint reasons);
+  public static int[] Holders(string file) {
+    uint h;
+    int rc = RmStartSession(out h, 0, new StringBuilder(64));
+    if (rc != 0) throw new Exception("RmStartSession failed: " + rc);
+    try {
+      rc = RmRegisterResources(h, 1, new string[] { file }, 0, null, 0, null);
+      if (rc != 0) throw new Exception("RmRegisterResources failed: " + rc);
+      uint needed = 0, count = 0, reasons = 0;
+      rc = RmGetList(h, out needed, ref count, null, ref reasons);
+      if (rc == 0) return new int[0];
+      if (rc != 234) throw new Exception("RmGetList failed: " + rc);
+      RM_PROCESS_INFO[] info = new RM_PROCESS_INFO[needed];
+      count = needed;
+      rc = RmGetList(h, out needed, ref count, info, ref reasons);
+      if (rc != 0) throw new Exception("RmGetList failed: " + rc);
+      List<int> pids = new List<int>();
+      for (int i = 0; i < count; i++) pids.Add(info[i].Process.dwProcessId);
+      return pids.ToArray();
+    } finally { RmEndSession(h); }
+  }
+}
+`;
+
+/**
+ * Which processes hold each of `files` open, as pid to the first file found
+ * held by it. Windows only; empty elsewhere. Throws when the probe could not
+ * run. The list travels through a temp file because a command line cannot
+ * carry a project's worth of paths.
+ */
+export async function findFileHolders(files: string[]): Promise<Map<number, string>> {
+  const holders = new Map<number, string>();
+  if (!IS_WINDOWS || files.length === 0) return holders;
+  const listFile = path.join(os.tmpdir(), `ue-mcp-holders-${process.pid}-${Date.now()}.json`);
+  fs.writeFileSync(listFile, JSON.stringify(files), "utf-8");
+  try {
+    const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+${RESTART_MANAGER_TYPE}
+'@
+$files = Get-Content -Raw -LiteralPath '${listFile.replace(/'/g, "''")}' | ConvertFrom-Json
+$out = foreach ($f in $files) {
+  foreach ($holder in [UeMcpFileHolders]::Holders($f)) { [pscustomobject]@{ pid = $holder; file = $f } }
+}
+@($out) | ConvertTo-Json -Compress -Depth 3
+`;
+    const raw = await powershell(script, 60000);
+    for (const row of parseJsonLoose<{ pid: number; file: string }>(raw)) {
+      if (typeof row?.pid === "number" && !holders.has(row.pid)) holders.set(row.pid, row.file);
+    }
+    return holders;
+  } finally {
+    fs.rmSync(listFile, { force: true });
+  }
 }
 
 // ---------------------------------------------------------------------------

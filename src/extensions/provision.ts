@@ -6,6 +6,7 @@ import {
   type ManifestProvidedCategory,
 } from "./manifest.js";
 import { inferActionEffect } from "../surface/action-class.js";
+import { contractActionFields, type NativeContractExtras } from "./native-contract.js";
 
 /**
  * Per-category provision plan derived from one plugin's `provides:` block.
@@ -21,7 +22,9 @@ export interface ProvisionPlan {
   /** Category description. */
   description?: string;
   /** Bare action name -> manifest spec. */
-  spec: ManifestProvidedCategory;
+  spec: Omit<ManifestProvidedCategory, "actions"> & {
+    actions: Record<string, ManifestProvidedCategory["actions"][string] & NativeContractExtras>;
+  };
 }
 
 /**
@@ -44,13 +47,14 @@ export function buildProvidedTool(plan: ProvisionPlan): ToolDef {
       effectSource: actionSpec.effect ? "declared" : "inferred",
       description:
         actionSpec.description ?? `Plugin action from ${plan.pluginName}`,
-    };
+      ...contractActionFields(actionSpec.contract),
+    } as ActionSpec;
     docLines.push(
       actionSpec.description
         ? `- ${actionName}: ${actionSpec.description}`
         : `- ${actionName}`,
     );
-    const compiled = compileSchemaFields(actionSpec.schema);
+    const compiled = actionSpec.zodSchema ?? compileSchemaFields(actionSpec.schema);
     for (const [k, v] of Object.entries(compiled)) {
       if (!(k in extraSchema)) extraSchema[k] = v;
     }

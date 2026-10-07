@@ -108,10 +108,15 @@ bool FMCPTargetedSaveLeavesOthersDirtyTest::RunTest(const FString& Parameters)
 	}
 
 	// One unknown entry refuses the whole list before anything is written.
+	// A missing object or subobject in a loaded package is still unknown.
+	for (const FString& UnknownPath : {
+		FString(MCPTargetedSaveTestRoot) + TEXT("DT_NoSuchProbe"),
+		NamedPackage + TEXT(".MissingObject"),
+		Named->GetPathName() + TEXT(":MissingSubobject") })
 	{
 		NamedPkg->SetDirtyFlag(true);
 		const TSharedPtr<FJsonObject> Result = TargetedSaveCall(Registry,
-			{ NamedPackage, FString(MCPTargetedSaveTestRoot) + TEXT("DT_NoSuchProbe") });
+			{ NamedPackage, UnknownPath });
 		TestFalse(TEXT("a list with an unknown path is refused"), Result->GetBoolField(TEXT("success")));
 		const TArray<TSharedPtr<FJsonValue>>* Refused = nullptr;
 		TestTrue(TEXT("the refusal lists the bad entry"),

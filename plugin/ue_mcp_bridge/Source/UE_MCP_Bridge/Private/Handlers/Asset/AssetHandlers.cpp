@@ -1,6 +1,7 @@
 #include "AssetHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerAssetDelete.h"
 #include "EdGraph/EdGraphNode.h"
 #include "HandlerPagination.h"
 #include "HandlerJsonProperty.h"
@@ -765,6 +766,7 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("read_datatable"), &ReadDataTable, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
 		MCPParam::Optional(TEXT("rowFilter"), EType::String, TEXT("Case-insensitive substring filter on row names")),
+		MCPParam::Optional(TEXT("columns"), EType::Array, TEXT("Row-struct fields to return; each row keeps Name and these fields, and an unknown name is refused with the valid list")).Items(EType::String),
 		MCPParam::Optional(TEXT("outputPath"), EType::String, TEXT("Write the rows to this JSON file instead of returning them; relative paths resolve under Saved/")),
 	});
 	Registry.RegisterHandler(TEXT("reimport_datatable"), &ReimportDataTable, {
@@ -2756,12 +2758,17 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAsset(const TSharedPtr<FJsonObject>
 		TryCloseAssetEditors(AssetPath, bClosedEditor);
 	}
 
-	const bool bSuccess = UEditorAssetLibrary::DeleteAsset(AssetPath);
+	bool bRemovedOrphanFile = false;
+	const bool bSuccess = MCPDeleteAssetFromDisk(AssetPath, bRemovedOrphanFile);
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("path"), AssetPath);
 	Result->SetBoolField(TEXT("deleted"), bSuccess);
 	Result->SetBoolField(TEXT("forced"), bForce);
+	if (bRemovedOrphanFile)
+	{
+		Result->SetBoolField(TEXT("removedOrphanFile"), true);
+	}
 	if (bClosedEditor)
 	{
 		Result->SetBoolField(TEXT("closedOpenEditor"), true);
@@ -2849,9 +2856,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAssetBatch(const TSharedPtr<FJsonOb
 				TryCloseAssetEditors(Path, bClosed);
 				if (bClosed) ClosedEditors++;
 			}
-			if (UEditorAssetLibrary::DeleteAsset(Path))
+			bool bRemovedOrphanFile = false;
+			if (MCPDeleteAssetFromDisk(Path, bRemovedOrphanFile))
 			{
 				Entry->SetStringField(TEXT("status"), TEXT("deleted"));
+				if (bRemovedOrphanFile) Entry->SetBoolField(TEXT("removedOrphanFile"), true);
 				if (bClosed) Entry->SetBoolField(TEXT("closedOpenEditor"), true);
 				Deleted++;
 			}
@@ -2869,6 +2878,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAssetBatch(const TSharedPtr<FJsonOb
 	Result->SetArrayField(TEXT("results"), PerPath);
 	Result->SetNumberField(TEXT("deleted"), Deleted);
 	Result->SetNumberField(TEXT("absent"), Absent);
+	Result->SetBoolField(TEXT("changed"), Deleted > 0);
 	Result->SetNumberField(TEXT("failed"), Failed);
 	Result->SetNumberField(TEXT("refused"), Refused);
 	Result->SetBoolField(TEXT("forced"), bForce);
@@ -3438,10 +3448,14 @@ namespace
 				// its package and naming the map does not.
 				const FString PackageName = FPackageName::ObjectPathToPackageName(Path);
 				UObject* Found = FindObject<UObject>(nullptr, *Path);
-				Package = Found ? Found->GetPackage() : FindPackage(nullptr, *PackageName);
+				// A missing object must not silently select its containing package.
+				Package = Found ? Found->GetPackage()
+					: (Path == PackageName ? FindPackage(nullptr, *PackageName) : nullptr);
 				if (!Package)
 				{
-					Reason = FPackageName::DoesPackageExist(PackageName)
+					Reason = Path != PackageName
+						? TEXT("no loaded object at this path; name an existing loaded object or its package path")
+						: FPackageName::DoesPackageExist(PackageName)
 						? TEXT("not loaded, so it has no unsaved changes; asset(save, assetPath, force=true) loads and rewrites one package")
 						: TEXT("no asset or package at this path");
 				}

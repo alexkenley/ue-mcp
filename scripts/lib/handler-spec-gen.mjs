@@ -3,7 +3,9 @@
 // tests/unit/handler-specs.test.ts, which asserts the checked-in files are what
 // the recording renders to. Run under tsx, so the validation is the server's own.
 
-import { specProblems, clauseItems, renderChoice, formsMessage } from "../../src/surface/handler-spec.js";
+import { specProblems, paramsClause, formsMessage } from "../../src/surface/handler-spec.js";
+
+export { paramsClause };
 
 const ZOD_BY_TYPE = {
   string: "z.string()",
@@ -33,6 +35,7 @@ const ARG_VALUE = `z.union([${ARG_SCALAR}, ${ARG_STRUCT}, z.array(z.union([${ARG
 const FORM_EXPRESSION = {
   argMap: `z.record(z.string(), ${ARG_VALUE})`,
   argEntryList: `z.array(z.object({ name: z.string(), value: ${ARG_VALUE}.optional() }))`,
+  scalarMap: `z.record(z.string(), ${ARG_SCALAR})`,
   stringList: "z.array(z.string())",
   string: "z.string()",
 };
@@ -48,9 +51,23 @@ function formsExpression(forms, name) {
   return `z.union([${members.join(", ")}], { errorMap: () => ({ message: ${JSON.stringify(formsMessage(name, forms))} }) })`;
 }
 
+/** A scalar of one type with its enum or range applied. The written twin of ruledZod. */
+function ruledExpression(type, rules, name) {
+  if (type === "string" && rules.enum?.length) return `z.enum(${JSON.stringify(rules.enum)})`;
+  if ((type === "number" || type === "integer") && (rules.minimum !== undefined || rules.maximum !== undefined)) {
+    let expr = baseExpression(type, name);
+    if (rules.minimum !== undefined) expr += `.min(${rules.minimum})`;
+    if (rules.maximum !== undefined) expr += `.max(${rules.maximum})`;
+    return expr;
+  }
+  return baseExpression(type, name);
+}
+
 function fieldExpression(f, owner) {
+  const at = `${owner}.${f.name}`;
   if (f.forms?.length) return formsExpression(f.forms, f.name);
-  return f.type === "array" ? `z.array(${baseExpression(f.items ?? "any", `${owner}.${f.name}`)})` : baseExpression(f.type, `${owner}.${f.name}`);
+  if (f.fields) return f.type === "array" ? `z.array(${fieldsExpression(f.fields, at)})` : fieldsExpression(f.fields, at);
+  return f.type === "array" ? `z.array(${ruledExpression(f.items ?? "any", f, at)})` : ruledExpression(f.type, f, at);
 }
 
 function fieldEntries(fields, owner) {
@@ -81,34 +98,18 @@ export function zodExpression(param) {
   let expr;
   const element = () => param.oneOf
     ? oneOfExpression(param.oneOf, param.name)
-    : param.fields ? fieldsExpression(param.fields, param.name) : baseExpression(param.items ?? "any", param.name);
+    : param.fields ? fieldsExpression(param.fields, param.name) : ruledExpression(param.items ?? "any", param, param.name);
   if (param.literal !== undefined) expr = `z.literal(${JSON.stringify(param.literal)})`;
   else if (param.forms?.length) expr = formsExpression(param.forms, param.name);
   else if (param.type === "array") expr = `z.array(${element()})`;
   else if (param.type === "object" && (param.fields || param.oneOf)) expr = element();
-  else expr = baseExpression(param.type, param.name);
+  else expr = ruledExpression(param.type, param, param.name);
   if (param.orTypes?.length) {
     expr = `z.union([${[expr, ...param.orTypes.map((t) => baseExpression(t, param.name))].join(", ")}])`;
   }
   return param.nullable ? `${expr}.nullable()` : expr;
 }
 
-/**
- * The `Params:` clause for one handler, in the grammar parseParams reads:
- * required names bare, optional ones with `?`, aliases as `(or alias)`, and a
- * choice where its first member is declared, written as renderChoice writes it
- * (`actorLabel OR actorPath`, `at least one of labelPrefix/tag`).
- */
-export function paramsClause(spec) {
-  if (spec.params.length === 0) return "Params: none";
-  const items = clauseItems(spec).map((item) => {
-    if (item.kind === "choice") return renderChoice(item.choice, spec.params);
-    const p = item.param;
-    const aliases = p.aliases?.length ? ` (${p.aliases.map((a) => `or ${a}`).join(", ")})` : "";
-    return `${p.name}${p.required ? "" : "?"}${aliases}`;
-  });
-  return `Params: ${items.join(", ")}`;
-}
 
 /**
  * One zod entry per key across a category. A key several handlers declare must
@@ -116,15 +117,26 @@ export function paramsClause(spec) {
  * shared; the descriptions are merged, naming which handlers each belongs to
  * when they differ.
  */
+/** The value with its enums and ranges removed, at every depth: what it is as a type. */
+function withoutRules(value) {
+  const { enum: _enum, minimum: _min, maximum: _max, ...rest } = value;
+  if (rest.fields) rest.fields = rest.fields.map(withoutRules);
+  if (rest.oneOf) rest.oneOf = { ...rest.oneOf, variants: rest.oneOf.variants.map((v) => ({ ...v, fields: v.fields.map(withoutRules) })) };
+  return rest;
+}
+
 function categoryKeys(handlers) {
   const keys = new Map();
-  const claim = (key, expr, description, method) => {
+  const claim = (key, expr, base, description, method) => {
     const entry = keys.get(key);
     if (!entry) {
-      keys.set(key, { expr, descriptions: new Map([[description, [method]]]) });
+      keys.set(key, { expr, base, descriptions: new Map([[description, [method]]]) });
       return;
     }
-    if (entry.expr !== expr) {
+    // Declarations that differ only by enum or range share the type; the
+    // shared key takes the type and each action's contract enforces its own rules.
+    if (entry.expr !== expr && entry.base === base) entry.expr = base;
+    else if (entry.expr !== expr) {
       throw new Error(`'${key}' is declared as ${entry.expr} and as ${expr} (${method}); one category key has one type`);
     }
     const owners = entry.descriptions.get(description);
@@ -134,8 +146,9 @@ function categoryKeys(handlers) {
   for (const [method, spec] of handlers) {
     for (const param of spec.params) {
       const expr = zodExpression(param);
-      claim(param.name, expr, param.description, method);
-      for (const alias of param.aliases ?? []) claim(alias, expr, `Alias for ${param.name}`, method);
+      const base = zodExpression(withoutRules(param));
+      claim(param.name, expr, base, param.description, method);
+      for (const alias of param.aliases ?? []) claim(alias, expr, base, `Alias for ${param.name}`, method);
     }
   }
   return [...keys.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => {

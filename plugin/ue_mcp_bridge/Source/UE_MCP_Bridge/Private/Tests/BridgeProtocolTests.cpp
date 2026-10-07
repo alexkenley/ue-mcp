@@ -628,6 +628,8 @@ bool FMCPBridgeCapabilitiesTest::RunTest(const FString& Parameters)
 	// surface is recorded from.
 	const TSharedPtr<FJsonObject>* HandlerSpecs = nullptr;
 	TestTrue(TEXT("handler parameter specs are reported"), Payload->TryGetObjectField(TEXT("handlerSpecs"), HandlerSpecs));
+	const TSharedPtr<FJsonObject>* PluginHandlerSpecs = nullptr;
+	TestTrue(TEXT("plugin handler specs are reported apart"), Payload->TryGetObjectField(TEXT("pluginHandlerSpecs"), PluginHandlerSpecs));
 	if (HandlerSpecs && HandlerSpecs->IsValid())
 	{
 		const TSharedPtr<FJsonObject>* Spec = nullptr;

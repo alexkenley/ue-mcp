@@ -10,6 +10,7 @@
 #include "UObject/UnrealType.h"
 #include "UObject/PropertyPortFlags.h"
 #include "UObject/SoftObjectPtr.h"
+#include "Misc/PackageName.h"
 #include "MCPEngineCompat.h"
 #include "HandlerUtils.h"
 #include "GameplayTagContainer.h"
@@ -521,6 +522,13 @@ namespace MCPJsonProperty
 				// The empty spellings are cleared by name rather than left to
 				// the path parser, so the stored value is the empty path on
 				// every engine version the verifier below has to agree with.
+				// A bare package path names a package, not an object, and nothing loads through it; an existing
+				// asset package is completed to Pkg.Name, the form the editor stores (#1256).
+				if (!IsEmptyReferenceText(Path) && !Path.Contains(TEXT(".")) && FPackageName::IsValidLongPackageName(Path)
+					&& (FindPackage(nullptr, *Path) || FPackageName::DoesPackageExist(Path)))
+				{
+					Path = Path + TEXT(".") + FPackageName::GetShortName(Path);
+				}
 				const FSoftObjectPath PathObj = IsEmptyReferenceText(Path) ? FSoftObjectPath() : FSoftObjectPath(Path);
 				FSoftObjectPtr Ptr(PathObj);
 				CastFieldChecked<FSoftObjectProperty>(Prop)->SetPropertyValue(ValueAddr, Ptr);

@@ -12,7 +12,9 @@ describe("packageRoot", () => {
   });
 
   it("resolves top-level entry points in src/, whatever folder this module is in", () => {
-    expect(path.dirname(packageModulePath("deploy-cli.js"))).toBe(path.join(packageRoot(), "src"));
+    const entry = packageModulePath("index.js");
+    expect(path.dirname(entry)).toBe(path.join(packageRoot(), "src"));
+    expect(fs.existsSync(entry.replace(/\.js$/, ".ts"))).toBe(true);
   });
 });
 

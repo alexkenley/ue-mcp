@@ -1,4 +1,5 @@
 #include "HandlerRegistry.h"
+#include "MCPContract.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -186,6 +187,15 @@ FString FMCPHandlerRegistry::ValidateValueShape(const FMCPParamSpec& Param)
 		}
 	}
 
+	{
+		const FString RuleProblem = ValidateValueRules(Param.Name, Param.Type, Param.ItemType, Param.EnumValues, Param.Minimum, Param.Maximum);
+		if (!RuleProblem.IsEmpty()) return RuleProblem;
+		if (Param.EnumValues.Num() > 0 && (Param.LiteralValue.IsValid() || Param.OrTypes.Num() > 0))
+		{
+			return FString::Printf(TEXT("'%s' is an enum and also a literal or a union"), *Param.Name);
+		}
+	}
+
 	if (Param.LiteralValue.IsValid())
 	{
 		const EJson Kind = Param.LiteralValue->Type;
@@ -314,6 +324,69 @@ FString FMCPHandlerRegistry::ValidateField(const FString& Owner, const FMCPParam
 			}
 		}
 	}
+	const FString Path = FString::Printf(TEXT("%s.%s"), *Owner, *Field.Name);
+	const FString RuleProblem = ValidateValueRules(Path, Field.Type, Field.ItemType, Field.EnumValues, Field.Minimum, Field.Maximum);
+	if (!RuleProblem.IsEmpty()) return RuleProblem;
+	if (Field.Fields.Num() > 0)
+	{
+		const bool bObjectShaped = Field.Type == EMCPParamType::Object
+			|| (Field.Type == EMCPParamType::Array && Field.ItemType == EMCPParamType::Object);
+		if (!bObjectShaped)
+		{
+			return FString::Printf(TEXT("'%s' declares fields but is neither an object nor an array of objects"), *Path);
+		}
+		TSet<FString> Names;
+		for (const FMCPParamField& Nested : Field.Fields)
+		{
+			if (Nested.Name.IsEmpty() || Names.Contains(Nested.Name))
+			{
+				return FString::Printf(TEXT("'%s' declares a field twice, or one with no name ('%s')"), *Path, *Nested.Name);
+			}
+			Names.Add(Nested.Name);
+			const FString NestedProblem = ValidateField(Path, Nested);
+			if (!NestedProblem.IsEmpty()) return NestedProblem;
+		}
+	}
+	return FString();
+}
+
+FString FMCPHandlerRegistry::ValidateValueRules(const FString& Owner, EMCPParamType Type, EMCPParamType ItemType,
+	const TArray<FString>& EnumValues, const TOptional<double>& Minimum, const TOptional<double>& Maximum)
+{
+	// Rules on an array apply to each element.
+	const EMCPParamType ValueType = Type == EMCPParamType::Array ? ItemType : Type;
+	if (EnumValues.Num() > 0)
+	{
+		if (ValueType != EMCPParamType::String)
+		{
+			return FString::Printf(TEXT("'%s' declares enum values but is not a string or an array of strings"), *Owner);
+		}
+		TSet<FString> Seen;
+		for (const FString& Value : EnumValues)
+		{
+			if (Value.IsEmpty() || Seen.Contains(Value))
+			{
+				return FString::Printf(TEXT("'%s' lists an enum value twice, or an empty one"), *Owner);
+			}
+			int32 Unused = 0;
+			if (Value.FindChar(TEXT(','), Unused) || Value.FindChar(TEXT('{'), Unused) || Value.FindChar(TEXT('}'), Unused))
+			{
+				return FString::Printf(TEXT("'%s' enum value '%s' contains ',', '{' or '}', which a signature cannot write"), *Owner, *Value);
+			}
+			Seen.Add(Value);
+		}
+	}
+	if (Minimum.IsSet() || Maximum.IsSet())
+	{
+		if (ValueType != EMCPParamType::Number && ValueType != EMCPParamType::Integer)
+		{
+			return FString::Printf(TEXT("'%s' declares a numeric range but is not a number or an integer"), *Owner);
+		}
+		if (Minimum.IsSet() && Maximum.IsSet() && Minimum.GetValue() > Maximum.GetValue())
+		{
+			return FString::Printf(TEXT("'%s' declares a minimum above its maximum"), *Owner);
+		}
+	}
 	return FString();
 }
 
@@ -324,6 +397,7 @@ const TCHAR* FMCPHandlerRegistry::ValueFormName(EMCPValueForm Form)
 	case EMCPValueForm::ArgMap:       return TEXT("argMap");
 	case EMCPValueForm::ArgEntryList: return TEXT("argEntryList");
 	case EMCPValueForm::StringList:   return TEXT("stringList");
+	case EMCPValueForm::ScalarMap:    return TEXT("scalarMap");
 	default:                          return TEXT("string");
 	}
 }
@@ -352,8 +426,18 @@ const TCHAR* FMCPHandlerRegistry::ParamTypeName(EMCPParamType Type)
 
 TSharedPtr<FJsonObject> FMCPHandlerRegistry::BuildHandlerSpecsJson() const
 {
+	return SpecsToJson(HandlerSpecs, HandlerCategories);
+}
+
+TSharedPtr<FJsonObject> FMCPHandlerRegistry::BuildExternalHandlerSpecsJson()
+{
+	return SpecsToJson(UEMCP::GetExternalHandlerSpecs(), TMap<FString, FString>());
+}
+
+TSharedPtr<FJsonObject> FMCPHandlerRegistry::SpecsToJson(const TMap<FString, FMCPHandlerSpec>& Specs, const TMap<FString, FString>& Categories)
+{
 	TArray<FString> Methods;
-	HandlerSpecs.GetKeys(Methods);
+	Specs.GetKeys(Methods);
 	Methods.Sort();
 
 	auto FormsJson = [](const TArray<EMCPValueForm>& Forms)
@@ -365,7 +449,25 @@ TSharedPtr<FJsonObject> FMCPHandlerRegistry::BuildHandlerSpecsJson() const
 		}
 		return MCPStringListToJson(Names);
 	};
-	auto FieldsJson = [&FormsJson](const TArray<FMCPParamField>& Fields)
+	// Written only when set, so a spec that uses none of them publishes exactly what it did before.
+	auto AddValueRules = [](const TSharedPtr<FJsonObject>& Entry, const TArray<FString>& EnumValues,
+		const TOptional<double>& Minimum, const TOptional<double>& Maximum)
+	{
+		if (EnumValues.Num() > 0)
+		{
+			Entry->SetArrayField(TEXT("enum"), MCPStringListToJson(EnumValues));
+		}
+		if (Minimum.IsSet())
+		{
+			Entry->SetNumberField(TEXT("minimum"), Minimum.GetValue());
+		}
+		if (Maximum.IsSet())
+		{
+			Entry->SetNumberField(TEXT("maximum"), Maximum.GetValue());
+		}
+	};
+	TFunction<TArray<TSharedPtr<FJsonValue>>(const TArray<FMCPParamField>&)> FieldsJson;
+	FieldsJson = [&FormsJson, &AddValueRules, &FieldsJson](const TArray<FMCPParamField>& Fields)
 	{
 		TArray<TSharedPtr<FJsonValue>> FieldValues;
 		for (const FMCPParamField& Field : Fields)
@@ -383,6 +485,11 @@ TSharedPtr<FJsonObject> FMCPHandlerRegistry::BuildHandlerSpecsJson() const
 			{
 				FieldEntry->SetArrayField(TEXT("forms"), FormsJson(Field.Forms));
 			}
+			AddValueRules(FieldEntry, Field.EnumValues, Field.Minimum, Field.Maximum);
+			if (Field.Fields.Num() > 0)
+			{
+				FieldEntry->SetArrayField(TEXT("fields"), FieldsJson(Field.Fields));
+			}
 			FieldValues.Add(MakeShared<FJsonValueObject>(FieldEntry));
 		}
 		return FieldValues;
@@ -391,7 +498,7 @@ TSharedPtr<FJsonObject> FMCPHandlerRegistry::BuildHandlerSpecsJson() const
 	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 	for (const FString& Method : Methods)
 	{
-		const FMCPHandlerSpec& Spec = HandlerSpecs.FindChecked(Method);
+		const FMCPHandlerSpec& Spec = Specs.FindChecked(Method);
 		TArray<TSharedPtr<FJsonValue>> ParamValues;
 		for (const FMCPParamSpec& Param : Spec.Params)
 		{
@@ -427,6 +534,7 @@ TSharedPtr<FJsonObject> FMCPHandlerRegistry::BuildHandlerSpecsJson() const
 			{
 				Entry->SetField(TEXT("literal"), Param.LiteralValue);
 			}
+			AddValueRules(Entry, Param.EnumValues, Param.Minimum, Param.Maximum);
 			if (Param.Fields.Num() > 0)
 			{
 				Entry->SetArrayField(TEXT("fields"), FieldsJson(Param.Fields));
@@ -455,7 +563,7 @@ TSharedPtr<FJsonObject> FMCPHandlerRegistry::BuildHandlerSpecsJson() const
 		}
 
 		TSharedPtr<FJsonObject> MethodEntry = MakeShared<FJsonObject>();
-		if (const FString* Category = HandlerCategories.Find(Method))
+		if (const FString* Category = Categories.Find(Method))
 		{
 			MethodEntry->SetStringField(TEXT("category"), *Category);
 		}
@@ -579,7 +687,20 @@ TSharedPtr<FJsonValue> FMCPHandlerRegistry::ExecuteHandler(const FString& Method
 		float Unused = 0.0f;
 		if (UEMCP::LookupExternalHandler(MethodName, External, Unused))
 		{
-			return External(Params);
+			// #1282: a plugin handler with a contract is held to it here, whoever sent the call, and reads its
+			// parameters by their declared names. Plugins read FJsonObject directly, which read tracking cannot
+			// see, so an undeclared key is refused rather than reported as unread.
+			FMCPHandlerSpec Spec;
+			if (!UEMCP::LookupExternalHandlerSpec(MethodName, Spec))
+			{
+				return External(Params);
+			}
+			const FString Problem = UEMCP::ContractViolation(Spec, Params);
+			if (!Problem.IsEmpty())
+			{
+				return MCPError(FString::Printf(TEXT("Invalid parameters for %s: %s"), *MethodName, *Problem));
+			}
+			return External(ResolveParamAliases(Spec, Params));
 		}
 	}
 

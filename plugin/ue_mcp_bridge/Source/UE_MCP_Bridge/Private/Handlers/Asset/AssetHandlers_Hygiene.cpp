@@ -44,6 +44,7 @@
 
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerAssetDelete.h"
 
 #include "AssetRegistry/ARFilter.h"
 #include "AssetRegistry/AssetData.h"
@@ -1618,7 +1619,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::FixAssetHygiene(const TSharedPtr<FJsonObj
 		for (FMCPHygPlannedFix& Item : Plan)
 		{
 			if (!Item.bEligible) continue;
-			if (UEditorAssetLibrary::DeleteAsset(Item.AssetPath))
+			bool bRemovedOrphanFile = false;
+			if (MCPDeleteAssetFromDisk(Item.AssetPath, bRemovedOrphanFile))
 			{
 				Item.Status = MCPHygStatusDeleted;
 				++Applied;
