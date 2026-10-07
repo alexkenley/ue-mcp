@@ -44,6 +44,34 @@
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
 
+// Records a paint layer on the landscape actor so it survives refreshes and reloads. Returns true when it was missing.
+static bool PersistLandscapeTargetLayer(ALandscapeProxy* Proxy, FName LayerName, ULandscapeLayerInfoObject* LayerInfo)
+{
+	ALandscape* Landscape = Proxy ? Proxy->GetLandscapeActor() : nullptr;
+	if (!Landscape || !LayerInfo)
+	{
+		return false;
+	}
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5)
+	if (Landscape->HasTargetLayer(LayerInfo))
+	{
+		return false;
+	}
+	Landscape->Modify();
+	Landscape->AddTargetLayer(LayerName, FLandscapeTargetLayerSettings(LayerInfo));
+#else
+	if (Landscape->EditorLayerSettings.ContainsByPredicate(
+			[LayerInfo](const FLandscapeEditorLayerSettings& Settings) { return Settings.LayerInfoObj == LayerInfo; }))
+	{
+		return false;
+	}
+	Landscape->Modify();
+	Landscape->EditorLayerSettings.Add(FLandscapeEditorLayerSettings(LayerInfo));
+#endif
+	Landscape->MarkPackageDirty();
+	return true;
+}
+
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
 #endif
@@ -1258,8 +1286,11 @@ TSharedPtr<FJsonValue> FLandscapeHandlers::AddLandscapeLayerInfo(const TSharedPt
 	{
 		if (ExistingLayer.LayerInfoObj && ExistingLayer.GetLayerName().ToString() == LayerName)
 		{
+			// A layer registered by an earlier build of this handler lives only in LandscapeInfo; persist it now.
+			const bool bRepaired = PersistLandscapeTargetLayer(TargetLandscape, FName(*LayerName), ExistingLayer.LayerInfoObj);
 			auto Result = MCPSuccess();
 			MCPSetExisted(Result);
+			Result->SetBoolField(TEXT("persistedOnActor"), bRepaired);
 			Result->SetStringField(TEXT("layerName"), LayerName);
 			Result->SetStringField(TEXT("path"), ExistingLayer.LayerInfoObj->GetPathName());
 			Result->SetStringField(TEXT("note"), TEXT("Layer already exists on this landscape"));
@@ -1313,13 +1344,15 @@ PRAGMA_ENABLE_DEPRECATION_WARNINGS
 		bSaved = SaveAssetPackageChecked(LayerInfoObj, SaveError);
 	}
 
-	// Register the layer info with the landscape
-	int32 LayerIndex = LandscapeInfo->Layers.Num();
-	FLandscapeInfoLayerSettings NewLayerSettings(LayerInfoObj, TargetLandscape);
-	LandscapeInfo->Layers.Add(NewLayerSettings);
-
-	// Mark the landscape as dirty
-	TargetLandscape->MarkPackageDirty();
+	// Register the layer on the landscape actor, which is what persists. ULandscapeInfo::Layers alone is rebuilt from
+	// the actor on every refresh and on load, so a layer added only there vanished after the next edit (#1239).
+	PersistLandscapeTargetLayer(TargetLandscape, FName(*LayerName), LayerInfoObj);
+	int32 LayerIndex = LandscapeInfo->Layers.IndexOfByPredicate(
+		[LayerInfoObj](const FLandscapeInfoLayerSettings& Settings) { return Settings.LayerInfoObj == LayerInfoObj; });
+	if (LayerIndex == INDEX_NONE)
+	{
+		LayerIndex = LandscapeInfo->Layers.Add(FLandscapeInfoLayerSettings(LayerInfoObj, TargetLandscape));
+	}
 
 	auto Result = MCPSuccess();
 	MCPSetCreated(Result);

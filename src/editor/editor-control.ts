@@ -21,6 +21,13 @@ import { oneLine } from "./dialog-guard.js";
 import type { ProgressDisplay, ProgressFn } from "../core/types.js";
 import { findUProject } from "../config/uproject-path.js";
 import { readEnv } from "../core/env.js";
+import {
+  crashReporterCleanupIsEmpty,
+  describeCrashReporterCleanup,
+  endProjectCrashReporters,
+  type CrashReporterCleanup,
+  type CrashReporterDeps,
+} from "./crash-reporter.js";
 
 const NO_EDITOR_BINARY_MSG =
   "Unreal Editor executable not found. Set UE_EDITOR_PATH to the editor binary (on macOS that is inside UnrealEditor.app/Contents/MacOS/), or install the engine to a default location.";
@@ -933,6 +940,25 @@ export interface StopEditorResult {
   /** Other editors of THIS project still running after the stop (#1072).
    *  Present only when there is something to report. */
   remainingInstances?: Array<{ pid: number; port: number }>;
+  /** Crash reporters of this project a crashed editor left holding its
+   *  binaries, and what was done about them. Present only when there is
+   *  something to report. */
+  crashReporters?: CrashReporterCleanup;
+}
+
+/**
+ * End any crash reporter a crashed editor of this project left behind, and fold
+ * what happened into the stop's result. Runs only once no editor of this
+ * project is left to serve: after a stop, or when there was nothing to stop.
+ */
+async function withCrashReporterCleanup(
+  result: StopEditorResult,
+  projectDir: string | undefined,
+  deps: Partial<CrashReporterDeps> | undefined,
+): Promise<StopEditorResult> {
+  const cleanup = await endProjectCrashReporters(projectDir, deps);
+  if (crashReporterCleanupIsEmpty(cleanup)) return result;
+  return { ...result, message: `${result.message} ${describeCrashReporterCleanup(cleanup)}`, crashReporters: cleanup };
 }
 
 /**
@@ -1092,6 +1118,9 @@ export async function stopEditor(
      * milliseconds instead of half a minute. Production passes nothing.
      */
     confirmPollMs?: number;
+
+    /** Seams for the crash reporter cleanup, for tests. Production passes nothing. */
+    crashReporters?: Partial<CrashReporterDeps>;
   } = {},
 ): Promise<StopEditorResult> {
   const projectPath = projectDir ? findUProject(projectDir) : null;
@@ -1111,12 +1140,17 @@ export async function stopEditor(
     // without anybody parsing the sentence, and so a flow step that expects it
     // can absorb it with `ignore_failure: true` instead of this call pretending
     // it quit something.
-    return {
+    const refusal: StopEditorResult = {
       success: false,
       ...(ownership.alreadyStopped ? { alreadyStopped: true } : {}),
       message: ownership.message,
       ...(ownership.state ? { state: ownership.state } : {}),
     };
+    // Nothing of this project is running, which is exactly when a crash
+    // reporter left over from a crash is still holding its binaries.
+    return ownership.alreadyStopped
+      ? withCrashReporterCleanup(refusal, projectDir, opts.crashReporters)
+      : refusal;
   }
 
   const port = ownership.port;
@@ -1126,7 +1160,11 @@ export async function stopEditor(
     // Same reason, one branch later: a published port with no listener and no
     // editor process holding the project means the editor this call would have
     // stopped is already gone, so nothing was quit and the marker says why.
-    return { success: false, alreadyStopped: true, message: "Editor is not running" };
+    return withCrashReporterCleanup(
+      { success: false, alreadyStopped: true, message: "Editor is not running" },
+      projectDir,
+      opts.crashReporters,
+    );
   }
   if (!bridgeUp) {
     // "Unreachable" is where the user is left guessing, so say what the engine
@@ -1255,7 +1293,7 @@ export async function stopEditor(
           }. Stop ${
             remaining.length === 1 ? "it" : "them"} by targeting ${
             remaining.length === 1 ? "its" : "their"} own editor session.`;
-      return {
+      return withCrashReporterCleanup({
         success: true,
         message:
           "Editor quit itself via the bridge." +
@@ -1265,7 +1303,7 @@ export async function stopEditor(
         // Reported whenever a dialog was in the way, including when answering
         // it is what let the stop through, so the caller can always see which
         // mode applied and why.
-      };
+      }, projectDir, opts.crashReporters);
     }
   }
 

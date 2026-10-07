@@ -1,5 +1,5 @@
 import { checkPluginFreshness } from "../../editor/bridge-freshness.js";
-import { checkBridgeParity, deployedPlugin } from "../../bridge/bridge-parity.js";
+import { checkBridgeParity, deployedPlugin, recordedPluginSpecs } from "../../bridge/bridge-parity.js";
 import * as fs from "node:fs";
 import { deploy, deploySummary, attach, attachSummary } from "../../editor/deployer.js";
 import { collapsingEnvWarnings } from "../../config/session-env.js";
@@ -109,7 +109,7 @@ export const sessionActions: Record<string, ActionSpec> = {
         // the source and the header on disk. architecture.md already draws
         // that line; this is the running-binary side of it, in one place
         // rather than as more sibling flags.
-        deployedPlugin: deployedPlugin(ctx.bridge.capabilities, parity),
+        deployedPlugin: deployedPlugin(ctx.bridge.capabilities, parity, undefined, recordedPluginSpecs(toolGraphOf(ctx))),
         mode: ctx.bridge.isConnected ? "live" : "disconnected",
         editorConnected: ctx.bridge.isConnected,
         answeringPid: answeringPid ?? undefined,

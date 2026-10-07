@@ -110,10 +110,22 @@ function describe(missing: string[], advertised: number, registered: number): st
  * Undefined on a healthy connected session, so a status payload only grows
  * when there is something to say.
  */
+/** The recorded contracts of the plugin actions on a tool graph, keyed by bridge method (#1282). */
+export function recordedPluginSpecs(tools: readonly ToolDef[]): HandlerSpecs {
+  const out: HandlerSpecs = {};
+  for (const tool of tools) {
+    for (const spec of Object.values(tool.actions)) {
+      if (spec.recordedContract) out[spec.recordedContract.method] = spec.recordedContract.spec;
+    }
+  }
+  return out;
+}
+
 export function deployedPlugin(
   capabilities: BridgeCapabilities | null | undefined,
   parity: BridgeParity,
   recordedSpecs: HandlerSpecs = RECORDED_HANDLER_SPECS,
+  pluginSpecs: HandlerSpecs = {},
 ): { builtAt?: string; missingActions?: number; warning?: string; handlerSpecDrift?: string[]; handlerSpecWarning?: string } | undefined {
   if (!capabilities) return undefined;
   const missing = parity.missing.length > 0 ? parity.missing.length : undefined;
@@ -121,7 +133,15 @@ export function deployedPlugin(
   // the plugin's own specs. A running plugin whose specs differ is one whose
   // handlers read something other than what this server advertises.
   const specs = compareHandlerSpecs(recordedSpecs, capabilities.handlerSpecs);
-  const drift = specs.drifted.length > 0 ? specs.drifted : undefined;
+  // #1282: a plugin's recorded contracts against the ones its module registered.
+  // Only methods a loaded plugin recorded are compared; other plugins' handlers are not this server's surface.
+  const livePlugin = capabilities.pluginHandlerSpecs ?? {};
+  const pluginDrift = Object.keys(pluginSpecs).length === 0 ? [] : compareHandlerSpecs(
+    pluginSpecs,
+    Object.fromEntries(Object.keys(pluginSpecs).filter((m) => m in livePlugin).map((m) => [m, livePlugin[m]])),
+  ).drifted;
+  const allDrift = [...specs.drifted, ...pluginDrift].sort();
+  const drift = allDrift.length > 0 ? allDrift : undefined;
   // The build time is the half that catches a handler which is PRESENT and
   // old. #1002 was a DataTable resolution fix that shipped on 2026-08-28 and
   // was reported as broken three days later by a session whose deployed plugin
@@ -138,7 +158,7 @@ export function deployedPlugin(
       ? `${drift.length} handler parameter spec(s) differ between the running plugin and the recording this server `
         + `advertises from: ${drift.slice(0, NAMED).join(", ")}${drift.length > NAMED ? `, and ${drift.length - NAMED} more` : ""}. `
         + "Either the plugin is behind this package (rebuild it), or the specs changed and need "
-        + "npm run specs:record then npm run specs:generate."
+        + "npm run specs:record then npm run specs:generate (for a plugin's handlers, ue-mcp plugin record-specs)."
       : undefined,
   };
 }

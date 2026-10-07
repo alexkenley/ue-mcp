@@ -28,6 +28,8 @@ vi.mock("../../src/editor/engine-observer.js", async (importOriginal) => {
     findInteractiveEditors: vi.fn(async () => []),
     findProjectEditors: vi.fn(async () => []),
     findEditorByPid: vi.fn(async () => null),
+    // No crash reporter probe: it would query the real process table.
+    listCrashReporterProcesses: vi.fn(async () => []),
     readEngineState: vi.fn(async () => ({
       running: true,
       processes: [],

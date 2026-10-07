@@ -273,6 +273,35 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "export_level_to_pcg_asset": {
+    "category": "pcg",
+    "params": [
+      {
+        "name": "levelPath",
+        "type": "string",
+        "required": true,
+        "description": "Saved level (.umap) to export, package or object path"
+      },
+      {
+        "name": "assetPath",
+        "type": "string",
+        "required": false,
+        "description": "Content folder for the PCG data asset (default: the level's folder)"
+      },
+      {
+        "name": "assetName",
+        "type": "string",
+        "required": false,
+        "description": "Asset name (default: <LevelName>_PCG)"
+      },
+      {
+        "name": "save",
+        "type": "boolean",
+        "required": false,
+        "description": "Save the asset after export (default true)"
+      }
+    ]
+  },
   "export_pcg_graph": {
     "category": "pcg",
     "params": [
@@ -514,6 +543,58 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "set_pcg_subgraph": {
+    "category": "pcg",
+    "params": [
+      {
+        "name": "assetPath",
+        "type": "string",
+        "required": true,
+        "description": "PCGGraph asset path",
+        "aliases": [
+          "path"
+        ]
+      },
+      {
+        "name": "nodeName",
+        "type": "string",
+        "required": true,
+        "description": "Engine name of the Subgraph node, as read_graph reports it"
+      },
+      {
+        "name": "subgraphPath",
+        "type": "string",
+        "required": true,
+        "description": "PCGGraph or PCGGraphInstance to run; \"\" clears it"
+      }
+    ]
+  },
+  "set_pcg_subgraph_parameters": {
+    "category": "pcg",
+    "params": [
+      {
+        "name": "assetPath",
+        "type": "string",
+        "required": true,
+        "description": "PCGGraph asset path",
+        "aliases": [
+          "path"
+        ]
+      },
+      {
+        "name": "nodeName",
+        "type": "string",
+        "required": true,
+        "description": "Engine name of the Subgraph node"
+      },
+      {
+        "name": "parameters",
+        "type": "object",
+        "required": true,
+        "description": "{parameterName: value}; null clears that override"
+      }
+    ]
+  },
   "set_static_mesh_spawner_meshes": {
     "category": "pcg",
     "params": [
@@ -543,7 +624,7 @@ export const handlerSpecs: HandlerSpecs = {
             "name": "mesh",
             "type": "string",
             "required": true,
-            "description": "StaticMesh asset path; an entry without one is skipped"
+            "description": "StaticMesh, package or object path; an entry without one is skipped, and one that does not load refuses the call"
           },
           {
             "name": "weight",
@@ -616,6 +697,24 @@ export const handlerSpecs: HandlerSpecs = {
         "description": "Only this node (default: every node in the graph)"
       }
     ]
+  },
+  "update_pcg_level_assets": {
+    "category": "pcg",
+    "params": [
+      {
+        "name": "assetPaths",
+        "type": "array",
+        "required": true,
+        "description": "PCG data assets to re-export from their source levels",
+        "items": "string"
+      },
+      {
+        "name": "save",
+        "type": "boolean",
+        "required": false,
+        "description": "Save the assets after export (default true)"
+      }
+    ]
   }
 };
 
@@ -628,6 +727,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   create_pcg_graph: "Params: name, packagePath?, onConflict?",
   disconnect_pcg_nodes: "Params: assetPath (or path), sourceNode (or sourceNodeName), targetNode (or targetNodeName), sourcePin? (or sourcePinLabel), targetPin? (or targetPinLabel)",
   execute_pcg_graph: "Params: actorLabel OR actorPath, seed?",
+  export_level_to_pcg_asset: "Params: levelPath, assetPath?, assetName?, save?",
   export_pcg_graph: "Params: assetPath (or path), includeSettings?",
   force_regenerate_pcg: "Params: actorLabel OR actorPath",
   get_pcg_component_details: "Params: actorLabel OR actorPath",
@@ -638,31 +738,38 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   read_pcg_node_settings: "Params: assetPath (or path), nodeName",
   remove_pcg_node: "Params: assetPath (or path), nodeName",
   set_pcg_node_settings: "Params: assetPath (or path), nodeName, settings OR propertyName + propertyValue",
+  set_pcg_subgraph: "Params: assetPath (or path), nodeName, subgraphPath",
+  set_pcg_subgraph_parameters: "Params: assetPath (or path), nodeName, parameters",
   set_static_mesh_spawner_meshes: "Params: assetPath (or path), nodeName, entries, replace?",
   toggle_pcg_graph: "Params: actorLabel OR actorPath, graphPath?",
   unwrap_pcg_instance_nodes: "Params: assetPath (or path), nodeName?",
+  update_pcg_level_assets: "Params: assetPaths, save?",
 };
 
 /** Every key the spec'd pcg handlers declare, aliases included. */
 export const schema: Record<string, z.ZodType> = {
   actorLabel: z.string().optional().describe("Editor label of the actor holding the PCG component; a label naming several actors is refused"),
   actorPath: z.string().optional().describe("Full actor object path; the unambiguous selector"),
-  assetPath: z.string().optional().describe("PCGGraph asset path"),
+  assetName: z.string().optional().describe("Asset name (default: <LevelName>_PCG)"),
+  assetPath: z.string().optional().describe("PCGGraph asset path (add_pcg_node, connect_pcg_nodes, disconnect_pcg_nodes, export_pcg_graph, import_pcg_graph, read_pcg_graph, read_pcg_node_settings, remove_pcg_node, set_pcg_node_settings, set_pcg_subgraph, set_pcg_subgraph_parameters, set_static_mesh_spawner_meshes, unwrap_pcg_instance_nodes). Content folder for the PCG data asset (default: the level's folder) (export_level_to_pcg_asset)"),
+  assetPaths: z.array(z.string()).optional().describe("PCG data assets to re-export from their source levels"),
   connections: z.array(z.record(z.unknown())).optional().describe("[{from, fromPin?, to, toPin?}]"),
   cursor: z.string().optional().describe("Resume a paged read: pass back the 'nextCursor' from the previous page, unmodified"),
-  entries: z.array(z.object({ mesh: z.string().describe("StaticMesh asset path; an entry without one is skipped"), weight: z.number().optional().describe("Relative pick weight (default 1), truncated to a whole number") })).optional().describe("Weighted mesh entries"),
+  entries: z.array(z.object({ mesh: z.string().describe("StaticMesh, package or object path; an entry without one is skipped, and one that does not load refuses the call"), weight: z.number().optional().describe("Relative pick weight (default 1), truncated to a whole number") })).optional().describe("Weighted mesh entries"),
   extent: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Half-size of the volume box {x,y,z} (default 500 on each axis)"),
   graphPath: z.string().optional().describe("PCGGraph to assign to the volume's component (add_pcg_volume). PCGGraph to assign (default: re-apply the component's current graph) (toggle_pcg_graph)"),
   includeSettings: z.boolean().optional().describe("Include per-node editable settings in the response (default true)"),
   label: z.string().optional().describe("Editor label. Also the idempotency key: an existing actor with this label is reported rather than duplicated"),
+  levelPath: z.string().optional().describe("Saved level (.umap) to export, package or object path"),
   limit: z.number().int().optional().describe("Rows to return on this page (default 200, max 2000)"),
   location: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("World location {x,y,z} (default origin)"),
   name: z.string().optional().describe("Graph asset name"),
-  nodeName: z.string().optional().describe("Engine name of the node, as read_graph reports it (read_pcg_node_settings, remove_pcg_node, set_pcg_node_settings, set_static_mesh_spawner_meshes). Only this node (default: every node in the graph) (unwrap_pcg_instance_nodes)"),
+  nodeName: z.string().optional().describe("Engine name of the node, as read_graph reports it (read_pcg_node_settings, remove_pcg_node, set_pcg_node_settings, set_static_mesh_spawner_meshes). Engine name of the Subgraph node, as read_graph reports it (set_pcg_subgraph). Engine name of the Subgraph node (set_pcg_subgraph_parameters). Only this node (default: every node in the graph) (unwrap_pcg_instance_nodes)"),
   nodes: z.array(z.record(z.unknown())).optional().describe("[{name, class, posX?, posY?, settings?}]"),
   nodeType: z.string().optional().describe("PCG settings class of the node to add"),
   onConflict: z.string().optional().describe("When the label exists: skip (default, report it) | error (add_pcg_volume). When the graph exists: skip (default, report it) | error (create_pcg_graph)"),
   packagePath: z.string().optional().describe("Folder for the new graph (default /Game/PCG)"),
+  parameters: z.record(z.unknown()).optional().describe("{parameterName: value}; null clears that override"),
   path: z.string().optional().describe("Alias for assetPath"),
   posX: z.number().optional().describe("Graph editor X position for the new node"),
   posY: z.number().optional().describe("Graph editor Y position for the new node"),
@@ -670,12 +777,14 @@ export const schema: Record<string, z.ZodType> = {
   propertyValue: z.string().optional().describe("The value for propertyName, as UE export text"),
   removeComponents: z.boolean().optional().describe("Remove the managed spawned components too (default true)"),
   replace: z.boolean().optional().describe("Wipe existing user nodes first (default false) (import_pcg_graph). Overwrite existing MeshEntries (default true) (set_static_mesh_spawner_meshes)"),
+  save: z.boolean().optional().describe("Save the asset after export (default true) (export_level_to_pcg_asset). Save the assets after export (default true) (update_pcg_level_assets)"),
   seed: z.number().int().optional().describe("Write the component's Seed before generating; the old one is reported as previousSeed"),
   settings: z.record(z.unknown()).optional().describe("{propertyPath: value}; dotted paths and nested structs supported"),
   sourceNode: z.string().optional().describe("Node the edge leaves"),
   sourceNodeName: z.string().optional().describe("Alias for sourceNode"),
   sourcePin: z.string().optional().describe("Output pin label. connect_nodes defaults to the first output pin, disconnect_nodes to any"),
   sourcePinLabel: z.string().optional().describe("Alias for sourcePin"),
+  subgraphPath: z.string().optional().describe("PCGGraph or PCGGraphInstance to run; \"\" clears it"),
   targetNode: z.string().optional().describe("Node the edge enters"),
   targetNodeName: z.string().optional().describe("Alias for targetNode"),
   targetPin: z.string().optional().describe("Input pin label. connect_nodes defaults to the first input pin, disconnect_nodes to any"),
