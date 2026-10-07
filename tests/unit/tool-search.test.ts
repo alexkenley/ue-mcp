@@ -90,6 +90,41 @@ describe("searchToolGraph", () => {
       // An ask that also writes keeps both on equal footing, in declaration order.
       expect(searchToolGraph(graph, "check then add widget tree").map((h) => h.action)).toEqual(["edit_widget_tree", "show_widget_tree"]);
     });
+
+    it("demotes read actions when the ask only writes, including inflected verbs", () => {
+      const graph = bp({
+        read_widget_tree: { description: "Read it.", effect: "read" },
+        edit_widget_tree: { description: "Edit it.", effect: "mutate" },
+      });
+      for (const query of ["set widget tree", "importing widget tree", "imported widget tree"]) {
+        expect(searchToolGraph(graph, query).map((h) => h.action)).toEqual(["edit_widget_tree", "read_widget_tree"]);
+      }
+    });
+
+    it("matches joined adjacent words on either side", () => {
+      expect(searchToolGraph(bp({ create_datatable: { description: "", effect: "mutate" } }), "data table")[0]?.action).toBe("create_datatable");
+      expect(searchToolGraph(bp({ create_data_table: { description: "", effect: "mutate" } }), "datatable")[0]?.action).toBe("create_data_table");
+    });
+
+    it("folds verb suffixes only when at least four characters remain", () => {
+      const graph = bp({ import: { description: "", effect: "mutate" }, ring: { description: "", effect: "read" } });
+      for (const query of ["importing", "imported", "importer"]) {
+        expect(searchToolGraph(graph, query)[0]?.action).toBe("import");
+      }
+      expect(searchToolGraph(graph, "ring")[0]?.action).toBe("ring");
+      expect(searchToolGraph(graph, "rings")[0]?.action).toBe("ring");
+    });
+
+    it("restores the silent e in deleted/deleting for matching and write intent", () => {
+      const graph = bp({
+        read_widget_tree: { description: "Read it.", effect: "read" },
+        delete_widget_tree: { description: "Delete it.", effect: "mutate" },
+      });
+      for (const verb of ["delete", "deleted", "deleting"]) {
+        expect(searchToolGraph(graph, verb)[0]?.action).toBe("delete_widget_tree");
+        expect(searchToolGraph(graph, `${verb} widget tree`).map((h) => h.action)).toEqual(["delete_widget_tree", "read_widget_tree"]);
+      }
+    });
   });
 
   describe("gate candidates for reading a component off a Blueprint", () => {
@@ -135,6 +170,29 @@ describe("searchToolGraph", () => {
   });
 
   describe("against the shipped graph", () => {
+    it.each([
+      ["create data table", "asset.create_datatable"],
+      ["add a row to a data table", "asset.add_datatable_row"],
+      ["spawning actors in the level", "level.spawn_actors_batch"],
+      ["importing an fbx mesh", "asset.import_static_mesh"],
+      ["create curve table", "asset.create_curvetable"],
+      ["set string table entry", "asset.set_stringtable_entry"],
+      ["create blend space", "animation.create_blendspace"],
+      ["add state to state tree", "statetree.add_state"],
+      ["create gameplay effect", "gas.create_effect"],
+    ])("keeps %s in the gate's top five", (query, action) => {
+      const candidates = searchToolGraph(ALL_TOOLS, query, 5).filter((hit) => hit.score >= 4);
+      expect(candidates.map((hit) => `${hit.tool}.${hit.action}`)).toContain(action);
+    });
+
+    it("ranks set_component_property ahead of its readers for a write ask", () => {
+      const ranked = ids("set component property", 5);
+      expect(ranked).toContain("blueprint.set_component_property");
+      for (const reader of ["blueprint.get_component_property", "blueprint.read_component_properties"]) {
+        expect(ranked.indexOf("blueprint.set_component_property")).toBeLessThan(ranked.indexOf(reader));
+      }
+    });
+
     it("keeps first-party actions on the default page for broad queries", () => {
       expect(firstParty("create widget").length).toBeGreaterThanOrEqual(15);
       expect(firstParty("material parameter").length).toBeGreaterThanOrEqual(15);

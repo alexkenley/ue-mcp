@@ -59,13 +59,13 @@ const STOPWORDS = new Set([
 ]);
 
 // A task summary says what the caller wants done to what. An action's effect
-// answers the first half, so a read-only ask demotes the actions that mutate.
+// answers the first half, so single-effect asks demote the opposite effect.
 const READ_VERBS = new Set(["read", "get", "list", "inspect", "check", "dump", "show", "find", "query", "which", "what"]);
 const MUTATE_VERBS = new Set([
   "set", "add", "create", "delete", "remove", "write", "modify", "change", "rename",
   "spawn", "import", "move", "apply", "assign", "update", "replace", "fix", "make",
 ]);
-const MUTATE_PENALTY = 3;
+const INTENT_PENALTY = 3;
 
 // Descriptions are long free text, so their hits grow with length, not with
 // relevance. Capped, a verbose action cannot outvote a name that says the word.
@@ -75,9 +75,12 @@ const PHRASE_HIT = 3;
 const TOOL_NAME_HIT = 2;
 const PHRASE_HIT_CAP = 6;
 
-/** Fold plurals together so "properties" meets "property". Both sides use it. */
+/** Fold plurals and common verb suffixes. Both sides use it. */
 function stem(w: string): string {
-  return w.replace(/ies$/, "y").replace(/(ss|x)es$/, "$1").replace(/([^s])s$/, "$1");
+  const root = w.replace(/ies$/, "y").replace(/(ss|x)es$/, "$1").replace(/([^s])s$/, "$1")
+    .replace(/^(.{4,})(ing|ed|er)$/, "$1");
+  // Inflected verbs can drop a silent e: deleted/deleting must meet delete.
+  return MUTATE_VERBS.has(`${root}e`) ? `${root}e` : root;
 }
 
 /**
@@ -92,6 +95,10 @@ function wordsOf(text: string): string[] {
 
 const pairsOf = (words: string[]): Set<string> =>
   new Set(words.slice(1).map((w, i) => `${words[i]} ${w}`));
+
+// Index compounds on both sides without changing the order used for phrases.
+const joinedWords = (words: string[]): string[] =>
+  [...words, ...words.slice(1).map((w, i) => words[i] + w)];
 
 const STEMMED_GROUPS = SYNONYM_GROUPS.map((g) => new Set(g.map(stem)));
 
@@ -119,11 +126,14 @@ export function searchToolGraph(tools: SearchableTool[], query: string, limit = 
   if (!q) return [];
   const queryWords = wordsOf(q);
   if (queryWords.length === 0) return [];
-  const terms = expandTerms(queryWords);
+  const terms = expandTerms(joinedWords(queryWords));
   const queryPairs = pairsOf(queryWords);
   const queryPhrase = ` ${queryWords.join(" ")} `;
-  const verbs = q.split(/[^a-z0-9]+/);
-  const readOnlyAsk = verbs.some((v) => READ_VERBS.has(v)) && !verbs.some((v) => MUTATE_VERBS.has(v));
+  const verbs = q.split(/[^a-z0-9]+/).map(stem);
+  const reads = verbs.some((v) => READ_VERBS.has(v));
+  const writes = verbs.some((v) => MUTATE_VERBS.has(v));
+  const readOnlyAsk = reads && !writes;
+  const writeOnlyAsk = writes && !reads;
 
   // The live graph, not the pristine declaration: discovery has to see the
   // Epic and plugin actions the server actually advertises, and with one graph
@@ -136,9 +146,9 @@ export function searchToolGraph(tools: SearchableTool[], query: string, limit = 
       const desc = spec?.description ?? "";
       const nameWords = wordsOf(actionName);
       const descWords = wordsOf(desc);
-      const nameSet = new Set(nameWords);
-      const toolSet = new Set(wordsOf(tool.name));
-      const textSet = new Set(descWords);
+      const nameSet = new Set(joinedWords(nameWords));
+      const toolSet = new Set(joinedWords(wordsOf(tool.name)));
+      const textSet = new Set(joinedWords(descWords));
       let nameHits = 0;
       let textHits = 0;
       for (const t of terms) {
@@ -150,9 +160,13 @@ export function searchToolGraph(tools: SearchableTool[], query: string, limit = 
       // ("movement component"), far stronger than the two words apart.
       let phraseHits = 0;
       for (const p of [...pairsOf(nameWords), ...pairsOf(descWords)]) if (queryPairs.has(p)) phraseHits += PHRASE_HIT;
+      for (const p of queryPairs) {
+        const joined = p.replace(" ", "");
+        if (nameWords.includes(joined) || descWords.includes(joined)) phraseHits += PHRASE_HIT;
+      }
       let score = nameHits + Math.min(textHits, TEXT_HIT_CAP) + Math.min(phraseHits, PHRASE_HIT_CAP);
       if (` ${[...wordsOf(tool.name), ...nameWords, ...descWords].join(" ")} `.includes(queryPhrase)) score += 3; // whole-query phrase bonus
-      if (readOnlyAsk && spec?.effect === "mutate") score -= MUTATE_PENALTY;
+      if ((readOnlyAsk && spec?.effect === "mutate") || (writeOnlyAsk && spec?.effect === "read")) score -= INTENT_PENALTY;
       if (score <= 0) continue;
 
       // Collapse aliases that route to the same bridge handler (e.g.
