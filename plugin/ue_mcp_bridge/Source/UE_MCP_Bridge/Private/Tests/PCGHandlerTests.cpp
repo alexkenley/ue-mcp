@@ -11,6 +11,8 @@
 #include "Elements/PCGAddTag.h"
 #include "PCGComponent.h"
 #include "PCGPin.h"
+#include "PCGSubgraph.h"
+#include "HandlerPackageSave.h"
 #include "Elements/PCGStaticMeshSpawner.h"
 #include "Engine/World.h"
 #include "MeshSelectors/PCGMeshSelectorWeighted.h"
@@ -188,6 +190,16 @@ bool FMCPPCGSpawnerSelectorTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("import refuses a path for the selector"), Succeeded(Imported));
 	TestEqual(TEXT("and adds no node"), Graph->GetNodes().Num(), NodesBefore);
 
+	// A refused mesh path must not replace a different selector or dirty the package.
+	WriteSettings(TEXT("MeshSelectorType"), MakeShared<FJsonValueString>(TEXT("/Script/PCG.PCGMeshSelectorByAttribute")));
+	UObject* BeforeBadMesh = Spawner->MeshSelectorParameters;
+	Graph->GetOutermost()->SetDirtyFlag(false);
+	Entry->SetStringField(TEXT("mesh"), TEXT("/Engine/BasicShapes/MissingMesh.MissingMesh"));
+	TestFalse(TEXT("invalid mesh is refused"), Succeeded(Call(Registry, TEXT("set_static_mesh_spawner_meshes"), MeshParams)));
+	TestTrue(TEXT("invalid mesh preserves selector and type"), Spawner->MeshSelectorParameters == BeforeBadMesh
+		&& Spawner->MeshSelectorType == BeforeBadMesh->GetClass());
+	TestFalse(TEXT("invalid mesh does not dirty the graph"), Graph->GetOutermost()->IsDirty());
+
 	// Type notifications must finish before nested writes, independent of JSON order.
 	auto WeightedEntry = MakeShared<FJsonObject>();
 	WeightedEntry->SetNumberField(TEXT("Weight"), 7);
@@ -205,9 +217,19 @@ bool FMCPPCGSpawnerSelectorTest::RunTest(const FString& Parameters)
 		BatchParams->SetObjectField(TEXT("settings"), Batch);
 		for (int32 Repeat = 0; Repeat < 2; ++Repeat)
 		{
-			TestTrue(TEXT("type plus entries succeeds, including same-type rewrite"), Succeeded(Call(Registry, TEXT("set_pcg_node_settings"), BatchParams)));
+			const auto BatchResult = Call(Registry, TEXT("set_pcg_node_settings"), BatchParams);
+			TestTrue(TEXT("type plus entries succeeds, including same-type rewrite"), Succeeded(BatchResult));
+			TestFalse(TEXT("rollback excludes entries owned by a replaced selector"), BatchResult->GetObjectField(TEXT("previousProperties"))->HasField(TEXT("MeshSelectorParameters.MeshEntries")));
+			TestTrue(TEXT("the selector-content loss is disclosed"), BatchResult->GetBoolField(TEXT("rollbackLossy")));
 			const auto* Weighted = Cast<UPCGMeshSelectorWeighted>(Spawner->MeshSelectorParameters);
 			TestTrue(TEXT("entries survive all settings notifications"), Weighted && Weighted->MeshEntries.Num() == 1 && Weighted->MeshEntries[0].Weight == 7);
+			if (Repeat == 0)
+			{
+				const auto Inverse = BatchResult->GetObjectField(TEXT("rollback"))->GetObjectField(TEXT("payload"));
+				TestTrue(TEXT("type-changing batch rollback succeeds"), Succeeded(Call(Registry, TEXT("set_pcg_node_settings"), Inverse)));
+				TestEqual(TEXT("rollback restores the original type"), Spawner->MeshSelectorParameters->GetClass()->GetName(), FString(TEXT("PCGMeshSelectorByAttribute")));
+				Call(Registry, TEXT("set_pcg_node_settings"), BatchParams);
+			}
 		}
 
 		ImportNode->SetObjectField(TEXT("settings"), Batch);
@@ -234,11 +256,40 @@ bool FMCPPCGImportWarningsTest::RunTest(const FString& Parameters)
 	const FString PackageName = FString(Root) + TEXT("PG_Import_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	UPackage* Package = CreatePackage(*PackageName);
 	UPCGGraph* Graph = NewObject<UPCGGraph>(Package, TEXT("PG_Import"), RF_Public | RF_Standalone | RF_Transactional);
-	UPCGAddTagSettings* FromSettings = nullptr;
+	const FString ChildPackageName = PackageName + TEXT("_Child");
+	UPCGGraph* Child = NewObject<UPCGGraph>(CreatePackage(*ChildPackageName), TEXT("Child"), RF_Public | RF_Standalone | RF_Transactional);
+	Child->AddUserParameters({FPropertyBagPropertyDesc(TEXT("Preserved"), EPropertyBagPropertyType::Bool)});
+	FString SaveError;
+	if (!TestTrue(TEXT("child graph saves"), SaveAssetPackageChecked(Child, SaveError))) return false;
+	UPCGSubgraphSettings* FromSettings = nullptr;
 	UPCGAddTagSettings* ToSettings = nullptr;
 	UPCGNode* From = Graph->AddNodeOfType(FromSettings);
 	UPCGNode* To = Graph->AddNodeOfType(ToSettings);
 	if (!TestTrue(TEXT("two nodes added"), From && To)) return false;
+	FromSettings->SetSubgraph(Child);
+	From->UpdateAfterSettingsChangeDuringCreation();
+	auto OverrideParams = MakeShared<FJsonObject>();
+	OverrideParams->SetStringField(TEXT("assetPath"), Graph->GetPathName());
+	OverrideParams->SetStringField(TEXT("nodeName"), From->GetName());
+	auto OverrideValues = MakeShared<FJsonObject>();
+	OverrideValues->SetBoolField(TEXT("Preserved"), true);
+	OverrideParams->SetObjectField(TEXT("parameters"), OverrideValues);
+	if (!TestTrue(TEXT("subgraph override is set"), Succeeded(Call(Registry, TEXT("set_pcg_subgraph_parameters"), OverrideParams)))) return false;
+	auto CheckSubgraph = [&]()
+	{
+		const UPCGSubgraphSettings* Restored = nullptr;
+		for (const UPCGNode* Candidate : Graph->GetNodes())
+		{
+			if (const auto* Sub = Cast<UPCGSubgraphSettings>(Candidate->GetSettings())) Restored = Sub;
+		}
+		if (!TestTrue(TEXT("subgraph asset and owned instance survive"), Restored && Restored->SubgraphInstance
+			&& Restored->SubgraphInstance->Graph == Child && Restored->SubgraphInstance->GetOuter() == Restored)) return;
+		const auto* Bag = Restored->SubgraphInstance->GetUserParametersStruct();
+		const auto Value = Bag->GetValueBool(TEXT("Preserved"));
+		TestTrue(TEXT("subgraph parameter value survives"), Value.HasValue() && Value.GetValue());
+		const auto* Desc = Bag->GetPropertyBagStruct()->FindPropertyDescByName(TEXT("Preserved"));
+		TestTrue(TEXT("subgraph override flag survives"), Desc && Restored->SubgraphInstance->IsPropertyOverridden(Desc->CachedProperty));
+	};
 	Graph->AddEdge(From, PCGPinConstants::DefaultOutputLabel, To, PCGPinConstants::DefaultInputLabel);
 	auto Params = MakeShared<FJsonObject>();
 	Params->SetStringField(TEXT("assetPath"), Graph->GetPathName());
@@ -251,8 +302,12 @@ bool FMCPPCGImportWarningsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("name collisions are still reported"), Imported->HasField(TEXT("warnings")));
 	TestEqual(TEXT("both nodes landed"), Imported->GetNumberField(TEXT("nodesCreated")), 2.0);
 	TestEqual(TEXT("the edge landed"), Imported->GetNumberField(TEXT("connectionsMade")), 1.0);
+	CheckSubgraph();
 	const auto Rollback = Imported->GetObjectField(TEXT("rollback"))->GetObjectField(TEXT("payload"));
-	TestTrue(TEXT("the import's rollback also succeeds with name collisions"), Succeeded(Call(Registry, TEXT("import_pcg_graph"), Rollback)));
+	const auto RolledBack = Call(Registry, TEXT("import_pcg_graph"), Rollback);
+	TestTrue(TEXT("the import's rollback also succeeds with name collisions"), Succeeded(RolledBack));
+	TestEqual(TEXT("rollback restores the subgraph edge"), RolledBack->GetNumberField(TEXT("connectionsMade")), 1.0);
+	CheckSubgraph();
 
 	// Actual losses still fail, whether a node, a setting, or a connection.
 	auto Node = MakeShared<FJsonObject>();

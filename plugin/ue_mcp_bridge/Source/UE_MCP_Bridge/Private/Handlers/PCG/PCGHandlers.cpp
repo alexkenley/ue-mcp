@@ -1426,6 +1426,26 @@ TSharedPtr<FJsonValue> FPCGHandlers::SetPCGNodeSettings(const TSharedPtr<FJsonOb
 	if (Refusals.Num() > 0) return InstancedPathRefusalError(AssetPath, Refusals);
 
 	if (auto Blocked = MCPAssetWriteBlockedError(Graph, AssetPath, TEXT("change this PCG node's settings"))) return Blocked;
+	TSharedPtr<FJsonObject> CapturedSettings = MakeShared<FJsonObject>();
+	for (const auto& Prop : PropertiesToSet)
+	{
+		// Capture the original object before any type write can replace it; the dotted-path
+		// walker used by the setter resolves nested and indexed keys to the leaf
+		// the original object actually owns.
+		FProperty* LeafProp = nullptr;
+		void* LeafAddr = nullptr;
+		UObject* LeafOwner = nullptr;
+		FString ResolveErr;
+		FString PreviousText;
+		const bool bCaptured = MCPJsonProperty::ResolveDottedPath(Settings, Prop.Key, LeafProp, LeafAddr, LeafOwner, ResolveErr)
+			&& LeafProp != nullptr && LeafAddr != nullptr;
+		if (bCaptured)
+		{
+			LeafProp->ExportText_Direct(PreviousText, LeafAddr, LeafAddr, LeafOwner, PPF_None);
+			if (!PreviousText.IsEmpty()) CapturedSettings->SetStringField(Prop.Key, PreviousText);
+		}
+	}
+
 	Settings->Modify();
 
 	// A spawner selector already stale is replaced before a dotted key writes
@@ -1435,32 +1455,22 @@ TSharedPtr<FJsonValue> FPCGHandlers::SetPCGNodeSettings(const TSharedPtr<FJsonOb
 
 	for (const auto& Prop : PropertiesToSet)
 	{
-		// Resolve and export BEFORE the write, through the same dotted-path
-		// walker the setter uses, so nested and indexed keys capture the leaf
-		// the write is about to land on.
-		FProperty* LeafProp = nullptr;
-		void* LeafAddr = nullptr;
-		UObject* LeafOwner = nullptr;
-		FString ResolveErr;
-		FString PreviousText;
-		bool bCaptured = MCPJsonProperty::ResolveDottedPath(Settings, Prop.Key, LeafProp, LeafAddr, LeafOwner, ResolveErr)
-			&& LeafProp != nullptr && LeafAddr != nullptr;
-		if (bCaptured)
-		{
-			LeafProp->ExportText_Direct(PreviousText, LeafAddr, LeafAddr, LeafOwner, PPF_None);
-			// An empty export is not a value that reads back: the JSON setter's
-			// last resort imports the string as export text, and an empty one
-			// fails for most property types rather than clearing the value. Drop
-			// it from the rollback and count it as uncaptured instead.
-			if (PreviousText.IsEmpty()) bCaptured = false;
-		}
-
 		FString SubErr;
 		if (MCPJsonProperty::SetDottedPropertyFromJson(Settings, Prop.Key, Prop.Value, SubErr))
 		{
 			FinishPCGSettingWrite(Settings, Prop.Key, Recreated, AppliedKeys);
 			SetResults->SetField(Prop.Key, Prop.Value);
-			if (bCaptured) PreviousSettings->SetStringField(Prop.Key, PreviousText);
+			const bool bReplacedOwner = Recreated.ContainsByPredicate([&Prop](const FString& Name)
+			{
+				return Prop.Key.Equals(Name, ESearchCase::IgnoreCase)
+					|| Prop.Key.StartsWith(Name + TEXT("."), ESearchCase::IgnoreCase)
+					|| Prop.Key.StartsWith(Name + TEXT("["), ESearchCase::IgnoreCase);
+			});
+			FString PreviousText;
+			if (!bReplacedOwner && CapturedSettings->TryGetStringField(Prop.Key, PreviousText))
+			{
+				PreviousSettings->SetStringField(Prop.Key, PreviousText);
+			}
 			else ++UncapturedCount;
 		}
 		else
@@ -1522,7 +1532,7 @@ TSharedPtr<FJsonValue> FPCGHandlers::SetPCGNodeSettings(const TSharedPtr<FJsonOb
 		if (UncapturedCount > 0)
 		{
 			Note = FString::Printf(
-				TEXT("%d written propert(ies) could not be read back before the write (the dotted path did not resolve to a leaf) and are not in the rollback. Everything in previousProperties is restored exactly."),
+				TEXT("%d written propert(ies) could not be captured from the original object, or belong to a recreated instance, and are excluded from the rollback. previousProperties contains only the values the inverse can restore."),
 				UncapturedCount);
 		}
 		if (Recreated.Num() > 0)
@@ -2058,6 +2068,45 @@ TSharedPtr<FJsonValue> FPCGHandlers::SetStaticMeshSpawnerMeshes(const TSharedPtr
 	}
 
 	if (auto Blocked = MCPAssetWriteBlockedError(Graph, AssetPath, TEXT("set this spawner's meshes"))) return Blocked;
+	TArray<FPCGMeshSelectorWeightedEntry> Rebuilt;
+	if (!bReplace && WeightedSelector)
+	{
+		Rebuilt = WeightedSelector->MeshEntries;
+	}
+
+	int32 Added = 0;
+	TArray<FString> Unresolved;
+	for (const TSharedPtr<FJsonValue>& V : *EntriesArr)
+	{
+		const TSharedPtr<FJsonObject>* EObj = nullptr;
+		if (!V.IsValid() || !V->TryGetObject(EObj) || !EObj) continue;
+		FString MeshPath;
+		if (!(*EObj)->TryGetStringField(TEXT("mesh"), MeshPath) || MeshPath.IsEmpty()) continue;
+
+		int32 Weight = 1;
+		double WeightD = 1.0;
+		if ((*EObj)->TryGetNumberField(TEXT("weight"), WeightD)) Weight = FMath::Max(0, (int32)WeightD);
+
+		// Resolved through the asset loader, so a bare package path becomes the object path the spawner needs.
+		// A raw FSoftObjectPath of "/Pkg/Mesh" names a package, not an object, and spawns nothing (#1242).
+		UStaticMesh* Mesh = LoadAssetByPath<UStaticMesh>(MeshPath);
+		if (!Mesh)
+		{
+			Unresolved.Add(MeshPath);
+			continue;
+		}
+		FPCGMeshSelectorWeightedEntry Entry(TSoftObjectPtr<UStaticMesh>(Mesh), Weight);
+		Rebuilt.Add(MoveTemp(Entry));
+		Added++;
+	}
+	if (Unresolved.Num() > 0)
+	{
+		return MCPError(FString::Printf(
+			TEXT("Nothing was changed: these entries do not load as a StaticMesh: %s"),
+			*FString::Join(Unresolved, TEXT(", "))));
+	}
+
+
 	SpawnerSettings->Modify();
 
 	FString ReplacedSelectorClass;
@@ -2098,43 +2147,6 @@ TSharedPtr<FJsonValue> FPCGHandlers::SetStaticMeshSpawnerMeshes(const TSharedPtr
 	}
 	const bool bDescriptorsWillBeLost = PreviousEntries.Num() > 0;
 
-	TArray<FPCGMeshSelectorWeightedEntry> Rebuilt;
-	if (!bReplace)
-	{
-		Rebuilt = WeightedSelector->MeshEntries;
-	}
-
-	int32 Added = 0;
-	TArray<FString> Unresolved;
-	for (const TSharedPtr<FJsonValue>& V : *EntriesArr)
-	{
-		const TSharedPtr<FJsonObject>* EObj = nullptr;
-		if (!V.IsValid() || !V->TryGetObject(EObj) || !EObj) continue;
-		FString MeshPath;
-		if (!(*EObj)->TryGetStringField(TEXT("mesh"), MeshPath) || MeshPath.IsEmpty()) continue;
-
-		int32 Weight = 1;
-		double WeightD = 1.0;
-		if ((*EObj)->TryGetNumberField(TEXT("weight"), WeightD)) Weight = FMath::Max(0, (int32)WeightD);
-
-		// Resolved through the asset loader, so a bare package path becomes the object path the spawner needs.
-		// A raw FSoftObjectPath of "/Pkg/Mesh" names a package, not an object, and spawns nothing (#1242).
-		UStaticMesh* Mesh = LoadAssetByPath<UStaticMesh>(MeshPath);
-		if (!Mesh)
-		{
-			Unresolved.Add(MeshPath);
-			continue;
-		}
-		FPCGMeshSelectorWeightedEntry Entry(TSoftObjectPtr<UStaticMesh>(Mesh), Weight);
-		Rebuilt.Add(MoveTemp(Entry));
-		Added++;
-	}
-	if (Unresolved.Num() > 0)
-	{
-		return MCPError(FString::Printf(
-			TEXT("Nothing was changed: these entries do not load as a StaticMesh: %s"),
-			*FString::Join(Unresolved, TEXT(", "))));
-	}
 
 	WeightedSelector->Modify();
 	WeightedSelector->MeshEntries = MoveTemp(Rebuilt);
@@ -2662,6 +2674,13 @@ TSharedPtr<FJsonValue> FPCGHandlers::ImportGraph(const TSharedPtr<FJsonObject>& 
 			MCPNotifyPCGSettingsChanged(DefaultSettings, AppliedKeys);
 		}
 
+		FString SubgraphError;
+		if (!ImportSubgraphSettings(DefaultSettings, *NodeObj, SubgraphError))
+		{
+			++ImportFailures;
+			Warnings.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("node '%s': %s"), *LocalName, *SubgraphError)));
+		}
+
 		NewNode->PostEditChange();
 
 		if (!LocalName.IsEmpty())
@@ -2826,7 +2845,7 @@ TSharedPtr<FJsonValue> FPCGHandlers::ImportGraph(const TSharedPtr<FJsonObject>& 
 		MCPSetRollback(Result, TEXT("import_pcg_graph"), Payload);
 		Result->SetBoolField(TEXT("rollbackLossy"), true);
 		Result->SetStringField(TEXT("rollbackNote"),
-			TEXT("The rollback rebuilds the graph from a snapshot taken before this call: each node's class, position, every edge, and the settings the export captured. Node names are attempted but NOT guaranteed. The import renames each rebuilt node to the name in the snapshot only when nothing else is found under the graph's outer holding it, and the check is a StaticFindObject on the outer rather than a look at the node list - a node the same replace pass has just removed still occupies its name until garbage collection, so a rollback can land on the engine-assigned name instead. Every such case is listed in that call's warnings, so read them rather than assuming the names came back. What does NOT come back at all is any settings property the export could not see: only properties flagged editable are captured, so anything outside that set returns to its class default. Instanced subobjects such as a spawner's mesh selector are not exported either, so they come back as the class default and their contents (mesh entries) have to be rewritten, e.g. with set_static_mesh_spawner_meshes."));
+			TEXT("The rollback rebuilds the graph from a snapshot taken before this call: each node's class, position, every edge, and the settings the export captured. Node names are attempted but NOT guaranteed. The import renames each rebuilt node to the name in the snapshot only when nothing else is found under the graph's outer holding it, and the check is a StaticFindObject on the outer rather than a look at the node list - a node the same replace pass has just removed still occupies its name until garbage collection, so a rollback can land on the engine-assigned name instead. Every such case is listed in that call's warnings, so read them rather than assuming the names came back. What does NOT come back at all is any settings property the export could not see: only properties flagged editable are captured, so anything outside that set returns to its class default. Subgraph assignments and parameter overrides are restored from the subgraph snapshot. Other instanced subobjects such as a spawner's mesh selector are not exported, so they come back as the class default and their contents (mesh entries) have to be rewritten, e.g. with set_static_mesh_spawner_meshes."));
 	}
 	else
 	{
@@ -2896,6 +2915,7 @@ TSharedPtr<FJsonValue> FPCGHandlers::ExportGraph(const TSharedPtr<FJsonObject>& 
 
 			if (bIncludeSettings)
 			{
+				ExportSubgraphSettings(Settings, NodeObj);
 				TSharedPtr<FJsonObject> SettingsOut = MakeShared<FJsonObject>();
 				TArray<TSharedPtr<FJsonValue>> OmittedInstanced;
 				for (TFieldIterator<FProperty> It(Settings->GetClass()); It; ++It)
@@ -2904,7 +2924,10 @@ TSharedPtr<FJsonValue> FPCGHandlers::ExportGraph(const TSharedPtr<FJsonObject>& 
 					if (!Prop || !Prop->HasAnyPropertyFlags(CPF_Edit)) continue;
 					if (IsInstancedObjectProp(Prop))
 					{
-						OmittedInstanced.Add(MakeShared<FJsonValueString>(Prop->GetName()));
+						if (Prop->GetFName() != FName(TEXT("SubgraphInstance")) || !NodeObj->HasField(TEXT("subgraph")))
+						{
+							OmittedInstanced.Add(MakeShared<FJsonValueString>(Prop->GetName()));
+						}
 						continue;
 					}
 					const void* Addr = Prop->ContainerPtrToValuePtr<void>(Settings);
