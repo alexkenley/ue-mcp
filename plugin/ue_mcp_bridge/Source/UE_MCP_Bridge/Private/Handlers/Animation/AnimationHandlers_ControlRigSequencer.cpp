@@ -4119,7 +4119,6 @@ namespace
 			if (Contact.bHasDrivenReference)
 			{
 				Object->SetStringField(TEXT("drivenReference"), Contact.DrivenReference.ToString());
-				Object->SetStringField(TEXT("verification"), TEXT("bake_and_analyze_required"));
 				if (Contact.bUsedFkRotationChain)
 				{
 					Object->SetStringField(TEXT("solver"), TEXT("fk_rotation_chain"));
@@ -4156,7 +4155,14 @@ namespace
 			}
 			Object->SetArrayField(TEXT("stabilizers"), StabilizerResults);
 			Object->SetBoolField(TEXT("keyReadbackPassed"), true);
-			if (!Contact.bHasDrivenReference) Object->SetBoolField(TEXT("passed"), true);
+			if (Contact.bHasDrivenReference || Contact.bHasTargetReference)
+			{
+				Object->SetStringField(TEXT("verification"), TEXT("bake_and_analyze_required"));
+			}
+			else
+			{
+				Object->SetBoolField(TEXT("passed"), true);
+			}
 			ContactResults.Add(MakeShared<FJsonValueObject>(Object));
 		}
 		Result->SetArrayField(TEXT("contactQa"), ContactResults);

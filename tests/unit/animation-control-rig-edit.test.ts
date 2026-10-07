@@ -224,6 +224,16 @@ describe("animation Control Rig edit workflow", () => {
     expect(refusal).toBeLessThan(prepare.indexOf("ControlRigSequencerSampleReferenceTransforms("));
   });
 
+  it("requires bake analysis for target references even without a driven reference", () => {
+    const source = readHandlerFile("AnimationHandlers_ControlRigSequencer.cpp");
+    const result = source.slice(
+      source.indexOf("TSharedPtr<FJsonObject> ControlRigEditsBuildResult("),
+      source.indexOf("void ControlRigEditsAttachInverse("),
+    );
+    expect(result).toMatch(/if \(Contact\.bHasDrivenReference \|\| Contact\.bHasTargetReference\)\s*\{\s*Object->SetStringField\(TEXT\("verification"\), TEXT\("bake_and_analyze_required"\)\);\s*\}\s*else\s*\{\s*Object->SetBoolField\(TEXT\("passed"\), true\);/);
+    expect(result).not.toContain('if (!Contact.bHasDrivenReference) Object->SetBoolField(TEXT("passed"), true)');
+  });
+
   it("makes partial IK retarget mappings explicit in batch results", () => {
     const source = readHandlerFile("AnimationHandlers_StateMachine.cpp");
 
