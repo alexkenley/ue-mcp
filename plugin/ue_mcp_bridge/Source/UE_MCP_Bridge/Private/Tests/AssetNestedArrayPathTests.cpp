@@ -28,6 +28,8 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
+#include "UObject/PropertyPortFlags.h"
+#include "UObject/UnrealType.h"
 #include "Tests/MCPScopedTestMount.h"
 
 namespace
@@ -183,6 +185,13 @@ bool FMCPAssetNestedArrayPathTest::RunTest(const FString& Parameters)
 
 	// Appending in memory carries the same unsaved inverse as a field write.
 	{
+		Asset->Profiles[2].Id = FName(TEXT("Original"));
+		Asset->Profiles[2].Presentation.PrimaryUse = Clip;
+		Asset->Profiles[2].Presentation.CameraRelativeTransform = FTransform(Expected.GetRotation(), Expected.GetTranslation(), FVector(2.0, 3.0, 4.0));
+		FArrayProperty* ProfilesProperty = FindFProperty<FArrayProperty>(Asset->GetClass(), TEXT("Profiles"));
+		if (!TestNotNull(TEXT("profile array reflected"), ProfilesProperty)) return false;
+		FString BeforeAppend;
+		ProfilesProperty->ExportText_Direct(BeforeAppend, &Asset->Profiles, &Asset->Profiles, Asset, PPF_None);
 		auto Params = MakeShared<FJsonObject>();
 		Params->SetStringField(TEXT("assetPath"), AssetPath);
 		Params->SetStringField(TEXT("propertyName"), TEXT("Profiles"));
@@ -201,7 +210,39 @@ bool FMCPAssetNestedArrayPathTest::RunTest(const FString& Parameters)
 		const auto Restored = NestedPathCall(Registry, TEXT("set_asset_property"), *AppendPayload);
 		TestTrue(TEXT("append inverse replays"), NestedPathBool(Restored, TEXT("success")));
 		TestEqual(TEXT("append inverse restores the previous array"), Asset->Profiles.Num(), 3);
+		FString AfterRollback;
+		ProfilesProperty->ExportText_Direct(AfterRollback, &Asset->Profiles, &Asset->Profiles, Asset, PPF_None);
+		TestEqual(TEXT("append inverse preserves every reference and transform channel"), AfterRollback, BeforeAppend);
 		TestFalse(TEXT("unsaved append and inverse write no package"), IFileManager::Get().FileExists(*PackageFileName));
+	}
+
+	// #820: export-text replay must keep struct-keyed maps and their transforms.
+	{
+		Asset->MapProfiles.SetNum(1);
+		Asset->MapProfiles[0].Offsets.Add(FIntPoint(2, 5), Expected);
+		Asset->MapProfiles[0].Offsets.Add(FIntPoint(7, 11), FTransform(FQuat::Identity, FVector(8.0, 9.0, 10.0), FVector(2.0, 3.0, 4.0)));
+		auto Params = MakeShared<FJsonObject>();
+		Params->SetStringField(TEXT("assetPath"), AssetPath);
+		Params->SetStringField(TEXT("propertyName"), TEXT("MapProfiles"));
+		Params->SetArrayField(TEXT("elements"), { MakeShared<FJsonValueObject>(MakeShared<FJsonObject>()) });
+		Params->SetBoolField(TEXT("save"), false);
+		const auto Appended = NestedPathCall(Registry, TEXT("append_asset_array_elements"), Params);
+		if (!TestTrue(TEXT("map-bearing append succeeds"), NestedPathBool(Appended, TEXT("success")))) return false;
+		TestEqual(TEXT("map-bearing element appended"), Asset->MapProfiles.Num(), 2);
+		const TSharedPtr<FJsonObject>* MapRollback = nullptr;
+		const TSharedPtr<FJsonObject>* MapPayload = nullptr;
+		if (!TestTrue(TEXT("map append has rollback"), Appended->TryGetObjectField(TEXT("rollback"), MapRollback))
+			|| !TestTrue(TEXT("map rollback has payload"), (*MapRollback)->TryGetObjectField(TEXT("payload"), MapPayload))) return false;
+		const auto Restored = NestedPathCall(Registry, TEXT("set_asset_property"), *MapPayload);
+		if (!TestTrue(TEXT("map-bearing inverse replays"), NestedPathBool(Restored, TEXT("success")))) return false;
+		if (!TestEqual(TEXT("map-bearing array count restored"), Asset->MapProfiles.Num(), 1)) return false;
+		TestEqual(TEXT("struct-keyed map keeps every pair"), Asset->MapProfiles[0].Offsets.Num(), 2);
+		const FTransform* Offset = Asset->MapProfiles[0].Offsets.Find(FIntPoint(2, 5));
+		TestTrue(TEXT("struct key and quaternion survive replay"), Offset && Offset->Equals(Expected, 1e-4));
+		Offset = Asset->MapProfiles[0].Offsets.Find(FIntPoint(7, 11));
+		TestTrue(TEXT("other struct key and nonuniform scale survive replay"), Offset && Offset->GetTranslation().Equals(FVector(8.0, 9.0, 10.0)) && Offset->GetScale3D().Equals(FVector(2.0, 3.0, 4.0)));
+		TestFalse(TEXT("map inverse preserves save=false"), NestedPathBool(*MapPayload, TEXT("save"), true));
+		TestFalse(TEXT("map-bearing inverse writes no package"), IFileManager::Get().FileExists(*PackageFileName));
 	}
 
 	// Paths that name nothing are refused, and nothing moves.

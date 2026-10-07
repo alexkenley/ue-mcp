@@ -32,7 +32,7 @@ describe("asset append_array_elements", () => {
 
   it.each([
     { action: "set_property", method: "set_asset_property", args: { propertyName: "Profiles[2].Presentation.PrimaryUse", value: "/Game/Animation/A_Clip" }, previous: "None" },
-    { action: "append_array_elements", method: "append_asset_array_elements", args: { propertyName: "Profiles", elements: [{ Id: "Appended" }] }, previous: [{ Id: "Original" }] },
+    { action: "append_array_elements", method: "append_asset_array_elements", args: { propertyName: "Profiles", elements: [{ Id: "Appended" }] }, previous: "((Id=Original,Presentation=(CameraRelativeTransform=(Rotation=(X=0,Y=0,Z=0,W=1),Translation=(X=1,Y=2,Z=3),Scale3D=(X=2,Y=3,Z=4)))))" },
   ])("keeps $action unsaved when its returned inverse is replayed", async ({ action, method, args, previous }) => {
     const assetPath = "/Game/Data/DA_Profiles";
     const payload = { assetPath, propertyName: args.propertyName, value: previous, save: false };

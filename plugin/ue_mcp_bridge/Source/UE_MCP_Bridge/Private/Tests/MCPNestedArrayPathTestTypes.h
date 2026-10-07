@@ -29,7 +29,16 @@ struct FUEMCPNestedArrayPathProfile
 	FUEMCPNestedArrayPathPresentation Presentation;
 };
 
-/** Data-asset shape used only by the nested array path tests: TArray<Struct{Struct{Object, Transform}}>. */
+USTRUCT()
+struct FUEMCPNestedArrayPathMapProfile
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TMap<FIntPoint, FTransform> Offsets;
+};
+
+/** Data-asset shape used only by the nested array path tests. */
 UCLASS()
 class UUEMCPNestedArrayPathTestAsset : public UObject
 {
@@ -38,4 +47,7 @@ class UUEMCPNestedArrayPathTestAsset : public UObject
 public:
 	UPROPERTY()
 	TArray<FUEMCPNestedArrayPathProfile> Profiles;
+
+	UPROPERTY()
+	TArray<FUEMCPNestedArrayPathMapProfile> MapProfiles;
 };

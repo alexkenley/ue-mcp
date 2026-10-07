@@ -4778,6 +4778,10 @@ TSharedPtr<FJsonValue> FAssetHandlers::AppendAssetArrayElements(const TSharedPtr
 		DestroyStagedElements();
 		return MCPError(FString::Printf(TEXT("Failed to serialize the previous value of '%s'"), *PropertyName));
 	}
+	// Display JSON (notably FTransform) is not the setter's reflected format.
+	// UE export text replays through MCPPropertyText, including nested TMaps (#820).
+	FString PreviousText;
+	ArrayProp->ExportText_Direct(PreviousText, ValuePtr, ValuePtr, LeafOwner, PPF_None);
 
 	FScriptArrayHelper ArrayHelper(ArrayProp, ValuePtr);
 	const int32 PreviousNum = ArrayHelper.Num();
@@ -4824,7 +4828,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::AppendAssetArrayElements(const TSharedPtr
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetStringField(TEXT("assetPath"), AssetPath);
 	Payload->SetStringField(TEXT("propertyName"), PropertyName);
-	Payload->SetField(TEXT("value"), PreviousValue);
+	Payload->SetStringField(TEXT("value"), PreviousText);
 	Payload->SetBoolField(TEXT("save"), bSave);
 	MCPSetRollback(Result, TEXT("set_asset_property"), Payload);
 	return MCPResult(Result);
