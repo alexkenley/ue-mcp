@@ -148,6 +148,54 @@ describe("animation Control Rig edit workflow", () => {
     expect(animationTool.actions.contact_lock).toBeUndefined();
   });
 
+  it("keys batched operations in call order, each sampled after the ones before it landed", () => {
+    const source = readHandlerFile("AnimationHandlers_ControlRigSequencer.cpp");
+    const commit = source.slice(
+      source.indexOf("TSharedPtr<FJsonValue> ControlRigEditsCommit("),
+      source.indexOf("TSharedPtr<FJsonObject> ControlRigEditsBuildResult("),
+    );
+
+    // A child's component-space offset batched after its parent's was sampled
+    // before the parent was keyed, which erased the parent's edit. The commit
+    // re-prepares each operation through the ordering seam the native
+    // UE.MCP.Animation.ControlRig.BatchedOffsetsComposeLikeSequentialCalls test drives.
+    expect(commit).toContain("ControlRigEditsKeyInCallOrder(Operations.Num(),");
+    expect(commit.indexOf("ControlRigEditsPrepareOperation(*Step, Operations, OperationIndex)")).toBeGreaterThan(
+      commit.indexOf("FScopedTransaction"),
+    );
+    expect(commit.indexOf("ControlRigEditsApplyWrite(Session, Write, ApplyError)")).toBeGreaterThan(
+      commit.indexOf("ControlRigEditsPrepareOperation(*Step, Operations, OperationIndex)"),
+    );
+    expect(commit).not.toContain("for (const FControlRigPreparedWrite& Write : Plan.Prepared)");
+    expect(source).toContain('"UE.MCP.Animation.ControlRig.BatchedOffsetsComposeLikeSequentialCalls"');
+
+    // Operations are undone last-first, so each restore meets the parent pose it was sampled under.
+    expect(source).toContain("InverseOperations.Insert(MakeShared<FJsonValueObject>(Operation), InsertAt++)");
+    expect(source).not.toContain("InverseOperations.Add(");
+  });
+
+  it("rechecks every keyed contact after later operations and before the transaction closes", () => {
+    const source = readHandlerFile("AnimationHandlers_ControlRigSequencer.cpp");
+    const commit = source.slice(
+      source.indexOf("TSharedPtr<FJsonValue> ControlRigEditsCommit("),
+      source.indexOf("TSharedPtr<FJsonObject> ControlRigEditsBuildResult("),
+    );
+
+    // A contact_lock can pass its immediate QA, then a later clavicle offset
+    // moves the locked hand. Verify the accumulated contacts after the ordered
+    // callbacks finish, inside the transaction, and route failure to undo.
+    expect(commit).toMatch(
+      /KeyedContacts\.Append\(MoveTemp\(Step->PreparedContacts\)\);\s*return bKeyed;\s*\}\);\s*(?:\/\/[^\n]*\n\s*)*if \(!bApplyFailed\)\s*\{\s*bApplyFailed = !ControlRigEditsVerifyContacts\(Session, KeyedContacts, ApplyError\);\s*\}\s*\}\s*if \(bApplyFailed\)\s*\{\s*const bool bRolledBack = GEditor && GEditor->UndoTransaction\(\);/,
+    );
+    expect(commit.match(/ControlRigEditsVerifyContacts\(Session, KeyedContacts, ApplyError\)/g)).toHaveLength(1);
+    expect(commit.indexOf("Plan.PreparedContacts = MoveTemp(KeyedContacts)")).toBeGreaterThan(
+      commit.indexOf("return MCPError(ApplyError);"),
+    );
+    expect(commit.indexOf("SaveAssetPackageChecked(")).toBeGreaterThan(
+      commit.indexOf("Plan.PreparedContacts = MoveTemp(KeyedContacts)"),
+    );
+  });
+
   it("makes partial IK retarget mappings explicit in batch results", () => {
     const source = readHandlerFile("AnimationHandlers_StateMachine.cpp");
 
