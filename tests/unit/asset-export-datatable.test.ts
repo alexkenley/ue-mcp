@@ -42,11 +42,20 @@ describe("asset.export DataTables", () => {
     expect(assetTool.actions.export.mapParams).toBeUndefined();
   });
 
-  it.each(["json", "csv", "txt"])("leaves inference from .%s to the native handler", async (extension) => {
+  it.each(["json", "csv"])("leaves inference from .%s to the native handler", async (extension) => {
     const call = vi.fn().mockResolvedValue({ success: true });
     const ctx = { bridge: { call } } as unknown as ToolContext;
     const params = { assetPath: "/Game/Data/DT_Items", outputPath: `exports/items.${extension}` };
     await assetTool.handler(ctx, { action: "export", ...params });
+    expect(call).toHaveBeenCalledWith("export_asset", params, undefined);
+  });
+
+  it("returns the native extension error for a DataTable package path", async () => {
+    const response = { success: false, error: "DataTable export outputPath must have a .json or .csv extension" };
+    const call = vi.fn().mockResolvedValue(response);
+    const ctx = { bridge: { call } } as unknown as ToolContext;
+    const params = { assetPath: "/Game/Data/DT_Items", outputPath: "Content/Data/DT_Items.uasset", format: "json" };
+    expect(await assetTool.handler(ctx, { action: "export", ...params })).toEqual(response);
     expect(call).toHaveBeenCalledWith("export_asset", params, undefined);
   });
 

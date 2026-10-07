@@ -13039,7 +13039,7 @@
           "name": "format",
           "type": "string",
           "required": false,
-          "description": "DataTable/CompositeDataTable: json | csv (default: .json/.csv extension, otherwise json); other assets use their registered exporter"
+          "description": "DataTable/CompositeDataTable: json | csv (default: from the required .json/.csv outputPath extension); other assets use their registered exporter"
         }
       ]
     },

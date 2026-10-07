@@ -2297,7 +2297,7 @@ export const handlerSpecs: HandlerSpecs = {
         "name": "format",
         "type": "string",
         "required": false,
-        "description": "DataTable/CompositeDataTable: json | csv (default: .json/.csv extension, otherwise json); other assets use their registered exporter"
+        "description": "DataTable/CompositeDataTable: json | csv (default: from the required .json/.csv outputPath extension); other assets use their registered exporter"
       }
     ]
   },
@@ -5794,7 +5794,7 @@ export const schema: Record<string, z.ZodType> = {
   flipU: z.boolean().optional().describe("Mirror across U"),
   flipV: z.boolean().optional().describe("Mirror across V"),
   force: z.boolean().optional().describe("Delete even when other packages reference it, closing open editors (default false) (delete_asset). Delete referenced assets too, closing open editors (default false) (delete_asset_batch). Also delete the assets inside (default false: only empty folders) (delete_folder). Rebuild even when the settings already match (generate_lightmap_uvs). World renames only: merge into a destination that already holds external packages (used by rollback) (move_asset, rename_asset). Write the package even when it is not dirty (needs assetPath) (save_asset)"),
-  format: z.string().optional().describe("R8 | RG8 | RGBA8 | RGBA8_SRGB | R16F | RG16F | RGBA16F | R32F | RG32F | RGBA32F | RGB10A2 (default RGBA8_SRGB) (create_render_target_2d). DataTable/CompositeDataTable: json | csv (default: .json/.csv extension, otherwise json); other assets use their registered exporter (export_asset). json | csv (default: from the file extension) (import_curvetable)"),
+  format: z.string().optional().describe("R8 | RG8 | RGBA8 | RGBA8_SRGB | R16F | RG16F | RGBA16F | R32F | RG32F | RGBA32F | RGB10A2 (default RGBA8_SRGB) (create_render_target_2d). DataTable/CompositeDataTable: json | csv (default: from the required .json/.csv outputPath extension); other assets use their registered exporter (export_asset). json | csv (default: from the file extension) (import_curvetable)"),
   fromChannel: z.number().optional().describe("Source channel (op=copy)"),
   gapWidth: z.number().optional().describe("How far apart the halves of each cut are pushed, in centimetres (default 0.01)"),
   generateLightmapUVs: z.boolean().optional().describe("Generate lightmap UVs (default true)"),

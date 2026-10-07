@@ -3776,12 +3776,16 @@ TSharedPtr<FJsonValue> FAssetHandlers::ExportAsset(const TSharedPtr<FJsonObject>
 	FString TableFormat;
 	if (DataTable)
 	{
+		const FString Extension = FPaths::GetExtension(AbsOutputPath).ToLower();
+		if (Extension != TEXT("json") && Extension != TEXT("csv"))
+		{
+			return MCPError(TEXT("DataTable export outputPath must have a .json or .csv extension"));
+		}
 		if (!DataTable->GetRowStruct()) return MCPError(TEXT("DataTable has no row struct"));
 		TableFormat = OptionalString(Params, TEXT("format")).ToLower();
 		if (TableFormat.IsEmpty())
 		{
-			TableFormat = FPaths::GetExtension(AbsOutputPath).Equals(TEXT("csv"), ESearchCase::IgnoreCase)
-				? TEXT("csv") : TEXT("json");
+			TableFormat = Extension;
 		}
 		if (TableFormat != TEXT("json") && TableFormat != TEXT("csv"))
 		{
