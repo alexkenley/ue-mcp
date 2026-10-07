@@ -1,6 +1,7 @@
 #include "AssetHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerAssetDelete.h"
 #include "EdGraph/EdGraphNode.h"
 #include "HandlerPagination.h"
 #include "HandlerJsonProperty.h"
@@ -2756,12 +2757,17 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAsset(const TSharedPtr<FJsonObject>
 		TryCloseAssetEditors(AssetPath, bClosedEditor);
 	}
 
-	const bool bSuccess = UEditorAssetLibrary::DeleteAsset(AssetPath);
+	bool bRemovedOrphanFile = false;
+	const bool bSuccess = MCPDeleteAssetFromDisk(AssetPath, bRemovedOrphanFile);
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("path"), AssetPath);
 	Result->SetBoolField(TEXT("deleted"), bSuccess);
 	Result->SetBoolField(TEXT("forced"), bForce);
+	if (bRemovedOrphanFile)
+	{
+		Result->SetBoolField(TEXT("removedOrphanFile"), true);
+	}
 	if (bClosedEditor)
 	{
 		Result->SetBoolField(TEXT("closedOpenEditor"), true);
@@ -2849,9 +2855,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAssetBatch(const TSharedPtr<FJsonOb
 				TryCloseAssetEditors(Path, bClosed);
 				if (bClosed) ClosedEditors++;
 			}
-			if (UEditorAssetLibrary::DeleteAsset(Path))
+			bool bRemovedOrphanFile = false;
+			if (MCPDeleteAssetFromDisk(Path, bRemovedOrphanFile))
 			{
 				Entry->SetStringField(TEXT("status"), TEXT("deleted"));
+				if (bRemovedOrphanFile) Entry->SetBoolField(TEXT("removedOrphanFile"), true);
 				if (bClosed) Entry->SetBoolField(TEXT("closedOpenEditor"), true);
 				Deleted++;
 			}
@@ -2869,6 +2877,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAssetBatch(const TSharedPtr<FJsonOb
 	Result->SetArrayField(TEXT("results"), PerPath);
 	Result->SetNumberField(TEXT("deleted"), Deleted);
 	Result->SetNumberField(TEXT("absent"), Absent);
+	Result->SetBoolField(TEXT("changed"), Deleted > 0);
 	Result->SetNumberField(TEXT("failed"), Failed);
 	Result->SetNumberField(TEXT("refused"), Refused);
 	Result->SetBoolField(TEXT("forced"), bForce);

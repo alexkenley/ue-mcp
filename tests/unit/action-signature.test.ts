@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { actionSignature, SIGNATURE_LEGEND } from "../../src/surface/action-signature.js";
+import { actionSignature, boundText, SIGNATURE_LEGEND } from "../../src/surface/action-signature.js";
 import type { ActionSpec, ToolDef } from "../../src/core/types.js";
 import { bp, categoryTool } from "../../src/surface/category-tool.js";
 import type { ParamChoice, ParamSpec } from "../../src/surface/handler-spec.js";
@@ -161,5 +161,16 @@ describe("the shipped surface", () => {
     for (const code of ["?", "|", "one(", "any(", "s ", "n ", "i ", "b ", "o ", "v ", "r ", "c ", "ref", "*", "[t]", "t/u", "=x", "o<k>", "+N"]) {
       expect(SIGNATURE_LEGEND).toContain(code);
     }
+  });
+});
+
+describe("range bounds", () => {
+  it("writes integers exactly and float bounds at float precision", () => {
+    expect(boundText(undefined)).toBe("");
+    expect(boundText(-2147483648)).toBe("-2147483648");
+    expect(boundText(0)).toBe("0");
+    expect(boundText(Math.fround(1e-4))).toBe("0.0001");
+    expect(boundText(Math.fround(3.4e38))).toBe("3.4e+38");
+    expect(boundText(0.25)).toBe("0.25");
   });
 });

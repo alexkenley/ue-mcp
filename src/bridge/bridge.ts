@@ -43,6 +43,8 @@ export interface BridgeCapabilities {
    * live answer is only compared against it.
    */
   handlerSpecs?: Record<string, unknown>;
+  /** The same for plugin handlers registered with a contract (#1282), published apart from the core ones. */
+  pluginHandlerSpecs?: Record<string, unknown>;
   /** True when the bridge did not answer the handshake at all. */
   legacy: boolean;
 }

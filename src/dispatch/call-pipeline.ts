@@ -40,7 +40,7 @@ import {
 import { mapTracked } from "../surface/param-forwarding.js";
 import { isDirectiveResponse } from "../core/directive.js";
 import { McpError, ErrorCode } from "../core/errors.js";
-import { choiceViolation, type ParamChoice, type ParamSpec } from "../surface/handler-spec.js";
+import { contractViolation, type ParamContract } from "../surface/handler-spec.js";
 
 /**
  * Separate the per-call timeout budget from the action's own parameters.
@@ -88,12 +88,12 @@ export interface CallPreparation {
    */
   nestedParamsKey?: string;
   /**
-   * The spec'd action's required choices and the parameters they name
-   * (#1057). The category's zod shape is one flat bag shared by every action,
-   * so it cannot say "actorLabel OR actorPath"; the call is checked here
-   * instead, after folding, and refused before anything is sent.
+   * The spec'd action's contract (#1057, #1282). The category's zod shape is one
+   * flat bag shared by every action, so it cannot say "actorLabel OR actorPath"
+   * or hold a key to this action's enum; the call is checked here instead,
+   * after folding, and refused before anything is sent.
    */
-  paramChoices?: { params: readonly ParamSpec[]; choices: readonly ParamChoice[] };
+  paramContract?: ParamContract;
 }
 
 /** What the inbound half decided, carried to the outbound half. */
@@ -195,8 +195,8 @@ export function prepareCall(
 
   const repaired = normalizePathParams(outerSelection.rest);
   const folded = applyCategoryFolding(repaired.params, prep);
-  if (prep.paramChoices) {
-    const violation = choiceViolation(prep.paramChoices, folded);
+  if (prep.paramContract) {
+    const violation = contractViolation(prep.paramContract, folded);
     if (violation) {
       throw new McpError(
         ErrorCode.INVALID_PARAMS,

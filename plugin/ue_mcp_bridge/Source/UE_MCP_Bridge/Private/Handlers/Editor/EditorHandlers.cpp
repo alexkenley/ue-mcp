@@ -6,6 +6,8 @@
 #include "HandlerPagination.h"
 #include "HandlerSkinnedAsset.h"
 #include "HandlerSceneCapture.h"
+#include "Handlers/Level/LevelHandlers.h"
+#include "Misc/PackageName.h"
 
 #include "MessageLogModule.h"
 #include "IMessageLogListing.h"
@@ -3505,6 +3507,13 @@ TSharedPtr<FJsonValue> FEditorHandlers::CreateNewLevel(const TSharedPtr<FJsonObj
 		&& !TemplateLevel.Equals(TEXT("Empty"), ESearchCase::IgnoreCase)
 		&& !TemplateLevel.Equals(TEXT("None"), ESearchCase::IgnoreCase);
 
+	// #1252: a missing template makes the engine save an untemplated map without opening it, and return true.
+	if (bHasTemplate && !FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(TemplateLevel)))
+	{
+		return MCPError(FString::Printf(TEXT("templateLevel '%s' does not exist. Engine templates live under /Engine/Maps/Templates/ ")
+			TEXT("(UE 5.8 ships Template_Default, OpenWorld, TimeOfDay_Default). Nothing was created."), *TemplateLevel));
+	}
+
 	bool bSuccess = false;
 	if (!bHasTemplate)
 	{
@@ -3532,16 +3541,19 @@ TSharedPtr<FJsonValue> FEditorHandlers::CreateNewLevel(const TSharedPtr<FJsonObj
 		return MCPError(Reason);
 	}
 
+	// The engine can report success while a different map stays open (#1252), so the open world is the proof.
+	UWorld* World = GetEditorWorld();
+	const FString OpenPackage = World ? World->GetOutermost()->GetName() : FString();
+	if (OpenPackage != FPackageName::ObjectPathToPackageName(LevelPath))
+	{
+		return MCPError(FString::Printf(TEXT("The engine reported '%s' created, but the open map is '%s'. Check the output log; ")
+			TEXT("a map file may have been saved at levelPath without being opened."), *LevelPath, *OpenPackage));
+	}
+
 	auto Result = MCPSuccess();
 	MCPSetCreated(Result);
-
-	// Get info about the new world
-	UWorld* World = GetEditorWorld();
-	if (World)
-	{
-		Result->SetStringField(TEXT("worldName"), World->GetName());
-		Result->SetStringField(TEXT("worldPath"), World->GetPathName());
-	}
+	Result->SetStringField(TEXT("worldName"), World->GetName());
+	Result->SetStringField(TEXT("worldPath"), World->GetPathName());
 
 	Result->SetStringField(TEXT("levelPath"), LevelPath);
 	Result->SetStringField(TEXT("message"), TEXT("New level created"));
@@ -3558,20 +3570,64 @@ TSharedPtr<FJsonValue> FEditorHandlers::OpenAsset(const TSharedPtr<FJsonObject>&
 	FString AssetPath;
 	if (auto Err = RequireString(Params, TEXT("assetPath"), AssetPath)) return Err;
 
+	// A map opens as the editor world through load_level. Loading it here first would leave its package resident,
+	// and the map load then fatals on "Old level package ... not cleaned up by garbage collection" (#1241).
+	FString PackageFilename;
+	if (FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(AssetPath), &PackageFilename)
+		&& FPaths::GetExtension(PackageFilename, /*bIncludeDot*/ true) == FPackageName::GetMapPackageExtension())
+	{
+		TSharedPtr<FJsonObject> LevelParams = MakeShared<FJsonObject>();
+		LevelParams->SetStringField(TEXT("levelPath"), AssetPath);
+		TSharedPtr<FJsonValue> LevelResult = FLevelHandlers::LoadLevel(LevelParams);
+		const TSharedPtr<FJsonObject>* LevelObject = nullptr;
+		if (LevelResult.IsValid() && LevelResult->TryGetObject(LevelObject) && LevelObject && LevelObject->IsValid())
+		{
+			(*LevelObject)->SetStringField(TEXT("assetPath"), AssetPath);
+			(*LevelObject)->SetStringField(TEXT("assetClass"), TEXT("World"));
+			(*LevelObject)->SetStringField(TEXT("openedVia"), TEXT("load_level"));
+			// load_level says alreadyOpen/unchanged; open_asset's contract also carries changed.
+			bool bSuccess = false;
+			bool bAlreadyOpen = false;
+			if ((*LevelObject)->TryGetBoolField(TEXT("success"), bSuccess) && bSuccess)
+			{
+				(*LevelObject)->TryGetBoolField(TEXT("alreadyOpen"), bAlreadyOpen);
+				(*LevelObject)->SetBoolField(TEXT("changed"), !bAlreadyOpen);
+			}
+		}
+		return LevelResult;
+	}
+
 	UObject* Asset = StaticLoadObject(UObject::StaticClass(), nullptr, *AssetPath);
 	if (!Asset)
 	{
 		return MCPError(FString::Printf(TEXT("Failed to load asset at '%s'"), *AssetPath));
 	}
 
-	// StaticLoadObject returns an unrooted pointer and OpenEditorForAsset can run
-	// the GC, so the asset is held for the rest of the call.
-	FGCObjectScopeGuard AssetScopeGuard(Asset);
-
 	if (!GEditor)
 	{
 		return MCPError(TEXT("GEditor not available"));
 	}
+
+	// A World opens by loading it as the editor map, which destroys the map
+	// loaded before it. Asked for the map already loaded, that load would
+	// destroy the very world the guard below pins, and the editor dies on its
+	// world-leak check. The map is already open, so there is nothing to do.
+	if (Asset == GetEditorWorld())
+	{
+		TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetStringField(TEXT("assetPath"), AssetPath);
+		Result->SetStringField(TEXT("assetClass"), Asset->GetClass()->GetName());
+		Result->SetBoolField(TEXT("success"), true);
+		Result->SetBoolField(TEXT("alreadyOpen"), true);
+		Result->SetBoolField(TEXT("changed"), false);
+		Result->SetBoolField(TEXT("rollbackPossible"), false);
+		Result->SetStringField(TEXT("rollbackNote"), TEXT("The map was already the loaded editor world, so nothing was opened."));
+		return MCPResult(Result);
+	}
+
+	// StaticLoadObject returns an unrooted pointer and OpenEditorForAsset can run
+	// the GC, so the asset is held for the rest of the call.
+	FGCObjectScopeGuard AssetScopeGuard(Asset);
 
 	UAssetEditorSubsystem* AssetEditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
 	if (!AssetEditorSubsystem)

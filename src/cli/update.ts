@@ -46,12 +46,12 @@ async function editorRunningFor(uproject: string): Promise<boolean> {
   }
 }
 
-/** Run a sibling CLI from THIS package (not npx) so a local shadow can't intercept. */
-function runSelfCli(scriptBase: string, projectArg: string | undefined): boolean {
-  const script = packageModulePath(scriptBase);
+/** Run `ue-mcp <command>` from THIS package (not npx) so a local shadow can't intercept. */
+function runSelfCommand(command: string, projectArg: string | undefined): boolean {
+  const entry = packageModulePath("index.js");
   const argSuffix = projectArg ? ` "${projectArg}"` : "";
   try {
-    execSync(`"${process.execPath}" "${script}"${argSuffix}`, { stdio: "inherit" });
+    execSync(`"${process.execPath}" "${entry}" ${command}${argSuffix}`, { stdio: "inherit" });
     return true;
   } catch {
     return false;
@@ -145,7 +145,7 @@ async function update(argv: string[]) {
     console.log("");
     step("Deploying bridge plugin...");
     console.log("");
-    if (!runSelfCli("deploy-cli.js", projectArg)) {
+    if (!runSelfCommand("deploy", projectArg)) {
       fail("Deploy failed. Run `ue-mcp deploy` manually.");
       process.exit(1);
     }
@@ -169,7 +169,7 @@ async function update(argv: string[]) {
     console.log("");
     step("Rebuilding the editor (this can take a few minutes)...");
     console.log("");
-    if (!runSelfCli("build-cli.js", projectArg)) {
+    if (!runSelfCommand("build", projectArg)) {
       fail("Build failed. Run `ue-mcp build` manually and check the output.");
       process.exit(1);
     }

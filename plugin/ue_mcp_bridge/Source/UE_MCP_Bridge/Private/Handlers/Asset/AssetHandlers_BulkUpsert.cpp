@@ -13,6 +13,7 @@
 
 #include "HandlerJsonProperty.h"
 #include "HandlerUtils.h"
+#include "HandlerAssetDelete.h"
 #include "JsonSerializer.h"
 
 #include "AssetToolsModule.h"
@@ -381,7 +382,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::BulkRestoreDataAssets(const TSharedPtr<FJ
 			{
 				continue;
 			}
-			if (UEditorAssetLibrary::DeleteAsset(AssetPath))
+			bool bRemovedOrphanFile = false;
+			if (MCPDeleteAssetFromDisk(AssetPath, bRemovedOrphanFile))
 			{
 				++DeletedAssetCount;
 			}

@@ -111,6 +111,10 @@ function flatObject(shape: Record<string, z.ZodType>): unknown {
 
 /** Why a flat bag fails a category's shape, worded as the MCP SDK words it, or null. */
 export function flatValidationMessage(tool: ToolDef, flat: Record<string, unknown>): { data?: Record<string, unknown>; message?: string } {
+  // #1282: a strict contract is narrower than the shared shape, which would strip the undeclared keys and the
+  // nested fields it exists to refuse. The bag goes on untouched and prepareCall holds it to the contract.
+  const named = typeof flat.action === "string" && Object.hasOwn(tool.actions, flat.action) ? tool.actions[flat.action] : undefined;
+  if (named?.strictParams && named.paramSpec) return { data: flat };
   const parsed = sdkSafeParse(flatObject(tool.schema) as never, flat) as { success: boolean; data?: unknown; error?: unknown };
   if (parsed.success) return { data: parsed.data as Record<string, unknown> };
   return { message: `Input validation error: Invalid arguments for tool ${tool.name}: ${getParseErrorMessage(parsed.error)}` };

@@ -37,9 +37,27 @@ TSharedPtr<FJsonValue> FLevelHandlers::AttachActor(const TSharedPtr<FJsonObject>
 
 	const FString SocketName = OptionalString(Params, TEXT("socketName"));
 
+	// The engine refuses these attaches with a log line and a false return; name the reason instead (#1251).
+	USceneComponent* ChildRoot = Child->GetRootComponent();
+	USceneComponent* ParentRoot = Parent->GetRootComponent();
+	if (!ChildRoot || !ParentRoot)
+	{
+		return MCPError(FString::Printf(TEXT("Cannot attach '%s' to '%s': %s has no root component. Give it one with add_component (a SceneComponent becomes the root)."),
+			*ChildLabel, *ParentLabel, !ChildRoot ? *ChildLabel : *ParentLabel));
+	}
+	if (ChildRoot->Mobility == EComponentMobility::Static && ParentRoot->Mobility != EComponentMobility::Static)
+	{
+		return MCPError(FString::Printf(TEXT("Cannot attach '%s' to '%s': a Static child cannot attach to a %s parent. Make the parent's root Static, or the child Movable."),
+			*ChildLabel, *ParentLabel, ParentRoot->Mobility == EComponentMobility::Movable ? TEXT("Movable") : TEXT("Stationary")));
+	}
+
 	Child->Modify();
 	const bool bOk = Child->AttachToActor(Parent, FAttachmentTransformRules(Loc, Loc, Loc, true), FName(*SocketName));
 	Child->MarkPackageDirty();
+	if (!bOk)
+	{
+		return MCPError(FString::Printf(TEXT("The engine refused to attach '%s' to '%s' (a cycle, or a socket that does not exist); the output log names the cause."), *ChildLabel, *ParentLabel));
+	}
 
 	auto Result = MCPSuccess();
 	MCPSetUpdated(Result);

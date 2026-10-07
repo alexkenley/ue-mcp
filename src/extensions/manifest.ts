@@ -119,6 +119,12 @@ const NativeModuleSchema = z.object({
   // Summary shown on a provisioned (new) category's tool. Ignored when
   // `category` is a built-in.
   categoryDescription: z.string().min(1).optional(),
+  // Package-relative path to the parameter contracts the module's handlers
+  // register with in C++ (UEMCP::RegisterExternalHandler with params), as
+  // `ue-mcp plugin record-specs` records them (#1282). When set, every surfaced
+  // handler takes its parameters from its spec and each call is validated
+  // against it; a handler with no recorded spec is not surfaced.
+  specs: z.string().min(1).optional(),
   handlers: z
     .record(
       z.object({
