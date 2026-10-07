@@ -11,9 +11,16 @@ import {
   type PluginManifest,
   type ManifestInjectAction,
   type ManifestProvidedAction,
-  type ManifestProvidedCategory,
 } from "./manifest.js";
 import { bridgeTaskClass } from "../flow/task-factory.js";
+import {
+  flatContractShape,
+  paramsClause,
+  recordedSpecsProblems,
+  type HandlerSpecs,
+  type RecordedHandlerSpecs,
+} from "../surface/handler-spec.js";
+import type { NativeContractExtras } from "./native-contract.js";
 import { resolvePackage, type ResolvedPackage } from "./resolver.js";
 import { satisfiesMinimum } from "./version.js";
 import { mergeInjectionsIntoTool, type InjectionPlan } from "./injection.js";
@@ -143,7 +150,7 @@ export async function loadPlugins(
     records.push(record.record);
     if (record.record.status !== "active" || !record.payload) continue;
 
-    const { manifest, pkg, taskCtors } = record.payload;
+    const { manifest, pkg, taskCtors, nativeSpecs } = record.payload;
 
     // Register task constructors under (a) the plugin task name and (b) the
     // plugin class_path. Both are looked up by FlowRunner/registry consumers.
@@ -228,7 +235,7 @@ export async function loadPlugins(
     // BridgeTask carries the method. A built-in category is injected into;
     // a new category is provisioned as a tool the plugin owns. Without
     // `category`, handlers stay bridge-only (back-compat).
-    const nativeSurface = nativeHandlerSurface(manifest, pkg.name, builtInCategories);
+    const nativeSurface = nativeHandlerSurface(manifest, pkg.name, builtInCategories, nativeSpecs);
     if (nativeSurface?.kind === "inject") {
       taskRegistrations.push(...nativeSurface.taskRegistrations);
       const list = plansByCategory.get(nativeSurface.plan.category) ?? [];
@@ -350,6 +357,8 @@ interface LoadOnePayload {
   manifest: PluginManifest;
   pkg: ResolvedPackage;
   taskCtors: Map<string, TaskConstructor>;
+  /** The native module's recorded handler specs, when its manifest names a file (#1282). */
+  nativeSpecs?: HandlerSpecs;
 }
 
 interface LoadOneResult {
@@ -414,6 +423,35 @@ async function loadOne(
         base,
         `nativeModule requires bridge ABI >= ${manifest.nativeModule.minBridgeApi} (deployed bridge is ${bridgeApiVersion}). Run \`ue-mcp deploy\` to refresh the bridge.`,
       );
+    }
+  }
+
+  // #1282: the native module's recorded contracts. A file that is named and
+  // unusable takes the plugin down: surfacing its handlers without their
+  // contracts would advertise parameters nothing checks.
+  let nativeSpecs: HandlerSpecs | undefined;
+  if (manifest.nativeModule?.specs) {
+    const specsPath = path.join(pkg.pkgDir, manifest.nativeModule.specs);
+    let raw: unknown;
+    try {
+      raw = JSON.parse(fs.readFileSync(specsPath, "utf-8"));
+    } catch (e) {
+      return skip(base, `nativeModule.specs '${manifest.nativeModule.specs}' could not be read: ${(e as Error).message}`);
+    }
+    const problems = recordedSpecsProblems(raw);
+    if (problems.length > 0) {
+      return skip(base, `nativeModule.specs '${manifest.nativeModule.specs}' is invalid: ${problems.slice(0, 5).join("; ")}`);
+    }
+    nativeSpecs = (raw as RecordedHandlerSpecs).handlers;
+    for (const hName of Object.keys(manifest.nativeModule.handlers)) {
+      if (nativeSpecs[hName]) continue;
+      delete manifest.nativeModule.handlers[hName];
+      base.degraded.push(`nativeModule.handlers.${hName}: no recorded spec in ${manifest.nativeModule.specs}`);
+      warn("plugin", `${entry.name}: dropped nativeModule.handlers.${hName} - no recorded spec; run ue-mcp plugin record-specs`);
+    }
+    for (const method of Object.keys(nativeSpecs)) {
+      if (manifest.nativeModule.handlers[method]) continue;
+      base.degraded.push(`${manifest.nativeModule.specs}: spec for '${method}', which nativeModule.handlers does not declare`);
     }
   }
 
@@ -496,7 +534,7 @@ async function loadOne(
 
   base.flows = Object.keys(manifest.flows);
   base.status = "active";
-  return { record: base, payload: { manifest, pkg, taskCtors } };
+  return { record: base, payload: { manifest, pkg, taskCtors, nativeSpecs } };
 }
 
 function baseRecord(entry: PluginEntry): PluginRecord {
@@ -550,6 +588,7 @@ export function nativeHandlerSurface(
   manifest: PluginManifest,
   pluginName: string,
   builtInCategories: Set<string>,
+  specs?: HandlerSpecs,
 ): NativeHandlerSurface | null {
   const native = manifest.nativeModule;
   if (!native?.category) return null;
@@ -571,20 +610,41 @@ export function nativeHandlerSurface(
   const timeoutMs = (seconds?: number) =>
     seconds ? seconds * 1000 : undefined;
 
+  // #1282: a handler with a recorded spec takes its parameters, Params clause
+  // and per-call contract from it. The category keys are built from every
+  // spec at once, so a key two handlers declare differently accepts either and
+  // the contract holds each call to its own handler's declaration.
+  const specced = Object.keys(native.handlers).filter((h) => specs?.[h]).map((h) => [h, specs![h]] as const);
+  const zodSchema = specced.length > 0 ? flatContractShape(specced) : undefined;
+  const surfaced = (hName: string, hSpec: { description?: string; schema?: ManifestInjectAction["schema"] }):
+    { description?: string; schema?: ManifestInjectAction["schema"] } & NativeContractExtras => {
+    const spec = specs?.[hName];
+    if (!spec) return { description: hSpec.description, schema: optionalSchema(hSpec.schema) };
+    return {
+      description: [hSpec.description, paramsClause(spec)].filter(Boolean).join(" "),
+      contract: { method: hName, spec },
+      zodSchema,
+    };
+  };
+  const prepFor = (action: string, hName: string) => {
+    const spec = specs?.[hName];
+    return spec ? { action, paramContract: { params: spec.params, choices: spec.choices, strict: true } } : undefined;
+  };
+
   if (builtInCategories.has(cat)) {
-    const actions: Record<string, ManifestInjectAction> = {};
+    const actions: Record<string, ManifestInjectAction & NativeContractExtras> = {};
     for (const [hName, hSpec] of Object.entries(native.handlers)) {
       // `task` is synthetic - mergeInjectionsIntoTool reads only description
       // and schema; dispatch is wired through the registry registration below.
       actions[hName] = {
         task: `${manifest.actionPrefix}.${hName}`,
-        description: hSpec.description,
-        schema: optionalSchema(hSpec.schema),
+        ...surfaced(hName, hSpec),
       };
       const dispatchName = `${cat}.${manifest.actionPrefix}_${hName}`;
       taskRegistrations.push({
         name: dispatchName,
-        ctor: bridgeTaskClass(dispatchName, hName, undefined, timeoutMs(hSpec.timeoutSeconds)),
+        ctor: bridgeTaskClass(dispatchName, hName, undefined, timeoutMs(hSpec.timeoutSeconds),
+          prepFor(`${manifest.actionPrefix}_${hName}`, hName)),
       });
     }
     return {
@@ -595,20 +655,19 @@ export function nativeHandlerSurface(
   }
 
   // New category: provision a tool the plugin owns; actions are unprefixed.
-  const actions: Record<string, ManifestProvidedAction> = {};
+  const actions: Record<string, ManifestProvidedAction & NativeContractExtras> = {};
   for (const [hName, hSpec] of Object.entries(native.handlers)) {
     actions[hName] = {
       task: `${cat}.${hName}`, // synthetic; buildProvidedTool ignores it
-      description: hSpec.description,
-      schema: optionalSchema(hSpec.schema),
+      ...surfaced(hName, hSpec),
     };
     const dispatchName = `${cat}.${hName}`;
     taskRegistrations.push({
       name: dispatchName,
-      ctor: bridgeTaskClass(dispatchName, hName, undefined, timeoutMs(hSpec.timeoutSeconds)),
+      ctor: bridgeTaskClass(dispatchName, hName, undefined, timeoutMs(hSpec.timeoutSeconds), prepFor(hName, hName)),
     });
   }
-  const spec: ManifestProvidedCategory = {
+  const spec: ProvisionPlan["spec"] = {
     description: native.categoryDescription,
     actions,
   };

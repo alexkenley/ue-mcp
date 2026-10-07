@@ -1894,6 +1894,11 @@ TSharedPtr<FJsonValue> FLevelHandlers::MoveActor(const TSharedPtr<FJsonObject>& 
 	AActor* Actor = MCPResolveActor(World, Params, ActorErr, ActorSel);
 	if (!Actor) return ActorErr;
 	const FString ActorLabel = Actor->GetActorLabel();
+	// Without a root the setters are no-ops, and reporting the move as done is a lie (#1251).
+	if (!Actor->GetRootComponent())
+	{
+		return MCPError(FString::Printf(TEXT("'%s' has no root component, so it has no transform to move. Give it one with add_component (a SceneComponent becomes the root)."), *ActorLabel));
+	}
 
 	// Capture previous transform for rollback.
 	const FVector PreviousLocation = Actor->GetActorLocation();
@@ -2219,10 +2224,19 @@ TSharedPtr<FJsonValue> FLevelHandlers::AddComponentToActor(const TSharedPtr<FJso
 		return MCPError(TEXT("Failed to create component"));
 	}
 
+	// A scene component added to an actor with no root becomes the root, as the editor's Add Component does;
+	// otherwise the actor has no transform to move or attach (#1251).
 	USceneComponent* SceneComp = Cast<USceneComponent>(NewComponent);
+	bool bBecameRoot = false;
 	if (SceneComp && Actor->GetRootComponent())
 	{
 		SceneComp->SetupAttachment(Actor->GetRootComponent());
+	}
+	else if (SceneComp)
+	{
+		Actor->Modify();
+		Actor->SetRootComponent(SceneComp);
+		bBecameRoot = true;
 	}
 
 	NewComponent->RegisterComponent();
@@ -2230,6 +2244,7 @@ TSharedPtr<FJsonValue> FLevelHandlers::AddComponentToActor(const TSharedPtr<FJso
 
 	auto Result = MCPSuccess();
 	MCPSetCreated(Result);
+	Result->SetBoolField(TEXT("becameRoot"), bBecameRoot);
 	Result->SetStringField(TEXT("actorLabel"), ActorLabel);
 	Result->SetStringField(TEXT("actorPath"), Actor->GetPathName());
 	Result->SetStringField(TEXT("componentName"), ComponentName);
@@ -2402,6 +2417,12 @@ TSharedPtr<FJsonValue> FLevelHandlers::LoadLevel(const TSharedPtr<FJsonObject>& 
 		return MCPResult(Noop);
 	}
 
+	// The subsystem returns true for a map that does not exist and leaves the old world open (#1252).
+	if (!FPackageName::DoesPackageExist(RequestedPackageName))
+	{
+		return MCPError(FString::Printf(TEXT("Level '%s' does not exist on disk. Nothing was unloaded."), *LevelPath));
+	}
+
 	// #590/#589: loading a map right after a PIE session (or a level-script
 	// recompile / duplicate) fatally asserts "World Memory Leaks: N leaks
 	// objects and packages" - the previous world's objects are still
@@ -2432,15 +2453,17 @@ TSharedPtr<FJsonValue> FLevelHandlers::LoadLevel(const TSharedPtr<FJsonObject>& 
 		return MCPError(FString::Printf(TEXT("Failed to load level: %s"), *LevelPath));
 	}
 
-	// Get info about the newly loaded world
-	auto Result = MCPSuccess();
+	// The open world is the proof the load happened, not the subsystem's return value.
 	UWorld* World = GetEditorWorld();
-	if (World)
+	const FString OpenPackage = World ? World->GetOutermost()->GetName() : FString();
+	if (OpenPackage != RequestedPackageName)
 	{
-		Result->SetStringField(TEXT("worldName"), World->GetName());
-		Result->SetStringField(TEXT("worldPath"), World->GetPathName());
+		return MCPError(FString::Printf(TEXT("The engine reported '%s' loaded, but the open map is '%s'. Check the output log."), *LevelPath, *OpenPackage));
 	}
 
+	auto Result = MCPSuccess();
+	Result->SetStringField(TEXT("worldName"), World->GetName());
+	Result->SetStringField(TEXT("worldPath"), World->GetPathName());
 	Result->SetStringField(TEXT("levelPath"), LevelPath);
 	Result->SetBoolField(TEXT("endedPlaySession"), bEndedPIE);
 	// The already-open case returned above, so reaching here is a real load.

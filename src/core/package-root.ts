@@ -14,7 +14,7 @@ export function packageRoot(): string {
   return path.resolve(ENTRY_DIR, "..");
 }
 
-/** A top-level entry point of the running build (e.g. "deploy-cli.js"), whatever the caller's depth. */
+/** A top-level entry point of the running build (e.g. "index.js"), whatever the caller's depth. */
 export function packageModulePath(fileName: string): string {
   return path.join(ENTRY_DIR, fileName);
 }

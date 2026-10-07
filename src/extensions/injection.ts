@@ -3,6 +3,7 @@ import type { ToolDef, ActionSpec } from "../core/types.js";
 import { actionEnum } from "../surface/category-tool.js";
 import { compileSchemaFields, type ManifestInjectAction } from "./manifest.js";
 import { inferActionEffect } from "../surface/action-class.js";
+import { contractActionFields, type NativeContractExtras } from "./native-contract.js";
 
 /**
  * Per-category injection plan derived from one plugin's `inject:` block.
@@ -17,7 +18,7 @@ export interface InjectionPlan {
   /** Plugin name for diagnostics. */
   pluginName: string;
   /** Bare action name → manifest spec. */
-  actions: Record<string, ManifestInjectAction>;
+  actions: Record<string, ManifestInjectAction & NativeContractExtras>;
 }
 
 /**
@@ -71,7 +72,8 @@ export function mergeInjectionsIntoTool(
         effect: injectSpec.effect ?? inferActionEffect(orig.name, prefixed),
         effectSource: injectSpec.effect ? "declared" : "inferred",
         description: injectSpec.description ?? `Plugin action from ${plan.pluginName}`,
-      };
+        ...contractActionFields(injectSpec.contract),
+      } as ActionSpec;
       added.push(prefixed);
       docLines.push(
         injectSpec.description
@@ -82,7 +84,7 @@ export function mergeInjectionsIntoTool(
       // Lift per-action schema fields to the top level as optional, matching
       // the pattern built-in categories already use (one flat schema, action
       // selects which params apply).
-      const compiled = compileSchemaFields(injectSpec.schema);
+      const compiled = injectSpec.zodSchema ?? compileSchemaFields(injectSpec.schema);
       for (const [k, v] of Object.entries(compiled)) {
         if (!(k in extraSchema) && !(k in orig.schema)) {
           extraSchema[k] = v;
