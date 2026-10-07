@@ -173,7 +173,7 @@ describe("the recording", () => {
     ];
     for (const param of params) {
       const generated = new Function("z", `return ${zodExpression(param)}`)(zodRuntime) as z.ZodTypeAny;
-      expect(zodSignature(generated), param.name).toBe(zodSignature(paramZod(param)));
+      expect(zodSignature(generated, { rules: true }), param.name).toBe(zodSignature(paramZod(param), { rules: true }));
     }
 
     const args = paramZod(params[0]);
@@ -199,6 +199,78 @@ describe("the recording", () => {
       },
     };
     expect(() => renderAll(clash)).toThrow(/one category key has one type/);
+  });
+
+  it("shares a key between declarations that differ only by enum or range, at its type (#1282)", () => {
+    const shared = {
+      handlers: {
+        one: { category: "animation", params: [{ name: "k", type: "string", required: false, description: "", enum: ["A"] }] },
+        two: { category: "animation", params: [{ name: "k", type: "string", required: false, description: "" }] },
+        three: { category: "animation", params: [{ name: "n", type: "integer", required: false, description: "", minimum: 0 }] },
+        four: { category: "animation", params: [{ name: "n", type: "integer", required: false, description: "", maximum: 9 }] },
+      },
+    };
+    const module = renderAll(shared).get("src/tools/specs/animation.generated.ts")!;
+    expect(module).toMatch(/ {2}k: z\.string\(\)\.optional\(\)/);
+    expect(module).toMatch(/ {2}n: z\.number\(\)\.int\(\)\.optional\(\)/);
+  });
+
+  it("refuses an enum or range off its type, and nested fields off an object (#1282)", () => {
+    const one = (param: Partial<ParamSpec>): string =>
+      specProblems({ probe: { params: [{ name: "v", type: "string", required: false, description: "", ...param } as ParamSpec] } }).join("\n");
+    expect(one({ enum: ["Max", "Min"] })).toBe("");
+    expect(one({ type: "array", items: "string", enum: ["A"] })).toBe("");
+    expect(one({ type: "number", enum: ["A"] })).toContain("not a string");
+    expect(one({ enum: ["A", "A"] })).toContain("listed twice");
+    expect(one({ enum: [""] })).toContain("empty one");
+    expect(one({ enum: ["A"], literal: "A" })).toContain("enum that is also a literal");
+    expect(one({ type: "number", minimum: 0, maximum: 1 })).toBe("");
+    expect(one({ type: "array", items: "integer", minimum: 0 })).toBe("");
+    expect(one({ minimum: 0 })).toContain("numeric range");
+    expect(one({ type: "number", minimum: 2, maximum: 1 })).toContain("minimum above");
+    const nested = (field: object): string => one({
+      type: "object",
+      fields: [{ name: "f", type: "object", required: false, description: "", ...field } as never],
+    });
+    expect(nested({ fields: [{ name: "n", type: "integer", required: true, description: "", minimum: 1 }] })).toBe("");
+    expect(nested({ type: "string", fields: [{ name: "n", type: "integer", required: true, description: "" }] })).toContain("neither an object");
+    expect(nested({ fields: [{ name: "n", type: "string", required: true, description: "", maximum: 1 }] })).toContain("numeric range");
+  });
+
+  it("generates the same enum, range and nested schema as it builds at runtime, and enforces them (#1282)", () => {
+    const params: ParamSpec[] = [
+      { name: "blend", type: "string", required: false, description: "", enum: ["Max", "Min", "Override"] },
+      { name: "flags", type: "array", items: "string", required: false, description: "", enum: ["A", "B"] },
+      { name: "size", type: "integer", required: false, description: "", minimum: 1, maximum: 4 },
+      { name: "weights", type: "array", items: "number", required: false, description: "", minimum: 0 },
+      { name: "quality", type: "object", required: false, description: "", fields: [
+        { name: "game", type: "object", required: false, description: "", fields: [
+          { name: "lod", type: "integer", required: true, description: "", minimum: 0, maximum: 7 },
+          { name: "mode", type: "string", required: false, description: "", enum: ["Fast", "Fine"] },
+        ] },
+        { name: "rows", type: "array", items: "object", required: false, description: "", fields: [
+          { name: "x", type: "number", required: true, description: "" },
+        ] },
+      ] },
+    ];
+    for (const param of params) {
+      const generated = new Function("z", `return ${zodExpression(param)}`)(zodRuntime) as z.ZodTypeAny;
+      expect(zodSignature(generated, { rules: true }), param.name).toBe(zodSignature(paramZod(param), { rules: true }));
+    }
+    const [blend, flags, size, weights, quality] = params.map((p) => paramZod(p));
+    expect(blend.safeParse("Min").success).toBe(true);
+    expect(blend.safeParse("min").success, "enums are case-sensitive").toBe(false);
+    expect(flags.safeParse(["A", "B"]).success).toBe(true);
+    expect(flags.safeParse(["A", "C"]).success).toBe(false);
+    expect(size.safeParse(4).success).toBe(true);
+    expect(size.safeParse(5).success).toBe(false);
+    expect(size.safeParse(1.5).success).toBe(false);
+    expect(weights.safeParse([0, 2.5]).success).toBe(true);
+    expect(weights.safeParse([-1]).success).toBe(false);
+    expect(quality.safeParse({ game: { lod: 3, mode: "Fine" }, rows: [{ x: 1 }] }).success).toBe(true);
+    expect(quality.safeParse({ game: { lod: 9 } }).success, "a nested range").toBe(false);
+    expect(quality.safeParse({ game: { mode: "Fine" } }).success, "a nested required field").toBe(false);
+    expect(quality.safeParse({ rows: [{ x: "1" }] }).success, "a field of each element").toBe(false);
   });
 });
 

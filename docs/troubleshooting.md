@@ -183,6 +183,14 @@ The C++ bridge links against many UE modules. If compilation fails:
 
 3. **Rebuild from clean.** Delete `<Project>/Plugins/UE_MCP_Bridge/Binaries/` and `<Project>/Plugins/UE_MCP_Bridge/Intermediate/`, then rebuild.
 
+### build_project fails with LNK1104 and no editor is running
+
+**Symptom:** `editor(build_project)` fails, the output has `LINK : fatal error LNK1104: cannot open file '...UnrealEditor-<Module>.dll'`, and the accelerator line before it says the file is `being used by another process. - ...CrashReportClientEditor.exe`.
+
+**Cause:** an editor of this project crashed, and its crash reporter is still running with the project's module DLLs open.
+
+**Fix:** run `editor(action="stop_editor")`, then build again. With no editor of this project running, the stop ends the crash reporter that holds the project's binaries and reports it under `crashReporters`. The build's own error names the file and the process holding it, under `lockedOutputs`, so a holder that is something else is named too.
+
 ### Plugin not loading
 
 If the editor starts but the bridge doesn't appear in the Output Log:

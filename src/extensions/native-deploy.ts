@@ -114,8 +114,28 @@ export function undeployNativeModule(projectDir: string, npmName: string): numbe
   const record = state[npmName];
   if (!record) return 0;
 
+  const removed = removeDeployedFiles(projectDir, record.files);
+
+  delete state[npmName];
+  writeNativeModulesState(projectDir, state);
+  return removed;
+}
+
+/**
+ * Remove files a previous install deployed that the new one no longer ships
+ * (#1236). A file that moved between modules otherwise survives at its old
+ * path and shadows the new copy. Only paths the installer itself recorded
+ * are touched, so files the user added stay. Returns the count removed.
+ */
+export function pruneStaleNativeFiles(projectDir: string, previousFiles: string[], newFiles: string[]): number {
+  const keep = new Set(newFiles);
+  return removeDeployedFiles(projectDir, previousFiles.filter((rel) => !keep.has(rel)));
+}
+
+/** Delete recorded files, then the directories their removal left empty. */
+function removeDeployedFiles(projectDir: string, files: string[]): number {
   let removed = 0;
-  for (const rel of record.files) {
+  for (const rel of files) {
     const abs = path.join(projectDir, rel);
     try {
       if (fs.existsSync(abs)) {
@@ -130,7 +150,7 @@ export function undeployNativeModule(projectDir: string, npmName: string): numbe
 
   // Best-effort: remove now-empty directories upward from the deepest path.
   const dirs = new Set<string>();
-  for (const rel of record.files) {
+  for (const rel of files) {
     let dir = path.dirname(path.join(projectDir, rel));
     while (dir.startsWith(projectDir) && dir !== projectDir) {
       dirs.add(dir);
@@ -148,8 +168,5 @@ export function undeployNativeModule(projectDir: string, npmName: string): numbe
       // ignore - directory wasn't empty or wasn't ours to remove
     }
   }
-
-  delete state[npmName];
-  writeNativeModulesState(projectDir, state);
   return removed;
 }

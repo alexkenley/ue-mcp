@@ -16,6 +16,9 @@ public:
 		bool bDryRun,
 		TArray<TSharedPtr<FJsonValue>>& OutGraphs);
 
+	// editor(open_asset) routes a .umap here (#1241).
+	static TSharedPtr<FJsonValue> LoadLevel(const TSharedPtr<FJsonObject>& Params);
+
 private:
 	// Handler implementations
 	static TSharedPtr<FJsonValue> GetOutliner(const TSharedPtr<FJsonObject>& Params);
@@ -59,7 +62,6 @@ private:
 	static TSharedPtr<FJsonValue> AddComponentToActor(const TSharedPtr<FJsonObject>& Params);
 	// #426: symmetric inverse of add_component_to_actor.
 	static TSharedPtr<FJsonValue> RemoveComponentFromActor(const TSharedPtr<FJsonObject>& Params);
-	static TSharedPtr<FJsonValue> LoadLevel(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> ClearLevelScript(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> SetComponentProperty(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> NudgeComponent(const TSharedPtr<FJsonObject>& Params);

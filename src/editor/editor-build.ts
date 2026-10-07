@@ -43,6 +43,8 @@ export interface BuildResult {
   success: boolean;
   message: string;
   exitCode: number | null;
+  /** Outputs the link could not write because another process held them open. */
+  lockedOutputs?: LockedOutput[];
 }
 
 function getPlatformString(): string {
@@ -109,6 +111,65 @@ export function describeMemoryFailure(parallel: number, totalMemBytes = os.total
     + "precompiled header. Lower it further with UE_MCP_MAX_PARALLEL_ACTIONS, or give Windows a "
     + "larger paging file, and run the build again."
   );
+}
+
+/** A file the build could not write because another process had it open. */
+export interface LockedOutput {
+  file: string;
+  /** The process holding it, as the build tool named it, or null when it did not. */
+  holder: string | null;
+}
+
+/**
+ * Every output the link could not write because something held it open.
+ *
+ * UnrealBuildAccelerator names the holder on its own line ("ERROR opening file
+ * X for write ... being used by another process. - <holder exe>"); the linker
+ * only says LNK1104 and the file. Both are read, one entry per file, preferring
+ * the line that names a holder.
+ */
+export function findLockedOutputs(output: string): LockedOutput[] {
+  const byFile = new Map<string, LockedOutput>();
+  const add = (file: string, holder: string | null): void => {
+    const key = file.replace(/\\/g, "/").toLowerCase();
+    const known = byFile.get(key);
+    if (!known) byFile.set(key, { file, holder });
+    else if (!known.holder && holder) known.holder = holder;
+  };
+  for (const line of output.split(/\r?\n/)) {
+    const uba = /opening file\s+['"]?(.+?)['"]?\s+for write\b.*being used by another process\.?\s*-\s*(.+?)\)?\s*$/i.exec(line);
+    if (uba) {
+      add(uba[1].trim(), uba[2].trim().replace(/[).]+$/, "") || null);
+      continue;
+    }
+    const lnk = /LNK1104:\s*cannot open file\s+'([^']+)'/i.exec(line);
+    if (lnk) add(lnk[1].trim(), null);
+  }
+  return [...byFile.values()];
+}
+
+/** What to tell somebody whose link failed on a locked file, naming the holder. */
+export function describeLockedOutputs(code: number | null, locked: LockedOutput[]): string {
+  const detail = locked
+    .map((l) => `${l.file} is held open by ${l.holder ?? "another process the build did not name"}`)
+    .join("; ");
+  // Split on both separators: the path is a Windows one whatever this runs on.
+  const holders = locked.map((l) => (l.holder ?? "").split(/[\\/]/).pop()!.toLowerCase());
+  let remedy: string;
+  if (holders.some((h) => h.startsWith("crashreportclient"))) {
+    remedy =
+      "That is the crash reporter a crashed editor left behind. Run editor(action='stop_editor'), which ends a " +
+      "crash reporter belonging to this project, then build again.";
+  } else if (holders.some((h) => h.startsWith("unrealeditor"))) {
+    remedy = "An editor still has the module loaded. Stop it with editor(action='stop_editor'), then build again.";
+  } else if (holders.every((h) => h === "")) {
+    remedy =
+      "Run editor(action='stop_editor'), which stops this project's editor and ends a crash reporter a crashed " +
+      "editor left holding its binaries, then build again. If it still fails, close whatever process has that file open.";
+  } else {
+    remedy = "Close that process, then build again.";
+  }
+  return `Build failed with exit code ${code}: the link could not write its output. ${detail}. ${remedy}`;
 }
 
 export interface BuildOptions {
@@ -217,17 +278,21 @@ export async function buildProject(
       // making the next get_status report a binary that no longer exists.
       // Only this project's: a build in one editor says nothing about another.
       invalidatePluginFreshness(resolvedPath);
-      resolve(
-        code === 0
-          ? { success: true, exitCode: 0, message: `Build succeeded (${target} ${platform} ${configuration})` }
-          : {
-              success: false,
-              exitCode: code,
-              message: ranOutOfMemory(transcript)
-                ? describeMemoryFailure(parallel)
-                : `Build failed with exit code ${code}`,
-            },
-      );
+      if (code === 0) {
+        resolve({ success: true, exitCode: 0, message: `Build succeeded (${target} ${platform} ${configuration})` });
+        return;
+      }
+      const locked = ranOutOfMemory(transcript) ? [] : findLockedOutputs(transcript);
+      resolve({
+        success: false,
+        exitCode: code,
+        message: ranOutOfMemory(transcript)
+          ? describeMemoryFailure(parallel)
+          : locked.length > 0
+            ? describeLockedOutputs(code, locked)
+            : `Build failed with exit code ${code}`,
+        ...(locked.length > 0 ? { lockedOutputs: locked } : {}),
+      });
     });
 
     proc.on("error", (err) => {

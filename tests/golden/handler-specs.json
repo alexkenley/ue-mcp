@@ -1,5 +1,5 @@
 {
-  "handlerCount": 1070,
+  "handlerCount": 1078,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -13171,6 +13171,35 @@
         }
       ]
     },
+    "export_level_to_pcg_asset": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "levelPath",
+          "type": "string",
+          "required": true,
+          "description": "Saved level (.umap) to export, package or object path"
+        },
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": false,
+          "description": "Content folder for the PCG data asset (default: the level's folder)"
+        },
+        {
+          "name": "assetName",
+          "type": "string",
+          "required": false,
+          "description": "Asset name (default: <LevelName>_PCG)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the asset after export (default true)"
+        }
+      ]
+    },
     "export_material_graph": {
       "category": "material",
       "params": [
@@ -16180,6 +16209,32 @@
         }
       ]
     },
+    "get_physics_asset_constraints": {
+      "category": "animation",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "PhysicsAsset asset path, or a SkeletalMesh whose assigned PhysicsAsset to read",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "boneName",
+          "type": "string",
+          "required": false,
+          "description": "Only constraints that touch this bone, as child (bone1) or parent (bone2)"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Cap on the constraints returned (default all); total still counts every match"
+        }
+      ]
+    },
     "get_physics_asset_info": {
       "category": "animation",
       "params": [
@@ -16634,6 +16689,26 @@
           "type": "string",
           "required": false,
           "description": "StateTree component to read (default: first found)"
+        }
+      ]
+    },
+    "get_static_mesh_build_settings": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Source model (LOD) to read (default 0)"
         }
       ]
     },
@@ -23428,6 +23503,13 @@
           "type": "string",
           "required": false,
           "description": "Case-insensitive substring filter on row names"
+        },
+        {
+          "name": "columns",
+          "type": "array",
+          "required": false,
+          "description": "Row-struct fields to return; each row keeps Name and these fields, and an unknown name is refused with the valid list",
+          "items": "string"
         },
         {
           "name": "outputPath",
@@ -30390,6 +30472,59 @@
         }
       ]
     },
+    "set_datatable_cells": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "DataTable asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "cells",
+          "type": "array",
+          "required": true,
+          "description": "Cells to write; every row must exist and every column must be a top-level row-struct field",
+          "items": "object",
+          "fields": [
+            {
+              "name": "row",
+              "type": "string",
+              "required": true,
+              "description": "Existing row to edit"
+            },
+            {
+              "name": "column",
+              "type": "string",
+              "required": true,
+              "description": "Row-struct field to write"
+            },
+            {
+              "name": "value",
+              "type": "any",
+              "required": true,
+              "description": "Value to write, parsed as set_datatable_cell parses value"
+            }
+          ]
+        },
+        {
+          "name": "dryRun",
+          "type": "boolean",
+          "required": false,
+          "description": "Validate every cell and report what would change without writing (default false)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the package after the write (default false)"
+        }
+      ]
+    },
     "set_datatable_row": {
       "category": "asset",
       "params": [
@@ -32938,6 +33073,58 @@
         }
       ]
     },
+    "set_pcg_subgraph": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "PCGGraph asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "nodeName",
+          "type": "string",
+          "required": true,
+          "description": "Engine name of the Subgraph node, as read_graph reports it"
+        },
+        {
+          "name": "subgraphPath",
+          "type": "string",
+          "required": true,
+          "description": "PCGGraph or PCGGraphInstance to run; \"\" clears it"
+        }
+      ]
+    },
+    "set_pcg_subgraph_parameters": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "PCGGraph asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "nodeName",
+          "type": "string",
+          "required": true,
+          "description": "Engine name of the Subgraph node"
+        },
+        {
+          "name": "parameters",
+          "type": "object",
+          "required": true,
+          "description": "{parameterName: value}; null clears that override"
+        }
+      ]
+    },
     "set_physics_properties": {
       "category": "physics",
       "params": [
@@ -34616,6 +34803,38 @@
         }
       ]
     },
+    "set_static_mesh_build_settings": {
+      "category": "asset",
+      "params": [
+        {
+          "name": "assetPath",
+          "type": "string",
+          "required": true,
+          "description": "StaticMesh asset path",
+          "aliases": [
+            "path"
+          ]
+        },
+        {
+          "name": "settings",
+          "type": "object",
+          "required": true,
+          "description": "FMeshBuildSettings fields to write by name, e.g. {bRecomputeNormals: true}; get_static_mesh_build_settings lists them"
+        },
+        {
+          "name": "lodIndex",
+          "type": "integer",
+          "required": false,
+          "description": "Source model (LOD) to write (default 0)"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the mesh after the rebuild (default true)"
+        }
+      ]
+    },
     "set_static_mesh_spawner_meshes": {
       "category": "pcg",
       "params": [
@@ -34645,7 +34864,7 @@
               "name": "mesh",
               "type": "string",
               "required": true,
-              "description": "StaticMesh asset path; an entry without one is skipped"
+              "description": "StaticMesh, package or object path; an entry without one is skipped, and one that does not load refuses the call"
             },
             {
               "name": "weight",
@@ -37401,6 +37620,24 @@
           "type": "vec3",
           "required": false,
           "description": "Actor scale"
+        }
+      ]
+    },
+    "update_pcg_level_assets": {
+      "category": "pcg",
+      "params": [
+        {
+          "name": "assetPaths",
+          "type": "array",
+          "required": true,
+          "description": "PCG data assets to re-export from their source levels",
+          "items": "string"
+        },
+        {
+          "name": "save",
+          "type": "boolean",
+          "required": false,
+          "description": "Save the assets after export (default true)"
         }
       ]
     },

@@ -4,6 +4,7 @@
 #include "Handlers/Asset/AssetHandlers.h"
 #include "Handlers/Asset/AssetHandlers_Geometry.h"
 #include "Handlers/Asset/AssetHandlers_MeshBoolean.h"
+#include "Handlers/Asset/AssetHandlers_MeshBuild.h"
 #include "Handlers/Asset/AssetHandlers_BulkRead.h"
 #include "Handlers/Blueprint/BlueprintHandlers.h"
 #include "Handlers/Blueprint/BlueprintHandlers_Collision.h"
@@ -41,6 +42,7 @@ void MCPHandlerCatalog::RegisterAllHandlers(FMCPHandlerRegistry& Registry)
 	FAssetHandlers::RegisterHandlers(Registry);
 	FAssetGeometryHandlers::RegisterHandlers(Registry);
 	FAssetMeshBooleanHandlers::RegisterHandlers(Registry);
+	FAssetMeshBuildHandlers::RegisterHandlers(Registry);
 	// #909: bulk_read_asset_properties, in its own translation unit so a
 	// library-wide read lands without reopening AssetHandlers.cpp.
 	FAssetBulkReadHandlers::RegisterHandlers(Registry);

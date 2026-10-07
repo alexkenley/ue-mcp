@@ -1,6 +1,7 @@
 #include "AssetHandlers.h"
 #include "HandlerRegistry.h"
 #include "HandlerUtils.h"
+#include "HandlerAssetDelete.h"
 #include "EdGraph/EdGraphNode.h"
 #include "HandlerPagination.h"
 #include "HandlerJsonProperty.h"
@@ -764,6 +765,7 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 	Registry.RegisterHandler(TEXT("read_datatable"), &ReadDataTable, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
 		MCPParam::Optional(TEXT("rowFilter"), EType::String, TEXT("Case-insensitive substring filter on row names")),
+		MCPParam::Optional(TEXT("columns"), EType::Array, TEXT("Row-struct fields to return; each row keeps Name and these fields, and an unknown name is refused with the valid list")).Items(EType::String),
 		MCPParam::Optional(TEXT("outputPath"), EType::String, TEXT("Write the rows to this JSON file instead of returning them; relative paths resolve under Saved/")),
 	});
 	Registry.RegisterHandler(TEXT("reimport_datatable"), &ReimportDataTable, {
@@ -802,6 +804,18 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("rowName"), EType::String, TEXT("Existing row to edit")),
 		MCPParam::Required(TEXT("fieldName"), EType::String, TEXT("Row-struct field to write")),
 		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Value to write")),
+	});
+	// Many cells in one transaction, verified against a whole-table export
+	// taken before the write.
+	Registry.RegisterHandler(TEXT("set_datatable_cells"), &SetDataTableCells, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("cells"), EType::Array, TEXT("Cells to write; every row must exist and every column must be a top-level row-struct field")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("row"), EType::String, TEXT("Existing row to edit")),
+			MCPParam::RequiredField(TEXT("column"), EType::String, TEXT("Row-struct field to write")),
+			MCPParam::RequiredField(TEXT("value"), EType::Any, TEXT("Value to write, parsed as set_datatable_cell parses value")),
+		}),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Validate every cell and report what would change without writing (default false)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the package after the write (default false)")),
 	});
 	Registry.RegisterHandler(TEXT("rename_datatable_row"), &RenameDataTableRow, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
@@ -2758,12 +2772,17 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAsset(const TSharedPtr<FJsonObject>
 		TryCloseAssetEditors(AssetPath, bClosedEditor);
 	}
 
-	const bool bSuccess = UEditorAssetLibrary::DeleteAsset(AssetPath);
+	bool bRemovedOrphanFile = false;
+	const bool bSuccess = MCPDeleteAssetFromDisk(AssetPath, bRemovedOrphanFile);
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("path"), AssetPath);
 	Result->SetBoolField(TEXT("deleted"), bSuccess);
 	Result->SetBoolField(TEXT("forced"), bForce);
+	if (bRemovedOrphanFile)
+	{
+		Result->SetBoolField(TEXT("removedOrphanFile"), true);
+	}
 	if (bClosedEditor)
 	{
 		Result->SetBoolField(TEXT("closedOpenEditor"), true);
@@ -2851,9 +2870,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAssetBatch(const TSharedPtr<FJsonOb
 				TryCloseAssetEditors(Path, bClosed);
 				if (bClosed) ClosedEditors++;
 			}
-			if (UEditorAssetLibrary::DeleteAsset(Path))
+			bool bRemovedOrphanFile = false;
+			if (MCPDeleteAssetFromDisk(Path, bRemovedOrphanFile))
 			{
 				Entry->SetStringField(TEXT("status"), TEXT("deleted"));
+				if (bRemovedOrphanFile) Entry->SetBoolField(TEXT("removedOrphanFile"), true);
 				if (bClosed) Entry->SetBoolField(TEXT("closedOpenEditor"), true);
 				Deleted++;
 			}
@@ -2871,6 +2892,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::DeleteAssetBatch(const TSharedPtr<FJsonOb
 	Result->SetArrayField(TEXT("results"), PerPath);
 	Result->SetNumberField(TEXT("deleted"), Deleted);
 	Result->SetNumberField(TEXT("absent"), Absent);
+	Result->SetBoolField(TEXT("changed"), Deleted > 0);
 	Result->SetNumberField(TEXT("failed"), Failed);
 	Result->SetNumberField(TEXT("refused"), Refused);
 	Result->SetBoolField(TEXT("forced"), bForce);

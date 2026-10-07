@@ -28,3 +28,21 @@ struct FUEMCPDataTableReferenceRow : public FTableRowBase
 	UPROPERTY()
 	int32 Count = 0;
 };
+
+/** Row hook used by the batch test to expose notifications to untouched rows. */
+USTRUCT()
+struct FUEMCPDataTableDerivedRow : public FTableRowBase
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	int32 Value = 0;
+
+	UPROPERTY()
+	int32 Derived = 0;
+
+	virtual void OnDataTableChanged(const UDataTable* InDataTable, const FName InRowName) override
+	{
+		Derived = Value * 2;
+	}
+};

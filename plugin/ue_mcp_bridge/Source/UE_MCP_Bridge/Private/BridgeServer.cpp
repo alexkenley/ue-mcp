@@ -573,6 +573,9 @@ TSharedPtr<FJsonObject> FMCPBridgeServer::BuildCapabilitiesPayload()
 	// of this, so a live answer that differs from the recording is drift.
 	Payload->SetObjectField(TEXT("handlerSpecs"), HandlerRegistry.BuildHandlerSpecsJson());
 
+	// #1282: plugin handler contracts, apart from the core ones so a core recording never captures them.
+	Payload->SetObjectField(TEXT("pluginHandlerSpecs"), FMCPHandlerRegistry::BuildExternalHandlerSpecsJson());
+
 	return Payload;
 }
 

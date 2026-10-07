@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
+#include "MCPHandlerSpec.h"
 
 /**
  * Public API for plugins that extend the UE-MCP bridge with their own
@@ -28,8 +29,9 @@
  */
 
 /** Current bridge handler ABI version. Bump when the FHandlerFunction
- *  signature or registration contract changes in a breaking way. */
-#define UEMCP_BRIDGE_API_VERSION 1
+ *  signature or registration contract changes in a breaking way.
+ *  2: external handlers can register a parameter contract (MCPHandlerSpec.h). */
+#define UEMCP_BRIDGE_API_VERSION 2
 
 /**
  * Current bridge wire protocol version, reported by get_bridge_capabilities.
@@ -85,4 +87,19 @@ namespace UEMCP
 	/** Snapshot of registered external handler names. Diagnostic use only;
 	 *  do not rely on the order. */
 	UE_MCP_BRIDGE_API TArray<FString> GetExternalHandlerNames();
+
+	/** Register a handler together with its parameter contract (#1282), the same
+	 *  contract a core handler declares (MCPHandlerSpec.h). The bridge publishes it in
+	 *  get_bridge_capabilities.pluginHandlerSpecs and renames declared aliases before the
+	 *  handler runs. The handler is registered either way; a spec that fails
+	 *  validation is logged and dropped, and the call returns false.
+	 *  TimeoutSeconds 0 keeps the default game-thread timeout. */
+	UE_MCP_BRIDGE_API bool RegisterExternalHandler(const FString& MethodName, FExternalHandlerFn Handler,
+		const TArray<FMCPParamSpec>& Params, const FMCPSpecRules& Rules = FMCPSpecRules(), float TimeoutSeconds = 0.0f);
+
+	/** The contract registered with MethodName, if it was registered with one. */
+	UE_MCP_BRIDGE_API bool LookupExternalHandlerSpec(const FString& MethodName, FMCPHandlerSpec& OutSpec);
+
+	/** Snapshot of every external handler's contract, keyed by method name. */
+	UE_MCP_BRIDGE_API TMap<FString, FMCPHandlerSpec> GetExternalHandlerSpecs();
 }

@@ -472,7 +472,8 @@ TSharedPtr<FJsonValue> FFoliageHandlers::AddFoliageInstances(const TSharedPtr<FJ
 	}
 
 	// ── Resolve the target actor, then place ──
-	AInstancedFoliageActor* IFA = AInstancedFoliageActor::Get(World, /*bCreateIfNone=*/ true, nullptr, Points[0]);
+	// A null level hint asserts in the actor partition subsystem and takes the editor down (#1240).
+	AInstancedFoliageActor* IFA = AInstancedFoliageActor::Get(World, /*bCreateIfNone=*/ true, World->GetCurrentLevel(), Points[0]);
 	if (!IFA)
 	{
 		return MCPError(TEXT("Could not get or create an InstancedFoliageActor for the open level."));
@@ -883,7 +884,7 @@ TSharedPtr<FJsonValue> FFoliageHandlers::AddFoliageTypeToLevel(const TSharedPtr<
 		return MCPAssetLoadError(TypePath, TEXT("FoliageType"));
 	}
 
-	AInstancedFoliageActor* IFA = AInstancedFoliageActor::Get(World, /*bCreateIfNone=*/ true);
+	AInstancedFoliageActor* IFA = AInstancedFoliageActor::Get(World, /*bCreateIfNone=*/ true, World->GetCurrentLevel());
 	if (!IFA)
 	{
 		return MCPError(TEXT("Could not get or create an InstancedFoliageActor for the open level."));
@@ -1343,7 +1344,7 @@ TSharedPtr<FJsonValue> FFoliageHandlers::SimulateProceduralFoliage(const TShared
 			if (!D.FoliageType) { ++Skipped; continue; }
 
 			AInstancedFoliageActor* IFA =
-				AInstancedFoliageActor::Get(World, /*bCreateIfNone=*/ true, nullptr, D.EndTrace);
+				AInstancedFoliageActor::Get(World, /*bCreateIfNone=*/ true, World->GetCurrentLevel(), D.EndTrace);
 			if (!IFA) { ++Skipped; continue; }
 
 			FFoliageInfo* Info = nullptr;

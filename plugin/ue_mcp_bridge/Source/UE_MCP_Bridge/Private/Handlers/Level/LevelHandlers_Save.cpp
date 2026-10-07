@@ -38,6 +38,8 @@
 #include "Editor.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "Landscape.h"
 #include "HAL/FileManager.h"
 #include "Misc/OutputDevice.h"
 // GError and GLog are declared as pointers in CoreGlobals; forwarding a line to
@@ -251,6 +253,18 @@ TSharedPtr<FJsonValue> FLevelHandlers::SaveLevel(const TSharedPtr<FJsonObject>& 
 		return MCPError(TEXT("Play In Editor is running; stop it before saving the level. Saving during PIE is what produced an unexplained failure before."));
 	}
 
+	// Landscape edits land in edit layers and reach the saved heightmaps and weightmaps through a merge that runs on
+	// editor ticks. A throttled, backgrounded editor can save before it runs, persisting stale weights (#1239).
+	int32 LandscapesMerged = 0;
+	for (TActorIterator<ALandscape> It(World); It; ++It)
+	{
+		if (It->HasLayersContent())
+		{
+			It->ForceUpdateLayersContent();
+			++LandscapesMerged;
+		}
+	}
+
 	// commitDeletes: the editor's own save path, which removes the external
 	// package of a deleted World Partition actor instead of failing on it.
 	if (OptionalBool(Params, TEXT("commitDeletes"), false))
@@ -258,6 +272,7 @@ TSharedPtr<FJsonValue> FLevelHandlers::SaveLevel(const TSharedPtr<FJsonObject>& 
 		TSharedPtr<FJsonObject> Committed = MCPSaveDirtyCommittingDeletes(true, true);
 		Committed->SetStringField(TEXT("levelName"), World->GetName());
 		Committed->SetStringField(TEXT("levelPath"), World->GetPathName());
+		Committed->SetNumberField(TEXT("landscapesMerged"), LandscapesMerged);
 		return MCPResult(Committed);
 	}
 
@@ -309,6 +324,7 @@ TSharedPtr<FJsonValue> FLevelHandlers::SaveLevel(const TSharedPtr<FJsonObject>& 
 	Result->SetStringField(TEXT("levelPackage"), LevelPackage->GetName());
 	Result->SetBoolField(TEXT("usesExternalActors"), Level->IsUsingExternalObjects());
 	Result->SetNumberField(TEXT("externalPackagesLoaded"), ExternalConsidered);
+	Result->SetNumberField(TEXT("landscapesMerged"), LandscapesMerged);
 	Result->SetNumberField(TEXT("savedCount"), Saved.Num());
 	Result->SetNumberField(TEXT("failedCount"), Failed.Num());
 	Result->SetNumberField(TEXT("skippedCount"), Skipped.Num());
