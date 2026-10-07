@@ -1582,4 +1582,74 @@ bool FDataTableBatchCellWriteTest::RunTest(const FString& Parameters)
 #endif
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataTableBatchRowHookTest,
+	"UE.MCP.Asset.DataTable.BatchCellWriteNotifiesChangedRows",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataTableBatchRowHookTest::RunTest(const FString& Parameters)
+{
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage());
+	if (!TestNotNull(TEXT("transient DataTable was created"), Table)) return false;
+	FGCRootScope TableRoot(Table);
+	Table->RowStruct = FUEMCPDataTableDerivedRow::StaticStruct();
+	for (int32 Index = 1; Index <= 4; ++Index)
+	{
+		FUEMCPDataTableDerivedRow Row;
+		Row.Value = Index;
+		Row.Derived = Index * 2;
+		Table->AddRow(FName(*FString::Printf(TEXT("Row%d"), Index)), Row);
+	}
+	// A global notification would recompute these stale fields and fail the batch.
+	Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row2"), TEXT("batch hook test"))->Derived = -1;
+	Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row3"), TEXT("batch hook test"))->Derived = -1;
+	int32 Notifications = 0;
+	const FDelegateHandle Handle = Table->OnDataTableChanged().AddLambda([&Notifications]() { ++Notifications; });
+	ON_SCOPE_EXIT { Table->OnDataTableChanged().Remove(Handle); };
+
+	FMCPHandlerRegistry Registry;
+	FAssetHandlers::RegisterHandlers(Registry);
+	TArray<TSharedPtr<FJsonValue>> Cells;
+	Cells.Add(MakeCellEntry(TEXT("Row1"), TEXT("Value"), MakeShared<FJsonValueNumber>(7)));
+	Cells.Add(MakeCellEntry(TEXT("Row1"), TEXT("Derived"), MakeShared<FJsonValueNumber>(14)));
+	Cells.Add(MakeCellEntry(TEXT("Row4"), TEXT("Value"), MakeShared<FJsonValueNumber>(8)));
+	Cells.Add(MakeCellEntry(TEXT("Row4"), TEXT("Derived"), MakeShared<FJsonValueNumber>(16)));
+	Cells.Add(MakeCellEntry(TEXT("Row2"), TEXT("Value"), MakeShared<FJsonValueNumber>(2)));
+	FString Error;
+	TestTrue(TEXT("requested derived fields verify after the row hook"), ResponseSucceeded(
+		Registry.ExecuteHandler(TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false)), Error));
+	TestEqual(TEXT("multiple changed cells notify each changed row once"), Notifications, 2);
+	TestEqual(TEXT("the changed row hook ran"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row1"), TEXT("batch hook test"))->Derived, 14);
+	TestEqual(TEXT("the other changed row hook ran"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row4"), TEXT("batch hook test"))->Derived, 16);
+	TestEqual(TEXT("the requested unchanged row was not notified"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row2"), TEXT("batch hook test"))->Derived, -1);
+	TestEqual(TEXT("the unrequested row was not notified"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row3"), TEXT("batch hook test"))->Derived, -1);
+
+	TestTrue(TEXT("replaying unchanged cells succeeds"), ResponseSucceeded(
+		Registry.ExecuteHandler(TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false)), Error));
+	TestEqual(TEXT("an unchanged batch sends no notification"), Notifications, 2);
+	Cells.Reset();
+	Cells.Add(MakeCellEntry(TEXT("Row1"), TEXT("Value"), MakeShared<FJsonValueNumber>(9)));
+	TestTrue(TEXT("dry run succeeds"), ResponseSucceeded(
+		Registry.ExecuteHandler(TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, true)), Error));
+	TestEqual(TEXT("a dry run sends no notification"), Notifications, 2);
+
+	TestFalse(TEXT("an unrequested derived field change still fails verification"), ResponseSucceeded(
+		Registry.ExecuteHandler(TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false)), Error));
+	TestTrue(TEXT("verification identifies the unrequested field"), Error.Contains(TEXT("Derived")));
+	TestEqual(TEXT("the changed row is notified on write and restore"), Notifications, 4);
+	TestEqual(TEXT("the failed write restores the value"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row1"), TEXT("batch hook test"))->Value, 7);
+	TestEqual(TEXT("the failed write restores the derived field"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row1"), TEXT("batch hook test"))->Derived, 14);
+	TestEqual(TEXT("restore leaves the unchanged requested row alone"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row2"), TEXT("batch hook test"))->Derived, -1);
+	TestEqual(TEXT("restore leaves the unrequested row alone"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row3"), TEXT("batch hook test"))->Derived, -1);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

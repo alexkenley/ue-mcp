@@ -2840,8 +2840,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetDataTableCell(const TSharedPtr<FJsonOb
 // the column is a top-level field of the row struct, the value parses. One
 // failure and nothing is written; every failing cell is reported. The staged
 // rows are then copied into the table inside one transaction with one
-// Modify/PostEditChange, and every row is re-exported and compared with the
-// export taken before the write: a touched row may differ only in the fields
+// Modify and a notification per changed row. Every row is re-exported and
+// compared with the prior export: a touched row may differ only in the fields
 // that were requested, each of which must hold the requested value, and every
 // other row must export the same text. A mismatch restores every row from its
 // backup, cancels the transaction and names the row and field.
@@ -3106,16 +3106,18 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetDataTableCells(const TSharedPtr<FJsonO
 		Backups.Add(Pair.Key, AllocCopy(Pair.Value));
 	}
 
-	// One transaction, one Modify, one change notification, however many
-	// cells. The staged copies already hold the merged rows, so each touched
-	// row is one struct copy into the memory the table owns (#929).
+	// One transaction and one Modify. Copy all changed rows before running
+	// their hooks, so each hook sees the complete batch (#929).
 	FScopedTransaction Transaction(NSLOCTEXT("UEMCPBridge", "SetDataTableCells", "Set DataTable cells"));
 	DataTable->Modify();
 	for (const FStagedRow& Row : Staged)
 	{
 		if (Row.bChanged) RowStruct->CopyScriptStruct(Row.Live, Row.Staged);
 	}
-	DataTable->PostEditChange();
+	for (const TPair<FName, int32>& Pair : StagedIndexByRow)
+	{
+		if (Staged[Pair.Value].bChanged) DataTable->HandleDataTableChanged(Pair.Key);
+	}
 	DataTable->MarkPackageDirty();
 
 	// ── Verify against the snapshot. A requested field must hold what was
@@ -3178,7 +3180,10 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetDataTableCells(const TSharedPtr<FJsonO
 				if (*Live) RowStruct->CopyScriptStruct(*Live, Pair.Value);
 			}
 		}
-		DataTable->PostEditChange();
+		for (const TPair<FName, int32>& Pair : StagedIndexByRow)
+		{
+			if (Staged[Pair.Value].bChanged) DataTable->HandleDataTableChanged(Pair.Key);
+		}
 		Transaction.Cancel();
 		return MCPError(FString::Printf(
 			TEXT("Verification failed after the write: %s. Every row was restored, the transaction was cancelled and nothing was saved."),
