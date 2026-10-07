@@ -331,13 +331,21 @@ transform first. The rules are:
   `apply_control_rig_edits` call. The batch is prevalidated, transacted,
   read back, and undone if application or readback fails.
 - Operations in one call are keyed in order, and each is sampled after the
-  ones before it have landed, so a batch composes exactly like the same
-  operations sent as separate calls. A component-space `offset` on a child
+  ones before it have landed, so batched control offsets compose like the same
+  offsets sent as separate calls. A component-space `offset` on a child
   after one on its parent adds to the parent's edit. Order matters for the
   same reason: put the parent first when the child's offset should ride on
   it. The rollback undoes the operations last-first. Before the transaction
   closes, every contact and stabilizer is checked again against the final
   batch pose; a later operation that breaks a contact rolls back the batch.
+- A contact using `targetReference`, or using `drivenReference` without the FK
+  rotation-chain solver, must be first in the batch. These paths sample the
+  source animation and cannot include earlier keyed edits; otherwise the call
+  returns `contact_lock_reference_batch_unsupported` before writing keys.
+  Use a direct control contact with a component-space target, or bake prior
+  edits and begin a new session before applying the reference-based contact.
+  Driven contacts check the final FK end-control or asset-driver pose;
+  their bone/socket result still requires baking and analysis.
 
 Read the same frames again after applying. Check both local continuity and the
 global/component anatomical targets before baking.

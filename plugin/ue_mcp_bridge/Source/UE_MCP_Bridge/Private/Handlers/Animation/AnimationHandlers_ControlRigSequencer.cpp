@@ -184,6 +184,8 @@ namespace
 		double RotationToleranceDegrees = 0.5;
 		TArray<FFrameNumber> Frames;
 		TArray<FTransform> ExpectedSubject;
+		FName ReadbackControl;
+		TArray<FTransform> ExpectedControl;
 		FControlRigContactMetrics Metrics;
 		TArray<FControlRigContactStabilizerQA> Stabilizers;
 	};
@@ -3126,6 +3128,14 @@ namespace
 			}
 		}
 
+		// ponytail: raw animation references cannot include earlier keyed edits; lift this refusal when reference sampling evaluates the rig pose.
+		if (OperationIndex > 0 && (bHasTargetReference || (bHasDrivenReference && !bUseFkRotationChain)))
+		{
+			return MCPError(FString::Printf(
+				TEXT("contact_lock_reference_batch_unsupported: operations[%d] needs source-animation reference samples and must be first in the batch. Use a direct control contact with a component-space target, or bake prior edits and begin a new session before applying this contact."),
+				OperationIndex));
+		}
+
 		TArray<FName> StabilizerNames;
 		const TSharedPtr<FJsonValue>* StabilizerValue = Operation->Values.Find(TEXT("stabilizeControls"));
 		if (StabilizerValue && StabilizerValue->IsValid() && !(*StabilizerValue)->IsNull())
@@ -3307,6 +3317,7 @@ namespace
 		ContactQA.RotationToleranceDegrees = RotationToleranceDegrees;
 		ContactQA.Frames = Write.Frames;
 		ContactQA.ExpectedSubject.SetNum(Write.Frames.Num());
+		ContactQA.ReadbackControl = ControlName;
 
 		TArray<double> Weights;
 		Weights.SetNum(Write.Frames.Num());
@@ -3366,6 +3377,8 @@ namespace
 		if (bUseFkRotationChain)
 		{
 			ContactQA.bUsedFkRotationChain = true;
+			ContactQA.ReadbackControl = FkChainControls.Last();
+			ContactQA.ExpectedControl.SetNum(Write.Frames.Num());
 			const TArray<FArrayOfRigControlTransforms> LocalControlValues =
 				UControlRigSequencerEditorLibrary::BatchGetControlTransforms(
 					Session.Sequence, Session.ControlRig, FkChainControls, Write.Frames,
@@ -3466,6 +3479,7 @@ namespace
 					SolvedGlobals[ChainIndex] = DesiredGlobal;
 				}
 				PredictedSubjects[FrameIndex] = SubjectRelativeToEnd * SolvedGlobals.Last();
+				ContactQA.ExpectedControl[FrameIndex] = TargetEnd;
 			}
 
 			ControlRigSequencerMeasureContact(
@@ -3484,6 +3498,8 @@ namespace
 					ContactQA.Metrics.WorstRotationFrame));
 			}
 		}
+
+		if (!bUseFkRotationChain) ContactQA.ExpectedControl = Write.After;
 
 		for (const FName StabilizerName : StabilizerNames)
 		{
@@ -3847,11 +3863,18 @@ namespace
 		FString& ApplyError = OutError;
 		for (FControlRigPreparedContactQA& Contact : PreparedContacts)
 		{
-			if (!Contact.bHasDrivenReference)
 			{
+				const FName ReadbackControl = Contact.bHasDrivenReference ? Contact.ReadbackControl : Contact.Control;
+				const TArray<FTransform>& Expected = Contact.bHasDrivenReference ? Contact.ExpectedControl : Contact.ExpectedSubject;
+				// Keep the FK subject prediction separate from measured control drift.
+				FControlRigContactMetrics DriverMetrics;
+				FControlRigContactMetrics& Metrics = Contact.bHasDrivenReference ? DriverMetrics : Contact.Metrics;
+				const bool bCheckRotation = Contact.bCheckRotation
+					|| (Contact.bHasDrivenReference && !Contact.bUsedFkRotationChain
+						&& ControlRigSequencerControlHasRotation(Contact.ControlType));
 				const TArray<FArrayOfRigControlTransforms> Actual =
 					UControlRigSequencerEditorLibrary::BatchGetControlTransforms(
-						Session.Sequence, Session.ControlRig, {Contact.Control}, Contact.Frames,
+						Session.Sequence, Session.ControlRig, {ReadbackControl}, Contact.Frames,
 						EControlRigTransformSpace::Global, EMovieSceneTimeUnit::DisplayRate);
 				if (Actual.Num() != 1 || Actual[0].Transforms.Num() != Contact.Frames.Num())
 				{
@@ -3862,21 +3885,21 @@ namespace
 					break;
 				}
 				ControlRigSequencerMeasureContact(
-					Contact.Frames, Contact.ExpectedSubject, Actual[0].Transforms,
-					true, Contact.bCheckRotation, Contact.Metrics);
-				if (Contact.Metrics.MaxPositionErrorCm > Contact.PositionToleranceCm
-					|| (Contact.bCheckRotation
-						&& Contact.Metrics.MaxRotationErrorDegrees > Contact.RotationToleranceDegrees))
+					Contact.Frames, Expected, Actual[0].Transforms,
+					true, bCheckRotation, Metrics);
+				if (Metrics.MaxPositionErrorCm > Contact.PositionToleranceCm
+					|| (bCheckRotation
+						&& Metrics.MaxRotationErrorDegrees > Contact.RotationToleranceDegrees))
 				{
 					bApplyFailed = true;
 					ApplyError = FString::Printf(
 						TEXT("contact_constraint_tolerance_exceeded: operations[%d] %s residual was %.4f cm at frame %d and %.4f degrees at frame %d"),
 						Contact.OperationIndex,
-						*Contact.Control.ToString(),
-						Contact.Metrics.MaxPositionErrorCm,
-						Contact.Metrics.WorstPositionFrame,
-						Contact.Metrics.MaxRotationErrorDegrees,
-						Contact.Metrics.WorstRotationFrame);
+						*ReadbackControl.ToString(),
+						Metrics.MaxPositionErrorCm,
+						Metrics.WorstPositionFrame,
+						Metrics.MaxRotationErrorDegrees,
+						Metrics.WorstRotationFrame);
 					break;
 				}
 			}

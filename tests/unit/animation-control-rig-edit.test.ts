@@ -196,6 +196,34 @@ describe("animation Control Rig edit workflow", () => {
     );
   });
 
+  it("checks driven contact component poses after the whole batch", () => {
+    const source = readHandlerFile("AnimationHandlers_ControlRigSequencer.cpp");
+    const verify = source.slice(
+      source.indexOf("bool ControlRigEditsVerifyContacts("),
+      source.indexOf("TSharedPtr<FJsonValue> ControlRigEditsPrepareOperation("),
+    );
+    expect(source).toContain("ContactQA.ReadbackControl = FkChainControls.Last()");
+    expect(source).toContain("ContactQA.ExpectedControl[FrameIndex] = TargetEnd");
+    expect(source).toContain("ContactQA.ExpectedControl = Write.After");
+    expect(verify).not.toContain("if (!Contact.bHasDrivenReference)");
+    expect(verify).toContain("Contact.bHasDrivenReference ? Contact.ReadbackControl : Contact.Control");
+    expect(verify).toContain("Contact.bHasDrivenReference ? Contact.ExpectedControl : Contact.ExpectedSubject");
+    expect(verify).toContain("Contact.Frames, Expected, Actual[0].Transforms");
+    expect(verify).toContain("contact_constraint_tolerance_exceeded");
+  });
+
+  it("refuses later contacts that would mix keyed poses with raw animation references", () => {
+    const source = readHandlerFile("AnimationHandlers_ControlRigSequencer.cpp");
+    const prepare = source.slice(
+      source.indexOf("TSharedPtr<FJsonValue> ControlRigEditsPrepareContactLock("),
+      source.indexOf("TSharedPtr<FJsonValue> ControlRigEditsPrepareTransformValues("),
+    );
+    expect(prepare).toContain("OperationIndex > 0 && (bHasTargetReference || (bHasDrivenReference && !bUseFkRotationChain))");
+    const refusal = prepare.indexOf("contact_lock_reference_batch_unsupported");
+    expect(refusal).toBeGreaterThan(-1);
+    expect(refusal).toBeLessThan(prepare.indexOf("ControlRigSequencerSampleReferenceTransforms("));
+  });
+
   it("makes partial IK retarget mappings explicit in batch results", () => {
     const source = readHandlerFile("AnimationHandlers_StateMachine.cpp");
 
