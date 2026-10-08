@@ -806,6 +806,18 @@ void FAssetHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Required(TEXT("fieldName"), EType::String, TEXT("Row-struct field to write")),
 		MCPParam::Required(TEXT("value"), EType::Any, TEXT("Value to write")),
 	});
+	// Many cells in one transaction, verified against a whole-table export
+	// taken before the write.
+	Registry.RegisterHandler(TEXT("set_datatable_cells"), &SetDataTableCells, {
+		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
+		MCPParam::Required(TEXT("cells"), EType::Array, TEXT("Cells to write; every row must exist and every column must be a top-level row-struct field")).Items(EType::Object).WithFields({
+			MCPParam::RequiredField(TEXT("row"), EType::String, TEXT("Existing row to edit")),
+			MCPParam::RequiredField(TEXT("column"), EType::String, TEXT("Row-struct field to write")),
+			MCPParam::RequiredField(TEXT("value"), EType::Any, TEXT("Value to write, parsed as set_datatable_cell parses value")),
+		}),
+		MCPParam::Optional(TEXT("dryRun"), EType::Boolean, TEXT("Validate every cell and report what would change without writing (default false)")),
+		MCPParam::Optional(TEXT("save"), EType::Boolean, TEXT("Save the package after the write (default false)")),
+	});
 	Registry.RegisterHandler(TEXT("rename_datatable_row"), &RenameDataTableRow, {
 		MCPParam::Required(TEXT("assetPath"), EType::String, TEXT("DataTable asset path")).Alias(TEXT("path")),
 		MCPParam::Required(TEXT("oldName"), EType::String, TEXT("Row to rename")).Alias(TEXT("rowName")),
@@ -1707,12 +1719,14 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadAssetPropertiesImpl(const TSharedPtr<
 	if (TryGetStringParam(Params, TEXT("propertyName"), PropertyName) && !PropertyName.IsEmpty())
 	{
 		// Resolve dotted/indexed paths into nested structs, array elements, and
-		// instanced subobjects (#527), e.g. "Config.Traits[1].Params.Field".
+		// instanced subobjects (#527), e.g. "Config.Traits[1].Params.Field", and
+		// keyed elements, e.g. "Profiles[Id=Axe].Offset.Scale3D".
 		FProperty* Prop = nullptr;
 		void* ValuePtr = nullptr;
 		UObject* LeafOwner = nullptr;
 		FString ResolveErr;
-		if (!MCPJsonProperty::ResolveDottedPath(Asset, PropertyName, Prop, ValuePtr, LeafOwner, ResolveErr))
+		MCPJsonProperty::FResolvedPathInfo PathInfo;
+		if (!MCPJsonProperty::ResolveDottedPath(Asset, PropertyName, Prop, ValuePtr, LeafOwner, ResolveErr, &PathInfo))
 		{
 			return MCPError(ResolveErr);
 		}
@@ -1722,6 +1736,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadAssetPropertiesImpl(const TSharedPtr<
 		auto Result = MCPSuccess();
 		Result->SetStringField(TEXT("path"), AssetPath);
 		Result->SetStringField(TEXT("propertyName"), PropertyName);
+		if (PathInfo.bUsedKeySelector) Result->SetStringField(TEXT("indexedPath"), PathInfo.IndexedPath);
 		Result->SetStringField(TEXT("type"), Prop->GetCPPType());
 		if (bJsonValues)
 		{
@@ -4795,7 +4810,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetAssetProperty(const TSharedPtr<FJsonOb
 	void* ValuePtr = nullptr;
 	UObject* LeafOwner = nullptr;
 	FString ResolveErr;
-	if (!MCPJsonProperty::ResolveDottedPath(Asset, PropertyName, FinalProp, ValuePtr, LeafOwner, ResolveErr))
+	MCPJsonProperty::FResolvedPathInfo PathInfo;
+	if (!MCPJsonProperty::ResolveDottedPath(Asset, PropertyName, FinalProp, ValuePtr, LeafOwner, ResolveErr, &PathInfo))
 	{
 		return MCPError(ResolveErr);
 	}
@@ -4835,6 +4851,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetAssetProperty(const TSharedPtr<FJsonOb
 	MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("assetPath"), AssetPath);
 	Result->SetStringField(TEXT("propertyName"), PropertyName);
+	if (PathInfo.bUsedKeySelector) Result->SetStringField(TEXT("indexedPath"), PathInfo.IndexedPath);
 	Result->SetStringField(TEXT("previousValue"), PrevValue);
 	Result->SetStringField(TEXT("value"), NewValue);
 	MCPDescribePropertyWritePersistence(Result, Asset, PropertyName, bSave, bPersisted, PersistReason);
@@ -4844,9 +4861,13 @@ TSharedPtr<FJsonValue> FAssetHandlers::SetAssetProperty(const TSharedPtr<FJsonOb
 		Result->SetField(TEXT("valueJson"), FMCPJsonSerializer::SerializeValue(ValuePtr, FinalProp));
 	}
 
+	// A keyed path is replayed by the index it resolved to: this write may have
+	// changed the key itself, and a flow rolls back in reverse order, so the
+	// array is back to the shape it had right after this write when the
+	// inverse runs.
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetStringField(TEXT("assetPath"), AssetPath);
-	Payload->SetStringField(TEXT("propertyName"), PropertyName);
+	Payload->SetStringField(TEXT("propertyName"), PathInfo.bUsedKeySelector ? PathInfo.IndexedPath : PropertyName);
 	if (PrevStructured.IsValid())
 	{
 		Payload->SetField(TEXT("value"), PrevStructured);
@@ -4891,7 +4912,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::AppendAssetArrayElements(const TSharedPtr
 	void* ValuePtr = nullptr;
 	UObject* LeafOwner = nullptr;
 	FString ResolveErr;
-	if (!MCPJsonProperty::ResolveDottedPath(Asset, PropertyName, FinalProp, ValuePtr, LeafOwner, ResolveErr))
+	MCPJsonProperty::FResolvedPathInfo PathInfo;
+	if (!MCPJsonProperty::ResolveDottedPath(Asset, PropertyName, FinalProp, ValuePtr, LeafOwner, ResolveErr, &PathInfo))
 	{
 		return MCPError(ResolveErr);
 	}
@@ -4992,6 +5014,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::AppendAssetArrayElements(const TSharedPtr
 	MCPSetUpdated(Result);
 	Result->SetStringField(TEXT("assetPath"), AssetPath);
 	Result->SetStringField(TEXT("propertyName"), PropertyName);
+	if (PathInfo.bUsedKeySelector) Result->SetStringField(TEXT("indexedPath"), PathInfo.IndexedPath);
 	Result->SetStringField(TEXT("elementType"), ArrayProp->Inner->GetCPPType());
 	Result->SetNumberField(TEXT("previousNum"), PreviousNum);
 	Result->SetNumberField(TEXT("appendedCount"), AppendedCount);
@@ -5002,7 +5025,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::AppendAssetArrayElements(const TSharedPtr
 
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetStringField(TEXT("assetPath"), AssetPath);
-	Payload->SetStringField(TEXT("propertyName"), PropertyName);
+	Payload->SetStringField(TEXT("propertyName"), PathInfo.bUsedKeySelector ? PathInfo.IndexedPath : PropertyName);
 	Payload->SetField(TEXT("value"), PreviousValue);
 	MCPSetRollback(Result, TEXT("set_asset_property"), Payload);
 	return MCPResult(Result);

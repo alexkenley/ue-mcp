@@ -1378,4 +1378,278 @@ bool FDataTableReadColumnsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// set_datatable_cells: a batch is validated whole, applied whole, and verified
+// against the table as it was before the write.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace
+{
+/** One {row, column, value} entry for asset(set_datatable_cells). */
+TSharedPtr<FJsonValue> MakeCellEntry(const TCHAR* RowName, const TCHAR* Column, const TSharedPtr<FJsonValue>& Value)
+{
+	TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+	Entry->SetStringField(TEXT("row"), RowName);
+	Entry->SetStringField(TEXT("column"), Column);
+	Entry->SetField(TEXT("value"), Value);
+	return MakeShared<FJsonValueObject>(Entry);
+}
+
+/** Params for asset(set_datatable_cells) against a transient table. */
+TSharedPtr<FJsonObject> MakeCellsWriteParams(
+	const UDataTable* Table, const TArray<TSharedPtr<FJsonValue>>& Cells, bool bDryRun)
+{
+	TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+	Params->SetStringField(TEXT("assetPath"), Table->GetPathName());
+	Params->SetArrayField(TEXT("cells"), Cells);
+	if (bDryRun) Params->SetBoolField(TEXT("dryRun"), true);
+	return Params;
+}
+
+int32 NumberFieldOr(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Field, int32 Fallback)
+{
+	int32 Value = Fallback;
+	Obj->TryGetNumberField(Field, Value);
+	return Value;
+}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataTableBatchCellWriteTest,
+	"UE.MCP.Asset.DataTable.BatchCellWriteVerifiesTheTable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataTableBatchCellWriteTest::RunTest(const FString& Parameters)
+{
+#if !WITH_EDITORONLY_DATA
+	AddInfo(TEXT("FPerPlatformInt::PerPlatform is editor-only data; nothing to assert here."));
+	return true;
+#else
+	UDataTable* Table = MakeTransientPerPlatformTable();
+	if (!TestNotNull(TEXT("transient DataTable was created"), Table)) return false;
+	FGCRootScope TableRoot(Table);
+
+	TMap<FName, int32> RowAOverrides;
+	RowAOverrides.Add(TEXT("Windows"), 41);
+	AddPerPlatformRow(Table, TEXT("RowA"), 1, RowAOverrides);
+	TMap<FName, int32> RowBOverrides;
+	RowBOverrides.Add(TEXT("Mac"), 42);
+	AddPerPlatformRow(Table, TEXT("RowB"), 2, RowBOverrides);
+	AddPerPlatformRow(Table, TEXT("RowC"), 3, TMap<FName, int32>());
+
+	FMCPHandlerRegistry Registry;
+	FAssetHandlers::RegisterHandlers(Registry);
+	TestTrue(TEXT("set_datatable_cells is registered"), Registry.HasHandler(TEXT("set_datatable_cells")));
+	if (!TestTrue(
+			TEXT("the handler resolves the transient table by path"),
+			MCPLoadAssetObject(Table->GetPathName()) == Table))
+	{
+		return false;
+	}
+
+	auto ScalarIs = [this, Table](const TCHAR* RowName, int32 Expected, const TCHAR* What) -> bool
+	{
+		const FPerPlatformInt* Row = FindPerPlatformRow(Table, RowName);
+		if (!TestNotNull(FString::Printf(TEXT("%s still exists (%s)"), RowName, What), Row)) return false;
+		TestEqual(FString::Printf(TEXT("%s.Default (%s)"), RowName, What), Row->Default, Expected);
+		return true;
+	};
+
+	// ── A batch touching two rows: one cell changes, one already holds its
+	// value, and the third row is not named at all.
+	{
+		TArray<TSharedPtr<FJsonValue>> Cells;
+		Cells.Add(MakeCellEntry(TEXT("RowA"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(7)));
+		Cells.Add(MakeCellEntry(TEXT("RowB"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(2)));
+
+		FString Error;
+		const TSharedPtr<FJsonValue> Response = Registry.ExecuteHandler(
+			TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false));
+		if (!TestTrue(FString::Printf(TEXT("the batch succeeded (%s)"), *Error), ResponseSucceeded(Response, Error))) return false;
+		const TSharedPtr<FJsonObject> Result = Response->AsObject();
+
+		bool bUpdated = false, bVerified = false, bSaved = true;
+		Result->TryGetBoolField(TEXT("updated"), bUpdated);
+		Result->TryGetBoolField(TEXT("verified"), bVerified);
+		Result->TryGetBoolField(TEXT("saved"), bSaved);
+		TestTrue(TEXT("the batch reports updated"), bUpdated);
+		TestTrue(TEXT("the batch reports verified"), bVerified);
+		TestFalse(TEXT("save defaults to false"), bSaved);
+		TestEqual(TEXT("one cell changed"), NumberFieldOr(Result, TEXT("changedCells"), -1), 1);
+		TestEqual(TEXT("one cell already held its value"), NumberFieldOr(Result, TEXT("unchangedCells"), -1), 1);
+		TestEqual(TEXT("one row was touched"), NumberFieldOr(Result, TEXT("rowsTouched"), -1), 1);
+		TestEqual(TEXT("two rows were requested"), NumberFieldOr(Result, TEXT("rowsRequested"), -1), 2);
+
+		// The rollback is the same call with the prior values of the cells
+		// that changed, and nothing for the cell that did not.
+		const TSharedPtr<FJsonObject>* Rollback = nullptr;
+		if (TestTrue(TEXT("a rollback record is attached"), Result->TryGetObjectField(TEXT("rollback"), Rollback)))
+		{
+			FString Method;
+			(*Rollback)->TryGetStringField(TEXT("method"), Method);
+			TestEqual(TEXT("the rollback is self-inverse"), Method, FString(TEXT("set_datatable_cells")));
+			const TSharedPtr<FJsonObject>* Payload = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* InverseCells = nullptr;
+			if ((*Rollback)->TryGetObjectField(TEXT("payload"), Payload)
+				&& (*Payload)->TryGetArrayField(TEXT("cells"), InverseCells))
+			{
+				TestEqual(TEXT("the rollback carries only the cell that changed"), InverseCells->Num(), 1);
+				if (InverseCells->Num() == 1)
+				{
+					const TSharedPtr<FJsonObject> Inverse = (*InverseCells)[0]->AsObject();
+					TestEqual(TEXT("the rollback restores the prior value"), NumberFieldOr(Inverse, TEXT("value"), -1), 1);
+				}
+			}
+			else
+			{
+				AddError(TEXT("the rollback payload has no cells array"));
+			}
+		}
+
+		ScalarIs(TEXT("RowA"), 7, TEXT("after the batch"));
+		ScalarIs(TEXT("RowB"), 2, TEXT("after the batch"));
+		ScalarIs(TEXT("RowC"), 3, TEXT("after the batch"));
+		if (const FPerPlatformInt* RowA = FindPerPlatformRow(Table, TEXT("RowA")))
+		{
+			TestEqual(TEXT("the touched row kept its untouched TMap"), RowA->PerPlatform.Num(), 1);
+		}
+		if (const FPerPlatformInt* RowB = FindPerPlatformRow(Table, TEXT("RowB")))
+		{
+			TestEqual(TEXT("the unchanged row kept its TMap"), RowB->PerPlatform.Num(), 1);
+		}
+		TestEqual(TEXT("no row was added or dropped"), Table->GetRowMap().Num(), 3);
+	}
+
+	// ── One bad cell fails the whole batch, every failure is reported, and
+	// the cells that were valid are not written.
+	{
+		TArray<TSharedPtr<FJsonValue>> Cells;
+		Cells.Add(MakeCellEntry(TEXT("RowA"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(9)));
+		Cells.Add(MakeCellEntry(TEXT("RowZ"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(1)));
+		Cells.Add(MakeCellEntry(TEXT("RowB"), TEXT("NoSuchField"), MakeShared<FJsonValueNumber>(1)));
+		Cells.Add(MakeCellEntry(TEXT("RowC"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(2.5)));
+
+		FString Error;
+		const TSharedPtr<FJsonValue> Response = Registry.ExecuteHandler(
+			TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false));
+		TestFalse(TEXT("a batch with a bad cell fails"), ResponseSucceeded(Response, Error));
+		TestTrue(TEXT("the error says nothing was written"), Error.Contains(TEXT("nothing was written")));
+
+		const TArray<TSharedPtr<FJsonValue>>* Errors = nullptr;
+		if (TestTrue(TEXT("every failing cell is listed"), Response->AsObject()->TryGetArrayField(TEXT("errors"), Errors)))
+		{
+			TestEqual(TEXT("three cells failed"), Errors->Num(), 3);
+			FString Joined;
+			for (const TSharedPtr<FJsonValue>& Entry : *Errors)
+			{
+				FString Message;
+				Entry->AsObject()->TryGetStringField(TEXT("error"), Message);
+				Joined += Message + TEXT("\n");
+			}
+			TestTrue(TEXT("the missing row is named"), Joined.Contains(TEXT("RowZ")));
+			TestTrue(TEXT("the unknown field is named"), Joined.Contains(TEXT("NoSuchField")));
+			TestTrue(TEXT("the unparsable value is explained"), Joined.Contains(TEXT("whole number")));
+		}
+
+		ScalarIs(TEXT("RowA"), 7, TEXT("after the rejected batch"));
+		ScalarIs(TEXT("RowC"), 3, TEXT("after the rejected batch"));
+	}
+
+	// ── A dry run reports the same counts and writes nothing.
+	{
+		TArray<TSharedPtr<FJsonValue>> Cells;
+		Cells.Add(MakeCellEntry(TEXT("RowC"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(30)));
+		Cells.Add(MakeCellEntry(TEXT("RowA"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(7)));
+
+		FString Error;
+		const TSharedPtr<FJsonValue> Response = Registry.ExecuteHandler(
+			TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, true));
+		if (!TestTrue(FString::Printf(TEXT("the dry run succeeded (%s)"), *Error), ResponseSucceeded(Response, Error))) return false;
+		const TSharedPtr<FJsonObject> Result = Response->AsObject();
+
+		bool bDryRun = false, bUpdated = true;
+		Result->TryGetBoolField(TEXT("dryRun"), bDryRun);
+		Result->TryGetBoolField(TEXT("updated"), bUpdated);
+		TestTrue(TEXT("the result says it was a dry run"), bDryRun);
+		TestFalse(TEXT("a dry run reports nothing updated"), bUpdated);
+		TestFalse(TEXT("a dry run attaches no rollback"), Result->HasField(TEXT("rollback")));
+		TestEqual(TEXT("the dry run counts the cell that would change"), NumberFieldOr(Result, TEXT("changedCells"), -1), 1);
+		TestEqual(TEXT("the dry run counts the cell that would not"), NumberFieldOr(Result, TEXT("unchangedCells"), -1), 1);
+
+		ScalarIs(TEXT("RowC"), 3, TEXT("after the dry run"));
+	}
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataTableBatchRowHookTest,
+	"UE.MCP.Asset.DataTable.BatchCellWriteNotifiesChangedRows",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataTableBatchRowHookTest::RunTest(const FString& Parameters)
+{
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage());
+	if (!TestNotNull(TEXT("transient DataTable was created"), Table)) return false;
+	FGCRootScope TableRoot(Table);
+	Table->RowStruct = FUEMCPDataTableDerivedRow::StaticStruct();
+	for (int32 Index = 1; Index <= 4; ++Index)
+	{
+		FUEMCPDataTableDerivedRow Row;
+		Row.Value = Index;
+		Row.Derived = Index * 2;
+		Table->AddRow(FName(*FString::Printf(TEXT("Row%d"), Index)), Row);
+	}
+	// A global notification would recompute these stale fields and fail the batch.
+	Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row2"), TEXT("batch hook test"))->Derived = -1;
+	Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row3"), TEXT("batch hook test"))->Derived = -1;
+	int32 Notifications = 0;
+	const FDelegateHandle Handle = Table->OnDataTableChanged().AddLambda([&Notifications]() { ++Notifications; });
+	ON_SCOPE_EXIT { Table->OnDataTableChanged().Remove(Handle); };
+
+	FMCPHandlerRegistry Registry;
+	FAssetHandlers::RegisterHandlers(Registry);
+	TArray<TSharedPtr<FJsonValue>> Cells;
+	Cells.Add(MakeCellEntry(TEXT("Row1"), TEXT("Value"), MakeShared<FJsonValueNumber>(7)));
+	Cells.Add(MakeCellEntry(TEXT("Row1"), TEXT("Derived"), MakeShared<FJsonValueNumber>(14)));
+	Cells.Add(MakeCellEntry(TEXT("Row4"), TEXT("Value"), MakeShared<FJsonValueNumber>(8)));
+	Cells.Add(MakeCellEntry(TEXT("Row4"), TEXT("Derived"), MakeShared<FJsonValueNumber>(16)));
+	Cells.Add(MakeCellEntry(TEXT("Row2"), TEXT("Value"), MakeShared<FJsonValueNumber>(2)));
+	FString Error;
+	TestTrue(TEXT("requested derived fields verify after the row hook"), ResponseSucceeded(
+		Registry.ExecuteHandler(TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false)), Error));
+	TestEqual(TEXT("multiple changed cells notify each changed row once"), Notifications, 2);
+	TestEqual(TEXT("the changed row hook ran"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row1"), TEXT("batch hook test"))->Derived, 14);
+	TestEqual(TEXT("the other changed row hook ran"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row4"), TEXT("batch hook test"))->Derived, 16);
+	TestEqual(TEXT("the requested unchanged row was not notified"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row2"), TEXT("batch hook test"))->Derived, -1);
+	TestEqual(TEXT("the unrequested row was not notified"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row3"), TEXT("batch hook test"))->Derived, -1);
+
+	TestTrue(TEXT("replaying unchanged cells succeeds"), ResponseSucceeded(
+		Registry.ExecuteHandler(TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false)), Error));
+	TestEqual(TEXT("an unchanged batch sends no notification"), Notifications, 2);
+	Cells.Reset();
+	Cells.Add(MakeCellEntry(TEXT("Row1"), TEXT("Value"), MakeShared<FJsonValueNumber>(9)));
+	TestTrue(TEXT("dry run succeeds"), ResponseSucceeded(
+		Registry.ExecuteHandler(TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, true)), Error));
+	TestEqual(TEXT("a dry run sends no notification"), Notifications, 2);
+
+	TestFalse(TEXT("an unrequested derived field change still fails verification"), ResponseSucceeded(
+		Registry.ExecuteHandler(TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false)), Error));
+	TestTrue(TEXT("verification identifies the unrequested field"), Error.Contains(TEXT("Derived")));
+	TestEqual(TEXT("the changed row is notified on write and restore"), Notifications, 4);
+	TestEqual(TEXT("the failed write restores the value"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row1"), TEXT("batch hook test"))->Value, 7);
+	TestEqual(TEXT("the failed write restores the derived field"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row1"), TEXT("batch hook test"))->Derived, 14);
+	TestEqual(TEXT("restore leaves the unchanged requested row alone"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row2"), TEXT("batch hook test"))->Derived, -1);
+	TestEqual(TEXT("restore leaves the unrequested row alone"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row3"), TEXT("batch hook test"))->Derived, -1);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
