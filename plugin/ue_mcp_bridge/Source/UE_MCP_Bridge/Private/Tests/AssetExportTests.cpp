@@ -209,6 +209,8 @@ bool FMCPDataTableExportValidationTest::RunTest(const FString& Parameters)
 	const auto MissingStruct = UEMCPAssetExportTests::Export(Registry, Table, MissingStructFile);
 	if (!TestTrue(TEXT("missing row struct rejected"), MissingStruct.IsValid() && !MissingStruct->GetBoolField(TEXT("success")))) return false;
 	TestFalse(TEXT("no file written for invalid table"), IFileManager::Get().FileExists(*MissingStructFile));
+	// Emptying a table without a row struct logs an error when the mount tears down.
+	Table->RowStruct = FUEMCPDataTableReferenceRow::StaticStruct();
 	return true;
 }
 

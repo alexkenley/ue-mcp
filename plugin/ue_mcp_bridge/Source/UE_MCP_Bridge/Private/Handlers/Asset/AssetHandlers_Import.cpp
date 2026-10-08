@@ -4150,6 +4150,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::ExportAsset(const TSharedPtr<FJsonObject>
 
 	FString OutputPath;
 	if (auto Err = RequireString(Params, TEXT("outputPath"), OutputPath)) return Err;
+	// Read before anything can fail (#1057); only a DataTable export uses it.
+	const FString RequestedFormat = OptionalString(Params, TEXT("format")).ToLower();
 
 	// #930: same resolution as asset(read), which opened assets this action
 	// reported as missing.
@@ -4182,7 +4184,7 @@ TSharedPtr<FJsonValue> FAssetHandlers::ExportAsset(const TSharedPtr<FJsonObject>
 			return MCPError(TEXT("DataTable export outputPath must have a .json or .csv extension"));
 		}
 		if (!DataTable->GetRowStruct()) return MCPError(TEXT("DataTable has no row struct"));
-		TableFormat = OptionalString(Params, TEXT("format")).ToLower();
+		TableFormat = RequestedFormat;
 		if (TableFormat.IsEmpty())
 		{
 			TableFormat = Extension;
