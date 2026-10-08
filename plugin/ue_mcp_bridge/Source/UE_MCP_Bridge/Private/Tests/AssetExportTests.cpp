@@ -184,6 +184,9 @@ bool FMCPDataTableExportValidationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("invalid format leaves existing output intact"), After, Before);
 
 	// A format override must never turn a package (or any other file) into text.
+	// The sentinel .uasset files sit in the mounted folder, so the asset registry
+	// may scan them and report them unloadable. That is the point of the sentinel.
+	AddExpectedError(TEXT("Package is unloadable"), EAutomationExpectedErrorFlags::Contains, 0);
 	for (const TCHAR* Name : { TEXT("DT_Items.uasset"), TEXT("DT_Items.UASSET"), TEXT("table.txt"), TEXT("no_extension"), TEXT("table.json.uasset") })
 	{
 		const FString RejectedFile = FPaths::Combine(Mount.ContentPath, Name);
