@@ -1,6 +1,7 @@
 // Coverage for the DataTable row write path and the JSON property setter it
 // runs on, for the three data-loss bugs they carried (#928, #929, #935), and
-// for read_datatable's outputPath form, which writes the rows to a file.
+// for read_datatable's outputPath form, which writes the rows to a file, and
+// its columns form, which narrows each row to the fields that were asked for.
 //
 // run_automation_tests dispatches every EditorContext/EngineFilter test in the
 // process when it is called without a filter, against whatever project the
@@ -113,13 +114,16 @@ bool ResponseSucceeded(const TSharedPtr<FJsonValue>& Response, FString& OutError
 }
 
 /** Params for asset(read_datatable) against a transient table. An empty
- *  filter or path leaves that param out, which is the inline, unfiltered read. */
-TSharedPtr<FJsonObject> MakeDataTableReadParams(const UDataTable* Table, const FString& RowFilter, const FString& OutputPath)
+ *  filter or path leaves that param out, which is the inline, unfiltered read,
+ *  and a null Columns leaves the rows whole. */
+TSharedPtr<FJsonObject> MakeDataTableReadParams(
+	const UDataTable* Table, const FString& RowFilter, const FString& OutputPath, const TArray<FString>* Columns = nullptr)
 {
 	TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
 	Params->SetStringField(TEXT("assetPath"), Table->GetPathName());
 	if (!RowFilter.IsEmpty()) Params->SetStringField(TEXT("rowFilter"), RowFilter);
 	if (!OutputPath.IsEmpty()) Params->SetStringField(TEXT("outputPath"), OutputPath);
+	if (Columns) Params->SetArrayField(TEXT("columns"), MCPStringListToJson(*Columns));
 	return Params;
 }
 
@@ -1208,6 +1212,443 @@ bool FDataTableEmptyReferenceSpellingsTest::RunTest(const FString& Parameters)
 		if (!TestNotNull(TEXT("the row survived the refused write"), Row)) return false;
 		TestEqual(TEXT("the refused write left the plain value alone"), Row->Count, 3);
 	}
+	return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// read_datatable with columns returns each row as its Name plus the named
+// fields, composes with rowFilter and outputPath, and refuses a name the row
+// struct does not have with the list of the names it does. Without columns
+// the rows come back whole, as they always did.
+// ─────────────────────────────────────────────────────────────────────────────
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataTableReadColumnsTest,
+	"UE.MCP.Asset.DataTable.ReadColumnsProjectsRows",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataTableReadColumnsTest::RunTest(const FString& Parameters)
+{
+	// The reference row struct: five fields beside the row name, so a
+	// projection to one of them has something to leave out.
+	const FName TableName(*FString::Printf(TEXT("DT_UEMCP_Columns_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage(), TableName);
+	if (!TestNotNull(TEXT("transient DataTable was created"), Table)) return false;
+	const FTransientDataTableScope TableScope(Table);
+	Table->RowStruct = FUEMCPDataTableReferenceRow::StaticStruct();
+	{
+		FUEMCPDataTableReferenceRow Row;
+		Row.Count = 1;
+		Table->AddRow(FName(TEXT("AlphaOne")), Row);
+		Row.Count = 2;
+		Table->AddRow(FName(TEXT("AlphaTwo")), Row);
+		Row.Count = 3;
+		Table->AddRow(FName(TEXT("Beta")), Row);
+	}
+
+	FMCPHandlerRegistry Registry;
+	FAssetHandlers::RegisterHandlers(Registry);
+	if (!TestTrue(
+			TEXT("the handler resolves the transient table by path"),
+			MCPLoadAssetObject(Table->GetPathName()) == Table))
+	{
+		return false;
+	}
+
+	const FString DumpFolder = FString::Printf(
+		TEXT("UE_MCP/AutomationTests/ReadDataTableColumns_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	const FString DumpDirectory = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), DumpFolder));
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*DumpDirectory, false, true);
+	};
+
+	auto Read = [&Registry, Table](const FString& RowFilter, const FString& OutputPath, const TArray<FString>* Columns)
+	{
+		return Registry.ExecuteHandler(TEXT("read_datatable"), MakeDataTableReadParams(Table, RowFilter, OutputPath, Columns));
+	};
+
+	/** Count keyed by Name, so the assertions do not depend on row order. */
+	auto CountsByName = [](const TArray<TSharedPtr<FJsonValue>>& Rows)
+	{
+		TMap<FString, int32> Out;
+		for (const TSharedPtr<FJsonValue>& RowValue : Rows)
+		{
+			const TSharedPtr<FJsonObject> Row = RowValue->AsObject();
+			FString Name;
+			int32 Count = -1;
+			Row->TryGetStringField(TEXT("Name"), Name);
+			Row->TryGetNumberField(TEXT("Count"), Count);
+			Out.Add(Name, Count);
+		}
+		return Out;
+	};
+
+	// ── Without columns every field of every row comes back, and nothing is
+	// echoed that was not asked for.
+	{
+		FString Error;
+		const TSharedPtr<FJsonValue> Response = Read(FString(), FString(), nullptr);
+		if (!TestTrue(FString::Printf(TEXT("the plain read succeeded (%s)"), *Error), ResponseSucceeded(Response, Error))) return false;
+		const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
+		if (!TestTrue(TEXT("the plain read returns rows"), Response->AsObject()->TryGetArrayField(TEXT("rows"), Rows))) return false;
+		TestEqual(TEXT("the plain read returns every row"), Rows->Num(), 3);
+		const TSharedPtr<FJsonObject> FirstRow = (*Rows)[0]->AsObject();
+		TestTrue(TEXT("a plain row carries the fields a projection would drop"),
+			FirstRow->HasField(TEXT("Name")) && FirstRow->HasField(TEXT("Icon")) && FirstRow->HasField(TEXT("Count")));
+		TestFalse(TEXT("no columns are echoed when none were asked for"), Response->AsObject()->HasField(TEXT("columns")));
+	}
+
+	// ── columns keeps Name and the named field on the rows the filter kept,
+	// and the rest of the response is what the inline read always carried.
+	const TArray<FString> CountOnly = { TEXT("Count") };
+	TArray<TSharedPtr<FJsonValue>> InlineRows;
+	{
+		FString Error;
+		const TSharedPtr<FJsonValue> Response = Read(TEXT("alpha"), FString(), &CountOnly);
+		if (!TestTrue(FString::Printf(TEXT("the projected read succeeded (%s)"), *Error), ResponseSucceeded(Response, Error))) return false;
+		const TSharedPtr<FJsonObject> Obj = Response->AsObject();
+		const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
+		if (!TestTrue(TEXT("the projected read returns rows"), Obj->TryGetArrayField(TEXT("rows"), Rows))) return false;
+		TestEqual(TEXT("rowFilter still applies under columns"), Rows->Num(), 2);
+		for (const TSharedPtr<FJsonValue>& RowValue : *Rows)
+		{
+			const TSharedPtr<FJsonObject> Row = RowValue->AsObject();
+			TestEqual(TEXT("a projected row holds exactly Name and the named field"), Row->Values.Num(), 2);
+			TestTrue(TEXT("a projected row keeps its Name"), Row->HasField(TEXT("Name")));
+			TestTrue(TEXT("a projected row keeps the named field"), Row->HasField(TEXT("Count")));
+			TestFalse(TEXT("a field that was not named is gone"), Row->HasField(TEXT("Icon")));
+		}
+		const TMap<FString, int32> Counts = CountsByName(*Rows);
+		TestEqual(TEXT("AlphaOne keeps its value through the projection"), Counts.FindRef(TEXT("AlphaOne")), 1);
+		TestEqual(TEXT("AlphaTwo keeps its value through the projection"), Counts.FindRef(TEXT("AlphaTwo")), 2);
+
+		const TArray<TSharedPtr<FJsonValue>>* Echoed = nullptr;
+		if (TestTrue(TEXT("the response echoes the resolved columns"), Obj->TryGetArrayField(TEXT("columns"), Echoed)))
+		{
+			TestEqual(TEXT("one column was resolved"), Echoed->Num(), 1);
+			TestEqual(TEXT("under the key the export writes"), (*Echoed)[0]->AsString(), FString(TEXT("Count")));
+		}
+		int32 FilteredCount = -1;
+		Obj->TryGetNumberField(TEXT("filteredCount"), FilteredCount);
+		TestEqual(TEXT("filteredCount still counts the rows after the filter"), FilteredCount, 2);
+		int32 TotalRowCount = -1;
+		Obj->TryGetNumberField(TEXT("totalRowCount"), TotalRowCount);
+		TestEqual(TEXT("totalRowCount still counts the whole table"), TotalRowCount, 3);
+		TestTrue(TEXT("the inline read still lists rowNames"), Obj->HasField(TEXT("rowNames")));
+		InlineRows = *Rows;
+	}
+
+	// ── With outputPath the file holds the projected rows, not the whole ones.
+	{
+		const FString Requested = DumpFolder / TEXT("columns.json");
+		FString Error;
+		const TSharedPtr<FJsonValue> Response = Read(TEXT("alpha"), Requested, &CountOnly);
+		if (!TestTrue(FString::Printf(TEXT("the projected read to a file succeeded (%s)"), *Error), ResponseSucceeded(Response, Error))) return false;
+		const TSharedPtr<FJsonObject> Obj = Response->AsObject();
+		TestFalse(TEXT("the rows do not come back inline"), Obj->HasField(TEXT("rows")));
+		TestTrue(TEXT("the file response echoes the columns too"), Obj->HasField(TEXT("columns")));
+
+		FString OutputPath;
+		Obj->TryGetStringField(TEXT("outputPath"), OutputPath);
+		FString Text;
+		if (TestTrue(FString::Printf(TEXT("the file can be read back (%s)"), *OutputPath), FFileHelper::LoadFileToString(Text, *OutputPath)))
+		{
+			TArray<TSharedPtr<FJsonValue>> FileRows;
+			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Text);
+			if (TestTrue(TEXT("the file holds a JSON array"), FJsonSerializer::Deserialize(Reader, FileRows)))
+			{
+				TestEqual(
+					TEXT("the file holds the projected rows the inline read returned"),
+					CondenseDataTableRows(FileRows),
+					CondenseDataTableRows(InlineRows));
+			}
+		}
+	}
+
+	// ── A name the row struct does not have is refused, the error names it
+	// and lists the fields that would have been accepted.
+	{
+		const TArray<FString> Unknown = { TEXT("Count"), TEXT("NoSuchColumn") };
+		FString Error;
+		TestFalse(TEXT("an unknown column is refused"), ResponseSucceeded(Read(FString(), FString(), &Unknown), Error));
+		TestTrue(TEXT("the error names the column"), Error.Contains(TEXT("NoSuchColumn")));
+		TestTrue(TEXT("and lists the row struct's fields"), Error.Contains(TEXT("Icon")) && Error.Contains(TEXT("Count")));
+	}
+	return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// set_datatable_cells: a batch is validated whole, applied whole, and verified
+// against the table as it was before the write.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace
+{
+/** One {row, column, value} entry for asset(set_datatable_cells). */
+TSharedPtr<FJsonValue> MakeCellEntry(const TCHAR* RowName, const TCHAR* Column, const TSharedPtr<FJsonValue>& Value)
+{
+	TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+	Entry->SetStringField(TEXT("row"), RowName);
+	Entry->SetStringField(TEXT("column"), Column);
+	Entry->SetField(TEXT("value"), Value);
+	return MakeShared<FJsonValueObject>(Entry);
+}
+
+/** Params for asset(set_datatable_cells) against a transient table. */
+TSharedPtr<FJsonObject> MakeCellsWriteParams(
+	const UDataTable* Table, const TArray<TSharedPtr<FJsonValue>>& Cells, bool bDryRun)
+{
+	TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
+	Params->SetStringField(TEXT("assetPath"), Table->GetPathName());
+	Params->SetArrayField(TEXT("cells"), Cells);
+	if (bDryRun) Params->SetBoolField(TEXT("dryRun"), true);
+	return Params;
+}
+
+int32 NumberFieldOr(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Field, int32 Fallback)
+{
+	int32 Value = Fallback;
+	Obj->TryGetNumberField(Field, Value);
+	return Value;
+}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataTableBatchCellWriteTest,
+	"UE.MCP.Asset.DataTable.BatchCellWriteVerifiesTheTable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataTableBatchCellWriteTest::RunTest(const FString& Parameters)
+{
+#if !WITH_EDITORONLY_DATA
+	AddInfo(TEXT("FPerPlatformInt::PerPlatform is editor-only data; nothing to assert here."));
+	return true;
+#else
+	UDataTable* Table = MakeTransientPerPlatformTable();
+	if (!TestNotNull(TEXT("transient DataTable was created"), Table)) return false;
+	FGCRootScope TableRoot(Table);
+
+	TMap<FName, int32> RowAOverrides;
+	RowAOverrides.Add(TEXT("Windows"), 41);
+	AddPerPlatformRow(Table, TEXT("RowA"), 1, RowAOverrides);
+	TMap<FName, int32> RowBOverrides;
+	RowBOverrides.Add(TEXT("Mac"), 42);
+	AddPerPlatformRow(Table, TEXT("RowB"), 2, RowBOverrides);
+	AddPerPlatformRow(Table, TEXT("RowC"), 3, TMap<FName, int32>());
+
+	FMCPHandlerRegistry Registry;
+	FAssetHandlers::RegisterHandlers(Registry);
+	TestTrue(TEXT("set_datatable_cells is registered"), Registry.HasHandler(TEXT("set_datatable_cells")));
+	if (!TestTrue(
+			TEXT("the handler resolves the transient table by path"),
+			MCPLoadAssetObject(Table->GetPathName()) == Table))
+	{
+		return false;
+	}
+
+	auto ScalarIs = [this, Table](const TCHAR* RowName, int32 Expected, const TCHAR* What) -> bool
+	{
+		const FPerPlatformInt* Row = FindPerPlatformRow(Table, RowName);
+		if (!TestNotNull(FString::Printf(TEXT("%s still exists (%s)"), RowName, What), Row)) return false;
+		TestEqual(FString::Printf(TEXT("%s.Default (%s)"), RowName, What), Row->Default, Expected);
+		return true;
+	};
+
+	// ── A batch touching two rows: one cell changes, one already holds its
+	// value, and the third row is not named at all.
+	{
+		TArray<TSharedPtr<FJsonValue>> Cells;
+		Cells.Add(MakeCellEntry(TEXT("RowA"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(7)));
+		Cells.Add(MakeCellEntry(TEXT("RowB"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(2)));
+
+		FString Error;
+		const TSharedPtr<FJsonValue> Response = Registry.ExecuteHandler(
+			TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false));
+		if (!TestTrue(FString::Printf(TEXT("the batch succeeded (%s)"), *Error), ResponseSucceeded(Response, Error))) return false;
+		const TSharedPtr<FJsonObject> Result = Response->AsObject();
+
+		bool bUpdated = false, bVerified = false, bSaved = true;
+		Result->TryGetBoolField(TEXT("updated"), bUpdated);
+		Result->TryGetBoolField(TEXT("verified"), bVerified);
+		Result->TryGetBoolField(TEXT("saved"), bSaved);
+		TestTrue(TEXT("the batch reports updated"), bUpdated);
+		TestTrue(TEXT("the batch reports verified"), bVerified);
+		TestFalse(TEXT("save defaults to false"), bSaved);
+		TestEqual(TEXT("one cell changed"), NumberFieldOr(Result, TEXT("changedCells"), -1), 1);
+		TestEqual(TEXT("one cell already held its value"), NumberFieldOr(Result, TEXT("unchangedCells"), -1), 1);
+		TestEqual(TEXT("one row was touched"), NumberFieldOr(Result, TEXT("rowsTouched"), -1), 1);
+		TestEqual(TEXT("two rows were requested"), NumberFieldOr(Result, TEXT("rowsRequested"), -1), 2);
+
+		// The rollback is the same call with the prior values of the cells
+		// that changed, and nothing for the cell that did not.
+		const TSharedPtr<FJsonObject>* Rollback = nullptr;
+		if (TestTrue(TEXT("a rollback record is attached"), Result->TryGetObjectField(TEXT("rollback"), Rollback)))
+		{
+			FString Method;
+			(*Rollback)->TryGetStringField(TEXT("method"), Method);
+			TestEqual(TEXT("the rollback is self-inverse"), Method, FString(TEXT("set_datatable_cells")));
+			const TSharedPtr<FJsonObject>* Payload = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* InverseCells = nullptr;
+			if ((*Rollback)->TryGetObjectField(TEXT("payload"), Payload)
+				&& (*Payload)->TryGetArrayField(TEXT("cells"), InverseCells))
+			{
+				TestEqual(TEXT("the rollback carries only the cell that changed"), InverseCells->Num(), 1);
+				if (InverseCells->Num() == 1)
+				{
+					const TSharedPtr<FJsonObject> Inverse = (*InverseCells)[0]->AsObject();
+					TestEqual(TEXT("the rollback restores the prior value"), NumberFieldOr(Inverse, TEXT("value"), -1), 1);
+				}
+			}
+			else
+			{
+				AddError(TEXT("the rollback payload has no cells array"));
+			}
+		}
+
+		ScalarIs(TEXT("RowA"), 7, TEXT("after the batch"));
+		ScalarIs(TEXT("RowB"), 2, TEXT("after the batch"));
+		ScalarIs(TEXT("RowC"), 3, TEXT("after the batch"));
+		if (const FPerPlatformInt* RowA = FindPerPlatformRow(Table, TEXT("RowA")))
+		{
+			TestEqual(TEXT("the touched row kept its untouched TMap"), RowA->PerPlatform.Num(), 1);
+		}
+		if (const FPerPlatformInt* RowB = FindPerPlatformRow(Table, TEXT("RowB")))
+		{
+			TestEqual(TEXT("the unchanged row kept its TMap"), RowB->PerPlatform.Num(), 1);
+		}
+		TestEqual(TEXT("no row was added or dropped"), Table->GetRowMap().Num(), 3);
+	}
+
+	// ── One bad cell fails the whole batch, every failure is reported, and
+	// the cells that were valid are not written.
+	{
+		TArray<TSharedPtr<FJsonValue>> Cells;
+		Cells.Add(MakeCellEntry(TEXT("RowA"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(9)));
+		Cells.Add(MakeCellEntry(TEXT("RowZ"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(1)));
+		Cells.Add(MakeCellEntry(TEXT("RowB"), TEXT("NoSuchField"), MakeShared<FJsonValueNumber>(1)));
+		Cells.Add(MakeCellEntry(TEXT("RowC"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(2.5)));
+
+		FString Error;
+		const TSharedPtr<FJsonValue> Response = Registry.ExecuteHandler(
+			TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false));
+		TestFalse(TEXT("a batch with a bad cell fails"), ResponseSucceeded(Response, Error));
+		TestTrue(TEXT("the error says nothing was written"), Error.Contains(TEXT("nothing was written")));
+
+		const TArray<TSharedPtr<FJsonValue>>* Errors = nullptr;
+		if (TestTrue(TEXT("every failing cell is listed"), Response->AsObject()->TryGetArrayField(TEXT("errors"), Errors)))
+		{
+			TestEqual(TEXT("three cells failed"), Errors->Num(), 3);
+			FString Joined;
+			for (const TSharedPtr<FJsonValue>& Entry : *Errors)
+			{
+				FString Message;
+				Entry->AsObject()->TryGetStringField(TEXT("error"), Message);
+				Joined += Message + TEXT("\n");
+			}
+			TestTrue(TEXT("the missing row is named"), Joined.Contains(TEXT("RowZ")));
+			TestTrue(TEXT("the unknown field is named"), Joined.Contains(TEXT("NoSuchField")));
+			TestTrue(TEXT("the unparsable value is explained"), Joined.Contains(TEXT("whole number")));
+		}
+
+		ScalarIs(TEXT("RowA"), 7, TEXT("after the rejected batch"));
+		ScalarIs(TEXT("RowC"), 3, TEXT("after the rejected batch"));
+	}
+
+	// ── A dry run reports the same counts and writes nothing.
+	{
+		TArray<TSharedPtr<FJsonValue>> Cells;
+		Cells.Add(MakeCellEntry(TEXT("RowC"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(30)));
+		Cells.Add(MakeCellEntry(TEXT("RowA"), DataTableRowWriteScalarField, MakeShared<FJsonValueNumber>(7)));
+
+		FString Error;
+		const TSharedPtr<FJsonValue> Response = Registry.ExecuteHandler(
+			TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, true));
+		if (!TestTrue(FString::Printf(TEXT("the dry run succeeded (%s)"), *Error), ResponseSucceeded(Response, Error))) return false;
+		const TSharedPtr<FJsonObject> Result = Response->AsObject();
+
+		bool bDryRun = false, bUpdated = true;
+		Result->TryGetBoolField(TEXT("dryRun"), bDryRun);
+		Result->TryGetBoolField(TEXT("updated"), bUpdated);
+		TestTrue(TEXT("the result says it was a dry run"), bDryRun);
+		TestFalse(TEXT("a dry run reports nothing updated"), bUpdated);
+		TestFalse(TEXT("a dry run attaches no rollback"), Result->HasField(TEXT("rollback")));
+		TestEqual(TEXT("the dry run counts the cell that would change"), NumberFieldOr(Result, TEXT("changedCells"), -1), 1);
+		TestEqual(TEXT("the dry run counts the cell that would not"), NumberFieldOr(Result, TEXT("unchangedCells"), -1), 1);
+
+		ScalarIs(TEXT("RowC"), 3, TEXT("after the dry run"));
+	}
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FDataTableBatchRowHookTest,
+	"UE.MCP.Asset.DataTable.BatchCellWriteNotifiesChangedRows",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDataTableBatchRowHookTest::RunTest(const FString& Parameters)
+{
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage());
+	if (!TestNotNull(TEXT("transient DataTable was created"), Table)) return false;
+	FGCRootScope TableRoot(Table);
+	Table->RowStruct = FUEMCPDataTableDerivedRow::StaticStruct();
+	for (int32 Index = 1; Index <= 4; ++Index)
+	{
+		FUEMCPDataTableDerivedRow Row;
+		Row.Value = Index;
+		Row.Derived = Index * 2;
+		Table->AddRow(FName(*FString::Printf(TEXT("Row%d"), Index)), Row);
+	}
+	// A global notification would recompute these stale fields and fail the batch.
+	Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row2"), TEXT("batch hook test"))->Derived = -1;
+	Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row3"), TEXT("batch hook test"))->Derived = -1;
+	int32 Notifications = 0;
+	const FDelegateHandle Handle = Table->OnDataTableChanged().AddLambda([&Notifications]() { ++Notifications; });
+	ON_SCOPE_EXIT { Table->OnDataTableChanged().Remove(Handle); };
+
+	FMCPHandlerRegistry Registry;
+	FAssetHandlers::RegisterHandlers(Registry);
+	TArray<TSharedPtr<FJsonValue>> Cells;
+	Cells.Add(MakeCellEntry(TEXT("Row1"), TEXT("Value"), MakeShared<FJsonValueNumber>(7)));
+	Cells.Add(MakeCellEntry(TEXT("Row1"), TEXT("Derived"), MakeShared<FJsonValueNumber>(14)));
+	Cells.Add(MakeCellEntry(TEXT("Row4"), TEXT("Value"), MakeShared<FJsonValueNumber>(8)));
+	Cells.Add(MakeCellEntry(TEXT("Row4"), TEXT("Derived"), MakeShared<FJsonValueNumber>(16)));
+	Cells.Add(MakeCellEntry(TEXT("Row2"), TEXT("Value"), MakeShared<FJsonValueNumber>(2)));
+	FString Error;
+	TestTrue(TEXT("requested derived fields verify after the row hook"), ResponseSucceeded(
+		Registry.ExecuteHandler(TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false)), Error));
+	TestEqual(TEXT("multiple changed cells notify each changed row once"), Notifications, 2);
+	TestEqual(TEXT("the changed row hook ran"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row1"), TEXT("batch hook test"))->Derived, 14);
+	TestEqual(TEXT("the other changed row hook ran"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row4"), TEXT("batch hook test"))->Derived, 16);
+	TestEqual(TEXT("the requested unchanged row was not notified"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row2"), TEXT("batch hook test"))->Derived, -1);
+	TestEqual(TEXT("the unrequested row was not notified"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row3"), TEXT("batch hook test"))->Derived, -1);
+
+	TestTrue(TEXT("replaying unchanged cells succeeds"), ResponseSucceeded(
+		Registry.ExecuteHandler(TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false)), Error));
+	TestEqual(TEXT("an unchanged batch sends no notification"), Notifications, 2);
+	Cells.Reset();
+	Cells.Add(MakeCellEntry(TEXT("Row1"), TEXT("Value"), MakeShared<FJsonValueNumber>(9)));
+	TestTrue(TEXT("dry run succeeds"), ResponseSucceeded(
+		Registry.ExecuteHandler(TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, true)), Error));
+	TestEqual(TEXT("a dry run sends no notification"), Notifications, 2);
+
+	TestFalse(TEXT("an unrequested derived field change still fails verification"), ResponseSucceeded(
+		Registry.ExecuteHandler(TEXT("set_datatable_cells"), MakeCellsWriteParams(Table, Cells, false)), Error));
+	TestTrue(TEXT("verification identifies the unrequested field"), Error.Contains(TEXT("Derived")));
+	TestEqual(TEXT("the changed row is notified on write and restore"), Notifications, 4);
+	TestEqual(TEXT("the failed write restores the value"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row1"), TEXT("batch hook test"))->Value, 7);
+	TestEqual(TEXT("the failed write restores the derived field"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row1"), TEXT("batch hook test"))->Derived, 14);
+	TestEqual(TEXT("restore leaves the unchanged requested row alone"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row2"), TEXT("batch hook test"))->Derived, -1);
+	TestEqual(TEXT("restore leaves the unrequested row alone"),
+		Table->FindRow<FUEMCPDataTableDerivedRow>(TEXT("Row3"), TEXT("batch hook test"))->Derived, -1);
 	return true;
 }
 

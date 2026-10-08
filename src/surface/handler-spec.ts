@@ -27,7 +27,7 @@ export type ParamType = (typeof PARAM_TYPES)[number];
  * advertised without an untyped member a client could read as "nothing
  * validates" (#811).
  */
-export const VALUE_FORMS = ["argMap", "argEntryList", "stringList", "string"] as const;
+export const VALUE_FORMS = ["argMap", "argEntryList", "stringList", "string", "scalarMap"] as const;
 export type ValueForm = (typeof VALUE_FORMS)[number];
 
 /** One field of an object parameter, or of each element of an array of objects. */
@@ -40,6 +40,14 @@ export interface ParamField {
   items?: ParamType;
   /** The named shapes an `any` field takes. */
   forms?: ValueForm[];
+  /** The only values a string field, or each string of an array field, may take. */
+  enum?: string[];
+  /** Inclusive lower bound of a number or integer field, or of each element of an array field. */
+  minimum?: number;
+  /** Inclusive upper bound, as minimum. */
+  maximum?: number;
+  /** The shape of an `object` field, or of each element of an array-of-objects field. */
+  fields?: ParamField[];
 }
 
 /** One shape of a tagged union: its tag value and the fields that shape has. */
@@ -77,6 +85,12 @@ export interface ParamSpec {
   forms?: ValueForm[];
   /** The variants of a tagged `object` parameter, or of each element of a tagged array of objects. */
   oneOf?: ParamOneOf;
+  /** The only values a string parameter, or each string of an array parameter, may take. */
+  enum?: string[];
+  /** Inclusive lower bound of a number or integer parameter, or of each element of an array parameter. */
+  minimum?: number;
+  /** Inclusive upper bound, as minimum. */
+  maximum?: number;
 }
 
 /** How many branches of a choice a call supplies. Mirrors EMCPChoiceMode. */
@@ -172,6 +186,10 @@ function shapeProblems(method: string, param: ParamSpec): string[] {
     else if (orType === param.type) problems.push(`${at}: its own type listed as an alternative`);
     else if (orTypes.indexOf(orType) !== index) problems.push(`${at}: an alternative type listed twice`);
   });
+  problems.push(...valueRuleProblems(at, param));
+  if (param.enum !== undefined && (param.literal !== undefined || orTypes.length > 0)) {
+    problems.push(`${at}: an enum that is also a literal or a union`);
+  }
   if (param.literal !== undefined) {
     const fits = (param.type === "boolean" && typeof param.literal === "boolean")
       || (param.type === "string" && typeof param.literal === "string")
@@ -236,6 +254,40 @@ function fieldListProblems(at: string, fields: readonly ParamField[]): string[] 
       if (field.type !== "any") problems.push(`${at}.${field.name}: forms on a field that is not of type any`);
       problems.push(...formProblems(`${at}.${field.name}`, field.forms));
     }
+    problems.push(...valueRuleProblems(`${at}.${field.name}`, field));
+    if (field.fields !== undefined) {
+      if (field.type !== "object" && !(field.type === "array" && field.items === "object")) {
+        problems.push(`${at}.${field.name}: fields on something that is neither an object nor an array of objects`);
+      }
+      problems.push(...fieldListProblems(`${at}.${field.name}`, field.fields));
+    }
+  }
+  return problems;
+}
+
+/** Mirrors FMCPHandlerRegistry::ValidateValueRules. Rules on an array apply to each element. */
+function valueRuleProblems(
+  at: string,
+  value: { type: ParamType; items?: ParamType; enum?: string[]; minimum?: number; maximum?: number },
+): string[] {
+  const problems: string[] = [];
+  const valueType = value.type === "array" ? value.items ?? "any" : value.type;
+  if (value.enum !== undefined) {
+    if (valueType !== "string") problems.push(`${at}: enum values on something that is not a string or an array of strings`);
+    if (!Array.isArray(value.enum) || value.enum.length === 0) problems.push(`${at}: enum is not a non-empty array`);
+    else if (value.enum.some((v, i) => typeof v !== "string" || v === "" || value.enum!.indexOf(v) !== i)) {
+      problems.push(`${at}: an enum value listed twice, or an empty one`);
+    } else if (value.enum.some((v) => /[,{}]/.test(v))) {
+      problems.push(`${at}: an enum value containing ',', '{' or '}', which a signature cannot write`);
+    }
+  }
+  for (const bound of ["minimum", "maximum"] as const) {
+    if (value[bound] === undefined) continue;
+    if (typeof value[bound] !== "number" || !Number.isFinite(value[bound])) problems.push(`${at}: ${bound} is not a finite number`);
+    if (valueType !== "number" && valueType !== "integer") problems.push(`${at}: a numeric range on something that is not a number or an integer`);
+  }
+  if (value.minimum !== undefined && value.maximum !== undefined && value.minimum > value.maximum) {
+    problems.push(`${at}: a minimum above its maximum`);
   }
   return problems;
 }
@@ -368,6 +420,23 @@ export function renderChoice(choice: ParamChoice, params: readonly ParamSpec[]):
 }
 
 /**
+ * The `Params:` clause for one handler, in the grammar parseParams reads:
+ * required names bare, optional ones with `?`, aliases as `(or alias)`, and a
+ * choice where its first member is declared, written as renderChoice writes it
+ * (`actorLabel OR actorPath`, `at least one of labelPrefix/tag`).
+ */
+export function paramsClause(spec: HandlerSpec): string {
+  if (spec.params.length === 0) return "Params: none";
+  const items = clauseItems(spec).map((item) => {
+    if (item.kind === "choice") return renderChoice(item.choice, spec.params);
+    const p = item.param;
+    const aliases = p.aliases?.length ? ` (${p.aliases.map((a) => `or ${a}`).join(", ")})` : "";
+    return `${p.name}${p.required ? "" : "?"}${aliases}`;
+  });
+  return `Params: ${items.join(", ")}`;
+}
+
+/**
  * Build the action declaration for a spec'd bridge method: the summary a person
  * wrote, then the generated `Params:` clause. There is no mapParams, because the
  * spec names are the bridge names and renames are the registry's aliases. The
@@ -439,6 +508,7 @@ const argValue = () => z.union([argScalar(), argStruct(), z.array(z.union([argSc
 const FORM_ZOD: Record<ValueForm, () => z.ZodTypeAny> = {
   argMap: () => z.record(z.string(), argValue()),
   argEntryList: () => z.array(z.object({ name: z.string(), value: argValue().optional() })),
+  scalarMap: () => z.record(z.string(), argScalar()),
   stringList: () => z.array(z.string()),
   string: () => z.string(),
 };
@@ -447,6 +517,7 @@ const FORM_ZOD: Record<ValueForm, () => z.ZodTypeAny> = {
 export const FORM_PHRASE: Record<ValueForm, string> = {
   argMap: 'an object mapping parameter name to value (e.g. {"bEnabled": true})',
   argEntryList: 'an entry list ([{"name": "bEnabled", "value": true}])',
+  scalarMap: 'an object mapping a name to a string, number, boolean or null (e.g. {"Radius": 400})',
   stringList: "an array of positional strings",
   string: "a string",
 };
@@ -466,20 +537,37 @@ function formsZod(name: string, forms: readonly ValueForm[]): z.ZodTypeAny {
   });
 }
 
-function fieldZod(f: ParamField): z.ZodTypeAny {
-  if (f.forms?.length) return formsZod(f.name, f.forms);
-  return f.type === "array" ? z.array(ZOD_BASE[f.items ?? "any"]()) : ZOD_BASE[f.type]();
+/** A scalar of one type with its enum or range applied. */
+function ruledZod(type: ParamType, rules: { enum?: string[]; minimum?: number; maximum?: number }): z.ZodTypeAny {
+  if (type === "string" && rules.enum?.length) return z.enum(rules.enum as [string, ...string[]]);
+  if ((type === "number" || type === "integer") && (rules.minimum !== undefined || rules.maximum !== undefined)) {
+    let n = type === "integer" ? z.number().int() : z.number();
+    if (rules.minimum !== undefined) n = n.min(rules.minimum);
+    if (rules.maximum !== undefined) n = n.max(rules.maximum);
+    return n;
+  }
+  return ZOD_BASE[type]();
 }
 
-function fieldEntries(fields: readonly ParamField[]): Record<string, z.ZodTypeAny> {
+/** `strict` makes every declared object refuse keys it does not declare, as a strict contract's top level does. */
+interface ZodOptions { strict?: boolean }
+
+function fieldZod(f: ParamField, opts: ZodOptions): z.ZodTypeAny {
+  if (f.forms?.length) return formsZod(f.name, f.forms);
+  if (f.fields) return f.type === "array" ? z.array(fieldsZod(f.fields, opts)) : fieldsZod(f.fields, opts);
+  return f.type === "array" ? z.array(ruledZod(f.items ?? "any", f)) : ruledZod(f.type, f);
+}
+
+function fieldEntries(fields: readonly ParamField[], opts: ZodOptions): Record<string, z.ZodTypeAny> {
   return Object.fromEntries(fields.map((f) => {
-    const base = fieldZod(f);
+    const base = fieldZod(f, opts);
     return [f.name, (f.required ? base : base.optional()).describe(f.description)];
   }));
 }
 
-function fieldsZod(fields: readonly ParamField[]): z.ZodTypeAny {
-  return z.object(fieldEntries(fields));
+function fieldsZod(fields: readonly ParamField[], opts: ZodOptions): z.ZodTypeAny {
+  const object = z.object(fieldEntries(fields, opts));
+  return opts.strict ? object.strict() : object;
 }
 
 /**
@@ -487,9 +575,9 @@ function fieldsZod(fields: readonly ParamField[]): z.ZodTypeAny {
  * because a variant is exactly its declared fields; a key that belongs to
  * another variant is a mistake to refuse, not one to strip silently.
  */
-function oneOfZod(oneOf: ParamOneOf): z.ZodTypeAny {
+function oneOfZod(oneOf: ParamOneOf, opts: ZodOptions): z.ZodTypeAny {
   const variants = oneOf.variants.map((v) =>
-    z.object({ [oneOf.key]: z.literal(v.tag), ...fieldEntries(v.fields) }).strict().describe(v.description),
+    z.object({ [oneOf.key]: z.literal(v.tag), ...fieldEntries(v.fields, opts) }).strict().describe(v.description),
   );
   return z.discriminatedUnion(
     oneOf.key,
@@ -503,15 +591,15 @@ function oneOfZod(oneOf: ParamOneOf): z.ZodTypeAny {
  * writes into a generated module; tests/unit/handler-specs.test.ts holds the two
  * to one signature.
  */
-export function paramZod(param: ParamSpec): z.ZodTypeAny {
+export function paramZod(param: ParamSpec, opts: ZodOptions = {}): z.ZodTypeAny {
   let base: z.ZodTypeAny;
   const element = (): z.ZodTypeAny =>
-    param.oneOf ? oneOfZod(param.oneOf) : param.fields ? fieldsZod(param.fields) : ZOD_BASE[param.items ?? "any"]();
+    param.oneOf ? oneOfZod(param.oneOf, opts) : param.fields ? fieldsZod(param.fields, opts) : ruledZod(param.items ?? "any", param);
   if (param.literal !== undefined) base = z.literal(param.literal);
   else if (param.forms?.length) base = formsZod(param.name, param.forms);
   else if (param.type === "array") base = z.array(element());
   else if (param.type === "object" && (param.fields || param.oneOf)) base = element();
-  else base = ZOD_BASE[param.type]();
+  else base = ruledZod(param.type, param);
   if (param.orTypes?.length) {
     base = z.union([base, ...param.orTypes.map((t) => ZOD_BASE[t]())] as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
   }
@@ -520,37 +608,47 @@ export function paramZod(param: ParamSpec): z.ZodTypeAny {
 
 /**
  * A type signature for a zod schema that ignores descriptions, so two
- * declarations of one key can be compared for what they accept.
+ * declarations of one key can be compared for what they accept. With
+ * `rules`, enums and numeric ranges count too; without, an enum reads as
+ * string and a range is dropped, which is what a type comparison against a
+ * hand-written key wants.
  */
-export function zodSignature(schema: z.ZodTypeAny): string {
+export function zodSignature(schema: z.ZodTypeAny, opts: { rules?: boolean } = {}): string {
+  const sig = (inner: z.ZodTypeAny): string => zodSignature(inner, opts);
   const def = schema._def as { typeName?: string; checks?: Array<{ kind: string }> };
   switch (def.typeName) {
     case "ZodOptional":
-      return `${zodSignature((schema as z.ZodOptional<z.ZodTypeAny>).unwrap())}?`;
+      return `${sig((schema as z.ZodOptional<z.ZodTypeAny>).unwrap())}?`;
     case "ZodNullable":
-      return `${zodSignature((schema as z.ZodNullable<z.ZodTypeAny>).unwrap())}|null`;
+      return `${sig((schema as z.ZodNullable<z.ZodTypeAny>).unwrap())}|null`;
     case "ZodString":
       return "string";
-    case "ZodNumber":
-      return def.checks?.some((c) => c.kind === "int") ? "integer" : "number";
+    case "ZodNumber": {
+      const checks = (def.checks ?? []) as Array<{ kind: string; value?: number }>;
+      const range = checks.filter((c) => c.kind === "min" || c.kind === "max").map((c) => `${c.kind}=${c.value}`);
+      const kind = checks.some((c) => c.kind === "int") ? "integer" : "number";
+      return opts.rules && range.length ? `${kind}[${range.join(",")}]` : kind;
+    }
+    case "ZodEnum":
+      return opts.rules ? `enum<${(schema as z.ZodEnum<[string, ...string[]]>).options.join("|")}>` : "string";
     case "ZodBoolean":
       return "boolean";
     case "ZodUnknown":
     case "ZodAny":
       return "any";
     case "ZodArray":
-      return `array<${zodSignature((schema as z.ZodArray<z.ZodTypeAny>).element)}>`;
+      return `array<${sig((schema as z.ZodArray<z.ZodTypeAny>).element)}>`;
     case "ZodRecord":
-      return `record<${zodSignature((schema as z.ZodRecord).valueSchema)}>`;
+      return `record<${sig((schema as z.ZodRecord).valueSchema)}>`;
     case "ZodObject": {
       const shape = (schema as z.ZodObject<z.ZodRawShape>).shape;
-      return `{${Object.keys(shape).sort().map((k) => `${k}:${zodSignature(shape[k])}`).join(",")}}`;
+      return `{${Object.keys(shape).sort().map((k) => `${k}:${sig(shape[k])}`).join(",")}}`;
     }
     case "ZodUnion":
-      return (schema as z.ZodUnion<[z.ZodTypeAny, ...z.ZodTypeAny[]]>).options.map(zodSignature).join("|");
+      return (schema as z.ZodUnion<[z.ZodTypeAny, ...z.ZodTypeAny[]]>).options.map(sig).join("|");
     case "ZodDiscriminatedUnion": {
       const tagged = schema as z.ZodDiscriminatedUnion<string, z.ZodDiscriminatedUnionOption<string>[]>;
-      return `oneOf<${tagged.discriminator}>(${tagged.options.map((o) => zodSignature(o)).join("|")})`;
+      return `oneOf<${tagged.discriminator}>(${tagged.options.map((o) => sig(o)).join("|")})`;
     }
     case "ZodNull":
       return "null";
@@ -570,7 +668,10 @@ export interface HandlerSpecDrift {
 }
 
 function canonicalField(f: ParamField): unknown[] {
-  return [f.name, f.type, f.required, f.description, f.items ?? null, [...(f.forms ?? [])]];
+  return [
+    f.name, f.type, f.required, f.description, f.items ?? null, [...(f.forms ?? [])],
+    [...(f.enum ?? [])], f.minimum ?? null, f.maximum ?? null, (f.fields ?? []).map(canonicalField),
+  ];
 }
 
 function canonical(spec: HandlerSpec | undefined): string {
@@ -582,6 +683,7 @@ function canonical(spec: HandlerSpec | undefined): string {
       (p.fields ?? []).map(canonicalField),
       [...(p.forms ?? [])],
       p.oneOf ? [p.oneOf.key, p.oneOf.variants.map((v) => [v.tag, v.description, v.fields.map(canonicalField)])] : null,
+      [...(p.enum ?? [])], p.minimum ?? null, p.maximum ?? null,
     ]),
     (spec.choices ?? []).map((c) => [c.mode, c.branches]),
     spec.contractExempt ?? null,
@@ -599,4 +701,103 @@ export function compareHandlerSpecs(recorded: HandlerSpecs, live: unknown): Hand
   const methods = new Set([...Object.keys(recorded), ...Object.keys(liveSpecs)]);
   const drifted = [...methods].filter((m) => canonical(recorded[m]) !== canonical(liveSpecs[m])).sort();
   return { checked: true, drifted };
+}
+
+/** What one action's call is checked against before it is sent (#1282). */
+export interface ParamContract {
+  params: readonly ParamSpec[];
+  choices?: readonly ParamChoice[];
+  /**
+   * Also refuse a missing required name and any key the spec does not declare.
+   * Set for plugin handlers, which have no read tracking; a core handler
+   * reports both itself (RequireString, paramsNotRead).
+   */
+  strict?: boolean;
+}
+
+/**
+ * Why a call's parameters break its action's contract, or undefined when they
+ * keep it: a value its declared type, enum, range or fields refuse, an unmet
+ * choice, and under `strict` a required name absent under every spelling or an
+ * undeclared key. The category's flat shape is shared by every action, so only
+ * this per-action check can hold a key to the one action's declaration.
+ */
+export function contractViolation(contract: ParamContract, supplied: Readonly<Record<string, unknown>>): string | undefined {
+  const present = (key: string): boolean => Object.prototype.hasOwnProperty.call(supplied, key) && supplied[key] !== undefined;
+  const declared = new Set<string>();
+  for (const param of contract.params) {
+    const names = [param.name, ...(param.aliases ?? [])];
+    names.forEach((n) => declared.add(n));
+    const given = names.filter(present);
+    // The bridge keeps the name and leaves the alias unread, and a plugin handler reports no unread keys.
+    if (contract.strict && given.length > 1) return `got ${given.join(" and ")}, which are one parameter; pass only ${param.name}`;
+    if (given.length === 0) {
+      if (param.required && contract.strict) return `needs ${clauseName(param, param.name)}, and it was not given`;
+      continue;
+    }
+    for (const key of given) {
+      const parsed = paramZod(param, { strict: contract.strict }).safeParse(supplied[key]);
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+        const at = [key, ...issue.path].join(".");
+        return `got ${JSON.stringify(supplied[key])} for ${at}: ${issue.message}`;
+      }
+    }
+  }
+  if (contract.strict) {
+    const unknown = Object.keys(supplied).filter((k) => present(k) && !declared.has(k));
+    if (unknown.length > 0) {
+      const names = contract.params.map((p) => p.name);
+      return `does not take ${unknown.join(", ")}; it takes ${names.length ? names.join(", ") : "no parameters"}`;
+    }
+  }
+  return choiceViolation({ params: contract.params, choices: contract.choices }, supplied);
+}
+
+/**
+ * The flat category shape for a set of spec'd handlers that share one tool:
+ * every declared name and alias, optional. A key whose declarations differ
+ * across handlers accepts any of them here; the per-action contract holds each
+ * call to its own action's declaration.
+ */
+export function flatContractShape(handlers: ReadonlyArray<readonly [string, HandlerSpec]>): Record<string, z.ZodType> {
+  const byKey = new Map<string, { schemas: Map<string, z.ZodTypeAny>; descriptions: Map<string, string[]> }>();
+  for (const [method, spec] of handlers) {
+    for (const param of spec.params) {
+      const schema = paramZod(param, { strict: true });
+      const signature = zodSignature(schema, { rules: true });
+      for (const key of [param.name, ...(param.aliases ?? [])]) {
+        const entry = byKey.get(key) ?? { schemas: new Map(), descriptions: new Map() };
+        if (!entry.schemas.has(signature)) entry.schemas.set(signature, schema);
+        const text = key === param.name ? param.description : `Alias for ${param.name}`;
+        entry.descriptions.set(text, [...(entry.descriptions.get(text) ?? []), method]);
+        byKey.set(key, entry);
+      }
+    }
+  }
+  const out: Record<string, z.ZodType> = {};
+  for (const [key, { schemas, descriptions }] of [...byKey.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const members = [...schemas.values()];
+    const schema = members.length === 1 ? members[0] : z.union(members as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
+    const described = [...descriptions.entries()];
+    const description = described.length === 1
+      ? described[0][0]
+      : described.map(([text, owners]) => `${text} (${owners.join(", ")})`).join(". ");
+    out[key] = schema.optional().describe(description);
+  }
+  return out;
+}
+
+/** A plugin's recorded handler specs file, as `ue-mcp plugin record-specs` writes it (#1282). */
+export interface RecordedHandlerSpecs {
+  handlerCount: number;
+  handlers: HandlerSpecs;
+}
+
+/** Why a recorded specs file cannot be used, one line per problem; empty when it can. */
+export function recordedSpecsProblems(raw: unknown): string[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return ["not a JSON object"];
+  const handlers = (raw as { handlers?: unknown }).handlers;
+  if (!handlers || typeof handlers !== "object" || Array.isArray(handlers)) return ["handlers is not an object"];
+  return specProblems(handlers as HandlerSpecs);
 }

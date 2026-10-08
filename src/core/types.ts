@@ -2,7 +2,7 @@ import type { z } from "zod";
 import type { IBridge } from "../bridge/bridge.js";
 import type { ProjectContext } from "../config/project.js";
 import type { EditorSession, SessionRegistry } from "../sessions/session.js";
-import type { ParamChoice, ParamSpec } from "../surface/handler-spec.js";
+import type { HandlerSpec, ParamChoice, ParamSpec } from "../surface/handler-spec.js";
 import type { EpicInputSchema, EpicToolRef } from "../surface/epic-input.js";
 
 /**
@@ -286,6 +286,23 @@ interface ActionSpecBase {
    * `asset(migrate)` is the one action that has it.
    */
   destinationEditor?: boolean;
+  /**
+   * The parameters the bridge method declares in C++: set by specBp (#1057), or
+   * by the plugin loader from a native module's recorded specs (#1282). When
+   * present it is the authority on this action's names, types, required flags
+   * and aliases; the category's zod shape is shared and cannot say.
+   */
+  paramSpec?: readonly ParamSpec[];
+  /**
+   * The spec's required choices (`actorLabel OR actorPath`). The flat category
+   * shape cannot express them, so every dispatch route checks them before the
+   * call is sent.
+   */
+  paramChoices?: readonly ParamChoice[];
+  /** Refuse keys paramSpec does not declare (#1282). Set on plugin handlers, which report no unread keys. */
+  strictParams?: boolean;
+  /** A plugin handler's recorded contract and its bridge method, compared against the live editor for drift (#1282). */
+  recordedContract?: { method: string; spec: HandlerSpec };
 }
 
 /** Forwards to a C++ bridge method over the WebSocket. Built by `bp`. */
@@ -293,18 +310,6 @@ export interface BridgeActionSpec extends ActionSpecBase {
   kind: "bridge";
   bridge: string;
   mapParams?: (p: Record<string, unknown>) => Record<string, unknown>;
-  /**
-   * The parameters the bridge method declares in C++, set by specBp (#1057).
-   * When present it is the authority on this action's names, types, required
-   * flags and aliases; the category's zod shape is shared and cannot say.
-   */
-  paramSpec?: readonly ParamSpec[];
-  /**
-   * The spec's required choices (`actorLabel OR actorPath`), set by specBp.
-   * The flat category shape cannot express them, so every dispatch route
-   * checks them before the call is sent.
-   */
-  paramChoices?: readonly ParamChoice[];
   /**
    * The wrapped engine tool's input schema, set on generated `epic_*` actions.
    * The structured source their compact signatures are built from (#1172).

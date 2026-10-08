@@ -13,6 +13,9 @@
  *                                      and a dormant native C++ module)
  *   publish [dir] [--private|--public] push a listing (incl. its README) to the
  *                                      registry; merges over curated fields
+ *   record-specs [dir] --project <p>   record the native module's handler
+ *                                      contracts from a running editor (#1282);
+ *                                      --check fails when the file differs
  *
  * Editing ue-mcp.yml: js-yaml does not preserve comments. We mitigate by
  * rewriting only the `plugins:` block via a string-level surgery when
@@ -37,6 +40,7 @@ import { checkboxSelect, singleSelect } from "./ui/select.js";
 import { readDeployedBridgeApiVersion } from "../extensions/bridge-api.js";
 import {
   deployNativeModule,
+  pruneStaleNativeFiles,
   readNativeModulesState,
   undeployNativeModule,
   writeNativeModulesState,
@@ -56,6 +60,8 @@ import {
   syncPluginSkills,
 } from "../extensions/skills.js";
 import { resolvePublishToken } from "../extensions/registry-auth.js";
+import { EditorBridge } from "../bridge/bridge.js";
+import { recordedSpecsProblems, type HandlerSpecs } from "../surface/handler-spec.js";
 import { parseEditorFlag, resolveEditorFlag, EditorFlagError } from "./editor-flag.js";
 import { packageVersion } from "../core/package-root.js";
 import { deriveDefaultPrefix, deriveUePluginName, writeScaffold } from "../extensions/plugin-scaffold.js";
@@ -325,6 +331,10 @@ function cmdInstall(args: string[], editor: string | undefined): void {
     try {
       const result = deployNativeModule(pkgDir, native.source, native.uePluginName, proj.projectDir);
       const state = readNativeModulesState(proj.projectDir);
+      const pruned = pruneStaleNativeFiles(proj.projectDir, state[name]?.files ?? [], result.fileList);
+      if (pruned > 0) {
+        note(`removed ${pruned} file(s) the previous ${native.uePluginName} version deployed and this one no longer ships`);
+      }
       const pkgJson = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf-8")) as { version?: string };
       state[name] = {
         uePluginName: native.uePluginName,
@@ -574,6 +584,64 @@ async function fetchCatalog(base: string): Promise<RegistryRow[]> {
  * tagline, tags, featured) are preserved by merging over the existing registry
  * row, so a re-publish only refreshes what the package owns.
  */
+/**
+ * Record a native module's handler contracts from the editor that has it
+ * loaded (#1282). The module registers each handler with its C++ spec; the
+ * bridge publishes them in get_bridge_capabilities.pluginHandlerSpecs, and
+ * this writes the ones nativeModule.handlers declares to nativeModule.specs.
+ * Every declared handler must have one: a handler without a contract would be
+ * dropped from the surface at load.
+ */
+async function cmdRecordSpecs(args: string[]): Promise<void> {
+  const check = args.includes("--check");
+  const projectIdx = args.indexOf("--project");
+  const project = projectIdx >= 0 ? args[projectIdx + 1] : undefined;
+  const positional = args.filter((a, i) => !a.startsWith("--") && (projectIdx < 0 || i !== projectIdx + 1));
+  const dir = path.resolve(positional[0] ?? process.cwd());
+  if (!project || !project.endsWith(".uproject") || !fs.existsSync(project)) {
+    fail("record-specs needs --project <path to the .uproject of a running editor that loads this plugin's native module>");
+  }
+  const { manifest } = loadManifest(dir);
+  const native = manifest.nativeModule;
+  if (!native?.specs) fail("the manifest declares no nativeModule.specs; add one (for example specs: handler-specs.json)");
+
+  const bridge = new EditorBridge();
+  bridge.setProjectContext(path.resolve(project));
+  try {
+    await bridge.ensureConnected(10000);
+  } catch (e) {
+    fail(`no editor answered for ${project}: ${(e as Error).message}`);
+  }
+  const capabilities = bridge.capabilities;
+  const live = capabilities?.pluginHandlerSpecs as HandlerSpecs | undefined;
+  bridge.disconnect();
+  if (!capabilities || capabilities.legacy) {
+    fail("the editor did not answer the capabilities handshake; wait until it finishes loading and run again");
+  }
+  if (!live) fail("the connected bridge publishes no pluginHandlerSpecs; it predates bridge ABI 2. Run ue-mcp deploy and rebuild.");
+
+  const declared = Object.keys(native.handlers).sort();
+  const missing = declared.filter((m) => !live[m]);
+  if (missing.length > 0) {
+    fail(`${missing.length} declared handler(s) registered no contract: ${missing.join(", ")}. Register each with UEMCP::RegisterExternalHandler(name, fn, params).`);
+  }
+  const handlers = Object.fromEntries(declared.map((m) => [m, live[m]]));
+  const snapshot = { handlerCount: declared.length, handlers };
+  const problems = recordedSpecsProblems(snapshot);
+  if (problems.length > 0) fail(`the live contracts cannot generate a surface:\n  ${problems.join("\n  ")}`);
+
+  const out = path.join(dir, native.specs);
+  const text = `${JSON.stringify(snapshot, null, 2)}\n`;
+  const current = fs.existsSync(out) ? fs.readFileSync(out, "utf-8").replace(/\r\n/g, "\n") : null;
+  if (check) {
+    if (current !== text) fail(`${native.specs} differs from the contracts the running module registered; run ue-mcp plugin record-specs`);
+    note(`${native.specs} matches the running module (${declared.length} handlers)`);
+    return;
+  }
+  fs.writeFileSync(out, text);
+  note(`recorded ${declared.length} handler contracts to ${native.specs}${current === text ? " (unchanged)" : ""}`);
+}
+
 async function cmdPublish(args: string[]): Promise<void> {
   let dir = process.cwd();
   let slugFlag: string | undefined;
@@ -839,6 +907,7 @@ export async function run(argv: string[]): Promise<number | void> {
     case "init": cmdCreate(args); break;
     case "publish": await cmdPublish(args).catch((e) => fail(e instanceof Error ? e.message : String(e))); break;
     case "config": await cmdConfig(args, editor).catch((e) => fail(e instanceof Error ? e.message : String(e))); break;
+    case "record-specs": await cmdRecordSpecs(args).catch((e) => fail(e instanceof Error ? e.message : String(e))); break;
     default:
       console.error(
         "Usage:\n" +
@@ -849,7 +918,8 @@ export async function run(argv: string[]): Promise<number | void> {
         "  ue-mcp plugin check-skills [dir]\n" +
         "  ue-mcp plugin config <name> [--enable a,b] [--disable c,d] [--list-groups] [--local|--project]\n" +
         "  ue-mcp plugin create <name> [--dir path]\n" +
-        "  ue-mcp plugin publish [dir] [--slug s] [--private|--public] [--dry-run]",
+        "  ue-mcp plugin publish [dir] [--slug s] [--private|--public] [--dry-run]\n" +
+        "  ue-mcp plugin record-specs [dir] --project <path.uproject> [--check]",
       );
       return 1;
   }

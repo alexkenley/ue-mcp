@@ -54,8 +54,8 @@ export function actionPreparation(
     normalizeParams: options?.normalizeParams,
     paramGroups: options?.paramGroups,
     nestedParamsKey: options?.nestedParamsKey,
-    paramChoices: spec.kind === "bridge" && spec.paramSpec && spec.paramChoices?.length
-      ? { params: spec.paramSpec, choices: spec.paramChoices }
+    paramContract: spec.paramSpec
+      ? { params: spec.paramSpec, choices: spec.paramChoices, strict: spec.strictParams }
       : undefined,
   };
 }

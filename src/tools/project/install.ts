@@ -13,7 +13,7 @@ export const buildProjectAction: HandlerActionSpec = {
   // #958: dispatched in process, because UnrealBuildTool cannot link while an
   // editor holds the module DLLs, so the build that matters runs with it down.
   description:
-    "Build the project's C++ out of process with UnrealBuildTool. Works with the editor STOPPED, which a full rebuild requires (UBT cannot link while an editor holds the module DLLs). Blocks until the build finishes and returns the compiler output. Params: configuration? (default Development), platform? (default the host platform), clean? (#958)",
+    "Build the project's C++ out of process with UnrealBuildTool. Works with the editor STOPPED, which a full rebuild requires (UBT cannot link while an editor holds the module DLLs). Blocks until the build finishes and returns the compiler output. A link that fails because another process holds an output open names the file and the holder under lockedOutputs, with the remedy in the message. Params: configuration? (default Development), platform? (default the host platform), clean? (#958)",
   handler: async (ctx, p) => {
     ctx.project.ensureLoaded();
     const lines: string[] = [];

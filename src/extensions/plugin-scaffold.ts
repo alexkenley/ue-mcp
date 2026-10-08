@@ -50,7 +50,7 @@ export function writeScaffold(dir: string, pkgName: string, prefix: string): voi
     main: "dist/index.js",
     // `ue` ships the dormant native C++ source so authors can activate it
     // without re-vendoring; `LICENSE` is included for npm publish hygiene.
-    files: ["dist", "ue", "ue-mcp.plugin.yml", "knowledge", "skills", "README.md", "LICENSE"],
+    files: ["dist", "ue", "ue-mcp.plugin.yml", "handler-specs.json", "knowledge", "skills", "README.md", "LICENSE"],
     keywords: ["ue-mcp-plugin", "unreal-engine"],
     author: "",
     license: "MIT",
@@ -144,18 +144,19 @@ flows:
 #    it is not deployed or compiled until you UNCOMMENT this block. Activating it
 #    makes 'ue-mcp plugin install' deploy the module and require a UE rebuild.
 #    The handlers then surface unprefixed under a '${nativeCategory}' category,
-#    e.g. ${nativeCategory}(action="echo").
+#    e.g. ${nativeCategory}(action="echo"). Each handler's parameters come from
+#    the contract its C++ registers with, recorded into handler-specs.json by
+#    'ue-mcp plugin record-specs'; every call is validated against it.
 # nativeModule:
 #   uePluginName: ${uePlugin}
-#   minBridgeApi: 1
+#   minBridgeApi: 2
 #   source: ue/Plugins/${uePlugin}
 #   category: ${nativeCategory}
 #   categoryDescription: "${pkgName} native C++ handlers"
+#   specs: handler-specs.json
 #   handlers:
 #     echo:
-#       description: "Echo a name back from native C++ (required: name)"
-#       schema:
-#         name: { type: string, description: "Name to echo" }
+#       description: "Echo a name back from native C++."
 `;
   fs.writeFileSync(path.join(dir, "ue-mcp.plugin.yml"), manifestYaml);
 
@@ -232,6 +233,15 @@ export default class ${greetClass} extends UeMcpTask<Options> {
 
   // ── Dormant native C++ module ────────────────────────────────────────────
   writeNativeSkeleton(dir, uePlugin, pkgName);
+  // The recording of the contract the skeleton's echo handler registers with,
+  // as `ue-mcp plugin record-specs` writes it.
+  const echoSpecs = {
+    handlerCount: 1,
+    handlers: {
+      echo: { params: [{ name: "name", type: "string", required: true, description: "Name to echo" }] },
+    },
+  };
+  fs.writeFileSync(path.join(dir, "handler-specs.json"), `${JSON.stringify(echoSpecs, null, 2)}\n`);
 
   // ── README / LICENSE / .gitignore ────────────────────────────────────────
   const readme =
@@ -261,6 +271,9 @@ The C++ source is already on disk but inert. To turn it on:
 1. Uncomment the \`nativeModule:\` block at the bottom of \`ue-mcp.plugin.yml\`.
 2. Reinstall (\`ue-mcp plugin install ${pkgName}\`) - this deploys the module into
    your project's \`Plugins/\` and requires a UE rebuild before the editor starts.
+3. After changing a handler's C++ contract, re-record it with the editor running:
+   \`ue-mcp plugin record-specs --project <path to .uproject>\`. CI runs the same
+   command with \`--check\`.
 
 The handler then surfaces as \`${prefix}_native(action="echo")\`.
 
@@ -413,7 +426,10 @@ void F${uePlugin}Module::StartupModule()
 {
 \t// Bare method names. When this module is surfaced via nativeModule.category
 \t// in ue-mcp.plugin.yml, ue-mcp routes <category>(action="echo") to "echo".
-\tUEMCP::RegisterExternalHandler(TEXT("echo"), &FExampleHandlers::Echo);
+\t// The contract is published to ue-mcp, which validates every call against it.
+\tUEMCP::RegisterExternalHandler(TEXT("echo"), &FExampleHandlers::Echo, {
+\t\tMCPParam::Required(TEXT("name"), EMCPParamType::String, TEXT("Name to echo")),
+\t});
 
 \tUE_LOG(Log${uePlugin}, Log, TEXT("[${uePlugin}] Registered 1 handler"));
 }

@@ -108,7 +108,7 @@ describe("value shapes", () => {
   it("render to the zod the runtime builds, for every shape and every recorded parameter", () => {
     const recorded = Object.values(SNAPSHOT.handlers).flatMap((s) => s.params);
     for (const param of [...shapes, ...recorded]) {
-      expect(zodSignature(evalZod(zodExpression(param))), param.name).toBe(zodSignature(paramZod(param)));
+      expect(zodSignature(evalZod(zodExpression(param)), { rules: true }), param.name).toBe(zodSignature(paramZod(param), { rules: true }));
     }
   });
 
@@ -286,7 +286,7 @@ describe("the choice check at the TS boundary", () => {
     const seen: Array<Record<string, unknown>> = [];
     const Task = bridgeTaskClass("probe.set_node_settings", "probe_settings", undefined, undefined, {
       action: "set_node_settings",
-      paramChoices: { params: SETTINGS.params, choices: SETTINGS.choices! },
+      paramContract: { params: SETTINGS.params, choices: SETTINGS.choices! },
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await expect(new (Task as any)(fakeCtx(seen), { settings: {}, propertyName: "Seed", propertyValue: "4" }).execute())
@@ -301,7 +301,7 @@ describe("the choice check at the TS boundary", () => {
         const { props, ...rest } = bag;
         return props === undefined ? bag : { ...rest, settings: props };
       },
-      paramChoices: { params: SETTINGS.params, choices: SETTINGS.choices! },
+      paramContract: { params: SETTINGS.params, choices: SETTINGS.choices! },
     });
     expect(pipeline.params.settings).toEqual({ A: 1 });
   });

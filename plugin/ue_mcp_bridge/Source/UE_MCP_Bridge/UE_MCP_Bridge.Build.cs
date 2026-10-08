@@ -96,6 +96,8 @@ public class UE_MCP_Bridge : ModuleRules
 				// generated its reflection data, not just the header.
 				"NiagaraShader",
 				"PCG",
+				// UPCGLevelToAsset, which pcg(export_level_to_asset) drives.
+				"PCGEditor",
 				"PoseSearch",
 				"PoseSearchEditor",
 				"PropertyBindingUtils",
