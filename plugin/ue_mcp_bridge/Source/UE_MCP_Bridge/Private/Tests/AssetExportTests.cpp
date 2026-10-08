@@ -184,12 +184,11 @@ bool FMCPDataTableExportValidationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("invalid format leaves existing output intact"), After, Before);
 
 	// A format override must never turn a package (or any other file) into text.
-	// The sentinel .uasset files sit in the mounted folder, so the asset registry
-	// may scan them and report them unloadable. That is the point of the sentinel.
-	AddExpectedError(TEXT("Package is unloadable"), EAutomationExpectedErrorFlags::Contains, 0);
+	// Outside the mount, so the asset registry never scans the sentinel .uasset files.
+	const FString RejectRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UEMCPExportRejectTest"), FGuid::NewGuid().ToString(EGuidFormats::Digits)));
 	for (const TCHAR* Name : { TEXT("DT_Items.uasset"), TEXT("DT_Items.UASSET"), TEXT("table.txt"), TEXT("no_extension"), TEXT("table.json.uasset") })
 	{
-		const FString RejectedFile = FPaths::Combine(Mount.ContentPath, Name);
+		const FString RejectedFile = FPaths::Combine(RejectRoot, Name);
 		const TArray<uint8> Sentinel = { 0xC1, 0x83, 0x2A, 0x9E, 0x00, 0xFF };
 		if (!TestTrue(TEXT("sentinel file written"), FFileHelper::SaveArrayToFile(Sentinel, *RejectedFile))) return false;
 		for (const TCHAR* Format : { TEXT(""), TEXT("json"), TEXT("csv") })
@@ -202,10 +201,11 @@ bool FMCPDataTableExportValidationTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("rejected file bytes are unchanged"), Preserved == Sentinel);
 		}
 	}
-	const FString RejectedDirectory = FPaths::Combine(Mount.ContentPath, TEXT("rejected"));
+	const FString RejectedDirectory = FPaths::Combine(RejectRoot, TEXT("rejected"));
 	const auto RejectedNew = UEMCPAssetExportTests::Export(Registry, Table, FPaths::Combine(RejectedDirectory, TEXT("new.uasset")), TEXT("json"));
 	if (!TestTrue(TEXT("new unsupported output rejected"), RejectedNew.IsValid() && !RejectedNew->GetBoolField(TEXT("success")))) return false;
 	TestFalse(TEXT("rejection does not create output directories"), IFileManager::Get().DirectoryExists(*RejectedDirectory));
+	IFileManager::Get().DeleteDirectory(*RejectRoot, false, true);
 
 	Table->RowStruct = nullptr;
 	const FString MissingStructFile = FPaths::Combine(Mount.ContentPath, TEXT("invalid/no_struct.csv"));
