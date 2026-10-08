@@ -105,6 +105,77 @@ namespace
 		const bool bSaved = SaveAssetPackageChecked(Target.Graph, SaveError);
 		MCPNoteSaveOutcome(Result, Target.Graph->GetPathName(), bSaved, SaveError);
 	}
+	bool MCPApplySubgraphParameters(const FMCPSubgraphNode& Target, const TSharedPtr<FJsonObject>& Values,
+		TSharedPtr<FJsonObject>& PreviousValues, FString& Error)
+	{
+		UPCGGraphInstance* Instance = Target.Settings->SubgraphInstance.Get();
+		// The mutable accessor is protected; the instance owns this bag, and UpdatePropertyOverride below is its notification.
+		FInstancedPropertyBag* Bag = Instance ? const_cast<FInstancedPropertyBag*>(Instance->GetUserParametersStruct()) : nullptr;
+		const UPropertyBag* BagStruct = Bag ? Bag->GetPropertyBagStruct() : nullptr;
+		if (!BagStruct)
+		{
+			Error = TEXT("The node's subgraph has no user parameters. Assign one with set_subgraph first.");
+			return false;
+		}
+
+		// Every value is written to a scratch copy first, so a bad entry refuses the call with nothing changed.
+		FInstancedPropertyBag Scratch = *Bag;
+		TArray<FString> Problems;
+		struct FWrite { const FPropertyBagPropertyDesc* Desc; bool bClear; };
+		TArray<FWrite> Writes;
+		for (const auto& Pair : Values->Values)
+		{
+			const FString Name(*Pair.Key);
+			const FPropertyBagPropertyDesc* Desc = BagStruct->FindPropertyDescByName(FName(*Name));
+			if (!Desc || !Desc->CachedProperty)
+			{
+				Problems.Add(FString::Printf(TEXT("%s is not a parameter of this subgraph"), *Name));
+				continue;
+			}
+			const bool bClear = !Pair.Value.IsValid() || Pair.Value->IsNull();
+			if (!bClear)
+			{
+				FString ValueError;
+				void* Addr = Desc->CachedProperty->ContainerPtrToValuePtr<void>(Scratch.GetMutableValue().GetMemory());
+				if (!MCPJsonProperty::SetJsonOnProperty(const_cast<FProperty*>(Desc->CachedProperty), Addr, Pair.Value, ValueError))
+				{
+					Problems.Add(FString::Printf(TEXT("%s: %s"), *Name, *ValueError));
+					continue;
+				}
+			}
+			Writes.Add({ Desc, bClear });
+		}
+		if (Problems.Num() > 0)
+		{
+			Error = FString::Printf(TEXT("Nothing was changed: %s. set_subgraph lists the parameters."), *FString::Join(Problems, TEXT("; ")));
+			return false;
+		}
+
+		PreviousValues = MakeShared<FJsonObject>();
+		Target.Graph->Modify();
+		Target.Settings->Modify();
+		Instance->Modify();
+		const void* Live = Bag->GetValue().GetMemory();
+		for (const FWrite& W : Writes)
+		{
+			const FProperty* Prop = W.Desc->CachedProperty;
+			PreviousValues->SetField(W.Desc->Name.ToString(), Instance->IsPropertyOverridden(Prop)
+				? MCPSubgraphParamValue(Prop, Prop->ContainerPtrToValuePtr<void>(Live))
+				: MakeShared<FJsonValueNull>());
+		}
+		for (const FWrite& W : Writes)
+		{
+			const FProperty* Prop = W.Desc->CachedProperty;
+			if (!W.bClear)
+			{
+				Prop->CopyCompleteValue(Prop->ContainerPtrToValuePtr<void>(Bag->GetMutableValue().GetMemory()),
+					Prop->ContainerPtrToValuePtr<void>(Scratch.GetValue().GetMemory()));
+			}
+			Instance->UpdatePropertyOverride(Prop, !W.bClear);
+		}
+		return true;
+	}
+
 }
 
 TSharedPtr<FJsonValue> FPCGHandlers::SetSubgraph(const TSharedPtr<FJsonObject>& Params)
@@ -172,69 +243,9 @@ TSharedPtr<FJsonValue> FPCGHandlers::SetSubgraphParameters(const TSharedPtr<FJso
 		return MCPError(TEXT("Missing 'parameters': an object of {parameterName: value}; null clears that override."));
 	}
 
-	UPCGGraphInstance* Instance = Target.Settings->SubgraphInstance.Get();
-	// The mutable accessor is protected; the instance owns this bag, and UpdatePropertyOverride below is its notification.
-	FInstancedPropertyBag* Bag = Instance ? const_cast<FInstancedPropertyBag*>(Instance->GetUserParametersStruct()) : nullptr;
-	const UPropertyBag* BagStruct = Bag ? Bag->GetPropertyBagStruct() : nullptr;
-	if (!BagStruct)
-	{
-		return MCPError(TEXT("The node's subgraph has no user parameters. Assign one with set_subgraph first."));
-	}
-
-	// Every value is written to a scratch copy first, so a bad entry refuses the call with nothing changed.
-	FInstancedPropertyBag Scratch = *Bag;
-	TArray<FString> Problems;
-	struct FWrite { const FPropertyBagPropertyDesc* Desc; bool bClear; };
-	TArray<FWrite> Writes;
-	for (const auto& Pair : (*Values)->Values)
-	{
-		const FString Name(*Pair.Key);
-		const FPropertyBagPropertyDesc* Desc = BagStruct->FindPropertyDescByName(FName(*Name));
-		if (!Desc || !Desc->CachedProperty)
-		{
-			Problems.Add(FString::Printf(TEXT("%s is not a parameter of this subgraph"), *Name));
-			continue;
-		}
-		const bool bClear = !Pair.Value.IsValid() || Pair.Value->IsNull();
-		if (!bClear)
-		{
-			FString Error;
-			void* Addr = Desc->CachedProperty->ContainerPtrToValuePtr<void>(Scratch.GetMutableValue().GetMemory());
-			if (!MCPJsonProperty::SetJsonOnProperty(const_cast<FProperty*>(Desc->CachedProperty), Addr, Pair.Value, Error))
-			{
-				Problems.Add(FString::Printf(TEXT("%s: %s"), *Name, *Error));
-				continue;
-			}
-		}
-		Writes.Add({ Desc, bClear });
-	}
-	if (Problems.Num() > 0)
-	{
-		return MCPError(FString::Printf(TEXT("Nothing was changed: %s. set_subgraph lists the parameters."), *FString::Join(Problems, TEXT("; "))));
-	}
-
-	TSharedPtr<FJsonObject> PreviousValues = MakeShared<FJsonObject>();
-	Target.Graph->Modify();
-	Target.Settings->Modify();
-	Instance->Modify();
-	const void* Live = Bag->GetValue().GetMemory();
-	for (const FWrite& W : Writes)
-	{
-		const FProperty* Prop = W.Desc->CachedProperty;
-		PreviousValues->SetField(W.Desc->Name.ToString(), Instance->IsPropertyOverridden(Prop)
-			? MCPSubgraphParamValue(Prop, Prop->ContainerPtrToValuePtr<void>(Live))
-			: MakeShared<FJsonValueNull>());
-	}
-	for (const FWrite& W : Writes)
-	{
-		const FProperty* Prop = W.Desc->CachedProperty;
-		if (!W.bClear)
-		{
-			Prop->CopyCompleteValue(Prop->ContainerPtrToValuePtr<void>(Bag->GetMutableValue().GetMemory()),
-				Prop->ContainerPtrToValuePtr<void>(Scratch.GetValue().GetMemory()));
-		}
-		Instance->UpdatePropertyOverride(Prop, !W.bClear);
-	}
+	TSharedPtr<FJsonObject> PreviousValues;
+	FString Error;
+	if (!MCPApplySubgraphParameters(Target, *Values, PreviousValues, Error)) return MCPError(Error);
 
 	auto Result = MCPSuccess();
 	Result->SetStringField(TEXT("nodeName"), Target.Node->GetName());
@@ -250,4 +261,49 @@ TSharedPtr<FJsonValue> FPCGHandlers::SetSubgraphParameters(const TSharedPtr<FJso
 	Payload->SetObjectField(TEXT("parameters"), PreviousValues);
 	MCPSetRollback(Result, TEXT("set_pcg_subgraph_parameters"), Payload);
 	return MCPResult(Result);
+}
+
+// Export the graph asset and overridden values, never a path to the node-owned instance.
+void FPCGHandlers::ExportSubgraphSettings(const UPCGSettings* Settings, const TSharedPtr<FJsonObject>& Node)
+{
+	const auto* Subgraph = Cast<UPCGSubgraphSettings>(Settings);
+	if (!Subgraph) return;
+	auto Snapshot = MakeShared<FJsonObject>();
+	Snapshot->SetStringField(TEXT("path"), MCPSubgraphPathOf(Subgraph));
+	auto Overrides = MakeShared<FJsonObject>();
+	for (const auto& Value : MCPDescribeSubgraphParameters(const_cast<UPCGSubgraphSettings*>(Subgraph)))
+	{
+		const auto Param = Value->AsObject();
+		if (Param->GetBoolField(TEXT("overridden"))) Overrides->SetField(Param->GetStringField(TEXT("name")), Param->TryGetField(TEXT("value")));
+	}
+	Snapshot->SetObjectField(TEXT("parameters"), Overrides);
+	Node->SetObjectField(TEXT("subgraph"), Snapshot);
+}
+
+bool FPCGHandlers::ImportSubgraphSettings(UPCGSettings* Settings, const TSharedPtr<FJsonObject>& Node, FString& Error)
+{
+	if (!Node->HasField(TEXT("subgraph"))) return true;
+	const TSharedPtr<FJsonObject>* Snapshot = nullptr;
+	FString Path;
+	const TSharedPtr<FJsonObject>* Overrides = nullptr;
+	auto* Subgraph = Cast<UPCGSubgraphSettings>(Settings);
+	if (!Subgraph || !Node->TryGetObjectField(TEXT("subgraph"), Snapshot) || !Snapshot
+		|| !(*Snapshot)->TryGetStringField(TEXT("path"), Path)
+		|| !(*Snapshot)->TryGetObjectField(TEXT("parameters"), Overrides) || !Overrides)
+	{
+		Error = TEXT("subgraph requires a Subgraph node and {path, parameters} snapshot");
+		return false;
+	}
+	UPCGGraphInterface* Graph = Path.IsEmpty() ? nullptr : LoadAssetByPath<UPCGGraphInterface>(Path);
+	if (!Path.IsEmpty() && !Graph)
+	{
+		Error = FString::Printf(TEXT("subgraph asset could not be loaded: %s"), *Path);
+		return false;
+	}
+	Subgraph->SetSubgraph(Graph);
+	FMCPSubgraphNode Target{Settings->GetTypedOuter<UPCGGraph>(), Settings->GetTypedOuter<UPCGNode>(), Subgraph};
+	Target.Node->UpdateAfterSettingsChangeDuringCreation();
+	if ((*Overrides)->Values.Num() == 0) return true;
+	TSharedPtr<FJsonObject> Previous;
+	return MCPApplySubgraphParameters(Target, *Overrides, Previous, Error);
 }

@@ -148,6 +148,92 @@ describe("animation Control Rig edit workflow", () => {
     expect(animationTool.actions.contact_lock).toBeUndefined();
   });
 
+  it("keys batched operations in call order, each sampled after the ones before it landed", () => {
+    const source = readHandlerFile("AnimationHandlers_ControlRigSequencer.cpp");
+    const commit = source.slice(
+      source.indexOf("TSharedPtr<FJsonValue> ControlRigEditsCommit("),
+      source.indexOf("TSharedPtr<FJsonObject> ControlRigEditsBuildResult("),
+    );
+
+    // A child's component-space offset batched after its parent's was sampled
+    // before the parent was keyed, which erased the parent's edit. The commit
+    // re-prepares each operation through the ordering seam the native
+    // UE.MCP.Animation.ControlRig.BatchedOffsetsComposeLikeSequentialCalls test drives.
+    expect(commit).toContain("ControlRigEditsKeyInCallOrder(Operations.Num(),");
+    expect(commit.indexOf("ControlRigEditsPrepareOperation(*Step, Operations, OperationIndex)")).toBeGreaterThan(
+      commit.indexOf("FScopedTransaction"),
+    );
+    expect(commit.indexOf("ControlRigEditsApplyWrite(Session, Write, ApplyError)")).toBeGreaterThan(
+      commit.indexOf("ControlRigEditsPrepareOperation(*Step, Operations, OperationIndex)"),
+    );
+    expect(commit).not.toContain("for (const FControlRigPreparedWrite& Write : Plan.Prepared)");
+    expect(source).toContain('"UE.MCP.Animation.ControlRig.BatchedOffsetsComposeLikeSequentialCalls"');
+
+    // Operations are undone last-first, so each restore meets the parent pose it was sampled under.
+    expect(source).toContain("InverseOperations.Insert(MakeShared<FJsonValueObject>(Operation), InsertAt++)");
+    expect(source).not.toContain("InverseOperations.Add(");
+  });
+
+  it("rechecks every keyed contact after later operations and before the transaction closes", () => {
+    const source = readHandlerFile("AnimationHandlers_ControlRigSequencer.cpp");
+    const commit = source.slice(
+      source.indexOf("TSharedPtr<FJsonValue> ControlRigEditsCommit("),
+      source.indexOf("TSharedPtr<FJsonObject> ControlRigEditsBuildResult("),
+    );
+
+    // A contact_lock can pass its immediate QA, then a later clavicle offset
+    // moves the locked hand. Verify the accumulated contacts after the ordered
+    // callbacks finish, inside the transaction, and route failure to undo.
+    expect(commit).toMatch(
+      /KeyedContacts\.Append\(MoveTemp\(Step->PreparedContacts\)\);\s*return bKeyed;\s*\}\);\s*(?:\/\/[^\n]*\n\s*)*if \(!bApplyFailed\)\s*\{\s*bApplyFailed = !ControlRigEditsVerifyContacts\(Session, KeyedContacts, ApplyError\);\s*\}\s*\}\s*if \(bApplyFailed\)\s*\{\s*const bool bRolledBack = GEditor && GEditor->UndoTransaction\(\);/,
+    );
+    expect(commit.match(/ControlRigEditsVerifyContacts\(Session, KeyedContacts, ApplyError\)/g)).toHaveLength(1);
+    expect(commit.indexOf("Plan.PreparedContacts = MoveTemp(KeyedContacts)")).toBeGreaterThan(
+      commit.indexOf("return MCPError(ApplyError);"),
+    );
+    expect(commit.indexOf("SaveAssetPackageChecked(")).toBeGreaterThan(
+      commit.indexOf("Plan.PreparedContacts = MoveTemp(KeyedContacts)"),
+    );
+  });
+
+  it("checks driven contact component poses after the whole batch", () => {
+    const source = readHandlerFile("AnimationHandlers_ControlRigSequencer.cpp");
+    const verify = source.slice(
+      source.indexOf("bool ControlRigEditsVerifyContacts("),
+      source.indexOf("TSharedPtr<FJsonValue> ControlRigEditsPrepareOperation("),
+    );
+    expect(source).toContain("ContactQA.ReadbackControl = FkChainControls.Last()");
+    expect(source).toContain("ContactQA.ExpectedControl[FrameIndex] = TargetEnd");
+    expect(source).toContain("ContactQA.ExpectedControl = Write.After");
+    expect(verify).not.toContain("if (!Contact.bHasDrivenReference)");
+    expect(verify).toContain("Contact.bHasDrivenReference ? Contact.ReadbackControl : Contact.Control");
+    expect(verify).toContain("Contact.bHasDrivenReference ? Contact.ExpectedControl : Contact.ExpectedSubject");
+    expect(verify).toContain("Contact.Frames, Expected, Actual[0].Transforms");
+    expect(verify).toContain("contact_constraint_tolerance_exceeded");
+  });
+
+  it("refuses later contacts that would mix keyed poses with raw animation references", () => {
+    const source = readHandlerFile("AnimationHandlers_ControlRigSequencer.cpp");
+    const prepare = source.slice(
+      source.indexOf("TSharedPtr<FJsonValue> ControlRigEditsPrepareContactLock("),
+      source.indexOf("TSharedPtr<FJsonValue> ControlRigEditsPrepareTransformValues("),
+    );
+    expect(prepare).toContain("OperationIndex > 0 && (bHasTargetReference || (bHasDrivenReference && !bUseFkRotationChain))");
+    const refusal = prepare.indexOf("contact_lock_reference_batch_unsupported");
+    expect(refusal).toBeGreaterThan(-1);
+    expect(refusal).toBeLessThan(prepare.indexOf("ControlRigSequencerSampleReferenceTransforms("));
+  });
+
+  it("requires bake analysis for target references even without a driven reference", () => {
+    const source = readHandlerFile("AnimationHandlers_ControlRigSequencer.cpp");
+    const result = source.slice(
+      source.indexOf("TSharedPtr<FJsonObject> ControlRigEditsBuildResult("),
+      source.indexOf("void ControlRigEditsAttachInverse("),
+    );
+    expect(result).toMatch(/if \(Contact\.bHasDrivenReference \|\| Contact\.bHasTargetReference\)\s*\{\s*Object->SetStringField\(TEXT\("verification"\), TEXT\("bake_and_analyze_required"\)\);\s*\}\s*else\s*\{\s*Object->SetBoolField\(TEXT\("passed"\), true\);/);
+    expect(result).not.toContain('if (!Contact.bHasDrivenReference) Object->SetBoolField(TEXT("passed"), true)');
+  });
+
   it("makes partial IK retarget mappings explicit in batch results", () => {
     const source = readHandlerFile("AnimationHandlers_StateMachine.cpp");
 

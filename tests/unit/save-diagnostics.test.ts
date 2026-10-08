@@ -44,4 +44,12 @@ describe("save failures carry the engine's reason (#1120)", () => {
     expect(body(assetHandlers, "TSharedPtr<FJsonValue> FAssetHandlers::SaveAsset(")).toContain("MCPAttachSaveDiagnostics(Result, SaveDiagnostics);");
     expect(body(assetHandlers, "TSharedPtr<FJsonValue> FAssetHandlers::SaveAllDirty(")).toContain("MCPAttachSaveDiagnostics(Result, SaveDiagnostics);");
   });
+
+  it("never falls back from a missing object to saving its loaded package", () => {
+    const targeted = body(assetHandlers, "TSharedPtr<FJsonValue> MCPSaveNamedPackages(");
+    expect(targeted).toContain("Path == PackageName ? FindPackage(nullptr, *PackageName) : nullptr");
+    expect(targeted.indexOf("if (Refused.Num() > 0)")).toBeLessThan(
+      targeted.indexOf("UEditorLoadingAndSavingUtils::SavePackages("),
+    );
+  });
 });
