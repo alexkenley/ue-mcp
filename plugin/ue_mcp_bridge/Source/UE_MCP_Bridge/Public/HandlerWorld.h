@@ -130,6 +130,23 @@ inline UWorld* ResolveWorldFromParams(const TSharedPtr<FJsonObject>& Params, con
 	return ResolveWorldScope(Scope, PIEInstance);
 }
 
+/** A world's kind as the short string responses report: editor, pie, game,
+ *  editorPreview, gamePreview, inactive or none. */
+inline const TCHAR* MCPDescribeWorldType(const UWorld* World)
+{
+	if (!World) return TEXT("none");
+	switch (World->WorldType)
+	{
+		case EWorldType::Editor:        return TEXT("editor");
+		case EWorldType::PIE:           return TEXT("pie");
+		case EWorldType::Game:          return TEXT("game");
+		case EWorldType::EditorPreview: return TEXT("editorPreview");
+		case EWorldType::GamePreview:   return TEXT("gamePreview");
+		case EWorldType::Inactive:      return TEXT("inactive");
+		default:                        return TEXT("none");
+	}
+}
+
 /** Get the editor world or return an error response. */
 #define REQUIRE_EDITOR_WORLD(WorldVar) \
 	UWorld* WorldVar = GetEditorWorld(); \
