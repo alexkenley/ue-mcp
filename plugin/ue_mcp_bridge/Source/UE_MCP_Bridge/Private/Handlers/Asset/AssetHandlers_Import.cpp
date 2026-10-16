@@ -1265,10 +1265,14 @@ TSharedPtr<FJsonValue> FAssetHandlers::ImportTextureBatch(const TSharedPtr<FJson
 		{
 			UTexture2D* Texture = Cast<UTexture2D>(Object);
 			if (!Texture) continue;
-			Texture->Modify();
-			AssetTextureSettings::Apply(Texture, Settings[Index]);
-			Texture->PostEditChange();
-			Texture->MarkPackageDirty();
+			// An entry with no settings keeps the import as it is, with no second build.
+			if (Settings[Index]->Values.Num() > 0)
+			{
+				Texture->Modify();
+				AssetTextureSettings::Apply(Texture, Settings[Index]);
+				Texture->PostEditChange();
+				Texture->MarkPackageDirty();
+			}
 			FString SaveError;
 			const bool bTextureSaved = bSave && SaveAssetPackageChecked(Texture, SaveError);
 			bSaved &= bTextureSaved;
