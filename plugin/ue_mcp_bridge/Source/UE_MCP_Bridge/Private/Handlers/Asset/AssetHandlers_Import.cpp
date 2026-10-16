@@ -2321,7 +2321,14 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadDataTable(const TSharedPtr<FJsonObjec
 			{
 				return MCPError(TEXT("'rowNames' must be an array of non-empty row names"));
 			}
-			WantedRows.AddUnique(FName(*RowName.TrimStartAndEnd()));
+			RowName.TrimStartAndEndInline();
+			// FName asserts on a name this long, and no row can carry one.
+			if (RowName.Len() >= NAME_SIZE)
+			{
+				return MCPError(FString::Printf(
+					TEXT("'rowNames' holds a name of %d characters; a row name is at most %d"), RowName.Len(), NAME_SIZE - 1));
+			}
+			WantedRows.AddUnique(FName(*RowName));
 		}
 	}
 

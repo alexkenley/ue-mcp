@@ -1499,6 +1499,8 @@ bool FDataTableReadRowNamesTest::RunTest(const FString& Parameters)
 	{
 		FString Error;
 		TestFalse(TEXT("an empty rowNames is refused"), ResponseSucceeded(Read(TArray<FString>(), nullptr), Error));
+		const TArray<FString> TooLong = { FString::ChrN(NAME_SIZE, TEXT('a')) };
+		TestFalse(TEXT("a name past the FName limit is refused, not asserted on"), ResponseSucceeded(Read(TooLong, nullptr), Error));
 	}
 	return true;
 }
