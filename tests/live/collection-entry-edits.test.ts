@@ -111,7 +111,8 @@ describe("native collection entry edits", () => {
     const source = await call("get_datatable_row", { assetPath: tablePath, rowName: "Source" });
     expect(source.fields.Count).toBe("5");
     expect(result.rollback.payload.save).toBe(false);
-    const removed = await call(result.rollback.method, result.rollback.payload);
+    expect(result.rollback.method).toBe("remove_datatable_row");
+    const removed = await call("remove_datatable_row", result.rollback.payload);
     expect(removed.removedRows).toEqual(["First", "Second"]);
     expect(removed.rowCount).toBe(1);
     expect(removed.persisted).toBe(false);
