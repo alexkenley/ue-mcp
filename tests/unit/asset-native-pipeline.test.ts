@@ -128,6 +128,6 @@ describe("master material discovery", () => {
     expect(materialTool.actions.add_expression.description).toContain("TextureSampleParameter2D");
     expect(materialTool.actions.add_expression.description).toContain("packed RMA");
     expect(materialTool.actions.create_instance.description).toContain("batch_set_instances");
-    expect(materialTool.actions.build_material.description).toContain("UV scale");
+    expect(materialTool.actions.build_material.description).toContain("textureParameters");
   });
 });
