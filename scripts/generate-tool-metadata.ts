@@ -253,10 +253,9 @@ const MARKER_FILES = [
   "docs/tool-reference.md",
 ];
 
-function applyMarkersToFiles(counts: Counts, docsOnly = false): string[] {
+function applyMarkersToFiles(counts: Counts): string[] {
   const updated: string[] = [];
   for (const rel of MARKER_FILES) {
-    if (docsOnly && !rel.startsWith("docs/")) continue;
     const file = path.join(repo, rel);
     if (!fs.existsSync(file)) continue;
     const before = fs.readFileSync(file, "utf8");
@@ -325,12 +324,6 @@ function updatePluginDescriptor(counts: Counts): boolean {
 
 function main(): void {
   const counts = computeCounts();
-  if (process.argv.includes("--docs-only")) {
-    const ref = regenerateToolReference(counts);
-    applyMarkersToFiles(counts, true);
-    console.log(`wrote ${path.relative(repo, ref)}`);
-    return;
-  }
   const json = writeCountsJson(counts);
   const ref = regenerateToolReference(counts);
   const updated = applyMarkersToFiles(counts);
