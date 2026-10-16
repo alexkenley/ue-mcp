@@ -1544,7 +1544,7 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetComponentTree(const TSharedPtr<FJsonOb
 		AActor* PathActor = (!bWorldGiven && !ActorPathParam.IsEmpty())
 			? FindObject<AActor>(nullptr, *FPackageName::ExportTextPathToObjectPath(ActorPathParam))
 			: nullptr;
-		UWorld* PathWorld = PathActor ? PathActor->GetWorld() : nullptr;
+		UWorld* PathWorld = IsValid(PathActor) ? PathActor->GetWorld() : nullptr;
 		World = PathWorld ? PathWorld : ResolveWorldFromParams(Params, *WorldScope);
 	}
 	if (!World)
