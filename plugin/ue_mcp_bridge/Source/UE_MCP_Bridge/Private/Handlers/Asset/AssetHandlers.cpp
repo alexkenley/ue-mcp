@@ -1349,7 +1349,8 @@ TSharedPtr<FJsonValue> FAssetHandlers::ListAssets(const TSharedPtr<FJsonObject>&
 	FARFilter Filter;
 	Filter.PackagePaths.Add(FName(*Directory));
 	Filter.bRecursivePaths = bRecursive;
-	Filter.bRecursiveClasses = bRecursiveClasses;
+	// Without classPaths there is nothing to expand; an empty recursive class filter would expand to every class.
+	Filter.bRecursiveClasses = bRecursiveClasses && ClassNames.Num() > 0;
 	for (const FString& Path : ClassNames) Filter.ClassPaths.Add(FTopLevelAssetPath(Path));
 	Registry.GetAssets(Filter, Found);
 
