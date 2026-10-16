@@ -2387,29 +2387,11 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadDataTable(const TSharedPtr<FJsonObjec
 	TArray<TSharedPtr<FJsonValue>> MissingRows;
 	if (bParsed)
 	{
-		// Apply row filter if specified
-		if (!RowFilter.IsEmpty())
-		{
-			FString FilterLower = RowFilter.ToLower();
-			TArray<TSharedPtr<FJsonValue>> FilteredRows;
-			for (const TSharedPtr<FJsonValue>& RowValue : ParsedRows)
-			{
-				if (RowValue.IsValid() && RowValue->Type == EJson::Object)
-				{
-					const TSharedPtr<FJsonObject>& RowObj = RowValue->AsObject();
-					FString RowName;
-					if (RowObj->TryGetStringField(TEXT("Name"), RowName) && RowName.ToLower().Contains(FilterLower))
-					{
-						FilteredRows.Add(RowValue);
-					}
-				}
-			}
-			ParsedRows = MoveTemp(FilteredRows);
-		}
-
 		// Row names are FNames, so they match case-insensitively, as the
 		// table's own FindRow does. A name the table lacks is reported rather
 		// than refused, so one stale name does not cost the rest of the read.
+		// Selected before rowFilter, so a name rowFilter drops is not reported
+		// as missing from the table.
 		if (bHasRowNames)
 		{
 			TMap<FName, TSharedPtr<FJsonValue>> ByName;
@@ -2429,6 +2411,26 @@ TSharedPtr<FJsonValue> FAssetHandlers::ReadDataTable(const TSharedPtr<FJsonObjec
 				else MissingRows.Add(MakeShared<FJsonValueString>(Wanted.ToString()));
 			}
 			ParsedRows = MoveTemp(Selected);
+		}
+
+		// Apply row filter if specified
+		if (!RowFilter.IsEmpty())
+		{
+			FString FilterLower = RowFilter.ToLower();
+			TArray<TSharedPtr<FJsonValue>> FilteredRows;
+			for (const TSharedPtr<FJsonValue>& RowValue : ParsedRows)
+			{
+				if (RowValue.IsValid() && RowValue->Type == EJson::Object)
+				{
+					const TSharedPtr<FJsonObject>& RowObj = RowValue->AsObject();
+					FString RowName;
+					if (RowObj->TryGetStringField(TEXT("Name"), RowName) && RowName.ToLower().Contains(FilterLower))
+					{
+						FilteredRows.Add(RowValue);
+					}
+				}
+			}
+			ParsedRows = MoveTemp(FilteredRows);
 		}
 
 		// Project after the filter, so only the rows that are going out are

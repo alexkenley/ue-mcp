@@ -1476,6 +1476,25 @@ bool FDataTableReadRowNamesTest::RunTest(const FString& Parameters)
 		}
 	}
 
+	// ── With rowFilter, a row the filter drops is not reported as missing.
+	{
+		TSharedPtr<FJsonObject> Params = MakeDataTableReadParams(Table, TEXT("Alpha"), FString());
+		Params->SetArrayField(TEXT("rowNames"), MCPStringListToJson(TArray<FString>{ TEXT("Beta"), TEXT("AlphaTwo") }));
+		const TSharedPtr<FJsonValue> Response = Registry.ExecuteHandler(TEXT("read_datatable"), Params);
+		FString Error;
+		if (!TestTrue(FString::Printf(TEXT("the filtered rowNames read succeeded (%s)"), *Error), ResponseSucceeded(Response, Error))) return false;
+		const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
+		if (TestTrue(TEXT("it returns rows"), Response->AsObject()->TryGetArrayField(TEXT("rows"), Rows)) && TestEqual(TEXT("only the row both select"), Rows->Num(), 1))
+		{
+			TestEqual(TEXT("which is AlphaTwo"), (*Rows)[0]->AsObject()->GetStringField(TEXT("Name")), FString(TEXT("AlphaTwo")));
+		}
+		const TArray<TSharedPtr<FJsonValue>>* Missing = nullptr;
+		if (TestTrue(TEXT("missingRowNames is present"), Response->AsObject()->TryGetArrayField(TEXT("missingRowNames"), Missing)))
+		{
+			TestEqual(TEXT("and empty, since Beta is in the table"), Missing->Num(), 0);
+		}
+	}
+
 	// ── An empty list is refused rather than read as "every row".
 	{
 		FString Error;
