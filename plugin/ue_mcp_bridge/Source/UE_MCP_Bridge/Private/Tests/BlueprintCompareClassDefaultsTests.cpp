@@ -121,6 +121,7 @@ bool FBlueprintCompareClassDefaultsTest::RunTest(const FString& Parameters)
 		if (TestNotNull(TEXT("the default-object override is reported"), LifeSpan.Get()))
 		{
 			TestEqual(TEXT("with the native value"), FCString::Atof(*LifeSpan->GetStringField(TEXT("value"))), 0.0f);
+			TestFalse(TEXT("a zero value is written out, not left blank"), LifeSpan->GetStringField(TEXT("value")).IsEmpty());
 			TestEqual(TEXT("and the Blueprint value"), FCString::Atof(*LifeSpan->GetStringField(TEXT("otherValue"))), 7.5f);
 			TestEqual(TEXT("and where it is declared"), LifeSpan->GetStringField(TEXT("declaredIn")), FString(TEXT("Actor")));
 		}

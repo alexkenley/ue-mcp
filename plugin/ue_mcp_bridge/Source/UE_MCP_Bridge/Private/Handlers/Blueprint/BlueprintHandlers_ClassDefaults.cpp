@@ -49,7 +49,8 @@ namespace
 	FString MCPClassDefaultsExport(const FProperty* Property, const void* Container, UObject* Owner)
 	{
 		FString Text;
-		Property->ExportText_InContainer(0, Text, Container, nullptr, Owner, PPF_None);
+		// ExportTextItem, not ExportText: the latter writes nothing for a zero value.
+		Property->ExportTextItem_InContainer(Text, Container, nullptr, Owner, PPF_None);
 		if (Property->ArrayDim > 1)
 		{
 			// A fixed array is one FProperty; export every element so a
@@ -58,7 +59,7 @@ namespace
 			for (int32 Index = 1; Index < Property->ArrayDim; ++Index)
 			{
 				FString Element;
-				Property->ExportText_InContainer(Index, Element, Container, nullptr, Owner, PPF_None);
+				Property->ExportTextItem_Direct(Element, Property->ContainerPtrToValuePtr<void>(Container, Index), nullptr, Owner, PPF_None);
 				Text += TEXT(",") + Element;
 			}
 			Text += TEXT(")");
