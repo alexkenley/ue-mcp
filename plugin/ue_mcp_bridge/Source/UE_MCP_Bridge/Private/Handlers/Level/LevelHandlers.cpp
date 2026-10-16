@@ -1534,7 +1534,7 @@ TSharedPtr<FJsonValue> FLevelHandlers::GetComponentTree(const TSharedPtr<FJsonOb
 		if (!World)
 		{
 			return MCPError(FString::Printf(
-				TEXT("No loaded world at '%s'. A preview world exists only while its editor is open; editor(find_live_objects, className=\"World\") lists the live ones."),
+				TEXT("No loaded world at '%s'. A preview world exists only while its editor is open; editor(find_object, className=\"World\") lists the live ones."),
 				*WorldScope));
 		}
 	}
