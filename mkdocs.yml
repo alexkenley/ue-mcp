@@ -64,6 +64,7 @@ nav:
   - Spatial Instructions: spatial-instructions.md
   - Collection and Input Editing: collection-and-input-editing.md
   - Native Tools: native-tools.md
+  - Native Asset Pipeline: native-asset-pipeline.md
   - Handler Conventions: handler-conventions.md
   - Release Notes Style: release-notes-style.md
   - Widgets:
