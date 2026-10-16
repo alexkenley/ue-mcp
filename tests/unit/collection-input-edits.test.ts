@@ -81,7 +81,7 @@ describe("collection and input edits", () => {
   });
 
   it("makes covered operations discoverable in action descriptions", () => {
-    expect(assetTool.actions.set_property.description).toContain("WeaponProfiles[WeaponId=Kar98K]");
+    expect(assetTool.actions.set_property.description).toContain("edit_collection_entry");
     expect(assetTool.actions.duplicate.description).toContain("InputAction");
     expect(gameplayTool.actions.read_imc.description).toContain("SettingBehavior");
     expect(gameplayTool.actions.read_imc.description).toContain("PlayerMappableKeySettings");
