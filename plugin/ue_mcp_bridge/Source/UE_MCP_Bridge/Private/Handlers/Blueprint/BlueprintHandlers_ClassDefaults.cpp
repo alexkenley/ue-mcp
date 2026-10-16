@@ -213,8 +213,8 @@ TSharedPtr<FJsonValue> FBlueprintHandlers::CompareClassDefaults(const TSharedPtr
 		return MCPError(FString::Printf(TEXT("No class default object for %s"), *(!DefaultObject ? Class : Other)->GetPathName()));
 	}
 
-	// Iterate the deeper class so its inherited properties are all visited; the
-	// shared ones are exactly those whose owner the other class also derives from.
+	// Iterating the first class visits every shared property whichever class is
+	// deeper: a shared property is one whose owner both classes derive from.
 	FMCPClassDefaultsOutput Out;
 	TSet<const UObject*> Visited;
 	MCPClassDefaultsCompare(Class, Other, DefaultObject, DefaultObject, OtherDefaultObject, OtherDefaultObject,
