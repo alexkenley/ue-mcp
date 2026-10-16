@@ -99,7 +99,7 @@ The query uses saved hard and soft package references. Save newly created or cha
 
 ## Parameterized master materials
 
-Master-material authoring is already covered by `material(create)`, `add_expression`, `set_expression_value`, `connect_expressions`, `connect_to_property`, `recompile`, `create_instance`, and `batch_set_instances`. `build_material` builds a fixed texture graph; use expression authoring when the texture slots must become instance parameters.
+Master-material authoring is already covered by `material(create)`, `add_expression`, `set_expression_value`, `connect_expressions`, `connect_to_property`, `recompile`, `create_instance`, and `batch_set_instances`. `build_material` can also build a parameterized master and its instances in one call (`textureParameters`, `parameters`, `nodes`, `instances`); the step-by-step recipe below gives control over each node.
 
 Create the material first, then add these nodes. Give each node the listed `name` and use `parameterName` on parameter nodes. Keep each returned `expressionIndex` for setting defaults.
 
