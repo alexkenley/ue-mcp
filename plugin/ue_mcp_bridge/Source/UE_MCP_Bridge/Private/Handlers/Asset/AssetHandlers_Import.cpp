@@ -4227,11 +4227,14 @@ TSharedPtr<FJsonValue> FAssetHandlers::ExportAsset(const TSharedPtr<FJsonObject>
 	}
 
 	TSharedPtr<FJsonObject> InstanceData;
+	// A .json outputPath (or format=json) writes the resolved parameters; any
+	// other extension keeps the registered exporter (T3D, COPY).
 	if (UMaterialInstance* Instance = Cast<UMaterialInstance>(Asset))
 	{
-		if (!FPaths::GetExtension(AbsOutputPath).Equals(TEXT("json"), ESearchCase::IgnoreCase) || (!RequestedFormat.IsEmpty() && RequestedFormat != TEXT("json")))
-			return MCPError(TEXT("MaterialInstance export requires a .json outputPath and format=json when specified"));
-		InstanceData = FMaterialHandlers::DescribeMaterialInstance(Instance);
+		const bool bJsonExtension = FPaths::GetExtension(AbsOutputPath).Equals(TEXT("json"), ESearchCase::IgnoreCase);
+		if (RequestedFormat == TEXT("json") && !bJsonExtension)
+			return MCPError(TEXT("MaterialInstance format=json requires a .json outputPath"));
+		if (bJsonExtension) InstanceData = FMaterialHandlers::DescribeMaterialInstance(Instance);
 	}
 
 	// Whether the output file was already there decides whether this call
