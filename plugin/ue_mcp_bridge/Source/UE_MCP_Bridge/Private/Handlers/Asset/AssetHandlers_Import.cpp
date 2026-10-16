@@ -485,7 +485,9 @@ TSharedPtr<FJsonValue> FAssetHandlers::ImportSkeletalMesh(const TSharedPtr<FJson
 {
 	FString FileName;
 	if (auto Err = RequireString(Params, TEXT("filePath"), FileName)) return Err;
-	const FString DestinationPath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/Meshes"));
+	FString DestinationPath = OptionalString(Params, TEXT("packagePath"), TEXT("/Game/Meshes"));
+	// The created-asset check below compares against DestinationPath + "/".
+	DestinationPath.RemoveFromEnd(TEXT("/"));
 	const FString AssetName = OptionalString(Params, TEXT("name"), FPaths::GetBaseFilename(FileName));
 	const FString SkeletonPath = OptionalString(Params, TEXT("skeletonPath"));
 	const bool bImportMaterials = OptionalBool(Params, TEXT("importMaterials"), true);
