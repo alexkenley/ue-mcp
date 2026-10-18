@@ -130,6 +130,10 @@ public:
 	static bool ShouldPublishStatus();
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FMCPEngineStatusConcurrentPublicationTest;
+#endif
+
 	struct FSlowTaskEntry
 	{
 		FString Name;
@@ -139,7 +143,7 @@ private:
 	/** Serialise under the lock, then write atomically (temp file + move). */
 	void FlushToDisk();
 
-	/** Temp file plus rename, with the temp file named for this process. */
+	/** Unique sibling temp file plus atomic replacement, without deleting the previous snapshot first. */
 	static bool PublishAtomically(const FString& FinalPath, const FString& Contents);
 
 	/** Drop `status.<pid>.json` files left by processes that are gone. */
