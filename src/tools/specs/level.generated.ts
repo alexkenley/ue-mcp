@@ -1075,6 +1075,85 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "find_static_mesh_uses": {
+    "category": "level",
+    "params": [
+      {
+        "name": "meshPaths",
+        "type": "array",
+        "required": false,
+        "description": "Static mesh asset paths; a package path such as /Game/Props/SM_Crate is accepted",
+        "items": "string"
+      },
+      {
+        "name": "meshPathPrefix",
+        "type": "string",
+        "required": false,
+        "description": "Every static mesh whose object path starts with this, such as /Game/Props/ or /Game/Props/SM_Rock"
+      },
+      {
+        "name": "world",
+        "type": "string",
+        "required": false,
+        "description": "World scope: editor (default) | pie"
+      },
+      {
+        "name": "pieInstance",
+        "type": "integer",
+        "required": false,
+        "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
+      },
+      {
+        "name": "bounds",
+        "type": "object",
+        "required": false,
+        "description": "{min:{x,y,z}, max:{x,y,z}}: keep components whose world location is inside, and instanced components whose bounds intersect"
+      },
+      {
+        "name": "minTiltDegrees",
+        "type": "number",
+        "required": false,
+        "description": "Keep only components whose up axis is at least this many degrees from world +Z (default 0)",
+        "minimum": 0,
+        "maximum": 180
+      },
+      {
+        "name": "includeInstanced",
+        "type": "boolean",
+        "required": false,
+        "description": "Report ISM/HISM components separately, with their instance count and tilt summary (default true)"
+      },
+      {
+        "name": "sortBy",
+        "type": "string",
+        "required": false,
+        "description": "path (default): actor then component path | tilt: most tilted first",
+        "enum": [
+          "path",
+          "tilt"
+        ]
+      },
+      {
+        "name": "maxResults",
+        "type": "integer",
+        "required": false,
+        "description": "Cap on rows per list (default 200, max 2000); totals still count every match"
+      }
+    ],
+    "choices": [
+      {
+        "mode": "atLeastOne",
+        "branches": [
+          [
+            "meshPaths"
+          ],
+          [
+            "meshPathPrefix"
+          ]
+        ]
+      }
+    ]
+  },
   "get_actor_bounds": {
     "category": "level",
     "params": [
@@ -1783,6 +1862,30 @@ export const handlerSpecs: HandlerSpecs = {
         "type": "integer",
         "required": false,
         "description": "Rows on this page"
+      }
+    ]
+  },
+  "list_data_layers": {
+    "category": "level",
+    "params": [
+      {
+        "name": "filter",
+        "type": "string",
+        "required": false,
+        "description": "Case-insensitive substring over a layer's short name, instance name and asset path"
+      },
+      {
+        "name": "includeMembers",
+        "type": "boolean",
+        "required": false,
+        "description": "List each layer's member actors from their descriptors, streamed in or not (default false)"
+      },
+      {
+        "name": "maxMembers",
+        "type": "integer",
+        "required": false,
+        "description": "Cap on members listed per layer (default 50, max 1000); actorCount stays complete",
+        "minimum": 0
       }
     ]
   },
@@ -5040,6 +5143,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   detach_actor: "Params: childLabel?, childPath?",
   detach_component: "Params: childLabel?, childPath?, childComponentName?",
   export_actor_fbx: "Params: actorLabel?, actorPath?, outputPath (or filePath)",
+  find_static_mesh_uses: "Params: at least one of meshPaths/meshPathPrefix, world?, pieInstance?, bounds?, minTiltDegrees?, includeInstanced?, sortBy?, maxResults?",
   get_actor_bounds: "Params: actorLabel?, actorPath?, onlyColliding?, world?, pieInstance?",
   get_actor_details: "Params: actorLabel?, actorPath?, includeProperties?, propertyName?, world?, pieInstance?",
   get_actors_by_class: "Params: className?, labelPrefix?, world?, pieInstance?, matchSubclasses?, includeTransforms?",
@@ -5062,6 +5166,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   line_trace: "Params: start?, end?, direction?, distance?, traceComplex?, channel?, ignoreActors?, world?, pieInstance?",
   list_actor_descs: "Params: filter?, className?, guids?, bounds?, loadedOnly?, unloadedOnly?, cursor?, limit?",
   list_actor_tags: "Params: actorLabel?, actorPath?, cursor?, limit?",
+  list_data_layers: "Params: filter?, includeMembers?, maxMembers?",
   list_levels: "Params: cursor?, limit?",
   list_streaming_sublevels: "Params: none",
   list_transient_actors: "Params: world?, pieInstance?, cursor?, limit?",
@@ -5148,7 +5253,7 @@ export const schema: Record<string, z.ZodType> = {
   attenuationRadius: z.number().optional().describe("Point, spot and rect lights only"),
   axisRotation: z.object({ axis: z.string().describe("forward | right | up"), degrees: z.number().describe("Signed rotation in degrees") }).optional().describe("Quaternion rotation about one frame axis; not with viewRotation"),
   bias: z.number().optional().describe("AutoExposureBias (exposure compensation)"),
-  bounds: z.record(z.string(), z.unknown()).optional().describe("{min:{x,y,z}, max:{x,y,z}} intersection test"),
+  bounds: z.record(z.string(), z.unknown()).optional().describe("{min:{x,y,z}, max:{x,y,z}}: keep components whose world location is inside, and instanced components whose bounds intersect (find_static_mesh_uses). {min:{x,y,z}, max:{x,y,z}} intersection test (list_actor_descs, load_actor_descs)"),
   brightness: z.number().optional().describe("Alias for exposure"),
   cellSize: z.number().optional().describe("Streaming cell size in world centimetres"),
   channel: z.string().optional().describe("Collision channel (default Visibility)"),
@@ -5194,7 +5299,7 @@ export const schema: Record<string, z.ZodType> = {
   extent: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Query extent (default 100, 100, 100) (nav_project_point). Half extent of the cube brush (default 100, 100, 100) (spawn_volume)"),
   fields: z.array(z.string()).optional().describe("Field groups: transform, bounds, localBounds, shadow, nanite, navigation, tick, materials, mesh, decal, health, physics, attachment, customPrimitiveData"),
   filePath: z.string().optional().describe("Alias for outputPath"),
-  filter: z.string().optional().describe("Case-insensitive substring over label, name, class and path"),
+  filter: z.string().optional().describe("Case-insensitive substring over label, name, class and path (list_actor_descs, load_actor_descs). Case-insensitive substring over a layer's short name, instance name and asset path (list_data_layers)"),
   floorOffset: z.number().optional().describe("Vertical offset added to the impact Z"),
   fogDensity: z.number().optional().describe("Fog density"),
   fogHeightFalloff: z.number().optional().describe("Fog height falloff"),
@@ -5215,6 +5320,8 @@ export const schema: Record<string, z.ZodType> = {
   hlodLayer: z.string().nullable().optional().describe("HLODLayer asset path, or null to clear the per-actor override"),
   ignoreActors: z.array(z.string()).optional().describe("Actor labels to skip"),
   includeExternalActors: z.boolean().optional().describe("Also save the level's loaded external actor and folder packages (default true)"),
+  includeInstanced: z.boolean().optional().describe("Report ISM/HISM components separately, with their instance count and tilt summary (default true)"),
+  includeMembers: z.boolean().optional().describe("List each layer's member actors from their descriptors, streamed in or not (default false)"),
   includeOccurrences: z.boolean().optional().describe("Include example actor and component occurrences per mesh"),
   includeProperties: z.boolean().optional().describe("Include reflected UPROPERTY values"),
   includeStreaming: z.boolean().optional().describe("Include World Partition streaming-proxy and HLOD actors (default false)"),
@@ -5257,13 +5364,17 @@ export const schema: Record<string, z.ZodType> = {
   maxComponents: z.number().int().optional().describe("Refuse to rebuild more than this many components (default 2000, max 20000)"),
   maxDistance: z.number().optional().describe("Downward trace length (default 100000)"),
   maxInstances: z.number().int().optional().describe("Cap on instances processed in one call"),
+  maxMembers: z.number().int().min(0).optional().describe("Cap on members listed per layer (default 50, max 1000); actorCount stays complete"),
   maxOccurrences: z.number().int().optional().describe("Cap on occurrence examples per mesh"),
   maxPasses: z.number().int().optional().describe("Rebuild passes before giving up on a stable QuadTreeResolution, 2..8 (default 4)"),
-  maxResults: z.number().int().optional().describe("Cap on result rows; full-scan totals are still reported"),
+  maxResults: z.number().int().optional().describe("Cap on rows per list (default 200, max 2000); totals still count every match (find_static_mesh_uses). Cap on result rows; full-scan totals are still reported (summarize_static_mesh_usage)"),
   maxSpawn: z.number().int().optional().describe("Refuse a plan larger than this (default 500, max 5000)"),
   meshPath: z.string().optional().describe("Alias for assetPath (get_nanite_info, set_nanite_settings). The older spelling of skeletalMesh (spawn_skeletal_mesh_actor)"),
+  meshPathPrefix: z.string().optional().describe("Every static mesh whose object path starts with this, such as /Game/Props/ or /Game/Props/SM_Rock"),
+  meshPaths: z.array(z.string()).optional().describe("Static mesh asset paths; a package path such as /Game/Props/SM_Crate is accepted"),
   method: z.string().optional().describe("OBB (oriented, default) | AABB (axis-aligned world bounds)"),
   min: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Grid lower bound"),
+  minTiltDegrees: z.number().min(0).max(180).optional().describe("Keep only components whose up axis is at least this many degrees from world +Z (default 0)"),
   mobility: z.string().optional().describe("static | stationary | movable"),
   mode: z.string().optional().describe("pin (make resident, default) | unpin (release)"),
   nameContains: z.string().optional().describe("Case-insensitive substring over the actor's internal name (delete_actors). Substring over the setting name (get_post_process_settings)"),
@@ -5313,6 +5424,7 @@ export const schema: Record<string, z.ZodType> = {
   slotIndex: z.number().int().optional().describe("Material slot (default 0)"),
   socketName: z.string().optional().describe("Socket or bone on the resolved parent component"),
   socketNames: z.array(z.string()).optional().describe("Bone or socket names; each component that has sockets reports their component-space transforms"),
+  sortBy: z.enum(["path","tilt"]).optional().describe("path (default): actor then component path | tilt: most tilted first"),
   sourceRadius: z.number().optional().describe("Point or spot light source radius"),
   start: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional().describe("Ray start"),
   startDistance: z.number().optional().describe("Fog start distance"),
@@ -5355,7 +5467,7 @@ export const schema: Record<string, z.ZodType> = {
   weldSimulatedBodies: z.boolean().optional().describe("Weld simulated bodies during attachment (default false)"),
   where: z.array(z.object({ field: z.string().describe("Dot path into the row, such as shadow.effectiveCastShadow or props.CullDistance"), op: z.string().optional().describe("eq (default) | ne | lt | lte | gt | gte | contains | notContains | startsWith | endsWith | in | notIn | exists | notExists | isNull | isNotNull | isTrue | isFalse"), value: z.unknown().optional().describe("Value the operator compares against") })).optional().describe("Predicates evaluated in the editor, at most 24"),
   whereMode: z.string().optional().describe("all (default) | any"),
-  world: z.string().optional().describe("World scope: editor (default) | pie (aim_actor_at, bulk_line_trace, count_actors_by_class, destroy_transient_actor, get_actor_bounds, get_actor_details, get_actors_by_class, get_actors_by_component_class, get_component_details, get_relative_transform, get_runtime_virtual_texture_summary, get_spline_info, get_world_outliner, line_trace, list_transient_actors, move_actor, nav_project_point, nudge_component, place_actor, query_components, recreate_physics_state, rerun_construction_scripts, restore_component_relative_transform, set_actor_property, set_component_property, set_component_skeletal_mesh, set_fog_properties, snap_actor_to_floor, spawn_transient_actor, summarize_static_mesh_usage, test_component_overlap). editor (default) | pie | a world object path such as a Blueprint editor preview world (/Engine/Transient.World_N); with world omitted, an actorPath in another world reads that world (get_component_tree). World scope: auto (default, PIE when running) | editor | pie (read_actor_motion)"),
+  world: z.string().optional().describe("World scope: editor (default) | pie (aim_actor_at, bulk_line_trace, count_actors_by_class, destroy_transient_actor, find_static_mesh_uses, get_actor_bounds, get_actor_details, get_actors_by_class, get_actors_by_component_class, get_component_details, get_relative_transform, get_runtime_virtual_texture_summary, get_spline_info, get_world_outliner, line_trace, list_transient_actors, move_actor, nav_project_point, nudge_component, place_actor, query_components, recreate_physics_state, rerun_construction_scripts, restore_component_relative_transform, set_actor_property, set_component_property, set_component_skeletal_mesh, set_fog_properties, snap_actor_to_floor, spawn_transient_actor, summarize_static_mesh_usage, test_component_overlap). editor (default) | pie | a world object path such as a Blueprint editor preview world (/Engine/Transient.World_N); with world omitted, an actorPath in another world reads that world (get_component_tree). World scope: auto (default, PIE when running) | editor | pie (read_actor_motion)"),
   worldSpace: z.boolean().optional().describe("Treat transforms as world space (default true)"),
   zoneExtent: z.unknown().optional().describe("New WaterZone ZoneExtent in cm, {x, y} or [x, y]"),
 };

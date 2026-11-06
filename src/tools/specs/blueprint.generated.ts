@@ -1286,6 +1286,92 @@ export const handlerSpecs: HandlerSpecs = {
       }
     ]
   },
+  "find_blueprint_static_mesh_uses": {
+    "category": "blueprint",
+    "params": [
+      {
+        "name": "meshPaths",
+        "type": "array",
+        "required": false,
+        "description": "Static mesh asset paths; a package path such as /Game/Props/SM_Crate is accepted",
+        "items": "string"
+      },
+      {
+        "name": "meshPathPrefix",
+        "type": "string",
+        "required": false,
+        "description": "Every static mesh whose object path starts with this, such as /Game/Props/ or /Game/Props/SM_Rock"
+      },
+      {
+        "name": "assetPaths",
+        "type": "array",
+        "required": false,
+        "description": "Blueprints to read; every effective component is reported, inherited ones included. Without it, the Blueprints under directory that reference a selected mesh",
+        "items": "string"
+      },
+      {
+        "name": "directory",
+        "type": "string",
+        "required": false,
+        "description": "Content path to search under (default /Game)"
+      },
+      {
+        "name": "recursive",
+        "type": "boolean",
+        "required": false,
+        "description": "Include subfolders of directory (default true)"
+      },
+      {
+        "name": "minTiltDegrees",
+        "type": "number",
+        "required": false,
+        "description": "Keep only components whose up axis is at least this many degrees from actor +Z (default 0)",
+        "minimum": 0,
+        "maximum": 180
+      },
+      {
+        "name": "includeInstanced",
+        "type": "boolean",
+        "required": false,
+        "description": "Report ISM/HISM templates separately, with their instance count and tilt summary (default true)"
+      },
+      {
+        "name": "sortBy",
+        "type": "string",
+        "required": false,
+        "description": "path (default): Blueprint then component order | tilt: most tilted first",
+        "enum": [
+          "path",
+          "tilt"
+        ]
+      },
+      {
+        "name": "maxResults",
+        "type": "integer",
+        "required": false,
+        "description": "Cap on rows per list (default 200, max 2000); totals still count every match"
+      },
+      {
+        "name": "maxBlueprints",
+        "type": "integer",
+        "required": false,
+        "description": "Cap on Blueprints loaded (default 500, max 5000)"
+      }
+    ],
+    "choices": [
+      {
+        "mode": "atLeastOne",
+        "branches": [
+          [
+            "meshPaths"
+          ],
+          [
+            "meshPathPrefix"
+          ]
+        ]
+      }
+    ]
+  },
   "flush_blueprint_component_templates": {
     "category": "blueprint",
     "params": [
@@ -3166,6 +3252,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
   edit_struct_metadata: "Params: assetPath (or path), tooltip?, fields?",
   export_blueprint_batch: "Params: assetPaths?, directory?, recursive?, parentClass?, includeLevelScripts?, outputDir?, maxAssets?, includeT3D?",
   export_nodes_t3d: "Params: assetPath (or path), graphName?, nodeIds?",
+  find_blueprint_static_mesh_uses: "Params: at least one of meshPaths/meshPathPrefix, assetPaths?, directory?, recursive?, minTiltDegrees?, includeInstanced?, sortBy?, maxResults?, maxBlueprints?",
   flush_blueprint_component_templates: "Params: assetPath (or path)",
   flush_inheritable_component_handler: "Params: assetPath (or path)",
   get_blueprint_component_property: "Params: assetPath (or path), componentName, propertyName",
@@ -3232,7 +3319,7 @@ export const paramsClauses: Readonly<Record<string, string>> = {
 export const schema: Record<string, z.ZodType> = {
   accessSpecifier: z.string().optional().describe("public, protected or private"),
   assetPath: z.string().optional().describe("Blueprint asset path. Read and graph actions also accept a World/umap path, resolved to that map's level script Blueprint (add_component, add_custom_event, add_function_parameter, add_local_variable, add_node, add_timeline_track, add_variable, auto_layout_graph, cleanup_graph, compile_blueprint, connect_pins, connect_pins_batch, create_function, create_macro, delete_function, delete_graph, delete_macro, delete_node, delete_variable, disconnect_pins, edit_graph_parameters, edit_local_variable, export_nodes_t3d, flush_blueprint_component_templates, flush_inheritable_component_handler, get_blueprint_component_property, get_blueprint_connections, get_blueprint_dependencies, get_blueprint_execution_flow, get_blueprint_variable_default, get_blueprint_variable_metadata, import_nodes_t3d, list_blueprint_functions, list_blueprint_graphs, list_blueprint_interfaces, list_blueprint_variables, list_event_dispatchers, list_graph_parameters, list_local_variables, list_overridable_functions, override_function, read_blueprint, read_blueprint_graph, read_blueprint_graph_summary, read_component_properties, read_node_property, refresh_node, remove_blueprint_interface, remove_component, remove_event_dispatcher, rename_blueprint_variable, rename_function, reparent_blueprint, reparent_component, resolve_blueprint_graph, run_construction_script, search_blueprint_nodes, set_actor_tick_settings, set_blueprint_component_property, set_blueprint_variable_metadata, set_capsule_size, set_class_default, set_component_override_materials, set_function_properties, set_node_position, set_node_property, set_variable_default, set_variable_properties, validate_blueprint). Full destination, e.g. /Game/Blueprints/BP_Example. A .uasset suffix, an object suffix and backslashes are normalized away (create_blueprint). Full destination of the new Blueprint Interface (create_blueprint_interface). Base Blueprint (A) (diff_blueprint). UserDefinedStruct asset path (edit_struct_metadata, read_user_defined_struct, reorder_struct_fields, set_struct_field_default). Blueprint path, or a native class (/Script/MyGame.MyCharacter or MyCharacter) (get_component_collision). UserDefinedEnum asset path (read_user_defined_enum, reorder_enum_values, set_enum_metadata)"),
-  assetPaths: z.array(z.string()).optional().describe("Blueprint asset paths; a World path resolves to its level script (audit_blueprint_dead_code, export_blueprint_batch). Blueprint asset paths to compile (compile_blueprints)"),
+  assetPaths: z.array(z.string()).optional().describe("Blueprint asset paths; a World path resolves to its level script (audit_blueprint_dead_code, export_blueprint_batch). Blueprint asset paths to compile (compile_blueprints). Blueprints to read; every effective component is reported, inherited ones included. Without it, the Blueprints under directory that reference a selected mesh (find_blueprint_static_mesh_uses)"),
   authoredOnly: z.boolean().optional().describe("Leave out transient and generated compiler graphs (default true)"),
   bCanEverTick: z.boolean().optional().describe("PrimaryActorTick.bCanEverTick"),
   bitflags: z.boolean().optional().describe("Mark the enum as a bitflags type"),
@@ -3259,7 +3346,7 @@ export const schema: Record<string, z.ZodType> = {
   deprecated: z.boolean().optional().describe("Mark the function deprecated so its call sites warn"),
   deprecationMessage: z.string().optional().describe("Text shown at a deprecated function's call sites"),
   destinationPath: z.string().optional().describe("Full destination asset path"),
-  directory: z.string().optional().describe("Content path to search under (default /Game) (audit_blueprint_dead_code, export_blueprint_batch, search_blueprint_call_sites). Only report Blueprints under this content path (default /Game; / for every mount). Parent chains are still followed outside it (list_subclasses)"),
+  directory: z.string().optional().describe("Content path to search under (default /Game) (audit_blueprint_dead_code, export_blueprint_batch, find_blueprint_static_mesh_uses, search_blueprint_call_sites). Only report Blueprints under this content path (default /Game; / for every mount). Parent chains are still followed outside it (list_subclasses)"),
   dumpToFile: z.boolean().optional().describe("Write the whole result to a JSON file instead of returning it inline"),
   editFlag: z.string().optional().describe("EditAnywhere, EditDefaultsOnly, EditInstanceOnly or none: the value list_variables reports"),
   entries: z.array(z.record(z.string(), z.unknown())).optional().describe("[{name or index, tooltip}] per-enumerator tooltips"),
@@ -3284,6 +3371,7 @@ export const schema: Record<string, z.ZodType> = {
   includeDefaults: z.boolean().optional().describe("Include pin default values (default true)"),
   includeGraphNodes: z.boolean().optional().describe("Include UEdGraphNode classes alongside function-library entries (default true)"),
   includeInherited: z.boolean().optional().describe("Append overridable parent and interface functions this Blueprint has not implemented (default false)"),
+  includeInstanced: z.boolean().optional().describe("Report ISM/HISM templates separately, with their instance count and tilt summary (default true)"),
   includeLevelScripts: z.boolean().optional().describe("Also sweep the level script Blueprint of every map under the directory, at a full map load each (default false)"),
   includeLinks: z.boolean().optional().describe("List what each pin is wired to, as {nodeId, pin} (default false)"),
   includeNeighbours: z.boolean().optional().describe("Include each hit's immediate execution and data neighbours"),
@@ -3308,9 +3396,13 @@ export const schema: Record<string, z.ZodType> = {
   macroName: z.string().optional().describe("Macro graph name"),
   materialPaths: z.array(z.string()).optional().describe("Material asset paths; an empty array clears"),
   maxAssets: z.number().int().optional().describe("Cap on Blueprints exported (default 200, max 5000)"),
-  maxBlueprints: z.number().int().optional().describe("Cap on Blueprints loaded (default 2000)"),
+  maxBlueprints: z.number().int().optional().describe("Cap on Blueprints loaded (default 2000) (audit_blueprint_dead_code, search_blueprint_call_sites). Cap on Blueprints loaded (default 500, max 5000) (find_blueprint_static_mesh_uses)"),
+  maxResults: z.number().int().optional().describe("Cap on rows per list (default 200, max 2000); totals still count every match"),
   maxSamples: z.number().int().optional().describe("Samples listed per finding kind per Blueprint (default 20, max 500); counts stay complete"),
+  meshPathPrefix: z.string().optional().describe("Every static mesh whose object path starts with this, such as /Game/Props/ or /Game/Props/SM_Rock"),
+  meshPaths: z.array(z.string()).optional().describe("Static mesh asset paths; a package path such as /Game/Props/SM_Crate is accepted"),
   metadata: z.record(z.string(), z.unknown()).optional().describe("{key: 'value'} pairs; a null value removes that key. Unreal stores every metadata value as text"),
+  minTiltDegrees: z.number().min(0).max(180).optional().describe("Keep only components whose up axis is at least this many degrees from actor +Z (default 0)"),
   name: z.string().optional().describe("Dispatcher name (add_event_dispatcher, remove_event_dispatcher). Variable name (add_local_variable, add_variable, delete_variable, edit_local_variable, get_blueprint_variable_metadata, set_blueprint_variable_metadata, set_variable_default, set_variable_properties). Asset name; with packagePath, the same destination as assetPath (create_blueprint). Variable name, or a dotted path such as CharacterMovement.MaxWalkSpeed into the CDO's structs and subobjects (get_blueprint_variable_default)"),
   narrowByRegistry: z.boolean().optional().describe("Use Asset Registry dependencies to rule out Blueprints before loading them (default true)"),
   netMode: z.string().optional().describe("none (default), multicast, server or client"),
@@ -3360,6 +3452,7 @@ export const schema: Record<string, z.ZodType> = {
   rowGap: z.number().int().optional().describe("Vertical spacing between rows (default 200)"),
   save: z.boolean().optional().describe("Persist on success (default true)"),
   scanReferencers: z.boolean().optional().describe("Also scan every Blueprint package that depends on an audited one for references (default true)"),
+  sortBy: z.enum(["path","tilt"]).optional().describe("path (default): Blueprint then component order | tilt: most tilted first"),
   source: z.string().optional().describe("Advisory hint for where the function comes from: auto (default), interface or parent. Echoed back"),
   sourceNode: z.string().optional().describe("Alias for sourceNodeId"),
   sourceNodeId: z.string().optional().describe("Source node GUID, as get_connections and find_nodes report it, or its title"),

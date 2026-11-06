@@ -1,5 +1,5 @@
 {
-  "handlerCount": 1210,
+  "handlerCount": 1213,
   "handlers": {
     "add_ability_system_component": {
       "category": "gas",
@@ -14722,6 +14722,92 @@
         }
       ]
     },
+    "find_blueprint_static_mesh_uses": {
+      "category": "blueprint",
+      "params": [
+        {
+          "name": "meshPaths",
+          "type": "array",
+          "required": false,
+          "description": "Static mesh asset paths; a package path such as /Game/Props/SM_Crate is accepted",
+          "items": "string"
+        },
+        {
+          "name": "meshPathPrefix",
+          "type": "string",
+          "required": false,
+          "description": "Every static mesh whose object path starts with this, such as /Game/Props/ or /Game/Props/SM_Rock"
+        },
+        {
+          "name": "assetPaths",
+          "type": "array",
+          "required": false,
+          "description": "Blueprints to read; every effective component is reported, inherited ones included. Without it, the Blueprints under directory that reference a selected mesh",
+          "items": "string"
+        },
+        {
+          "name": "directory",
+          "type": "string",
+          "required": false,
+          "description": "Content path to search under (default /Game)"
+        },
+        {
+          "name": "recursive",
+          "type": "boolean",
+          "required": false,
+          "description": "Include subfolders of directory (default true)"
+        },
+        {
+          "name": "minTiltDegrees",
+          "type": "number",
+          "required": false,
+          "description": "Keep only components whose up axis is at least this many degrees from actor +Z (default 0)",
+          "minimum": 0,
+          "maximum": 180
+        },
+        {
+          "name": "includeInstanced",
+          "type": "boolean",
+          "required": false,
+          "description": "Report ISM/HISM templates separately, with their instance count and tilt summary (default true)"
+        },
+        {
+          "name": "sortBy",
+          "type": "string",
+          "required": false,
+          "description": "path (default): Blueprint then component order | tilt: most tilted first",
+          "enum": [
+            "path",
+            "tilt"
+          ]
+        },
+        {
+          "name": "maxResults",
+          "type": "integer",
+          "required": false,
+          "description": "Cap on rows per list (default 200, max 2000); totals still count every match"
+        },
+        {
+          "name": "maxBlueprints",
+          "type": "integer",
+          "required": false,
+          "description": "Cap on Blueprints loaded (default 500, max 5000)"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "meshPaths"
+            ],
+            [
+              "meshPathPrefix"
+            ]
+          ]
+        }
+      ]
+    },
     "find_landscape_proxy_at": {
       "category": "landscape",
       "params": [
@@ -14844,6 +14930,85 @@
             ],
             [
               "nameContains"
+            ]
+          ]
+        }
+      ]
+    },
+    "find_static_mesh_uses": {
+      "category": "level",
+      "params": [
+        {
+          "name": "meshPaths",
+          "type": "array",
+          "required": false,
+          "description": "Static mesh asset paths; a package path such as /Game/Props/SM_Crate is accepted",
+          "items": "string"
+        },
+        {
+          "name": "meshPathPrefix",
+          "type": "string",
+          "required": false,
+          "description": "Every static mesh whose object path starts with this, such as /Game/Props/ or /Game/Props/SM_Rock"
+        },
+        {
+          "name": "world",
+          "type": "string",
+          "required": false,
+          "description": "World scope: editor (default) | pie"
+        },
+        {
+          "name": "pieInstance",
+          "type": "integer",
+          "required": false,
+          "description": "Which PIE world when world is pie: 0 = server or primary, 1..N = clients"
+        },
+        {
+          "name": "bounds",
+          "type": "object",
+          "required": false,
+          "description": "{min:{x,y,z}, max:{x,y,z}}: keep components whose world location is inside, and instanced components whose bounds intersect"
+        },
+        {
+          "name": "minTiltDegrees",
+          "type": "number",
+          "required": false,
+          "description": "Keep only components whose up axis is at least this many degrees from world +Z (default 0)",
+          "minimum": 0,
+          "maximum": 180
+        },
+        {
+          "name": "includeInstanced",
+          "type": "boolean",
+          "required": false,
+          "description": "Report ISM/HISM components separately, with their instance count and tilt summary (default true)"
+        },
+        {
+          "name": "sortBy",
+          "type": "string",
+          "required": false,
+          "description": "path (default): actor then component path | tilt: most tilted first",
+          "enum": [
+            "path",
+            "tilt"
+          ]
+        },
+        {
+          "name": "maxResults",
+          "type": "integer",
+          "required": false,
+          "description": "Cap on rows per list (default 200, max 2000); totals still count every match"
+        }
+      ],
+      "choices": [
+        {
+          "mode": "atLeastOne",
+          "branches": [
+            [
+              "meshPaths"
+            ],
+            [
+              "meshPathPrefix"
             ]
           ]
         }
@@ -20910,6 +21075,30 @@
           "type": "string",
           "required": false,
           "description": "Case-insensitive substring filter on row names"
+        }
+      ]
+    },
+    "list_data_layers": {
+      "category": "level",
+      "params": [
+        {
+          "name": "filter",
+          "type": "string",
+          "required": false,
+          "description": "Case-insensitive substring over a layer's short name, instance name and asset path"
+        },
+        {
+          "name": "includeMembers",
+          "type": "boolean",
+          "required": false,
+          "description": "List each layer's member actors from their descriptors, streamed in or not (default false)"
+        },
+        {
+          "name": "maxMembers",
+          "type": "integer",
+          "required": false,
+          "description": "Cap on members listed per layer (default 50, max 1000); actorCount stays complete",
+          "minimum": 0
         }
       ]
     },

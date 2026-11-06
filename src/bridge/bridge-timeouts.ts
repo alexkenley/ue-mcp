@@ -82,6 +82,8 @@ export const REGISTERED_HANDLER_TIMEOUT_SECONDS: Readonly<Record<string, number>
   delete_exact_labeled_actors_in_levels: 300,
   export_blueprint_batch: 600,
   export_landscape_heightmap: 300,
+  find_blueprint_static_mesh_uses: 600,
+  find_static_mesh_uses: 300,
   fix_asset_hygiene: 300,
   fixup_redirectors: 300,
   generate_mesh_collision: 300,

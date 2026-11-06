@@ -366,6 +366,18 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("includeOccurrences"), EType::Boolean, TEXT("Include example actor and component occurrences per mesh")),
 		MCPParam::Optional(TEXT("maxOccurrences"), EType::Integer, TEXT("Cap on occurrence examples per mesh")),
 	});
+	// The same whole-map pass as summarize_static_mesh_usage, so the same
+	// budget. Mirrored in src/bridge/bridge-timeouts.ts.
+	Registry.RegisterHandlerWithTimeout(TEXT("find_static_mesh_uses"), &FindStaticMeshUses, 300.0f, {
+		MCPParam::Optional(TEXT("meshPaths"), EType::Array, TEXT("Static mesh asset paths; a package path such as /Game/Props/SM_Crate is accepted")).Items(EType::String),
+		MCPParam::Optional(TEXT("meshPathPrefix"), EType::String, TEXT("Every static mesh whose object path starts with this, such as /Game/Props/ or /Game/Props/SM_Rock")),
+		SpecWorld, SpecPieInstance,
+		MCPParam::Optional(TEXT("bounds"), EType::Object, TEXT("{min:{x,y,z}, max:{x,y,z}}: keep components whose world location is inside, and instanced components whose bounds intersect")),
+		MCPParam::Optional(TEXT("minTiltDegrees"), EType::Number, TEXT("Keep only components whose up axis is at least this many degrees from world +Z (default 0)")).Range(0.0, 180.0),
+		MCPParam::Optional(TEXT("includeInstanced"), EType::Boolean, TEXT("Report ISM/HISM components separately, with their instance count and tilt summary (default true)")),
+		MCPParam::Optional(TEXT("sortBy"), EType::String, TEXT("path (default): actor then component path | tilt: most tilted first")).Enum({ TEXT("path"), TEXT("tilt") }),
+		MCPParam::Optional(TEXT("maxResults"), EType::Integer, TEXT("Cap on rows per list (default 200, max 2000); totals still count every match")),
+	}, MCPSpec::AtLeastOne({ { TEXT("meshPaths") }, { TEXT("meshPathPrefix") } }));
 	Registry.RegisterHandler(TEXT("count_actors_by_class"), &CountActorsByClass, {
 		SpecWorld, SpecPieInstance,
 		MCPParam::Optional(TEXT("topN"), EType::Integer, TEXT("Only the N most common classes")),
@@ -587,6 +599,11 @@ void FLevelHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		SpecDescFilter, SpecDescClassName, SpecDescGuids, SpecDescBounds, SpecDescLoadedOnly, SpecDescUnloadedOnly,
 		MCPParam::Optional(TEXT("maxActors"), EType::Integer, TEXT("Refuse to act on more than this many actors (default 256)")),
 		SpecDryRun,
+	});
+	Registry.RegisterHandler(TEXT("list_data_layers"), &ListDataLayers, {
+		MCPParam::Optional(TEXT("filter"), EType::String, TEXT("Case-insensitive substring over a layer's short name, instance name and asset path")),
+		MCPParam::Optional(TEXT("includeMembers"), EType::Boolean, TEXT("List each layer's member actors from their descriptors, streamed in or not (default false)")),
+		MCPParam::Optional(TEXT("maxMembers"), EType::Integer, TEXT("Cap on members listed per layer (default 50, max 1000); actorCount stays complete")).Min(0.0),
 	});
 	// #985: LevelHandlers_WorldPartitionSettings.cpp. The streaming knobs and
 	// the runtime cell transformer stack live with the other World Partition

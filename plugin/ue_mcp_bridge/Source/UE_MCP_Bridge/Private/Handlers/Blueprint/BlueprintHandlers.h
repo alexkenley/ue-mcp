@@ -166,6 +166,10 @@ private:
 	static TSharedPtr<FJsonValue> ReorderStructFields(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> EditStructMetadata(const TSharedPtr<FJsonObject>& Params);
 
+	// Static mesh component templates using a set of meshes, with their transform
+	// composed up the attach chain to the actor root. BlueprintHandlers_MeshUses.cpp.
+	static TSharedPtr<FJsonValue> FindBlueprintStaticMeshUses(const TSharedPtr<FJsonObject>& Params);
+
 	// Helper functions
 	static class UBlueprint* LoadBlueprint(const FString& AssetPath);
 	static class UEdGraph* FindGraph(class UBlueprint* Blueprint, const FString& GraphName);

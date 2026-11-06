@@ -584,6 +584,20 @@ void FBlueprintHandlers::RegisterHandlers(FMCPHandlerRegistry& Registry)
 		MCPParam::Optional(TEXT("includeTransitive"), EType::Boolean, TEXT("Include indirect subclasses (default true); false lists direct children only")),
 		MCPParam::Optional(TEXT("limit"), EType::Integer, TEXT("Rows to return (default 2000, max 20000); count stays complete")),
 	});
+	// BlueprintHandlers_MeshUses.cpp. Loads Blueprints, so it has the audit's budget.
+	Registry.RegisterHandler(TEXT("find_blueprint_static_mesh_uses"), &FindBlueprintStaticMeshUses, {
+		MCPParam::Optional(TEXT("meshPaths"), EType::Array, TEXT("Static mesh asset paths; a package path such as /Game/Props/SM_Crate is accepted")).Items(EType::String),
+		MCPParam::Optional(TEXT("meshPathPrefix"), EType::String, TEXT("Every static mesh whose object path starts with this, such as /Game/Props/ or /Game/Props/SM_Rock")),
+		MCPParam::Optional(TEXT("assetPaths"), EType::Array, TEXT("Blueprints to read; every effective component is reported, inherited ones included. Without it, the Blueprints under directory that reference a selected mesh")).Items(EType::String),
+		SpecDirectory,
+		SpecRecursive,
+		MCPParam::Optional(TEXT("minTiltDegrees"), EType::Number, TEXT("Keep only components whose up axis is at least this many degrees from actor +Z (default 0)")).Range(0.0, 180.0),
+		MCPParam::Optional(TEXT("includeInstanced"), EType::Boolean, TEXT("Report ISM/HISM templates separately, with their instance count and tilt summary (default true)")),
+		MCPParam::Optional(TEXT("sortBy"), EType::String, TEXT("path (default): Blueprint then component order | tilt: most tilted first")).Enum({ TEXT("path"), TEXT("tilt") }),
+		MCPParam::Optional(TEXT("maxResults"), EType::Integer, TEXT("Cap on rows per list (default 200, max 2000); totals still count every match")),
+		MCPParam::Optional(TEXT("maxBlueprints"), EType::Integer, TEXT("Cap on Blueprints loaded (default 500, max 5000)")),
+	}, MCPSpec::AtLeastOne({ { TEXT("meshPaths") }, { TEXT("meshPathPrefix") } }));
+	Registry.RegisterHandlerWithTimeout(TEXT("find_blueprint_static_mesh_uses"), &FindBlueprintStaticMeshUses, SearchCallSitesTimeoutSeconds);
 
 	// V9 Blueprint depth (BlueprintHandlers_Members.cpp). Interface removal and
 	// listing, function flags and metadata, parameter CRUD across functions,

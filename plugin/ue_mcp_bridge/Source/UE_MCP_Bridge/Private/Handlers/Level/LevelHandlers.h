@@ -79,6 +79,9 @@ private:
 	static TSharedPtr<FJsonValue> GetActorsByComponentClass(const TSharedPtr<FJsonObject>& Params);
 	// Aggregate loaded static-mesh usage in one bounded, read-only world scan.
 	static TSharedPtr<FJsonValue> SummarizeStaticMeshUsage(const TSharedPtr<FJsonObject>& Params);
+	// Every loaded component using one of a set of static meshes, with its world
+	// transform and the tilt of its up axis. LevelHandlers_Inspection.cpp.
+	static TSharedPtr<FJsonValue> FindStaticMeshUses(const TSharedPtr<FJsonObject>& Params);
 	// v0.7.19 issue #146 - actor class histogram (counts by class name)
 	static TSharedPtr<FJsonValue> CountActorsByClass(const TSharedPtr<FJsonObject>& Params);
 	// v0.7.19 issue #150 - RuntimeVirtualTextureVolume / component summary
@@ -107,6 +110,9 @@ private:
 	// them in, instead of every actor query silently reporting zero for them.
 	static TSharedPtr<FJsonValue> ListActorDescs(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> LoadActorDescs(const TSharedPtr<FJsonObject>& Params);
+	// The World Partition map's data layer instances, with their runtime and
+	// editor state and the actors each holds. LevelHandlers_WorldPartition.cpp.
+	static TSharedPtr<FJsonValue> ListDataLayers(const TSharedPtr<FJsonObject>& Params);
 	// #219: actor tag CRUD
 	static TSharedPtr<FJsonValue> AddActorTag(const TSharedPtr<FJsonObject>& Params);
 	static TSharedPtr<FJsonValue> RemoveActorTag(const TSharedPtr<FJsonObject>& Params);
